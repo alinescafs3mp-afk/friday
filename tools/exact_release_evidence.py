@@ -15,7 +15,7 @@ import sys
 import tempfile
 import xml.etree.ElementTree as ET
 from collections.abc import Iterator
-from contextlib import contextmanager
+from contextlib import contextmanager, suppress
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path, PurePosixPath
@@ -29,13 +29,110 @@ from tools import immutable_release_operator as release_operator  # noqa: E402
 from tools import quality_gate  # noqa: E402
 
 RECEIPT_SCHEMA = "friday.golden-journey-sanitized-receipt.v2"
+CLEAN_ARTIFACT_RECEIPT_SCHEMA = "friday.golden-journey-sanitized-receipt.v4"
+MANIFEST_SCHEMA = "friday.golden-journey-evidence.v1"
 PRODUCER_PATH = "tools/exact_release_evidence.py"
 PYTEST_TIMEOUT_SECONDS = 900
+_EVIDENCE_ROOT = PurePosixPath("evidence/golden_journeys")
+_CLEAN_ARTIFACT_CLASS = "clean artifact path"
 _PYTEST_BOOTSTRAP = (
     "import pathlib,sys; "
     "root=str(pathlib.Path(sys.argv.pop(1)).resolve(strict=True)); "
     "sys.path.insert(0,root); import pytest; raise SystemExit(pytest.main(sys.argv[1:]))"
 )
+_INSTALLED_PYTEST_BOOTSTRAP = r"""
+import hashlib,importlib.machinery,json,os,pathlib,sys
+source_root=pathlib.Path(sys.argv.pop(1)).resolve(strict=True)
+release_root=pathlib.Path(sys.argv.pop(1)).resolve(strict=True)
+site=pathlib.Path(sys.argv.pop(1)).resolve(strict=True)
+site_ref=sys.argv.pop(1)
+report_path=pathlib.Path(sys.argv.pop(1))
+source_commit=sys.argv.pop(1)
+wheel_sha256=sys.argv.pop(1)
+if site != release_root / site_ref:
+    raise RuntimeError("installed_site_binding_invalid")
+sys.path.insert(0,str(source_root))
+sys.path.insert(0,str(site))
+blocked={"os.exec","os.fork","os.forkpty","os.posix_spawn","os.posix_spawnp","os.system","pty.spawn","subprocess.Popen"}
+violations=set()
+def deny_child(event,args):
+    if event in blocked:
+        violations.add("child_execution_unattested")
+        raise RuntimeError("child_execution_unattested")
+sys.addaudithook(deny_child)
+origins=set()
+def first_party(name):
+    return name == "friday" or name.startswith("friday.") or name.startswith("friday_")
+def confined(path):
+    resolved=pathlib.Path(path).resolve(strict=True)
+    try:
+        relative=resolved.relative_to(site).as_posix()
+    except ValueError as exc:
+        violations.add("first_party_origin_escaped_release")
+        raise RuntimeError("first_party_origin_escaped_release") from exc
+    origins.add(relative)
+    return resolved
+class FirstPartyGuard:
+    def find_spec(self,fullname,path=None,target=None):
+        if not first_party(fullname):
+            return None
+        spec=importlib.machinery.PathFinder.find_spec(fullname,path)
+        if spec is None:
+            violations.add("first_party_origin_missing")
+            raise RuntimeError("first_party_origin_missing")
+        if spec.origin in {None,"built-in","frozen"}:
+            violations.add("first_party_origin_missing")
+            raise RuntimeError("first_party_origin_missing")
+        confined(spec.origin)
+        locations=spec.submodule_search_locations
+        if locations is not None:
+            for location in locations:
+                confined(location)
+        return spec
+sys.meta_path.insert(0,FirstPartyGuard())
+import friday
+friday_origin=pathlib.Path(friday.__file__).resolve(strict=True)
+if friday_origin != site / "friday" / "__init__.py":
+    raise RuntimeError("installed_friday_origin_invalid")
+from tools import quality_gate as exact_quality_gate
+if pathlib.Path(exact_quality_gate.__file__).resolve(strict=True) != source_root / "tools" / "quality_gate.py":
+    raise RuntimeError("quality_gate_origin_invalid")
+import pytest
+code=pytest.main(sys.argv[1:])
+if violations:
+    raise RuntimeError(sorted(violations)[0])
+for name,module in sorted(sys.modules.items()):
+    if not first_party(name):
+        continue
+    raw_origin=getattr(module,"__file__",None)
+    if raw_origin is None:
+        raise RuntimeError("first_party_origin_missing")
+    confined(raw_origin)
+ordered_origins=sorted(origins)
+origin_bytes=json.dumps(ordered_origins,ensure_ascii=True,sort_keys=True,separators=(",",":"),allow_nan=False).encode()
+report={
+    "module_count":len(ordered_origins),
+    "module_origins_sha256":hashlib.sha256(origin_bytes).hexdigest(),
+    "schema":"friday.clean-artifact-import-origin.v1",
+    "site_packages_ref":site_ref,
+    "source_commit":source_commit,
+    "subprocess_policy":"deny",
+    "wheel_sha256":wheel_sha256,
+}
+raw=json.dumps(report,ensure_ascii=True,sort_keys=True,separators=(",",":"),allow_nan=False).encode()
+descriptor=os.open(report_path,os.O_WRONLY|os.O_CREAT|os.O_EXCL|os.O_CLOEXEC,0o600)
+try:
+    view=memoryview(raw)
+    while view:
+        written=os.write(descriptor,view)
+        if written < 1:
+            raise RuntimeError("origin_report_write_failed")
+        view=view[written:]
+    os.fsync(descriptor)
+finally:
+    os.close(descriptor)
+raise SystemExit(code)
+"""
 
 ENVIRONMENT_BY_CLASS = {
     "deterministic contract": "deterministic_contract",
@@ -51,7 +148,7 @@ ENVIRONMENT_BY_CLASS = {
 _CHECK_SUFFIXES = {
     "deterministic contract": ("contract_suite",),
     "integration path": ("integration_suite",),
-    "clean artifact path": ("installed_surface", "schema_migration", "wheel_reproducibility"),
+    "clean artifact path": ("installed_journey_suite",),
     "synthetic live path": ("synthetic_live_battery",),
     "production read-only observation": ("database_integrity", "schema_attestation", "service_health"),
     "physical device evidence": ("android_round_trip", "real_conflict_preserved"),
@@ -121,6 +218,59 @@ _SUPERVISOR_REVIEW_REFS = _parameterized_refs(
     ("0", "1"),
 )
 
+_CONVERSATION_CLEAN_ARTIFACT_REFS = (
+    *_PROMOTED_WINDOW_REFS,
+    *_parameterized_refs(
+        "tests/test_message_window_runtime_integration.py::"
+        "test_final_message_snapshot_drift_is_unavailable_source_free_and_not_retried",
+        ("content", "snapshot", "insert"),
+    ),
+    "tests/test_archive_search_runtime_publication.py::"
+    "test_real_router_preserves_two_exact_archive_pages_through_final_answer",
+)
+_DOCUMENT_CLEAN_ARTIFACT_REFS = (
+    "tests/test_v12_file_evidence_reader.py::test_current_turn_native_files_form_one_process_owned_bundle",
+    "tests/test_v12_file_evidence_reader.py::test_reader_contract_matches_real_ingestion_projections",
+    "tests/test_archive_search_runtime_publication.py::"
+    "test_natural_selected_document_question_uses_bound_preingestion_v12_without_ordinary_paths",
+)
+_DURABLE_CLEAN_ARTIFACT_REFS = (
+    "tests/test_a_reminder_is_set_before_the_model_speaks.py::"
+    "test_the_reminder_is_set_without_asking_the_model",
+    "tests/test_durable_scheduled_work_recovery.py::test_two_workers_only_one_claims_pending_task",
+    *_parameterized_refs(
+        "tests/test_durable_scheduled_work_recovery.py::"
+        "test_post_checkpoint_failure_is_uncertain_and_never_replayed",
+        ("exception", "cancelled"),
+    ),
+    "tests/test_reminder_send_edge_storage.py::test_two_storage_workers_get_one_due_reminder_body",
+    *_parameterized_refs(
+        "tests/test_reminder_send_edge_storage.py::"
+        "test_pending_reminder_cannot_be_settled_without_send_edge_claim",
+        ("sent", "failed", "uncertain"),
+    ),
+    "tests/test_reminder_delivery_fence.py::test_lost_ack_reacks_off_page_after_restart_without_resend",
+    "tests/test_release_bound_reminder_scan.py::"
+    "test_release_evidence_scan_stops_at_exact_ten_pages_of_two_hundred",
+    "tests/test_release_bound_reminder_scan.py::"
+    "test_release_evidence_scan_stops_when_continuation_cursor_is_missing",
+)
+_HONEST_DEGRADATION_CLEAN_ARTIFACT_REFS = (
+    "tests/test_search_provider_refusal_is_not_emptiness.py::"
+    "test_202_from_duckduckgo_is_a_refusal_not_an_empty_result[asyncio]",
+    "tests/test_search_provider_refusal_is_not_emptiness.py::"
+    "test_a_provider_that_honestly_found_nothing_is_not_a_refusal[asyncio]",
+    "tests/test_search_provider_refusal_is_not_emptiness.py::"
+    "test_the_chain_moves_on_when_the_first_provider_refuses[asyncio]",
+    *_parameterized_refs(
+        "tests/test_message_window_runtime_integration.py::"
+        "test_final_message_snapshot_drift_is_unavailable_source_free_and_not_retried",
+        ("content", "snapshot", "insert"),
+    ),
+    "tests/test_message_window_work_item_runtime.py::"
+    "test_post_boundary_admission_race_returns_atomic_clarification_without_execution",
+)
+
 
 _PROOF_REFS_BY_JOURNEY_CLASS = {
     ("conversation_recall", "deterministic contract"): (*_PROMOTED_WINDOW_REFS,),
@@ -132,6 +282,7 @@ _PROOF_REFS_BY_JOURNEY_CLASS = {
         "tests/test_message_window_work_item_runtime.py::test_restart_temporal_followup_reuses_identity_role_and_zone_with_one_cas_update",
         *_MESSAGE_ARCHIVE_REFS,
     ),
+    ("conversation_recall", "clean artifact path"): _CONVERSATION_CLEAN_ARTIFACT_REFS,
     ("document_recall_answer", "deterministic contract"): (
         "tests/test_v12_file_evidence_reader.py::test_current_turn_native_files_form_one_process_owned_bundle",
     ),
@@ -148,6 +299,7 @@ _PROOF_REFS_BY_JOURNEY_CLASS = {
         "tests/test_archive_search_runtime_publication.py::test_locate_select_and_explain_document_survives_both_runtime_restarts",
         *_ARCHIVE_REPLAY_FAILURE_REFS,
     ),
+    ("document_recall_answer", "clean artifact path"): _DOCUMENT_CLEAN_ARTIFACT_REFS,
     ("obsidian_write_sync", "deterministic contract"): (
         "tests/test_obsidian_structured_acceptance_core.py::test_conflict_preview_is_non_destructive_and_contains_both_versions",
     ),
@@ -170,6 +322,7 @@ _PROOF_REFS_BY_JOURNEY_CLASS = {
     ("durable_scheduled_work", "restart and recovery evidence"): (
         "tests/test_mission_budgets_and_recovery.py::test_spent_budget_survives_a_restart",
     ),
+    ("durable_scheduled_work", "clean artifact path"): _DURABLE_CLEAN_ARTIFACT_REFS,
     ("honest_degradation", "deterministic contract"): (
         "tests/test_search_provider_refusal_is_not_emptiness.py::test_202_from_duckduckgo_is_a_refusal_not_an_empty_result[asyncio]",
     ),
@@ -182,6 +335,7 @@ _PROOF_REFS_BY_JOURNEY_CLASS = {
     ("honest_degradation", "restart and recovery evidence"): (
         "tests/test_message_window_work_item_runtime.py::test_post_boundary_admission_race_returns_atomic_clarification_without_execution",
     ),
+    ("honest_degradation", "clean artifact path"): _HONEST_DEGRADATION_CLEAN_ARTIFACT_REFS,
     ("current_file_web_comparison", "deterministic contract"): (
         "tests/test_compare_current_file_web_work_graph_schema45.py::test_schema45_exact_binding_is_durable_immutable_and_revision_cas",
     ),
@@ -202,7 +356,9 @@ _GENERIC_OPERATOR_REFS = frozenset(
 
 _SHA256 = re.compile(r"[0-9a-f]{64}\Z")
 _COMMIT = re.compile(r"[0-9a-f]{40}\Z")
+_TEST_PATH = re.compile(r"tests/(?:[A-Za-z0-9_-]+/)*test_[A-Za-z0-9_]{1,180}\.py\Z")
 _TEST_NAME = re.compile(r"test_[A-Za-z0-9_]{1,159}\Z")
+_PARAMETER_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}\Z")
 _SAFE_ID = re.compile(r"[a-z][a-z0-9_.:-]{1,127}\Z")
 _RECEIPT_FIELDS = frozenset(
     {
@@ -219,6 +375,28 @@ _RECEIPT_FIELDS = frozenset(
         "owner_smoke",
     }
 )
+_MANIFEST_FIELDS = frozenset({"$schema", "journey_id", "evidence_class", "result", "release", "observation"})
+_MANIFEST_OBSERVATION_FIELDS = frozenset(
+    {
+        "environment",
+        "observed_at_utc",
+        "check_ids",
+        "artifact_ref",
+        "artifact_schema",
+        "artifact_sha256",
+    }
+)
+_EXECUTION_FIELDS = frozenset(
+    {
+        "collection_sha256",
+        "exit_code",
+        "outcome_projection_sha256",
+        "producer_path",
+        "producer_source_sha256",
+        "runner",
+    }
+)
+_ARTIFACT_IMPORT_FIELDS = frozenset({"origin_report_sha256", "site_packages_ref", "subprocess_policy"})
 
 
 class ExactReleaseEvidenceError(ValueError):
@@ -226,6 +404,8 @@ class ExactReleaseEvidenceError(ValueError):
 
 
 _EXECUTION_WITNESS_AUTHORITY = object()
+_EVIDENCE_BUNDLE_AUTHORITY = object()
+_RELEASE_RUNTIME_AUTHORITY = object()
 
 
 @dataclass(frozen=True, slots=True)
@@ -236,6 +416,23 @@ class _ExecutionWitness:
     exit_code: int
     collection_sha256: str
     outcome_projection_sha256: str
+    authority: object
+    artifact_origin_sha256: str | None = None
+    site_packages_ref: str | None = None
+    subprocess_policy: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class EvidenceBundle:
+    """Process-authenticated canonical receipt/manifest bytes and references."""
+
+    receipt_ref: str
+    receipt: bytes
+    receipt_sha256: str
+    manifest_ref: str
+    manifest: bytes
+    manifest_sha256: str
+    result: str
     authority: object
 
 
@@ -262,6 +459,18 @@ class ReleaseIdentity:
 
     def payload(self) -> dict[str, object]:
         return _release_payload(self)
+
+
+@dataclass(frozen=True, slots=True)
+class _AuthenticatedReleaseRuntime:
+    """Process-local authority for one sealed installed package surface."""
+
+    root: Path
+    identity: ReleaseIdentity
+    site_packages: Path
+    site_packages_ref: str
+    package_root: Path
+    authority: object
 
 
 @dataclass(frozen=True, slots=True)
@@ -324,6 +533,12 @@ def proof_refs(journey_id: str, evidence_class: str) -> tuple[str, ...]:
     return refs
 
 
+def receipt_schema(evidence_class: str) -> str:
+    if type(evidence_class) is not str or evidence_class not in ENVIRONMENT_BY_CLASS:
+        raise ExactReleaseEvidenceError("evidence_class_invalid")
+    return CLEAN_ARTIFACT_RECEIPT_SCHEMA if evidence_class == _CLEAN_ARTIFACT_CLASS else RECEIPT_SCHEMA
+
+
 def _closed_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
     result: dict[str, Any] = {}
     for key, value in pairs:
@@ -355,6 +570,141 @@ def _load_canonical_receipt(raw: bytes) -> dict[str, Any]:
     if raw != canonical:
         raise ExactReleaseEvidenceError("receipt_json_invalid")
     return value
+
+
+def _load_canonical_manifest(raw: bytes) -> dict[str, Any]:
+    if type(raw) is not bytes or not raw or len(raw) > 65_536:
+        raise ExactReleaseEvidenceError("manifest_json_invalid")
+    try:
+        value = json.loads(
+            raw.decode("utf-8", errors="strict"),
+            object_pairs_hook=_closed_object,
+            parse_constant=lambda _value: (_ for _ in ()).throw(
+                ExactReleaseEvidenceError("manifest_json_invalid")
+            ),
+        )
+    except (UnicodeError, RuntimeError, ValueError, json.JSONDecodeError) as exc:
+        raise ExactReleaseEvidenceError("manifest_json_invalid") from exc
+    if type(value) is not dict:
+        raise ExactReleaseEvidenceError("manifest_json_invalid")
+    try:
+        canonical = canonical_json_bytes(value)
+    except (TypeError, ValueError, UnicodeError) as exc:
+        raise ExactReleaseEvidenceError("manifest_json_invalid") from exc
+    if raw != canonical:
+        raise ExactReleaseEvidenceError("manifest_json_invalid")
+    return value
+
+
+def release_binding_sha256(identity: ReleaseIdentity) -> str:
+    """Hash all four exact release fields for deterministic artifact names."""
+
+    return hashlib.sha256(canonical_json_bytes(_release_payload(identity))).hexdigest()
+
+
+def _evidence_ref(
+    *,
+    identity: ReleaseIdentity,
+    journey_id: str,
+    evidence_class: str,
+    result: str,
+    kind: str,
+) -> str:
+    proof_refs(journey_id, evidence_class)
+    if result not in {"VERIFIED", "FAILED"} or kind not in {"receipts", "manifests"}:
+        raise ExactReleaseEvidenceError("evidence_ref_invalid")
+    environment = ENVIRONMENT_BY_CLASS.get(evidence_class)
+    if environment is None or _SAFE_ID.fullmatch(environment) is None:
+        raise ExactReleaseEvidenceError("evidence_ref_invalid")
+    filename = f"{journey_id}--{environment}--{result.lower()}--{release_binding_sha256(identity)}.json"
+    return str(_EVIDENCE_ROOT / kind / filename)
+
+
+def _bundle_from_receipt(
+    raw: bytes,
+    *,
+    identity: ReleaseIdentity,
+    journey_id: str,
+    evidence_class: str,
+) -> EvidenceBundle:
+    receipt = _load_canonical_receipt(raw)
+    expected_release = _release_payload(identity)
+    result = receipt.get("result")
+    expected_schema = receipt_schema(evidence_class)
+    if (
+        set(receipt) != _RECEIPT_FIELDS
+        or receipt.get("$schema") != expected_schema
+        or receipt.get("journey_id") != journey_id
+        or receipt.get("evidence_class") != evidence_class
+        or receipt.get("environment") != ENVIRONMENT_BY_CLASS.get(evidence_class)
+        or receipt.get("check_ids") != _check_ids(journey_id, evidence_class)
+        or receipt.get("release") != expected_release
+        or result not in {"VERIFIED", "FAILED"}
+    ):
+        raise ExactReleaseEvidenceError("bundle_receipt_invalid")
+    observed_at = receipt.get("observed_at_utc")
+    if (
+        type(observed_at) is not str
+        or re.fullmatch(
+            r"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z",
+            observed_at,
+        )
+        is None
+    ):
+        raise ExactReleaseEvidenceError("bundle_receipt_invalid")
+    try:
+        datetime.strptime(observed_at, "%Y-%m-%dT%H:%M:%SZ")
+    except ValueError as exc:
+        raise ExactReleaseEvidenceError("bundle_receipt_invalid") from exc
+    receipt_ref = _evidence_ref(
+        identity=identity,
+        journey_id=journey_id,
+        evidence_class=evidence_class,
+        result=result,
+        kind="receipts",
+    )
+    receipt_sha256 = hashlib.sha256(raw).hexdigest()
+    manifest_ref = _evidence_ref(
+        identity=identity,
+        journey_id=journey_id,
+        evidence_class=evidence_class,
+        result=result,
+        kind="manifests",
+    )
+    manifest_value = {
+        "$schema": MANIFEST_SCHEMA,
+        "evidence_class": evidence_class,
+        "journey_id": journey_id,
+        "observation": {
+            "artifact_ref": receipt_ref,
+            "artifact_schema": expected_schema,
+            "artifact_sha256": receipt_sha256,
+            "check_ids": receipt["check_ids"],
+            "environment": receipt["environment"],
+            "observed_at_utc": observed_at,
+        },
+        "release": expected_release,
+        "result": result,
+    }
+    manifest = canonical_json_bytes(manifest_value)
+    loaded_manifest = _load_canonical_manifest(manifest)
+    observation = loaded_manifest.get("observation")
+    if (
+        set(loaded_manifest) != _MANIFEST_FIELDS
+        or type(observation) is not dict
+        or set(observation) != _MANIFEST_OBSERVATION_FIELDS
+    ):
+        raise ExactReleaseEvidenceError("manifest_fields_invalid")
+    return EvidenceBundle(
+        receipt_ref=receipt_ref,
+        receipt=raw,
+        receipt_sha256=receipt_sha256,
+        manifest_ref=manifest_ref,
+        manifest=manifest,
+        manifest_sha256=hashlib.sha256(manifest).hexdigest(),
+        result=result,
+        authority=_EVIDENCE_BUNDLE_AUTHORITY,
+    )
 
 
 def _git(repo_root: Path, *args: str) -> bytes:
@@ -403,13 +753,10 @@ def _test_source(repo_root: Path, commit: str, test_ref: str) -> bytes:
     path, name = test_ref.split("::")
     function_name, separator, parameter_id = name.partition("[")
     parameter_valid = not separator or (
-        name.endswith("]")
-        and 1 <= len(parameter_id) <= 1024
-        and not any(character in "\x00\r\n" for character in parameter_id)
+        name.endswith("]") and _PARAMETER_ID.fullmatch(parameter_id[:-1]) is not None
     )
     if (
-        not path.startswith("tests/test_")
-        or not path.endswith(".py")
+        _TEST_PATH.fullmatch(path) is None
         or _TEST_NAME.fullmatch(function_name) is None
         or not parameter_valid
     ):
@@ -665,7 +1012,19 @@ def _execution_witness(
     exit_code: int,
     collection_sha256: str,
     outcome_projection_sha256: str,
+    *,
+    artifact_origin_sha256: str | None = None,
+    site_packages_ref: str | None = None,
+    subprocess_policy: str | None = None,
 ) -> _ExecutionWitness:
+    artifact_values = (artifact_origin_sha256, site_packages_ref, subprocess_policy)
+    artifact_valid = all(value is None for value in artifact_values) or (
+        type(artifact_origin_sha256) is str
+        and _SHA256.fullmatch(artifact_origin_sha256) is not None
+        and type(site_packages_ref) is str
+        and re.fullmatch(r"venv/lib/python[0-9]+\.[0-9]+/site-packages", site_packages_ref) is not None
+        and subprocess_policy == "deny"
+    )
     if (
         type(outcomes) is not tuple
         or not outcomes
@@ -676,6 +1035,7 @@ def _execution_witness(
         or type(outcome_projection_sha256) is not str
         or _SHA256.fullmatch(collection_sha256) is None
         or _SHA256.fullmatch(outcome_projection_sha256) is None
+        or not artifact_valid
     ):
         raise ExactReleaseEvidenceError("pytest_execution_evidence_invalid")
     return _ExecutionWitness(
@@ -684,6 +1044,9 @@ def _execution_witness(
         collection_sha256,
         outcome_projection_sha256,
         _EXECUTION_WITNESS_AUTHORITY,
+        artifact_origin_sha256,
+        site_packages_ref,
+        subprocess_policy,
     )
 
 
@@ -695,6 +1058,9 @@ def _require_execution_witness(value: object) -> _ExecutionWitness:
         value.exit_code,
         value.collection_sha256,
         value.outcome_projection_sha256,
+        artifact_origin_sha256=value.artifact_origin_sha256,
+        site_packages_ref=value.site_packages_ref,
+        subprocess_policy=value.subprocess_policy,
     )
 
 
@@ -712,6 +1078,47 @@ def _outcome_projection_sha256(nodeids: tuple[str, ...], outcomes: tuple[str, ..
     ).hexdigest()
 
 
+def _artifact_origin_report_sha256(
+    path: Path,
+    runtime: _AuthenticatedReleaseRuntime,
+) -> str:
+    try:
+        raw = _stable_file(path, 4096)
+        value = json.loads(
+            raw.decode("ascii", errors="strict"),
+            object_pairs_hook=_closed_object,
+            parse_constant=lambda _value: (_ for _ in ()).throw(
+                ExactReleaseEvidenceError("artifact_origin_report_invalid")
+            ),
+        )
+    except (OSError, UnicodeError, RuntimeError, ValueError, json.JSONDecodeError) as exc:
+        raise ExactReleaseEvidenceError("artifact_origin_report_invalid") from exc
+    fields = {
+        "module_count",
+        "module_origins_sha256",
+        "schema",
+        "site_packages_ref",
+        "source_commit",
+        "subprocess_policy",
+        "wheel_sha256",
+    }
+    if (
+        type(value) is not dict
+        or set(value) != fields
+        or raw != canonical_json_bytes(value)
+        or value.get("schema") != "friday.clean-artifact-import-origin.v1"
+        or type(value.get("module_count")) is not int
+        or not 1 <= value["module_count"] <= 10_000
+        or _SHA256.fullmatch(str(value.get("module_origins_sha256") or "")) is None
+        or value.get("site_packages_ref") != runtime.site_packages_ref
+        or value.get("source_commit") != runtime.identity.source_commit
+        or value.get("wheel_sha256") != runtime.identity.wheel_sha256
+        or value.get("subprocess_policy") != "deny"
+    ):
+        raise ExactReleaseEvidenceError("artifact_origin_report_invalid")
+    return hashlib.sha256(raw).hexdigest()
+
+
 def _run_closed_pytest(
     repo_root: Path,
     identity: ReleaseIdentity,
@@ -719,8 +1126,16 @@ def _run_closed_pytest(
     evidence_class: str,
     *,
     require_running_producer: bool = True,
+    release_runtime: _AuthenticatedReleaseRuntime | None = None,
 ) -> _ExecutionWitness:
     nodeids = proof_refs(journey_id, evidence_class)
+    clean_artifact = evidence_class == _CLEAN_ARTIFACT_CLASS
+    if clean_artifact:
+        runtime = _require_release_runtime(release_runtime, identity)
+    elif release_runtime is not None:
+        raise ExactReleaseEvidenceError("release_runtime_unexpected")
+    else:
+        runtime = None
     _require_exact_checkout(repo_root, identity.source_commit)
     _source_proofs(
         repo_root,
@@ -734,12 +1149,29 @@ def _run_closed_pytest(
     outcomes: tuple[str, ...] = ()
     collection_sha256 = ""
     outcome_projection_sha256 = ""
+    artifact_origin_sha256: str | None = None
     try:
         with tempfile.TemporaryDirectory(prefix="friday-exact-evidence-") as temporary:
             scratch = Path(temporary)
             report = scratch / "results.xml"
             collection = scratch / "collection.json"
             python_cache = scratch / "python-cache"
+            origin_report = scratch / "artifact-origin.json"
+            if runtime is None:
+                bootstrap = (_PYTEST_BOOTSTRAP, str(repo_root))
+                artifact_options: tuple[str, ...] = ()
+            else:
+                bootstrap = (
+                    _INSTALLED_PYTEST_BOOTSTRAP,
+                    str(repo_root),
+                    str(runtime.root),
+                    str(runtime.site_packages),
+                    runtime.site_packages_ref,
+                    str(origin_report),
+                    identity.source_commit,
+                    identity.wheel_sha256,
+                )
+                artifact_options = ("-o", "pythonpath=", "--import-mode=importlib")
             with quality_gate._isolated_test_environment() as environment:  # noqa: SLF001
                 environment.pop("PYTEST_PLUGINS", None)
                 environment["PYTEST_DISABLE_PLUGIN_AUTOLOAD"] = "1"
@@ -751,8 +1183,7 @@ def _run_closed_pytest(
                         "-X",
                         f"pycache_prefix={python_cache}",
                         "-c",
-                        _PYTEST_BOOTSTRAP,
-                        str(repo_root),
+                        *bootstrap,
                         "-q",
                         "-o",
                         "addopts=",
@@ -768,6 +1199,7 @@ def _run_closed_pytest(
                         "tools.quality_gate",
                         "-n",
                         "0",
+                        *artifact_options,
                         f"--junitxml={report}",
                         f"--friday-collection-manifest={collection}",
                         f"--basetemp={scratch / 'pytest'}",
@@ -794,6 +1226,8 @@ def _run_closed_pytest(
                 raise ExactReleaseEvidenceError("pytest_exit_invalid")
             collection_sha256 = hashlib.sha256(collection_raw).hexdigest()
             outcome_projection_sha256 = _outcome_projection_sha256(nodeids, outcomes)
+            if runtime is not None:
+                artifact_origin_sha256 = _artifact_origin_report_sha256(origin_report, runtime)
     except (OSError, subprocess.SubprocessError, RuntimeError, ExactReleaseEvidenceError) as exc:
         run_error = exc
     finally:
@@ -805,6 +1239,12 @@ def _run_closed_pytest(
             evidence_class,
             require_running_producer=require_running_producer,
         )
+        if runtime is not None:
+            try:
+                _reauthenticate_release_runtime(runtime)
+            except ExactReleaseEvidenceError as exc:
+                if run_error is None:
+                    run_error = exc
     if run_error is not None:
         if isinstance(run_error, ExactReleaseEvidenceError):
             raise run_error
@@ -815,6 +1255,9 @@ def _run_closed_pytest(
         result.returncode,
         collection_sha256,
         outcome_projection_sha256,
+        artifact_origin_sha256=artifact_origin_sha256,
+        site_packages_ref=(None if runtime is None else runtime.site_packages_ref),
+        subprocess_policy=(None if runtime is None else "deny"),
     )
 
 
@@ -829,30 +1272,54 @@ def _produce_for_identity(
     journey_id: str,
     evidence_class: str,
     owner_smoke: AuthenticatedOwnerSmokeBinding | None = None,
+    release_runtime: _AuthenticatedReleaseRuntime | None = None,
 ) -> bytes:
     """Run the code-owned tests; callers cannot provide a result or runner."""
 
     release_payload = _release_payload(identity)
     owner_smoke_payload = _owner_smoke_payload(owner_smoke)
     root = _resolve_directory(repo_root, "repo_root_invalid")
+    clean_artifact = evidence_class == _CLEAN_ARTIFACT_CLASS
+    if clean_artifact:
+        runtime = _require_release_runtime(release_runtime, identity)
+    elif release_runtime is not None:
+        raise ExactReleaseEvidenceError("release_runtime_unexpected")
+    else:
+        runtime = None
     producer_sha256, proofs = _source_proofs(root, identity, journey_id, evidence_class)
-    witness = _run_closed_pytest(root, identity, journey_id, evidence_class)
+    if runtime is None:
+        witness = _run_closed_pytest(root, identity, journey_id, evidence_class)
+    else:
+        witness = _run_closed_pytest(
+            root,
+            identity,
+            journey_id,
+            evidence_class,
+            release_runtime=runtime,
+        )
     for proof, outcome in zip(proofs, witness.outcomes, strict=True):
         proof["outcome"] = outcome
     result = "VERIFIED" if witness.exit_code == 0 else "FAILED"
+    execution: dict[str, object] = {
+        "collection_sha256": witness.collection_sha256,
+        "exit_code": witness.exit_code,
+        "outcome_projection_sha256": witness.outcome_projection_sha256,
+        "producer_path": PRODUCER_PATH,
+        "producer_source_sha256": producer_sha256,
+        "runner": "pytest",
+    }
+    if runtime is not None:
+        execution["artifact_import"] = {
+            "origin_report_sha256": witness.artifact_origin_sha256,
+            "site_packages_ref": witness.site_packages_ref,
+            "subprocess_policy": witness.subprocess_policy,
+        }
     receipt = {
-        "$schema": RECEIPT_SCHEMA,
+        "$schema": receipt_schema(evidence_class),
         "check_ids": _check_ids(journey_id, evidence_class),
         "environment": ENVIRONMENT_BY_CLASS[evidence_class],
         "evidence_class": evidence_class,
-        "execution": {
-            "collection_sha256": witness.collection_sha256,
-            "exit_code": witness.exit_code,
-            "outcome_projection_sha256": witness.outcome_projection_sha256,
-            "producer_path": PRODUCER_PATH,
-            "producer_source_sha256": producer_sha256,
-            "runner": "pytest",
-        },
+        "execution": execution,
         "journey_id": journey_id,
         "observed_at_utc": _canonical_utc_now(),
         "owner_smoke": owner_smoke_payload,
@@ -869,6 +1336,7 @@ def _produce_for_identity(
         repo_root=root,
         authenticated_owner_smoke=owner_smoke,
         execution_witness=witness,
+        release_runtime=runtime,
     )
     return raw
 
@@ -883,6 +1351,7 @@ def _validate_receipt(
     authenticated_owner_smoke: AuthenticatedOwnerSmokeBinding | None = None,
     execution_witness: _ExecutionWitness | None = None,
     require_running_producer: bool = True,
+    release_runtime: _AuthenticatedReleaseRuntime | None = None,
 ) -> dict[str, Any]:
     """Validate against external release and already-authenticated owner roots.
 
@@ -892,6 +1361,13 @@ def _validate_receipt(
     """
 
     expected_release_payload = _release_payload(expected_release)
+    clean_artifact = expected_evidence_class == _CLEAN_ARTIFACT_CLASS
+    if clean_artifact:
+        runtime = _require_release_runtime(release_runtime, expected_release)
+    elif release_runtime is not None:
+        raise ExactReleaseEvidenceError("release_runtime_unexpected")
+    else:
+        runtime = None
     root = _resolve_directory(repo_root, "repo_root_invalid")
     expected_producer_sha256, _source_inventory = _source_proofs(
         root,
@@ -906,7 +1382,7 @@ def _validate_receipt(
     refs = proof_refs(expected_journey_id, expected_evidence_class)
     expected_checks = _check_ids(expected_journey_id, expected_evidence_class)
     if (
-        value.get("$schema") != RECEIPT_SCHEMA
+        value.get("$schema") != receipt_schema(expected_evidence_class)
         or value.get("journey_id") != expected_journey_id
         or value.get("evidence_class") != expected_evidence_class
         or value.get("environment") != ENVIRONMENT_BY_CLASS[expected_evidence_class]
@@ -926,16 +1402,24 @@ def _validate_receipt(
         raise ExactReleaseEvidenceError("receipt_time_invalid") from exc
 
     execution = value.get("execution")
-    execution_fields = {
-        "collection_sha256",
-        "exit_code",
-        "outcome_projection_sha256",
-        "producer_path",
-        "producer_source_sha256",
-        "runner",
-    }
+    execution_fields = set(_EXECUTION_FIELDS)
+    if clean_artifact:
+        execution_fields.add("artifact_import")
     if type(execution) is not dict or set(execution) != execution_fields:
         raise ExactReleaseEvidenceError("execution_binding_invalid")
+    artifact_import = execution.get("artifact_import")
+    if clean_artifact:
+        assert runtime is not None
+        if (
+            type(artifact_import) is not dict
+            or set(artifact_import) != _ARTIFACT_IMPORT_FIELDS
+            or _SHA256.fullmatch(str(artifact_import.get("origin_report_sha256") or "")) is None
+            or artifact_import.get("site_packages_ref") != runtime.site_packages_ref
+            or artifact_import.get("subprocess_policy") != "deny"
+        ):
+            raise ExactReleaseEvidenceError("artifact_execution_binding_invalid")
+    elif artifact_import is not None:
+        raise ExactReleaseEvidenceError("artifact_execution_binding_invalid")
     expected_collection = canonical_json_bytes({"nodeids": list(refs), "version": 1})
     if (
         execution.get("producer_path") != PRODUCER_PATH
@@ -987,17 +1471,25 @@ def _validate_receipt(
     ):
         raise ExactReleaseEvidenceError("owner_smoke_binding_invalid")
 
-    witness = (
-        _run_closed_pytest(
+    if execution_witness is None and runtime is None:
+        witness = _run_closed_pytest(
             root,
             expected_release,
             expected_journey_id,
             expected_evidence_class,
             require_running_producer=require_running_producer,
         )
-        if execution_witness is None
-        else execution_witness
-    )
+    elif execution_witness is None:
+        witness = _run_closed_pytest(
+            root,
+            expected_release,
+            expected_journey_id,
+            expected_evidence_class,
+            require_running_producer=require_running_producer,
+            release_runtime=runtime,
+        )
+    else:
+        witness = execution_witness
     witness = _require_execution_witness(witness)
     if (
         tuple(outcomes) != witness.outcomes
@@ -1005,6 +1497,25 @@ def _validate_receipt(
         or execution.get("collection_sha256") != witness.collection_sha256
         or execution.get("outcome_projection_sha256") != witness.outcome_projection_sha256
         or witness.outcome_projection_sha256 != _outcome_projection_sha256(refs, witness.outcomes)
+        or (
+            clean_artifact
+            and (
+                witness.artifact_origin_sha256 != artifact_import.get("origin_report_sha256")
+                or witness.site_packages_ref != artifact_import.get("site_packages_ref")
+                or witness.subprocess_policy != artifact_import.get("subprocess_policy")
+            )
+        )
+        or (
+            not clean_artifact
+            and any(
+                item is not None
+                for item in (
+                    witness.artifact_origin_sha256,
+                    witness.site_packages_ref,
+                    witness.subprocess_policy,
+                )
+            )
+        )
     ):
         raise ExactReleaseEvidenceError("execution_evidence_mismatch")
     return value
@@ -1018,8 +1529,20 @@ def validate_receipt(
     expected_evidence_class: str,
     repo_root: Path,
     authenticated_owner_smoke: AuthenticatedOwnerSmokeBinding | None = None,
+    release_root: Path | None = None,
 ) -> dict[str, Any]:
     """Validate structure, then independently rerun the exact closed inventory."""
+
+    if expected_evidence_class == _CLEAN_ARTIFACT_CLASS:
+        if release_root is None:
+            raise ExactReleaseEvidenceError("release_runtime_required")
+        runtime = _authenticate_release_runtime(release_root)
+        if runtime.identity != expected_release:
+            raise ExactReleaseEvidenceError("release_identity_mismatch")
+    elif release_root is not None:
+        raise ExactReleaseEvidenceError("release_runtime_unexpected")
+    else:
+        runtime = None
 
     with _validation_source_checkout(repo_root, expected_release.source_commit) as (
         source_root,
@@ -1033,6 +1556,7 @@ def validate_receipt(
             repo_root=source_root,
             authenticated_owner_smoke=authenticated_owner_smoke,
             require_running_producer=require_running_producer,
+            release_runtime=runtime,
         )
 
 
@@ -1129,6 +1653,86 @@ def derive_release_identity(release_root: Path) -> ReleaseIdentity:
     )
 
 
+def _authenticate_release_runtime(release_root: Path) -> _AuthenticatedReleaseRuntime:
+    """Authenticate one sealed release and discover its unique installed package."""
+
+    try:
+        root = Path(os.path.abspath(release_root)).resolve(strict=True)
+        identity = derive_release_identity(root)
+        venv = root / "venv"
+        library = venv / "lib"
+        for directory in (venv, library):
+            if not stat.S_ISDIR(directory.lstat().st_mode) or directory.resolve(strict=True) != directory:
+                raise ExactReleaseEvidenceError("release_runtime_invalid")
+        candidates = tuple(
+            path
+            for path in sorted(library.glob("python*/site-packages"))
+            if re.fullmatch(r"python[0-9]+\.[0-9]+", path.parent.name) is not None
+        )
+        if len(candidates) != 1:
+            raise ExactReleaseEvidenceError("release_runtime_invalid")
+        site_packages = candidates[0]
+        python_directory = site_packages.parent
+        expected_python_directory = f"python{sys.version_info.major}.{sys.version_info.minor}"
+        package_root = site_packages / "friday"
+        package_init = package_root / "__init__.py"
+        for directory in (python_directory, site_packages, package_root):
+            if not stat.S_ISDIR(directory.lstat().st_mode) or directory.resolve(strict=True) != directory:
+                raise ExactReleaseEvidenceError("release_runtime_invalid")
+        if (
+            not stat.S_ISREG(package_init.lstat().st_mode)
+            or package_init.resolve(strict=True) != package_init
+            or python_directory.name != expected_python_directory
+        ):
+            raise ExactReleaseEvidenceError("release_runtime_invalid")
+        distributions = tuple(sorted(site_packages.glob("friday-*.dist-info")))
+        if (
+            len(distributions) != 1
+            or re.fullmatch(r"friday-[A-Za-z0-9_.+-]+\.dist-info", distributions[0].name) is None
+            or not stat.S_ISDIR(distributions[0].lstat().st_mode)
+            or distributions[0].resolve(strict=True) != distributions[0]
+        ):
+            raise ExactReleaseEvidenceError("release_runtime_invalid")
+        site_packages_ref = site_packages.relative_to(root).as_posix()
+    except (OSError, TypeError, ValueError, RuntimeError) as exc:
+        if isinstance(exc, ExactReleaseEvidenceError):
+            raise
+        raise ExactReleaseEvidenceError("release_runtime_invalid") from exc
+    return _AuthenticatedReleaseRuntime(
+        root=root,
+        identity=identity,
+        site_packages=site_packages,
+        site_packages_ref=site_packages_ref,
+        package_root=package_root,
+        authority=_RELEASE_RUNTIME_AUTHORITY,
+    )
+
+
+def _require_release_runtime(
+    value: object,
+    identity: ReleaseIdentity,
+) -> _AuthenticatedReleaseRuntime:
+    if (
+        type(value) is not _AuthenticatedReleaseRuntime
+        or value.authority is not _RELEASE_RUNTIME_AUTHORITY
+        or value.identity != identity
+        or not value.root.is_absolute()
+        or value.site_packages != value.root / value.site_packages_ref
+        or value.package_root != value.site_packages / "friday"
+        or PurePosixPath(value.site_packages_ref).is_absolute()
+        or any(part in {"", ".", ".."} for part in PurePosixPath(value.site_packages_ref).parts)
+    ):
+        raise ExactReleaseEvidenceError("release_runtime_not_authenticated")
+    return value
+
+
+def _reauthenticate_release_runtime(runtime: _AuthenticatedReleaseRuntime) -> None:
+    refreshed = _authenticate_release_runtime(runtime.root)
+    projection = ("root", "identity", "site_packages", "site_packages_ref", "package_root")
+    if any(getattr(runtime, field) != getattr(refreshed, field) for field in projection):
+        raise ExactReleaseEvidenceError("release_identity_changed")
+
+
 def produce_receipt(
     *,
     repo_root: Path,
@@ -1144,17 +1748,110 @@ def produce_receipt(
     consumers must independently supply that same expected token to validation.
     """
 
-    identity = derive_release_identity(release_root)
-    raw = _produce_for_identity(
+    if evidence_class == _CLEAN_ARTIFACT_CLASS:
+        runtime = _authenticate_release_runtime(release_root)
+        identity = runtime.identity
+    else:
+        runtime = None
+        identity = derive_release_identity(release_root)
+    if runtime is None:
+        raw = _produce_for_identity(
+            repo_root=repo_root,
+            identity=identity,
+            journey_id=journey_id,
+            evidence_class=evidence_class,
+            owner_smoke=authenticated_owner_smoke,
+        )
+    else:
+        raw = _produce_for_identity(
+            repo_root=repo_root,
+            identity=identity,
+            journey_id=journey_id,
+            evidence_class=evidence_class,
+            owner_smoke=authenticated_owner_smoke,
+            release_runtime=runtime,
+        )
+    if runtime is None:
+        if derive_release_identity(release_root) != identity:
+            raise ExactReleaseEvidenceError("release_identity_changed")
+    else:
+        _reauthenticate_release_runtime(runtime)
+    return raw
+
+
+def manifest_from_receipt(
+    raw: bytes,
+    *,
+    expected_release: ReleaseIdentity,
+    expected_journey_id: str,
+    expected_evidence_class: str,
+    repo_root: Path,
+    authenticated_owner_smoke: AuthenticatedOwnerSmokeBinding | None = None,
+    release_root: Path | None = None,
+) -> EvidenceBundle:
+    """Revalidate machine evidence and derive its only canonical manifest."""
+
+    validate_receipt(
+        raw,
+        expected_release=expected_release,
+        expected_journey_id=expected_journey_id,
+        expected_evidence_class=expected_evidence_class,
         repo_root=repo_root,
+        authenticated_owner_smoke=authenticated_owner_smoke,
+        release_root=release_root,
+    )
+    return _bundle_from_receipt(
+        raw,
+        identity=expected_release,
+        journey_id=expected_journey_id,
+        evidence_class=expected_evidence_class,
+    )
+
+
+def produce_evidence_bundle(
+    *,
+    repo_root: Path,
+    release_root: Path,
+    journey_id: str,
+    evidence_class: str,
+    authenticated_owner_smoke: AuthenticatedOwnerSmokeBinding | None = None,
+) -> EvidenceBundle:
+    """Run the closed verifier and derive receipt plus manifest without caller claims."""
+
+    if evidence_class == _CLEAN_ARTIFACT_CLASS:
+        runtime = _authenticate_release_runtime(release_root)
+        identity = runtime.identity
+    else:
+        runtime = None
+        identity = derive_release_identity(release_root)
+    if runtime is None:
+        raw = _produce_for_identity(
+            repo_root=repo_root,
+            identity=identity,
+            journey_id=journey_id,
+            evidence_class=evidence_class,
+            owner_smoke=authenticated_owner_smoke,
+        )
+    else:
+        raw = _produce_for_identity(
+            repo_root=repo_root,
+            identity=identity,
+            journey_id=journey_id,
+            evidence_class=evidence_class,
+            owner_smoke=authenticated_owner_smoke,
+            release_runtime=runtime,
+        )
+    if runtime is None:
+        if derive_release_identity(release_root) != identity:
+            raise ExactReleaseEvidenceError("release_identity_changed")
+    else:
+        _reauthenticate_release_runtime(runtime)
+    return _bundle_from_receipt(
+        raw,
         identity=identity,
         journey_id=journey_id,
         evidence_class=evidence_class,
-        owner_smoke=authenticated_owner_smoke,
     )
-    if derive_release_identity(release_root) != identity:
-        raise ExactReleaseEvidenceError("release_identity_changed")
-    return raw
 
 
 def _cleanup_owned_target(target: Path, identity: tuple[int, int] | None) -> None:
@@ -1168,17 +1865,19 @@ def _cleanup_owned_target(target: Path, identity: tuple[int, int] | None) -> Non
         pass
 
 
-def write_receipt_exclusive(path: Path, raw: bytes) -> str:
-    """Write one complete canonical receipt without replacing an existing name."""
-
-    _load_canonical_receipt(raw)
+def _write_canonical_exclusive(
+    path: Path,
+    raw: bytes,
+    *,
+    failure_code: str,
+) -> tuple[str, tuple[int, int]]:
     try:
         target = Path(os.path.abspath(path))
         parent = target.parent.resolve(strict=True)
     except (OSError, TypeError, ValueError, RuntimeError) as exc:
-        raise ExactReleaseEvidenceError("receipt_output_invalid") from exc
+        raise ExactReleaseEvidenceError(failure_code) from exc
     if parent != target.parent or target.name in {"", ".", ".."}:
-        raise ExactReleaseEvidenceError("receipt_output_invalid")
+        raise ExactReleaseEvidenceError(failure_code)
     flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_CLOEXEC | getattr(os, "O_NOFOLLOW", 0)
     descriptor = -1
     owned_identity: tuple[int, int] | None = None
@@ -1214,8 +1913,134 @@ def write_receipt_exclusive(path: Path, raw: bytes) -> str:
                     failure = exc
     if failure is not None:
         _cleanup_owned_target(target, owned_identity)
-        raise ExactReleaseEvidenceError("receipt_output_invalid") from failure
-    return hashlib.sha256(raw).hexdigest()
+        raise ExactReleaseEvidenceError(failure_code) from failure
+    assert owned_identity is not None
+    return hashlib.sha256(raw).hexdigest(), owned_identity
+
+
+def write_receipt_exclusive(path: Path, raw: bytes) -> str:
+    """Write one complete canonical receipt without replacing an existing name."""
+
+    _load_canonical_receipt(raw)
+    digest, _identity = _write_canonical_exclusive(
+        path,
+        raw,
+        failure_code="receipt_output_invalid",
+    )
+    return digest
+
+
+def _require_evidence_bundle(value: object) -> EvidenceBundle:
+    if type(value) is not EvidenceBundle or value.authority is not _EVIDENCE_BUNDLE_AUTHORITY:
+        raise ExactReleaseEvidenceError("evidence_bundle_invalid")
+    if (
+        _SHA256.fullmatch(value.receipt_sha256) is None
+        or _SHA256.fullmatch(value.manifest_sha256) is None
+        or hashlib.sha256(value.receipt).hexdigest() != value.receipt_sha256
+        or hashlib.sha256(value.manifest).hexdigest() != value.manifest_sha256
+        or value.result not in {"VERIFIED", "FAILED"}
+    ):
+        raise ExactReleaseEvidenceError("evidence_bundle_invalid")
+    receipt = _load_canonical_receipt(value.receipt)
+    manifest = _load_canonical_manifest(value.manifest)
+    observation = manifest.get("observation")
+    release = receipt.get("release")
+    if (
+        set(manifest) != _MANIFEST_FIELDS
+        or type(observation) is not dict
+        or set(observation) != _MANIFEST_OBSERVATION_FIELDS
+        or type(release) is not dict
+        or set(release) != {"database_schema", "source_commit", "tree_sha256", "wheel_sha256"}
+        or manifest.get("result") != value.result
+        or observation.get("artifact_ref") != value.receipt_ref
+        or observation.get("artifact_sha256") != value.receipt_sha256
+        or receipt.get("result") != value.result
+        or not value.manifest_ref.startswith(str(_EVIDENCE_ROOT / "manifests") + "/")
+        or not value.receipt_ref.startswith(str(_EVIDENCE_ROOT / "receipts") + "/")
+    ):
+        raise ExactReleaseEvidenceError("evidence_bundle_invalid")
+    try:
+        identity = ReleaseIdentity(
+            source_commit=release["source_commit"],
+            tree_sha256=release["tree_sha256"],
+            wheel_sha256=release["wheel_sha256"],
+            database_schema=release["database_schema"],
+        )
+        expected = _bundle_from_receipt(
+            value.receipt,
+            identity=identity,
+            journey_id=receipt["journey_id"],
+            evidence_class=receipt["evidence_class"],
+        )
+    except (KeyError, TypeError, ExactReleaseEvidenceError) as exc:
+        raise ExactReleaseEvidenceError("evidence_bundle_invalid") from exc
+    comparable = (
+        "receipt_ref",
+        "receipt",
+        "receipt_sha256",
+        "manifest_ref",
+        "manifest",
+        "manifest_sha256",
+        "result",
+    )
+    if any(getattr(value, field) != getattr(expected, field) for field in comparable):
+        raise ExactReleaseEvidenceError("evidence_bundle_invalid")
+    return value
+
+
+def _ensure_bundle_parent(root: Path, ref: str) -> Path:
+    candidate = PurePosixPath(ref)
+    if (
+        candidate.is_absolute()
+        or str(candidate) != ref
+        or any(part in {"", ".", ".."} for part in candidate.parts)
+        or tuple(candidate.parts[:2]) != ("evidence", "golden_journeys")
+    ):
+        raise ExactReleaseEvidenceError("bundle_output_invalid")
+    parent = root
+    try:
+        for part in candidate.parts[:-1]:
+            parent /= part
+            with suppress(FileExistsError):
+                parent.mkdir(mode=0o700)
+            if not stat.S_ISDIR(parent.lstat().st_mode) or parent.resolve(strict=True) != parent:
+                raise ExactReleaseEvidenceError("bundle_output_invalid")
+    except (OSError, RuntimeError, ValueError) as exc:
+        if isinstance(exc, ExactReleaseEvidenceError):
+            raise
+        raise ExactReleaseEvidenceError("bundle_output_invalid") from exc
+    return root / ref
+
+
+def write_evidence_bundle_exclusive(output_root: Path, bundle: EvidenceBundle) -> dict[str, str]:
+    """Publish both deterministic artifacts create-only, rolling back our first write."""
+
+    exact = _require_evidence_bundle(bundle)
+    root = _resolve_directory(output_root, "bundle_output_invalid")
+    receipt_path = _ensure_bundle_parent(root, exact.receipt_ref)
+    manifest_path = _ensure_bundle_parent(root, exact.manifest_ref)
+    receipt_identity: tuple[int, int] | None = None
+    try:
+        receipt_digest, receipt_identity = _write_canonical_exclusive(
+            receipt_path,
+            exact.receipt,
+            failure_code="bundle_output_invalid",
+        )
+        manifest_digest, _manifest_identity = _write_canonical_exclusive(
+            manifest_path,
+            exact.manifest,
+            failure_code="bundle_output_invalid",
+        )
+    except ExactReleaseEvidenceError:
+        _cleanup_owned_target(receipt_path, receipt_identity)
+        raise
+    return {
+        "manifest_ref": exact.manifest_ref,
+        "manifest_sha256": manifest_digest,
+        "receipt_ref": exact.receipt_ref,
+        "receipt_sha256": receipt_digest,
+        "result": exact.result,
+    }
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -1230,15 +2055,38 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument(
         "--evidence-class",
         required=True,
-        choices=sorted({key[1] for key in _PROOF_REFS_BY_JOURNEY_CLASS}),
+        choices=sorted({key[1] for key in _PROOF_REFS_BY_JOURNEY_CLASS} - {"clean artifact path"}),
     )
     run.add_argument("--output", required=True, type=Path)
+    bundle = commands.add_parser("bundle")
+    bundle.add_argument("--release-root", required=True, type=Path)
+    bundle.add_argument("--repo-root", required=True, type=Path)
+    bundle.add_argument(
+        "--journey-id",
+        required=True,
+        choices=sorted(
+            journey_id
+            for journey_id, evidence_class in _PROOF_REFS_BY_JOURNEY_CLASS
+            if evidence_class == "clean artifact path"
+        ),
+    )
+    bundle.add_argument("--output-root", required=True, type=Path)
     return parser
 
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     try:
+        if args.command == "bundle":
+            bundle = produce_evidence_bundle(
+                repo_root=args.repo_root,
+                release_root=args.release_root,
+                journey_id=args.journey_id,
+                evidence_class="clean artifact path",
+            )
+            published = write_evidence_bundle_exclusive(args.output_root, bundle)
+            print(canonical_json_bytes(published).decode())
+            return 0 if published["result"] == "VERIFIED" else 1
         raw = produce_receipt(
             repo_root=args.repo_root,
             release_root=args.release_root,
