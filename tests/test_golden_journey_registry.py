@@ -1277,12 +1277,15 @@ def test_clean_registry_binds_one_fd_pinned_native_command(
 
     assert len(calls) == 1
     command, options = calls[0]
-    assert command[:5] == (str(Path(sys.executable).resolve(strict=True)), "-I", "-S", "-B", "-c")
+    assert command[:5] == (str(Path(sys.executable).resolve(strict=True)), "-I", "-S", "-B", "-X")
+    assert command[5].startswith("pycache_prefix=/var/tmp/friday-native-validation-")
+    assert command[6] == "-c"
     assert command.count("--release-root") == 1
     assert command[command.index("--release-root") + 1] == str(release_root)
     assert options["raw"] == raw
     assert Path(str(options["cwd"])).is_relative_to(Path("/var/tmp"))
     assert options["interpreter_descriptor"] != options["producer_descriptor"]
+    assert options["bootstrap_descriptors"]
 
 
 @pytest.mark.parametrize(

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import importlib.machinery
 import inspect
 import json
 import os
@@ -130,6 +131,7 @@ def _run_bootstrap_producer(
     options: tuple[str, ...] = ("-I", "-S", "-B"),
     wrong_interpreter_argument: bool = False,
     wrong_producer_bytes: bool = False,
+    tamper_binding: str | None = None,
 ) -> subprocess.CompletedProcess[bytes]:
     target = Path(sys.executable).resolve(strict=True)
     stdlib = Path(sysconfig.get_path("stdlib")).resolve(strict=True)
@@ -137,14 +139,45 @@ def _run_bootstrap_producer(
     interpreter = os.open(target, os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW)
     expected_sha256 = hashlib.sha256(producer_path.read_bytes()).hexdigest()
     producer = os.open(producer_path, os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW)
+    bindings = evidence._open_validation_bootstrap_files(stdlib)  # noqa: SLF001
     if wrong_producer_bytes:
         producer_path.write_bytes(producer_path.read_bytes() + b"\n# tampered\n")
     environment_root = producer_path.parent / "bootstrap-environment"
     environment_root.mkdir()
+    bootstrap_cache = environment_root / "bootstrap-cache"
     try:
+        binding_records = [
+            [
+                module_name,
+                module_origin,
+                str(descriptor),
+                (
+                    ",".join(
+                        str(getattr(status_value, field))
+                        for field in evidence._TRUSTED_GIT_STATUS_FIELDS  # noqa: SLF001
+                    )
+                    if status_value is not None
+                    else "-"
+                ),
+            ]
+            for module_name, module_origin, descriptor, status_value in bindings
+        ]
+        if tamper_binding == "origin":
+            binding_records[0][1] = str(producer_path)
+        elif tamper_binding == "stat":
+            status_parts = binding_records[0][3].split(",")
+            status_parts[-1] = str(int(status_parts[-1]) + 1)
+            binding_records[0][3] = ",".join(status_parts)
+        elif tamper_binding == "fd":
+            binding_records[0][2] = str(interpreter)
+        elif tamper_binding is not None:
+            raise AssertionError(f"unsupported binding tamper: {tamper_binding}")
+        binding_arguments = tuple(value for record in binding_records for value in record)
         command = (
             str(target),
             *options,
+            "-X",
+            f"pycache_prefix={bootstrap_cache}",
             "-c",
             evidence._ISOLATED_VALIDATION_BOOTSTRAP,  # noqa: SLF001
             str(producer if wrong_interpreter_argument else interpreter),
@@ -155,6 +188,8 @@ def _run_bootstrap_producer(
             ".".join(str(part) for part in sys.version_info[:3]),
             str(stdlib),
             str(tooling),
+            str(bootstrap_cache),
+            *binding_arguments,
             str(os.getpid()),
             *arguments,
         )
@@ -165,8 +200,14 @@ def _run_bootstrap_producer(
             raw=b"",
             interpreter_descriptor=interpreter,
             producer_descriptor=producer,
+            bootstrap_descriptors=tuple(
+                descriptor for _name, _origin, descriptor, _status in bindings if descriptor >= 0
+            ),
         )
     finally:
+        for _name, _origin, descriptor, _status in bindings:
+            if descriptor >= 0:
+                os.close(descriptor)
         os.close(producer)
         os.close(interpreter)
 
@@ -236,6 +277,26 @@ def test_bootstrap_rejects_wrong_fd_or_producer_bytes_before_exec(
     assert not marker.exists()
 
 
+@pytest.mark.parametrize("tamper", ["origin", "stat", "fd"])
+def test_bootstrap_rejects_tampered_file_binding_before_producer_exec(
+    tmp_path: Path,
+    tamper: str,
+) -> None:
+    marker = tmp_path / "not-executed"
+    producer = tmp_path / "producer.py"
+    _write_bootstrap_producer(producer, marker)
+
+    completed = _run_bootstrap_producer(
+        producer,
+        (str(marker),),
+        tamper_binding=tamper,
+    )
+
+    assert completed.returncode != 0
+    assert completed.stderr
+    assert not marker.exists()
+
+
 def test_native_interpreter_binding_is_finite_physical_and_nofollow(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -252,7 +313,7 @@ def test_native_interpreter_binding_is_finite_physical_and_nofollow(
         "scandir",
         lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("recursive runtime scan")),
     )
-    descriptor, target, opened_status, directories, stdlib, python_zip = (
+    descriptor, target, opened_status, directories, bindings, stdlib, python_zip = (
         evidence._open_validation_interpreter()  # noqa: SLF001
     )
     try:
@@ -260,9 +321,81 @@ def test_native_interpreter_binding_is_finite_physical_and_nofollow(
         assert stdlib in {path for path, _status in directories}
         assert python_zip[0].name == f"python{sys.version_info.major}{sys.version_info.minor}.zip"
         assert len(directories) < 16
+        assert tuple(name for name, _origin, _descriptor, _status in bindings) == tuple(
+            name
+            for name, _relative in evidence._VALIDATION_BOOTSTRAP_MODULES  # noqa: SLF001
+        )
+        assert len(bindings) == 6
         assert opened and all(flags & os.O_NOFOLLOW for flags in opened)
     finally:
+        for _name, _origin, bootstrap_descriptor, _status in bindings:
+            if bootstrap_descriptor >= 0:
+                os.close(bootstrap_descriptor)
         os.close(descriptor)
+
+
+@pytest.mark.parametrize("unsafe", ["writable", "symlink"])
+def test_bootstrap_file_binding_rejects_unsafe_origin_and_closes_fds(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    unsafe: str,
+) -> None:
+    stdlib = tmp_path / "stdlib"
+    stdlib.mkdir()
+    first = stdlib / "first.py"
+    second = stdlib / "second.py"
+    first.write_text("first\n", encoding="ascii")
+    second.write_text("second\n", encoding="ascii")
+    first.chmod(0o644)
+    second.chmod(0o644)
+    if unsafe == "writable":
+        second.chmod(0o666)
+    else:
+        target = stdlib / "target.py"
+        target.write_text("target\n", encoding="ascii")
+        second.unlink()
+        second.symlink_to(target)
+    monkeypatch.setattr(
+        evidence,
+        "_VALIDATION_BOOTSTRAP_MODULES",
+        (("first", "first.py"), ("second", "second.py")),
+    )
+    opened: list[int] = []
+    original_open = evidence.os.open
+
+    def record_open(*args: Any, **kwargs: Any) -> int:
+        descriptor = original_open(*args, **kwargs)
+        opened.append(descriptor)
+        return descriptor
+
+    monkeypatch.setattr(evidence.os, "open", record_open)
+
+    with pytest.raises(evidence.ExactReleaseEvidenceError, match="^validation_controller_invalid$"):
+        evidence._open_validation_bootstrap_files(stdlib)  # noqa: SLF001
+
+    assert opened
+    for descriptor in opened:
+        with pytest.raises(OSError):
+            os.fstat(descriptor)
+
+
+def test_bootstrap_file_binding_rejects_higher_priority_loader_candidate(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    stdlib = tmp_path / "stdlib"
+    stdlib.mkdir()
+    (stdlib / "candidate.py").write_text("source\n", encoding="ascii")
+    extension = stdlib / f"candidate{importlib.machinery.EXTENSION_SUFFIXES[0]}"
+    extension.write_bytes(b"not executed")
+    monkeypatch.setattr(
+        evidence,
+        "_VALIDATION_BOOTSTRAP_MODULES",
+        (("candidate", "candidate.py"),),
+    )
+
+    with pytest.raises(evidence.ExactReleaseEvidenceError, match="^validation_controller_invalid$"):
+        evidence._open_validation_bootstrap_files(stdlib)  # noqa: SLF001
 
 
 def test_runtime_anchor_allows_writable_toolcache_outer_but_not_runtime(
@@ -273,9 +406,17 @@ def test_runtime_anchor_allows_writable_toolcache_outer_but_not_runtime(
     target = anchor / "bin/python"
     stdlib = anchor / "lib/python3.14"
     (stdlib / "lib-dynload").mkdir(parents=True)
+    (stdlib / "encodings").mkdir()
     target.parent.mkdir(parents=True)
     target.write_bytes(b"physical interpreter placeholder")
-    for protected in (anchor, target.parent, anchor / "lib", stdlib, stdlib / "lib-dynload"):
+    for protected in (
+        anchor,
+        target.parent,
+        anchor / "lib",
+        stdlib,
+        stdlib / "lib-dynload",
+        stdlib / "encodings",
+    ):
         protected.chmod(0o755)
     toolcache.chmod(0o777)
 
@@ -285,6 +426,73 @@ def test_runtime_anchor_allows_writable_toolcache_outer_but_not_runtime(
     anchor.chmod(0o775)
     with pytest.raises(evidence.ExactReleaseEvidenceError, match="^validation_controller_invalid$"):
         evidence._validation_runtime_directories(target, stdlib)  # noqa: SLF001
+    anchor.chmod(0o755)
+    (stdlib / "encodings").chmod(0o775)
+    with pytest.raises(evidence.ExactReleaseEvidenceError, match="^validation_controller_invalid$"):
+        evidence._validation_runtime_directories(target, stdlib)  # noqa: SLF001
+
+
+def test_bootstrap_file_binding_closes_prior_fd_on_cancellation(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    stdlib = tmp_path / "stdlib"
+    stdlib.mkdir()
+    first = stdlib / "first.py"
+    second = stdlib / "second.py"
+    first.write_text("first\n", encoding="ascii")
+    second.write_text("second\n", encoding="ascii")
+    first.chmod(0o644)
+    second.chmod(0o644)
+    monkeypatch.setattr(
+        evidence,
+        "_VALIDATION_BOOTSTRAP_MODULES",
+        (("first", "first.py"), ("second", "second.py")),
+    )
+    opened: list[int] = []
+    original_open = evidence.os.open
+
+    def interrupt_second(*args: Any, **kwargs: Any) -> int:
+        if opened:
+            raise KeyboardInterrupt
+        descriptor = original_open(*args, **kwargs)
+        opened.append(descriptor)
+        return descriptor
+
+    monkeypatch.setattr(evidence.os, "open", interrupt_second)
+
+    with pytest.raises(KeyboardInterrupt):
+        evidence._open_validation_bootstrap_files(stdlib)  # noqa: SLF001
+
+    assert len(opened) == 1
+    with pytest.raises(OSError):
+        os.fstat(opened[0])
+
+
+def test_native_interpreter_binding_closes_fd_on_cancellation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    opened: list[int] = []
+    original_open = evidence.os.open
+
+    def record_open(*args: Any, **kwargs: Any) -> int:
+        descriptor = original_open(*args, **kwargs)
+        opened.append(descriptor)
+        return descriptor
+
+    monkeypatch.setattr(evidence.os, "open", record_open)
+    monkeypatch.setattr(
+        evidence,
+        "_validation_runtime_directories",
+        lambda *_args: (_ for _ in ()).throw(KeyboardInterrupt),
+    )
+
+    with pytest.raises(KeyboardInterrupt):
+        evidence._open_validation_interpreter()  # noqa: SLF001
+
+    assert len(opened) == 1
+    with pytest.raises(OSError):
+        os.fstat(opened[0])
 
 
 def test_native_controller_rejects_non_clean_scope_before_spawn(
@@ -451,14 +659,20 @@ def test_native_controller_dies_with_a_sigkilled_gate_parent(tmp_path: Path) -> 
         "tooling=os.path.realpath(sysconfig.get_path('purelib')); "
         "interpreter=os.open(target,os.O_RDONLY|os.O_CLOEXEC|os.O_NOFOLLOW); "
         "producer=os.open(producer_path,os.O_RDONLY|os.O_CLOEXEC|os.O_NOFOLLOW); "
-        "command=(target,'-I','-S','-B','-c',e._ISOLATED_VALIDATION_BOOTSTRAP,"
+        "bindings=e._open_validation_bootstrap_files(e.Path(stdlib)); cache=envroot+'/bootstrap-cache'; "
+        "binding_args=tuple(value for name,origin,fd,status in bindings for value in "
+        "(name,origin,str(fd),','.join(str(getattr(status,field)) for field in "
+        "e._TRUSTED_GIT_STATUS_FIELDS) if status is not None else '-')); "
+        "command=(target,'-I','-S','-B','-X','pycache_prefix='+cache,'-c',e._ISOLATED_VALIDATION_BOOTSTRAP,"
         "str(interpreter),str(producer),producer_path,hashlib.sha256(raw).hexdigest(),target,"
-        "'.'.join(str(part) for part in sys.version_info[:3]),stdlib,tooling,str(os.getpid()),marker,finalizer_marker); "
+        "'.'.join(str(part) for part in sys.version_info[:3]),stdlib,tooling,cache,*binding_args,"
+        "str(os.getpid()),marker,finalizer_marker); "
         "environment={'HOME':envroot+'/home','LANG':'C.UTF-8','LC_ALL':'C.UTF-8',"
         "'PATH':os.defpath,'TMPDIR':envroot+'/tmp','TZ':'UTC'}; "
         "completed=e._run_validation_controller(command,cwd=os.path.dirname(producer_path),"
         "environment=environment,raw=b'',interpreter_descriptor=interpreter,"
-        "producer_descriptor=producer); raise SystemExit(completed.returncode)"
+        "producer_descriptor=producer,bootstrap_descriptors=tuple(fd for _name,_origin,fd,_status "
+        "in bindings if fd>=0)); raise SystemExit(completed.returncode)"
     )
     parent = subprocess.Popen(  # noqa: S603 - exact local helper source
         (

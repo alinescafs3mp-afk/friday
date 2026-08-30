@@ -51,6 +51,14 @@ _CLEAN_ARTIFACT_CLASS = "clean artifact path"
 _SUBPROCESS_POLICY = "cpython_audit_deny"
 _TEST_TOOLING_POLICY = "explicit_single_site_v1"
 _INTERPRETER_REF = "venv/bin/python"
+_VALIDATION_BOOTSTRAP_MODULES = (
+    ("encodings", "encodings/__init__.py"),
+    ("encodings.aliases", "encodings/aliases.py"),
+    ("encodings.utf_8", "encodings/utf_8.py"),
+    ("linecache", "linecache.py"),
+    ("_sha2", None),
+    ("select", None),
+)
 _TEST_TOOLING_MODULES = (
     "pytest",
     "_pytest",
@@ -161,16 +169,21 @@ _PYTEST_BOOTSTRAP = (
     "sys.path.insert(0,root); import pytest; raise SystemExit(pytest.main(sys.argv[1:]))"
 )
 _ISOLATED_VALIDATION_BOOTSTRAP = r"""
-import _sha2,os,select,signal,stat,sys,types
+import _sha2,_signal,os,select,stat,sys
 interpreter_fd=int(sys.argv[1]); producer_fd=int(sys.argv[2])
 producer_path=sys.argv[3]; producer_sha256=sys.argv[4]
 interpreter_argv0=sys.argv[5]
 expected_version=tuple(int(part) for part in sys.argv[6].split("."))
 stdlib=os.path.realpath(sys.argv[7],strict=True)
-tooling_site=os.path.realpath(sys.argv[8],strict=True); parent_pid=int(sys.argv[9])
+tooling_site=os.path.realpath(sys.argv[8],strict=True)
+bootstrap_cache=os.path.realpath(sys.argv[9],strict=False)
+binding_names=("encodings","encodings.aliases","encodings.utf_8","linecache","_sha2","select")
+binding_values=sys.argv[10:34]; parent_pid=int(sys.argv[34])
 fields=("st_dev","st_ino","st_mode","st_nlink","st_uid","st_gid","st_size","st_mtime_ns","st_ctime_ns")
 def same(left,right):
     return all(getattr(left,name)==getattr(right,name) for name in fields)
+def status_tuple(value):
+    return tuple(getattr(value,name) for name in fields)
 runtime_anchor=os.path.realpath(os.path.commonpath((os.path.dirname(interpreter_argv0),stdlib)),strict=True)
 def controlled_directory(path):
     current=path
@@ -182,6 +195,37 @@ def controlled_directory(path):
         if current==os.sep:
             return
         current=os.path.dirname(current)
+def controlled_file(path,descriptor):
+    named=os.lstat(path); opened=os.fstat(descriptor)
+    if os.path.realpath(path,strict=True)!=path or not same(named,opened) or not stat.S_ISREG(named.st_mode) or named.st_nlink!=1 or named.st_uid not in (0,os.geteuid()) or named.st_mode&0o022:
+        raise RuntimeError("validation_controller_invalid")
+if len(binding_values)!=24:
+    raise RuntimeError("validation_controller_invalid")
+bindings=[]
+for index,expected_name in enumerate(binding_names):
+    name,expected_origin,raw_fd,raw_status=binding_values[index*4:index*4+4]
+    descriptor=int(raw_fd); module=sys.modules.get(name)
+    origin=getattr(getattr(module,"__spec__",None),"origin",None)
+    if name!=expected_name or origin!=expected_origin:
+        raise RuntimeError("validation_controller_invalid")
+    if origin in ("built-in","frozen"):
+        if descriptor!=-1 or raw_status!="-":
+            raise RuntimeError("validation_controller_invalid")
+    else:
+        expected_status=tuple(int(value) for value in raw_status.split(","))
+        cached=getattr(module,"__cached__",None)
+        if len(expected_status)!=len(fields) or descriptor<0 or descriptor in (interpreter_fd,producer_fd) or any(descriptor==item[2] for item in bindings) or getattr(module,"__file__",None)!=origin:
+            raise RuntimeError("validation_controller_invalid")
+        controlled_directory(os.path.dirname(origin))
+        controlled_file(origin,descriptor)
+        if status_tuple(os.fstat(descriptor))!=expected_status or status_tuple(os.lstat(origin))!=expected_status:
+            raise RuntimeError("validation_controller_invalid")
+        if origin.endswith(".py") and (not isinstance(cached,str) or os.path.commonpath((bootstrap_cache,cached))!=bootstrap_cache or os.path.lexists(cached)):
+            raise RuntimeError("validation_controller_invalid")
+    bindings.append((name,origin,descriptor))
+loaded_file_modules={name for name,module in sys.modules.items() if getattr(getattr(module,"__spec__",None),"origin",None) not in (None,"built-in","frozen")}
+if loaded_file_modules!={name for name,origin,_descriptor in bindings if origin not in ("built-in","frozen")}:
+    raise RuntimeError("validation_controller_invalid")
 expected_path=(os.path.realpath(os.path.join(os.path.dirname(stdlib),f"python{sys.version_info.major}{sys.version_info.minor}.zip"),strict=False),stdlib,os.path.realpath(os.path.join(stdlib,"lib-dynload"),strict=True))
 if (
     len(expected_version)!=3 or tuple(sys.version_info[:3])!=expected_version
@@ -190,7 +234,8 @@ if (
     or sys.flags.ignore_environment!=1 or sys.flags.dont_write_bytecode!=1 or not sys.flags.safe_path
     or "site" in sys.modules or tuple(os.path.realpath(value,strict=False) for value in sys.path)!=expected_path
     or set(os.environ)!={"HOME","LANG","LC_ALL","PATH","TMPDIR","TZ"}
-    or signal.getsignal(signal.SIGCHLD)!=signal.SIG_DFL
+    or sys.pycache_prefix!=bootstrap_cache or sys._xoptions!={"pycache_prefix":bootstrap_cache} or os.path.lexists(bootstrap_cache)
+    or _signal.getsignal(_signal.SIGCHLD)!=_signal.SIG_DFL
     or os.path.realpath(tooling_site,strict=True)!=tooling_site or not stat.S_ISDIR(os.lstat(tooling_site).st_mode)
 ):
     raise RuntimeError("validation_controller_invalid")
@@ -203,6 +248,9 @@ except FileNotFoundError:
 else:
     if os.path.realpath(expected_path[0],strict=True)!=expected_path[0] or not stat.S_ISREG(python_zip_status.st_mode) or python_zip_status.st_uid not in (0,os.geteuid()) or python_zip_status.st_mode&0o022:
         raise RuntimeError("validation_controller_invalid")
+for _name,_origin,descriptor in bindings:
+    if descriptor>=0:
+        os.close(descriptor)
 if os.getpgrp()!=os.getpid() or os.getppid()!=parent_pid or not hasattr(os,"pidfd_open"):
     raise RuntimeError("validation_controller_invalid")
 parent_fd=os.pidfd_open(parent_pid,0)
@@ -215,7 +263,7 @@ if monitor==0:
         try: os.close(descriptor)
         except OSError: pass
     select.select((parent_fd,controller_fd),(),())
-    os.killpg(os.getpgrp(),signal.SIGKILL)
+    os.killpg(os.getpgrp(),_signal.SIGKILL)
     os._exit(1)
 os.close(parent_fd); os.close(controller_fd)
 running=os.stat("/proc/self/exe"); pinned=os.fstat(interpreter_fd)
@@ -232,14 +280,14 @@ if len(source)>1048576 or not same(before,after) or not same(after,named) or _sh
 module_name="exact_release_evidence_validation"
 if module_name in sys.modules:
     raise RuntimeError("validation_controller_invalid")
-module=types.ModuleType(module_name); module.__file__=producer_path; module.__package__=""
+module=type(sys)(module_name); module.__file__=producer_path; module.__package__=""
 sys.modules[module_name]=module
 try:
     exec(compile(source,producer_path,"exec",dont_inherit=True),module.__dict__)
     module._NATIVE_VALIDATION_TOOLING_SITE=module.Path(tooling_site)
     module._NATIVE_VALIDATION_INTERPRETER_FD=interpreter_fd
     module._NATIVE_VALIDATION_INTERPRETER_ARGV0=interpreter_argv0
-    result=module.main(sys.argv[10:])
+    result=module.main(sys.argv[35:])
 finally:
     sys.modules.pop(module_name,None)
 raise SystemExit(result)
@@ -3473,7 +3521,12 @@ def _canonical_validation_python_version(repo_root: Path, head: str) -> str:
 def _validation_runtime_directories(target: Path, stdlib: Path) -> tuple[tuple[Path, os.stat_result], ...]:
     lib_dynload = stdlib / "lib-dynload"
     runtime_anchor = Path(os.path.commonpath((target.parent, stdlib))).resolve(strict=True)
-    paths = tuple(dict.fromkeys((*target.parents, stdlib, lib_dynload, *stdlib.parents)))
+    bootstrap_parents = tuple(
+        stdlib / Path(relative).parent
+        for _module_name, relative in _VALIDATION_BOOTSTRAP_MODULES
+        if relative is not None and Path(relative).parent != Path()
+    )
+    paths = tuple(dict.fromkeys((*target.parents, stdlib, lib_dynload, *bootstrap_parents, *stdlib.parents)))
     try:
         values = tuple((path, path.lstat()) for path in paths)
     except OSError as exc:
@@ -3509,15 +3562,87 @@ def _validation_python_zip_status(stdlib: Path) -> tuple[Path, os.stat_result | 
     return path, value
 
 
+def _open_validation_bootstrap_files(
+    stdlib: Path,
+) -> tuple[tuple[str, str, int, os.stat_result | None], ...]:
+    """Pin the finite files which CPython executes before producer validation."""
+
+    values: list[tuple[str, str, int, os.stat_result | None]] = []
+    try:
+        for module_name, relative in _VALIDATION_BOOTSTRAP_MODULES:
+            if relative is not None:
+                path = stdlib / relative
+                origin = str(path)
+                search_root = path.parent.parent if path.name == "__init__.py" else path.parent
+                spec = importlib.machinery.PathFinder.find_spec(module_name, [str(search_root)])
+                if getattr(spec, "origin", None) != origin:
+                    raise ExactReleaseEvidenceError("validation_controller_invalid")
+            else:
+                spec = importlib.machinery.BuiltinImporter.find_spec(module_name)
+                if spec is None:
+                    spec = importlib.machinery.FrozenImporter.find_spec(module_name)
+                if spec is None:
+                    spec = importlib.machinery.PathFinder.find_spec(
+                        module_name,
+                        [str(stdlib / "lib-dynload")],
+                    )
+                raw_origin = getattr(spec, "origin", None)
+                if raw_origin in {"built-in", "frozen"}:
+                    values.append((module_name, str(raw_origin), -1, None))
+                    continue
+                if type(raw_origin) is not str:
+                    raise ExactReleaseEvidenceError("validation_controller_invalid")
+                origin = raw_origin
+                path = Path(origin)
+                if (
+                    path.parent != stdlib / "lib-dynload"
+                    or not path.name.startswith(f"{module_name}.")
+                    or path.suffix != ".so"
+                ):
+                    raise ExactReleaseEvidenceError("validation_controller_invalid")
+            named = path.lstat()
+            descriptor = os.open(path, os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW)
+            try:
+                opened = os.fstat(descriptor)
+                if (
+                    not path.is_absolute()
+                    or path.resolve(strict=True) != path
+                    or not _same_validation_status(named, opened)
+                    or not stat.S_ISREG(named.st_mode)
+                    or named.st_nlink != 1
+                    or named.st_uid not in {0, os.geteuid()}
+                    or named.st_mode & 0o022
+                ):
+                    raise ExactReleaseEvidenceError("validation_controller_invalid")
+            except BaseException:
+                with suppress(OSError):
+                    os.close(descriptor)
+                raise
+            values.append((module_name, origin, descriptor, named))
+    except BaseException as exc:
+        for _name, _origin, descriptor, _status in values:
+            if descriptor >= 0:
+                with suppress(OSError):
+                    os.close(descriptor)
+        if not isinstance(exc, (OSError, RuntimeError, TypeError, ValueError)):
+            raise
+        if isinstance(exc, ExactReleaseEvidenceError):
+            raise
+        raise ExactReleaseEvidenceError("validation_controller_invalid") from exc
+    return tuple(values)
+
+
 def _open_validation_interpreter() -> tuple[
     int,
     Path,
     os.stat_result,
     tuple[tuple[Path, os.stat_result], ...],
+    tuple[tuple[str, str, int, os.stat_result | None], ...],
     Path,
     tuple[Path, os.stat_result | None],
 ]:
     descriptor = -1
+    bootstrap_files: tuple[tuple[str, str, int, os.stat_result | None], ...] = ()
     try:
         lexical = Path(_INITIAL_PRODUCER_EXECUTABLE)
         target = lexical.resolve(strict=True)
@@ -3529,6 +3654,7 @@ def _open_validation_interpreter() -> tuple[
         opened = os.fstat(descriptor)
         stdlib = Path(sysconfig.get_path("stdlib")).resolve(strict=True)
         directories = _validation_runtime_directories(target, stdlib)
+        bootstrap_files = _open_validation_bootstrap_files(stdlib)
         python_zip = _validation_python_zip_status(stdlib)
         if (
             sys.executable != _INITIAL_PRODUCER_EXECUTABLE
@@ -3543,11 +3669,17 @@ def _open_validation_interpreter() -> tuple[
             or not _same_validation_status(opened, os.stat("/proc/self/exe"))
         ):
             raise ExactReleaseEvidenceError("validation_controller_invalid")
-        return descriptor, target, opened, directories, stdlib, python_zip
-    except (OSError, RuntimeError, TypeError, ValueError) as exc:
+        return descriptor, target, opened, directories, bootstrap_files, stdlib, python_zip
+    except BaseException as exc:
+        for _name, _origin, bootstrap_descriptor, _status in bootstrap_files:
+            if bootstrap_descriptor >= 0:
+                with suppress(OSError):
+                    os.close(bootstrap_descriptor)
         if descriptor >= 0:
             with suppress(OSError):
                 os.close(descriptor)
+        if not isinstance(exc, (OSError, RuntimeError, TypeError, ValueError)):
+            raise
         if isinstance(exc, ExactReleaseEvidenceError):
             raise
         raise ExactReleaseEvidenceError("validation_controller_invalid") from exc
@@ -3622,6 +3754,7 @@ def _run_validation_controller(
     raw: bytes,
     interpreter_descriptor: int,
     producer_descriptor: int,
+    bootstrap_descriptors: tuple[int, ...] = (),
 ) -> subprocess.CompletedProcess[bytes]:
     output_root = Path(environment["TMPDIR"])
     try:
@@ -3641,7 +3774,7 @@ def _run_validation_controller(
                 stdout=output_file,
                 stderr=error_file,
                 start_new_session=True,
-                pass_fds=(interpreter_descriptor, producer_descriptor),
+                pass_fds=(interpreter_descriptor, producer_descriptor, *bootstrap_descriptors),
             )
             pidfd = -1
             try:
@@ -3733,6 +3866,7 @@ def validate_receipt_via_native_controller(
     origin, head = _validation_origin_identity(repo_root)
     interpreter_descriptor = -1
     producer_descriptor = -1
+    bootstrap_files: tuple[tuple[str, str, int, os.stat_result | None], ...] = ()
     completed: subprocess.CompletedProcess[bytes] | None = None
     run_error: BaseException | None = None
     try:
@@ -3741,6 +3875,7 @@ def validate_receipt_via_native_controller(
             executable_target,
             target_before,
             runtime_directories,
+            bootstrap_files,
             validation_stdlib,
             python_zip_before,
         ) = _open_validation_interpreter()
@@ -3748,6 +3883,9 @@ def validate_receipt_via_native_controller(
             scratch = Path(temporary).resolve(strict=True)
             scratch.chmod(0o700)
             environment = _isolated_validation_environment(scratch)
+            bootstrap_cache = scratch / "bootstrap-cache"
+            if os.path.lexists(bootstrap_cache):
+                raise ExactReleaseEvidenceError("validation_controller_invalid")
             controller = _private_validation_checkout(origin, head, scratch)
             python_version = _canonical_validation_python_version(controller, head)
             tooling_site = _test_tooling_site(controller, bound_release_root)
@@ -3758,11 +3896,27 @@ def validate_receipt_via_native_controller(
                 producer_sha256,
             ) = _open_validation_producer(controller, head)
             producer = controller / PRODUCER_PATH
+            bootstrap_arguments = tuple(
+                value
+                for module_name, module_origin, descriptor, status_value in bootstrap_files
+                for value in (
+                    module_name,
+                    module_origin,
+                    str(descriptor),
+                    (
+                        ",".join(str(getattr(status_value, field)) for field in _TRUSTED_GIT_STATUS_FIELDS)
+                        if status_value is not None
+                        else "-"
+                    ),
+                )
+            )
             command = (
                 str(executable_target),
                 "-I",
                 "-S",
                 "-B",
+                "-X",
+                f"pycache_prefix={bootstrap_cache}",
                 "-c",
                 _ISOLATED_VALIDATION_BOOTSTRAP,
                 str(interpreter_descriptor),
@@ -3773,6 +3927,8 @@ def validate_receipt_via_native_controller(
                 python_version,
                 str(validation_stdlib),
                 str(tooling_site),
+                str(bootstrap_cache),
+                *bootstrap_arguments,
                 str(os.getpid()),
                 "validate",
                 "--repo-root",
@@ -3800,6 +3956,11 @@ def validate_receipt_via_native_controller(
                     raw=raw,
                     interpreter_descriptor=interpreter_descriptor,
                     producer_descriptor=producer_descriptor,
+                    bootstrap_descriptors=tuple(
+                        descriptor
+                        for _name, _origin, descriptor, _status in bootstrap_files
+                        if descriptor >= 0
+                    ),
                 )
             finally:
                 _require_exact_checkout(controller, head)
@@ -3809,6 +3970,7 @@ def validate_receipt_via_native_controller(
                     not _same_validation_status(producer_before, producer_after)
                     or not _same_validation_status(producer_after, producer.lstat())
                     or producer_raw != producer_expected
+                    or os.path.lexists(bootstrap_cache)
                 ):
                     raise ExactReleaseEvidenceError("validation_controller_invalid")
     except (OSError, RuntimeError, subprocess.SubprocessError) as exc:
@@ -3849,11 +4011,23 @@ def validate_receipt_via_native_controller(
                             strict=True,
                         )
                     )
+                    or any(
+                        status_value is None
+                        or descriptor < 0
+                        or not _same_validation_status(status_value, os.fstat(descriptor))
+                        or not _same_validation_status(status_value, Path(origin_value).lstat())
+                        for _name, origin_value, descriptor, status_value in bootstrap_files
+                        if origin_value not in {"built-in", "frozen"}
+                    )
                 ):
                     raise ExactReleaseEvidenceError("validation_controller_invalid")
             except (OSError, RuntimeError) as exc:
                 raise ExactReleaseEvidenceError("validation_controller_invalid") from exc
             finally:
+                for _name, _origin, descriptor, _status in bootstrap_files:
+                    if descriptor >= 0:
+                        with suppress(OSError):
+                            os.close(descriptor)
                 with suppress(OSError):
                     os.close(interpreter_descriptor)
     if run_error is not None:
