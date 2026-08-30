@@ -296,6 +296,18 @@ exact qrel is recovered at citation rank 64 through the real continuation and
 is not classified as a lost source. All 24 exact source/window qrels are hits,
 all four restart replays are exact, and the closed adjunct gap count is zero.
 
+## R6 bounded lexical-refill reproduced baseline
+
+At base `c487ae3`, the unchanged released selector reproduces exactly two
+`channel_mismatch` gaps: cases `conversation.case.0008` and `.0016` expect both
+authorized lanes but observe only `MESSAGE_HISTORY` after 801 earlier foreign
+postings own the complete retained 800-row FTS pool and its sentinel. The two
+targets remain authorized qrel hits through the independently complete history
+lane. The baseline therefore keeps all 24 qrel hits, candidate recall@50 at
+`23/24`, recall@100 at `24/24`, false absence at `0/24`, all four replay checks
+exact, and the writer restart observation true. Lexical remains
+`PARTIAL`/`CAPPED`; `MESSAGE_HISTORY` remains the sole absence authority.
+
 ## Known limits
 
 - The shipped accepted candidate projection deliberately excludes pending or

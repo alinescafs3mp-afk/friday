@@ -592,7 +592,7 @@ def _build_plan() -> _ConversationSyntheticPlan:
         _MatrixCell.FALLBACK,
         "poolamber",
         target,
-        channels=history,
+        channels=both,
         contour=_ProjectionContour.FOREIGN_SATURATED,
     )
 
@@ -731,7 +731,7 @@ def _build_plan() -> _ConversationSyntheticPlan:
         _MatrixCell.DIVERSITY,
         "diversitypooltoken",
         target,
-        channels=history,
+        channels=both,
         contour=_ProjectionContour.FOREIGN_SATURATED,
     )
 
