@@ -144,7 +144,7 @@ class CurrentDRGenerationIdentity:
 
 @dataclass(frozen=True)
 class PendingDRGenerationIdentity:
-    """One exact authenticated pending identity from a single pinned epoch."""
+    """One exact pending identity and its validated external receipt bodies."""
 
     index_journal_sha256: str
     authenticated_journal_sha256: str
@@ -1907,7 +1907,13 @@ class DurableDRGenerationIndex:
         *,
         expected_journal_sha256: str,
     ) -> PendingDRGenerationIdentity:
-        """Return a candidate only after its complete authentication is durable."""
+        """Return a validated pending candidate and exact receipt bodies.
+
+        All state and body reads occur inside one pinned state/receipt namespace
+        epoch.  This is intentionally unavailable for ``prepared`` state: a DR
+        rehearsal may consume only a candidate whose complete authentication
+        receipt is already durable.
+        """
 
         with self._guard() as pins:
             state = self._load_unlocked(pins)
@@ -1918,6 +1924,8 @@ class DurableDRGenerationIndex:
             pending = state["pending"]
             candidate = normalize_generation_candidate(pending["candidate"])
             candidate_sha256 = _sha256(_canonical_json(candidate))
+            if pending["candidate_sha256"] != candidate_sha256:
+                raise DRGenerationIndexError("dr_generation_index_invalid")
             authentication = self._load_external_receipt(
                 pending["authentication_receipt"],
                 pins.receipt_fd,

@@ -63,9 +63,7 @@ ENGINEER_COMMAND_LIFECYCLE_CONTRACT = "authenticated-external-ledger-v1"
 ENGINEER_COMMAND_LIFECYCLE_MIN_SCHEMA = 46
 OPERATOR_TRANSACTION_LOCK_SCOPE_CONTRACT = "canonical-friday-home-state-v1"
 OPERATOR_TRANSACTION_LOCK_SCOPE_SCHEMA = "friday.immutable-release-operator-lock-scope.v1"
-OPERATOR_TRANSACTION_UNIT_PAIR_SCOPE_SCHEMA = (
-    "friday.immutable-release-operator-unit-pair-lock-scope.v1"
-)
+OPERATOR_TRANSACTION_UNIT_PAIR_SCOPE_SCHEMA = "friday.immutable-release-operator-unit-pair-lock-scope.v1"
 RUNTIME_CONFIG_SCHEMA_V1 = "friday.immutable-release-runtime-config.v1"
 RUNTIME_CONFIG_SCHEMA_V2 = "friday.immutable-release-runtime-config.v2"
 RUNTIME_CONFIG_SCHEMA_V3 = "friday.immutable-release-runtime-config.v3"
@@ -1951,10 +1949,14 @@ def _require_operator_layout(
         (inbox_database, lexical_state / "telegram-inbox.sqlite3"),
     )
     for actual, expected in supplied:
-        if actual is not None and _lexical_operator_path(
-            actual,
-            code="operator_transaction_layout_invalid",
-        ) != expected:
+        if (
+            actual is not None
+            and _lexical_operator_path(
+                actual,
+                code="operator_transaction_layout_invalid",
+            )
+            != expected
+        ):
             raise ReleaseFailure("operator_transaction_layout_invalid")
     if database is not None:
         lexical_database = _lexical_operator_path(
@@ -8704,6 +8706,23 @@ class _ExactInboxBackup:
     receipt_sha256: str
 
 
+@dataclass(frozen=True)
+class FreshExactBackupMaterialization:
+    """Root-free result of copying an exact backup into an absent contour.
+
+    This is deliberately a separate authority from the production restore
+    path.  In particular, an Engineer SQLite inode from the production backup
+    is never accepted as the identity of a newly created rehearsal file.
+    """
+
+    schema_version: int
+    database_receipt_sha256: str
+    inbox_receipt_sha256: str
+    obsidian_receipt_sha256: str
+    engineer_receipt_sha256: str
+    engineer_fresh_identity_assigned: bool
+
+
 def _journal_release(release: ReleaseIdentity) -> dict[str, Any]:
     return {
         "commit": release.commit,
@@ -13835,6 +13854,261 @@ def _restore_exact_engineer_backup_after_scan(
     return dict(authority) if isinstance(authority, dict) else None
 
 
+def _fresh_engineer_target(config: SystemdConfig, relative: PurePosixPath) -> Path:
+    store, key, state = _engineer_artifact_paths(config)
+    if relative.as_posix() == "key":
+        return key
+    if relative.parts[0] == "state":
+        return state.joinpath(*relative.parts[1:])
+    if relative.parts[0] == "store":
+        return store.joinpath(*relative.parts[1:])
+    raise ReleaseFailure("engineer_fresh_materialization_manifest_invalid")
+
+
+def _materialize_exact_engineer_backup_fresh(
+    config: SystemdConfig,
+    payload: _ExactBackupPayload,
+) -> str:
+    """Copy Engineer artifacts only into a provably absent private contour.
+
+    The production restore path above preserves the manifest-bound identity of
+    ``store/kernel.sqlite``.  A rehearsal starts without such an inode, so it
+    must create a new one and bind that newly assigned identity locally.  This
+    helper never falls back to replace/truncate semantics and cannot be used on
+    a populated contour.
+    """
+
+    descriptor = payload.engineer
+    if descriptor is None:
+        return "0" * 64
+    manifest = _verify_engineer_backup(payload.directory, descriptor)
+    store, key, state = _engineer_artifact_paths(config)
+    data = _private_directory(store.parent, create=True)
+    state = _private_directory(state, create=True)
+    forbidden = (store, key, *(state / name for name in _ENGINEER_LIFECYCLE_FILENAMES))
+    if any(_engineer_path_present(path) for path in forbidden):
+        raise ReleaseFailure("engineer_fresh_materialization_target_not_absent")
+
+    entries = tuple(manifest["entries"])
+    directory_entries = sorted(
+        (item for item in entries if item["kind"] == "directory"),
+        key=lambda item: (len(PurePosixPath(str(item["path"])).parts), str(item["path"])),
+    )
+    for item in directory_entries:
+        relative = _engineer_backup_relative(str(item["path"]))
+        target = _fresh_engineer_target(config, relative)
+        parent = _private_directory(target.parent)
+        try:
+            target.mkdir(mode=0o700)
+        except OSError as exc:
+            raise ReleaseFailure("engineer_fresh_materialization_failed") from exc
+        _private_directory(target)
+        os.chmod(target, int(item["mode"]))
+        _fsync_directory(parent)
+
+    recovery = payload.directory / "engineer-recovery"
+    for item in sorted(
+        (item for item in entries if item["kind"] != "directory"),
+        key=lambda item: str(item["path"]),
+    ):
+        relative = _engineer_backup_relative(str(item["path"]))
+        target = _fresh_engineer_target(config, relative)
+        parent = _private_directory(target.parent)
+        if _engineer_path_present(target):
+            raise ReleaseFailure("engineer_fresh_materialization_target_not_absent")
+        try:
+            if item["kind"] == "ephemeral":
+                flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_CLOEXEC", 0)
+                flags |= getattr(os, "O_NOFOLLOW", 0)
+                file_descriptor = os.open(target, flags, int(item["mode"]))
+                try:
+                    os.fchmod(file_descriptor, int(item["mode"]))
+                    os.fsync(file_descriptor)
+                finally:
+                    os.close(file_descriptor)
+            else:
+                source = _private_engineer_backup_file(recovery.joinpath(*relative.parts))
+                _copy_private(source, target)
+                os.chmod(target, int(item["mode"]))
+            _fsync_directory(parent)
+        except ReleaseFailure:
+            raise
+        except OSError as exc:
+            raise ReleaseFailure("engineer_fresh_materialization_failed") from exc
+
+    if _engineer_path_present(store):
+        _fsync_tree(store)
+    _fsync_directory(data)
+    _fsync_directory(state)
+    observed = _scan_engineer_artifacts(config, destination=None)
+    expected = {key: value for key, value in manifest.items() if key != "engineer_command_ledger_authority"}
+    expected_entries = [dict(item) for item in expected["entries"]]
+    observed_by_path = {str(item["path"]): item for item in observed["entries"]}
+    for item in expected_entries:
+        if item["path"] == "store/kernel.sqlite":
+            assigned = observed_by_path.get("store/kernel.sqlite")
+            if not isinstance(assigned, dict):
+                raise ReleaseFailure("engineer_fresh_materialization_mismatch")
+            item["device"] = assigned.get("device")
+            item["inode"] = assigned.get("inode")
+    expected["entries"] = expected_entries
+    if observed != expected:
+        raise ReleaseFailure("engineer_fresh_materialization_mismatch")
+    assigned_database = observed_by_path.get("store/kernel.sqlite")
+    assigned_identity = (
+        {
+            "device": assigned_database["device"],
+            "inode": assigned_database["inode"],
+        }
+        if isinstance(assigned_database, dict)
+        else {"absent": True}
+    )
+    return _sha256_bytes(_canonical_json(assigned_identity))
+
+
+def _verify_fresh_sqlite_materialization(
+    config: SystemdConfig,
+    declared: Mapping[str, tuple[str, int]],
+    *,
+    expected_identities: Mapping[str, tuple[int, int]] | None = None,
+) -> dict[str, tuple[int, int]]:
+    identities: dict[str, tuple[int, int]] = {}
+    for label, destination in (("database", config.database), ("inbox", config.inbox_database)):
+        for suffix in ("", "-wal"):
+            name = f"{label}.sqlite3{suffix}"
+            target = Path(f"{destination}{suffix}")
+            expected = declared.get(name)
+            if expected is None:
+                if _engineer_path_present(target):
+                    raise ReleaseFailure("fresh_materialization_destination_mismatch")
+                continue
+            digest, size = expected
+            resolved = (
+                _private_regular_file_allow_empty(
+                    target,
+                    maximum_bytes=1 << 40,
+                    code="fresh_materialization_destination_mismatch",
+                )
+                if size == 0
+                else _private_regular_file(
+                    target,
+                    maximum_bytes=1 << 40,
+                    code="fresh_materialization_destination_mismatch",
+                )
+            )
+            status = os.stat(resolved, follow_symlinks=False)
+            identity = (int(status.st_dev), int(status.st_ino))
+            if (
+                status.st_size != size
+                or _sha256_file(resolved) != digest
+                or expected_identities is not None
+                and expected_identities.get(name) != identity
+            ):
+                raise ReleaseFailure("fresh_materialization_destination_mismatch")
+            identities[name] = identity
+        if _engineer_path_present(Path(f"{destination}-shm")):
+            raise ReleaseFailure("fresh_materialization_destination_mismatch")
+    if set(identities) != set(declared):
+        raise ReleaseFailure("fresh_materialization_destination_mismatch")
+    return identities
+
+
+def materialize_exact_backup_into_fresh_contour(
+    config: SystemdConfig,
+    backup: DatabaseBackup,
+) -> FreshExactBackupMaterialization:
+    """Materialize all four surfaces into one owner-private absent contour.
+
+    This API is intentionally incapable of replacing an existing database,
+    inbox, Obsidian root, key, lifecycle record, or Engineer store.  Production
+    rollback continues to use :func:`_restore_exact_sqlite_backup`, including
+    its strict manifest-bound Engineer database inode fence.
+    """
+
+    payload = backup.opaque
+    if not isinstance(payload, _ExactBackupPayload) or payload.obsidian is None or payload.engineer is None:
+        raise ReleaseFailure("fresh_materialization_backup_identity_invalid")
+    home = Path(os.path.abspath(config.friday_home))
+    try:
+        home_status = os.lstat(home)
+        home_resolved = home.resolve(strict=True)
+    except OSError as exc:
+        raise ReleaseFailure("fresh_materialization_home_invalid") from exc
+    if (
+        home != config.friday_home
+        or home_resolved != home
+        or not stat.S_ISDIR(home_status.st_mode)
+        or home_status.st_uid != os.geteuid()
+        or stat.S_IMODE(home_status.st_mode) != 0o700
+    ):
+        raise ReleaseFailure("fresh_materialization_home_invalid")
+    protected = (
+        config.database,
+        config.inbox_database,
+        config.backup_dir,
+        config.state_dir,
+        _obsidian_root(config),
+    )
+    if any(Path(os.path.abspath(path)) != path or not path.is_relative_to(home) for path in protected):
+        raise ReleaseFailure("fresh_materialization_contour_invalid")
+    for target in (config.database, config.inbox_database):
+        for suffix in ("", "-wal", "-shm"):
+            if _engineer_path_present(Path(f"{target}{suffix}")):
+                raise ReleaseFailure("fresh_materialization_target_not_absent")
+    obsidian_root = _obsidian_root(config)
+    if _engineer_path_present(obsidian_root):
+        raise ReleaseFailure("fresh_materialization_target_not_absent")
+
+    declared = {name: (digest, size) for name, digest, size in payload.files}
+    if not {"database.sqlite3", "inbox.sqlite3"}.issubset(declared):
+        raise ReleaseFailure("fresh_materialization_backup_identity_invalid")
+    for name, (digest, size) in declared.items():
+        source = _private_regular_file(
+            payload.directory / name,
+            maximum_bytes=1 << 40,
+            code="fresh_materialization_source_changed",
+        )
+        if source.stat().st_size != size or _sha256_file(source) != digest:
+            raise ReleaseFailure("fresh_materialization_source_changed")
+    _verify_obsidian_backup(payload.directory, payload.obsidian)
+    _verify_engineer_backup(payload.directory, payload.engineer)
+
+    for label, destination in (("database", config.database), ("inbox", config.inbox_database)):
+        parent = _private_directory(destination.parent, create=True)
+        for suffix in ("", "-wal"):
+            name = f"{label}.sqlite3{suffix}"
+            if name not in declared:
+                continue
+            _copy_private(payload.directory / name, Path(f"{destination}{suffix}"))
+        _fsync_directory(parent)
+    copied_identities = _verify_fresh_sqlite_materialization(config, declared)
+    database_schema = _verify_sqlite_snapshot_copy(
+        config.database.parent,
+        label=config.database.stem,
+        require_schema=True,
+    )
+    if database_schema != backup.schema_version:
+        raise ReleaseFailure("fresh_materialization_database_schema_changed")
+    _sqlite_integrity(config.inbox_database, require_schema=False)
+    _restore_exact_obsidian_backup(config, payload)
+    engineer_identity = _materialize_exact_engineer_backup_fresh(config, payload)
+    _verify_obsidian_backup(payload.directory, payload.obsidian)
+    _verify_engineer_backup(payload.directory, payload.engineer)
+    _verify_fresh_sqlite_materialization(
+        config,
+        declared,
+        expected_identities=copied_identities,
+    )
+    return FreshExactBackupMaterialization(
+        schema_version=database_schema,
+        database_receipt_sha256=backup.receipt_sha256,
+        inbox_receipt_sha256=backup.inbox_receipt_sha256,
+        obsidian_receipt_sha256=backup.obsidian_receipt_sha256,
+        engineer_receipt_sha256=backup.engineer_receipt_sha256,
+        engineer_fresh_identity_assigned=engineer_identity != "0" * 64,
+    )
+
+
 def _restore_exact_sqlite_backup(
     config: SystemdConfig,
     backup: DatabaseBackup,
@@ -18488,6 +18762,7 @@ __all__ = [
     "ENGINEER_COMMAND_LIFECYCLE_CONTRACT",
     "ENGINEER_COMMAND_LIFECYCLE_MIN_SCHEMA",
     "FORBIDDEN_ROLLBACK_COMMITS",
+    "FreshExactBackupMaterialization",
     "HISTORICAL_ALBUM_PLAN_SHA256",
     "HISTORICAL_ALBUM_UPDATE_IDS",
     "OBSIDIAN_CUTOVER_CONTRACT",
@@ -18511,6 +18786,7 @@ __all__ = [
     "installed_surface_smoke",
     "install_units",
     "load_release_identity",
+    "materialize_exact_backup_into_fresh_contour",
     "recover_historical_album",
     "recover_interrupted_activation",
     "render_units",

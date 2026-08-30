@@ -40,6 +40,17 @@ class AuthenticatedDRCandidate:
     authentication_receipt: dict[str, Any]
 
 
+@dataclass(frozen=True)
+class AuthenticatedDRMaterial:
+    """Exact four-surface material and releases from one locked source epoch."""
+
+    authenticated: AuthenticatedDRCandidate
+    backup: release_operator.DatabaseBackup
+    activation_candidate: release_operator.ReleaseIdentity
+    activation_previous: release_operator.ReleaseIdentity
+    restore_fallback: release_operator.ReleaseIdentity
+
+
 def _canonical(value: object) -> bytes:
     try:
         return json.dumps(
@@ -119,7 +130,9 @@ def _stable_private_file(
     except OSError as exc:
         raise DRGenerationAuthenticationError(code) from exc
 
-    if _file_identity(before) != _file_identity(after_open) or _file_identity(before) != _file_identity(after):
+    if _file_identity(before) != _file_identity(after_open) or _file_identity(before) != _file_identity(
+        after
+    ):
         raise DRGenerationAuthenticationError(code)
     return b"".join(chunks), opened
 
@@ -319,9 +332,7 @@ def _authenticate_locked(
         journal_file_payload.get("journal_sha256"),
         code="dr_activation_journal_invalid",
     )
-    journal_core = {
-        key: value for key, value in journal_file_payload.items() if key != "journal_sha256"
-    }
+    journal_core = {key: value for key, value in journal_file_payload.items() if key != "journal_sha256"}
     if activation_journal_sha256 != _sha256(_canonical(journal_core)):
         raise DRGenerationAuthenticationError("dr_activation_journal_invalid")
     journal = release_operator.DurableActivationJournal(
@@ -763,9 +774,67 @@ def authenticate_terminal_activation_backup(
         )
 
 
+def _authenticate_material_locked(
+    *,
+    activation_journal: Path,
+    activation_receipt: Path,
+    backup_root: Path,
+) -> AuthenticatedDRMaterial:
+    """Load rehearsal material while the caller holds the operator lock."""
+
+    first = _authenticate_locked(
+        activation_journal=activation_journal,
+        activation_receipt=activation_receipt,
+        backup_root=backup_root,
+    )
+    journal = release_operator.DurableActivationJournal(
+        activation_journal,
+        backup_root=backup_root,
+        config_identity_sha256=None,
+    )
+    backup = journal.database_backup(verify_engineer_sqlite_integrity=True)
+    if backup is None:
+        raise DRGenerationAuthenticationError("dr_activation_backup_missing")
+    activation_candidate, activation_previous, fallback = journal.release_identities()
+    payload = backup.opaque
+    if (
+        not isinstance(payload, release_operator._ExactBackupPayload)  # noqa: SLF001
+        or payload.obsidian is None
+        or payload.engineer is None
+        or str(payload.directory) != first.candidate["backup_directory"]
+        or backup.receipt_sha256 != first.candidate["database_receipt_sha256"]
+        or backup.inbox_receipt_sha256 != first.candidate["inbox_receipt_sha256"]
+        or backup.obsidian_receipt_sha256 != first.candidate["obsidian_receipt_sha256"]
+        or backup.engineer_receipt_sha256 != first.candidate["engineer_receipt_sha256"]
+        or _release_record(fallback) != first.candidate["restore_release"]
+    ):
+        raise DRGenerationAuthenticationError("dr_rehearsal_material_mismatch")
+    second = _authenticate_locked(
+        activation_journal=activation_journal,
+        activation_receipt=activation_receipt,
+        backup_root=backup_root,
+    )
+    backup_after = journal.database_backup(verify_engineer_sqlite_integrity=True)
+    releases_after = journal.release_identities()
+    if (
+        second != first
+        or backup_after != backup
+        or releases_after != (activation_candidate, activation_previous, fallback)
+    ):
+        raise DRGenerationAuthenticationError("dr_rehearsal_material_changed")
+    return AuthenticatedDRMaterial(
+        authenticated=second,
+        backup=backup,
+        activation_candidate=activation_candidate,
+        activation_previous=activation_previous,
+        restore_fallback=fallback,
+    )
+
+
 __all__ = [
     "AUTHENTICATION_RECEIPT_SCHEMA",
     "AuthenticatedDRCandidate",
+    "AuthenticatedDRMaterial",
     "DRGenerationAuthenticationError",
     "authenticate_terminal_activation_backup",
     "reauthenticate_generation_candidate",
