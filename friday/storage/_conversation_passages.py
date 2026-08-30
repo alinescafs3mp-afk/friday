@@ -1,13 +1,13 @@
-"""Dormant authenticated reader for body-free conversation-passage anchors.
+"""Authenticated reader and bounded writer for conversation-passage anchors.
 
 The caller owns one SQLite transaction and therefore the snapshot.  Authority
 is established from ``users``, ``conversations`` and ``messages`` before this
 module inspects any sidecar object.  Only then are the exact schema and accepted
 prefix authenticated and a bounded page of anchor identities returned.
 
-This module deliberately has no storage mixin, writer, search lane or runtime
-export.  Message bodies are read only while deriving the accepted-boundary and
-anchor digests; neither the returned contract nor its repr contains a body.
+Message bodies are read only while deriving accepted-boundary/anchor digests or
+feeding the derivative FTS index; neither the ordinary sidecar rows nor their
+public read contracts contain a body.
 """
 
 from __future__ import annotations
@@ -32,10 +32,31 @@ from friday.conversation_passages.contract import (
 from friday.conversation_passages.schema import (
     validate_conversation_passage_schema,
 )
+from friday.conversation_passages.worker_state import (
+    CONVERSATION_PASSAGE_WORKER_STATE_KEY,
+    ConversationPassageWorkerState,
+    conversation_passage_owner_scan_key,
+    decode_conversation_passage_scan_cursor,
+    decode_conversation_passage_worker_state,
+    encode_conversation_passage_scan_cursor,
+    encode_conversation_passage_worker_state,
+    load_conversation_passage_worker_namespace_key,
+    next_conversation_passage_generation,
+)
+from friday.conversation_passages.writer import (
+    CONVERSATION_PASSAGE_DEFAULT_WORK_ITEMS,
+    backfill_conversation_passages_in_transaction,
+)
+from friday.storage._base import (
+    StorageShared,
+    deleted_account_tombstone_key,
+    utc_now,
+)
 from friday.user_ids import USER_ID_RE
 
 _CONVERSATION_ID_RE = re.compile(r"conv_[0-9a-f]{16}\Z")
 _MESSAGE_ID_RE = re.compile(r"msg_[0-9a-f]{16}\Z")
+_OWNER_SCAN_PAGE = 32
 
 
 class ConversationPassageStorageError(ValueError):
@@ -722,7 +743,179 @@ def select_authorized_conversation_passage_projection_in_transaction(
         raise ConversationPassageStorageError("conversation passage projection is unavailable") from None
 
 
+class ConversationPassagesMixin(StorageShared):
+    def backfill_conversation_passages(
+        self,
+        user_id: str,
+        *,
+        resume_at_conversation_id: str | None = None,
+        limit: int = CONVERSATION_PASSAGE_DEFAULT_WORK_ITEMS,
+    ) -> dict[str, Any]:
+        """Advance one bounded owner page; the parent count is its durable cursor."""
+
+        with self.transaction() as conn:
+            return backfill_conversation_passages_in_transaction(
+                conn,
+                principal_id=user_id,
+                resume_at_conversation_id=resume_at_conversation_id,
+                limit=limit,
+            )
+
+    def run_conversation_passage_worker_tick(
+        self,
+        *,
+        expected_value: str | None,
+        limit: int = CONVERSATION_PASSAGE_DEFAULT_WORK_ITEMS,
+    ) -> dict[str, Any]:
+        """Keyset-select, CAS-admit and execute one owner in one transaction.
+
+        The identity-free numeric owner cursor is advanced before passage work.
+        A competing manager with the same runtime snapshot loses without work.
+        Selection reads at most two fixed raw ``users.rowid`` pages and never
+        materializes or status-filters the owner corpus.
+        """
+
+        if expected_value is not None and type(expected_value) is not str:
+            raise ValueError("expected conversation passage worker state must be TEXT or None")
+        state, supported = decode_conversation_passage_worker_state(expected_value)
+        if not supported:
+            raise ValueError("conversation passage worker state is unsupported")
+
+        with self.transaction() as conn:
+            row = conn.execute(
+                "SELECT value FROM runtime_kv WHERE key=?",
+                (CONVERSATION_PASSAGE_WORKER_STATE_KEY,),
+            ).fetchone()
+            current_value = str(row["value"]) if row is not None else None
+            if current_value != expected_value:
+                return {"admitted": False, "report": None, "phase_error": None}
+
+            namespace_key = load_conversation_passage_worker_namespace_key(conn)
+            if state.owner_cursor is None:
+                owner_rows = conn.execute(
+                    """SELECT rowid,id,status FROM users
+                        ORDER BY rowid ASC LIMIT ?""",
+                    (_OWNER_SCAN_PAGE + 1,),
+                ).fetchall()
+            else:
+                owner_rows = conn.execute(
+                    """SELECT rowid,id,status FROM users
+                        WHERE rowid>? ORDER BY rowid ASC LIMIT ?""",
+                    (state.owner_cursor, _OWNER_SCAN_PAGE + 1),
+                ).fetchall()
+                if not owner_rows:
+                    owner_rows = conn.execute(
+                        """SELECT rowid,id,status FROM users
+                            ORDER BY rowid ASC LIMIT ?""",
+                        (_OWNER_SCAN_PAGE + 1,),
+                    ).fetchall()
+            if not owner_rows:
+                return {"admitted": True, "report": None, "phase_error": None}
+
+            bounded_owner_rows = owner_rows[:_OWNER_SCAN_PAGE]
+            if not bounded_owner_rows:
+                raise sqlite3.DatabaseError("conversation passage owner keyset page is invalid")
+            owner: str | None = None
+            owner_rowid: int | None = None
+            last_examined_rowid: int | None = None
+            for candidate in bounded_owner_rows:
+                candidate_rowid = candidate["rowid"]
+                if type(candidate_rowid) is not int:
+                    raise sqlite3.DatabaseError("conversation passage owner rowid is invalid")
+                last_examined_rowid = candidate_rowid
+                if candidate["status"] != "active":
+                    continue
+                try:
+                    candidate_owner = _principal_id(candidate["id"])
+                except ConversationPassageStorageError:
+                    # A legacy unsupported active identity consumes only its
+                    # numeric keyset position. It grants no writer authority and
+                    # cannot pin valid owners later in this fixed raw page.
+                    continue
+                if conn.execute(
+                    "SELECT 1 FROM runtime_kv WHERE key=? LIMIT 1",
+                    (deleted_account_tombstone_key(candidate_owner),),
+                ).fetchone():
+                    continue
+                owner = candidate_owner
+                owner_rowid = candidate_rowid
+                break
+            next_owner_cursor = owner_rowid if owner_rowid is not None else last_examined_rowid
+            if type(next_owner_cursor) is not int:
+                raise sqlite3.DatabaseError("conversation passage owner keyset did not advance")
+            next_state = ConversationPassageWorkerState(
+                owner_cursor=next_owner_cursor,
+                generation=next_conversation_passage_generation(state.generation),
+            )
+            next_value = encode_conversation_passage_worker_state(next_state)
+            claimed = (
+                conn.execute(
+                    "INSERT OR IGNORE INTO runtime_kv(key,value,updated_at) VALUES(?,?,?)",
+                    (CONVERSATION_PASSAGE_WORKER_STATE_KEY, next_value, utc_now()),
+                )
+                if expected_value is None
+                else conn.execute(
+                    "UPDATE runtime_kv SET value=?,updated_at=? WHERE key=? AND value=?",
+                    (next_value, utc_now(), CONVERSATION_PASSAGE_WORKER_STATE_KEY, expected_value),
+                )
+            )
+            if claimed.rowcount != 1:
+                return {"admitted": False, "report": None, "phase_error": None}
+            if owner is None:
+                return {"admitted": True, "report": None, "phase_error": None}
+
+            report: dict[str, Any] | None = None
+            phase_error: str | None = None
+            conn.execute("SAVEPOINT friday_conversation_passage_worker_phase")
+            try:
+                owner_scan_key = conversation_passage_owner_scan_key(
+                    owner,
+                    namespace_key=namespace_key,
+                )
+                cursor_row = conn.execute(
+                    "SELECT value FROM runtime_kv WHERE key=?",
+                    (owner_scan_key,),
+                ).fetchone()
+                owner_scan_cursor = (
+                    decode_conversation_passage_scan_cursor(cursor_row["value"])
+                    if cursor_row is not None
+                    else None
+                )
+                report = backfill_conversation_passages_in_transaction(
+                    conn,
+                    principal_id=owner,
+                    resume_at_conversation_id=owner_scan_cursor,
+                    limit=limit,
+                )
+                has_more = report.get("has_more")
+                next_cursor = report.get("next_resume_conversation_id")
+                if has_more is True and type(next_cursor) is str and next_cursor:
+                    conn.execute(
+                        """INSERT INTO runtime_kv(key,value,updated_at) VALUES(?,?,?)
+                           ON CONFLICT(key) DO UPDATE SET
+                               value=excluded.value,updated_at=excluded.updated_at""",
+                        (
+                            owner_scan_key,
+                            encode_conversation_passage_scan_cursor(next_cursor),
+                            utc_now(),
+                        ),
+                    )
+                elif has_more is False and next_cursor is None:
+                    conn.execute("DELETE FROM runtime_kv WHERE key=?", (owner_scan_key,))
+                else:
+                    raise ValueError("conversation passage writer cursor result is invalid")
+            except Exception as exc:  # rotate after the writer savepoint is physically rolled back
+                conn.execute("ROLLBACK TO SAVEPOINT friday_conversation_passage_worker_phase")
+                conn.execute("RELEASE SAVEPOINT friday_conversation_passage_worker_phase")
+                report = None
+                phase_error = type(exc).__name__
+            else:
+                conn.execute("RELEASE SAVEPOINT friday_conversation_passage_worker_phase")
+            return {"admitted": True, "report": report, "phase_error": phase_error}
+
+
 __all__ = [
+    "ConversationPassagesMixin",
     "ConversationPassageStorageError",
     "select_authorized_conversation_passage_projection_in_transaction",
 ]

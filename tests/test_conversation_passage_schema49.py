@@ -242,6 +242,33 @@ def _execute_without_projection_update_guard(
         conn.execute(trigger["sql"])  # nosec B608 - exact SQLite-owned canonical DDL
 
 
+def _delete_projection_without_delete_guard(
+    conn: sqlite3.Connection,
+    conversation_id: str,
+) -> None:
+    """Forge one missing parent while restoring the exact canonical fence."""
+
+    trigger = conn.execute(
+        """SELECT sql FROM sqlite_master
+            WHERE type='trigger' AND name='conversation_passage_projection_bd_validate'"""
+    ).fetchone()
+    assert trigger is not None and isinstance(trigger[0], str)
+    canonical_sql = str(trigger[0])
+    conn.execute("DROP TRIGGER conversation_passage_projection_bd_validate")
+    try:
+        conn.execute(
+            "DELETE FROM conversation_passage_projections WHERE conversation_id=?",
+            (conversation_id,),
+        )
+    finally:
+        conn.execute(canonical_sql)  # nosec B608 - exact SQLite-owned canonical DDL
+    restored = conn.execute(
+        """SELECT sql FROM sqlite_master
+            WHERE type='trigger' AND name='conversation_passage_projection_bd_validate'"""
+    ).fetchone()
+    assert restored is not None and restored[0] == canonical_sql
+
+
 def _rewrite_backup_manifest(database: Path, manifest_path: Path) -> None:
     blob = database.read_bytes()
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
@@ -254,8 +281,8 @@ def _rewrite_backup_manifest(database: Path, manifest_path: Path) -> None:
 
 
 def test_fresh_schema49_is_exact_body_free_and_reader_first(storage: FridayStorage) -> None:
-    assert SCHEMA_VERSION == 49
-    assert storage.execute("SELECT value FROM schema_meta WHERE key='schema_version'").fetchone()[0] == "49"
+    assert SCHEMA_VERSION == 50
+    assert storage.execute("SELECT value FROM schema_meta WHERE key='schema_version'").fetchone()[0] == "50"
     validate_conversation_passage_schema(storage.conn, require_fts=True)
     assert len(conversation_passage_schema_fingerprint(storage.conn)) == 64
     assert len(conversation_passage_fts_schema_fingerprint(storage.conn)) == 64
@@ -335,17 +362,24 @@ def test_schema48_migration_seeds_historical_conversations_parent_only(
 ) -> None:
     database = _unpack_schema_48(tmp_path, "schema48-to-reader-first-49.sqlite3")
     canary = "HISTORICAL-SCHEMA48-CONVERSATION-BODY"
+    historical_conversation_id = "conv_0000000000004948"
+    historical_user_message_id = "msg_0000000000004941"
+    historical_assistant_message_id = "msg_0000000000004942"
     with sqlite3.connect(database) as predecessor:
         assert predecessor.execute("SELECT 1 FROM users WHERE id='fixture-owner'").fetchone() is not None
         predecessor.execute(
             """INSERT INTO conversations(id,user_id,title,created_at,updated_at)
-               VALUES('conv_schema49_historical','fixture-owner','Historical',?,?)""",
-            ("2026-08-29T10:00:00+00:00", "2026-08-29T10:01:00+00:00"),
+               VALUES(?,'fixture-owner','Historical',?,?)""",
+            (
+                historical_conversation_id,
+                "2026-08-29T10:00:00+00:00",
+                "2026-08-29T10:01:00+00:00",
+            ),
         )
         _insert_source_message(
             predecessor,
-            message_id="msg_schema49_historical_user",
-            conversation_id="conv_schema49_historical",
+            message_id=historical_user_message_id,
+            conversation_id=historical_conversation_id,
             user_id="fixture-owner",
             role="user",
             content=canary,
@@ -353,8 +387,8 @@ def test_schema48_migration_seeds_historical_conversations_parent_only(
         )
         _insert_source_message(
             predecessor,
-            message_id="msg_schema49_historical_assistant",
-            conversation_id="conv_schema49_historical",
+            message_id=historical_assistant_message_id,
+            conversation_id=historical_conversation_id,
             user_id="fixture-owner",
             role="assistant",
             content="Historical assistant reply",
@@ -364,11 +398,11 @@ def test_schema48_migration_seeds_historical_conversations_parent_only(
     migrated = FridayStorage(replace(settings, database_path=database, database_must_exist=True))
     try:
         assert (
-            migrated.execute("SELECT value FROM schema_meta WHERE key='schema_version'").fetchone()[0] == "49"
+            migrated.execute("SELECT value FROM schema_meta WHERE key='schema_version'").fetchone()[0] == "50"
         )
         projection_row = migrated.execute(
             "SELECT * FROM conversation_passage_projections WHERE conversation_id=?",
-            ("conv_schema49_historical",),
+            (historical_conversation_id,),
         ).fetchone()
         assert projection_row is not None
         projection = dict(projection_row)
@@ -379,7 +413,7 @@ def test_schema48_migration_seeds_historical_conversations_parent_only(
         assert (
             migrated.execute(
                 "SELECT COUNT(*) FROM conversation_passages WHERE conversation_id=?",
-                ("conv_schema49_historical",),
+                (historical_conversation_id,),
             ).fetchone()[0]
             == 0
         )
@@ -393,8 +427,8 @@ def test_schema48_migration_seeds_historical_conversations_parent_only(
             ),
         ):
             conn.execute(
-                """UPDATE messages SET rowid=rowid+1000000
-                    WHERE id='msg_schema49_historical_user'"""
+                "UPDATE messages SET rowid=rowid+1000000 WHERE id=?",
+                (historical_user_message_id,),
             )
     finally:
         migrated.close(final=True)
@@ -405,10 +439,7 @@ def test_schema49_installer_resumes_missing_parent_without_identity_conflict(
 ) -> None:
     conversation = storage.create_conversation("schema49-resume-owner")
     with storage.transaction() as conn:
-        conn.execute(
-            "DELETE FROM conversation_passage_projections WHERE conversation_id=?",
-            (conversation["id"],),
-        )
+        _delete_projection_without_delete_guard(conn, str(conversation["id"]))
         install_conversation_passage_schema(conn)
 
     parent = storage.execute(
@@ -431,6 +462,8 @@ def test_schema49_seals_the_message_rowid_boundary_but_allows_metadata_updates(
     storage: FridayStorage,
 ) -> None:
     conversation = storage.create_conversation("schema49-rowid-owner")
+    seed_message_id = "msg_00000000000049a1"
+    backinsert_message_id = "msg_00000000000049a2"
     previous_max = int(storage.execute("SELECT COALESCE(MAX(rowid),0) FROM messages").fetchone()[0])
     high_rowid = previous_max + 100
     with storage.transaction() as conn:
@@ -440,7 +473,7 @@ def test_schema49_seals_the_message_rowid_boundary_but_allows_metadata_updates(
                    metadata_json,reply_to,created_at
                ) VALUES(?,?,?,'schema49-rowid-owner','user','high admitted row',
                         '{}',NULL,'2026-08-29T09:00:00+00:00')""",
-            (high_rowid, "msg_schema49_rowid_seed", conversation["id"]),
+            (high_rowid, seed_message_id, conversation["id"]),
         )
     boundary = storage.store_message(
         str(conversation["id"]),
@@ -464,7 +497,7 @@ def test_schema49_seals_the_message_rowid_boundary_but_allows_metadata_updates(
 
     with storage.transaction() as conn:
         for message_id, row_identity in (
-            ("msg_schema49_rowid_seed", "rowid"),
+            (seed_message_id, "rowid"),
             (str(boundary["id"]), "_rowid_"),
             (str(future["id"]), "oid"),
         ):
@@ -489,7 +522,7 @@ def test_schema49_seals_the_message_rowid_boundary_but_allows_metadata_updates(
                             '2026-08-29T12:00:00+00:00')""",
                 (
                     previous_max + 50,
-                    "msg_schema49_rowid_backinsert",
+                    backinsert_message_id,
                     conversation["id"],
                 ),
             )
@@ -560,9 +593,7 @@ def test_schema49_seals_the_message_rowid_boundary_but_allows_metadata_updates(
             "msg_fffffffffffffff2",
         )
     )
-    assert (
-        storage.execute("SELECT 1 FROM messages WHERE id='msg_schema49_rowid_backinsert'").fetchone() is None
-    )
+    assert storage.execute("SELECT 1 FROM messages WHERE id=?", (backinsert_message_id,)).fetchone() is None
     validate_conversation_passage_schema(storage.conn, require_fts=True)
 
 
@@ -660,11 +691,21 @@ def test_authoritative_validation_rejects_a_forged_skipped_prefix(
         set_digest = conversation_passage_set_sha256(
             ((0, str(source["id"]), revision, content_digest, locator, prefix),)
         )
-        trigger = conn.execute(
-            """SELECT sql FROM sqlite_master
-                WHERE type='trigger' AND name='conversation_passage_bi_validate'"""
-        ).fetchone()
-        assert trigger is not None and isinstance(trigger["sql"], str)
+        triggers = {
+            str(row["name"]): str(row["sql"])
+            for row in conn.execute(
+                """SELECT name,sql FROM sqlite_master
+                    WHERE type='trigger' AND name IN (
+                        'conversation_passage_bi_validate',
+                        'conversation_passage_ai_parent_cas'
+                    ) ORDER BY name"""
+            ).fetchall()
+        }
+        assert set(triggers) == {
+            "conversation_passage_ai_parent_cas",
+            "conversation_passage_bi_validate",
+        }
+        conn.execute("DROP TRIGGER conversation_passage_ai_parent_cas")
         conn.execute("DROP TRIGGER conversation_passage_bi_validate")
         try:
             conn.execute(
@@ -683,7 +724,8 @@ def test_authoritative_validation_rejects_a_forged_skipped_prefix(
                 ),
             )
         finally:
-            conn.execute(trigger["sql"])  # nosec B608 - exact SQLite-owned canonical DDL
+            for trigger_sql in triggers.values():
+                conn.execute(trigger_sql)  # nosec B608 - exact SQLite-owned canonical DDL
         _execute_without_projection_update_guard(
             conn,
             """UPDATE conversation_passage_projections
@@ -720,10 +762,7 @@ def test_exact_schema_or_data_tamper_fails_closed(
         if tamper == "ddl":
             conn.execute("DROP INDEX idx_conversation_passage_anchor_revision")
         else:
-            conn.execute(
-                "DELETE FROM conversation_passage_projections WHERE conversation_id=?",
-                (conversation["id"],),
-            )
+            _delete_projection_without_delete_guard(conn, str(conversation["id"]))
 
     with pytest.raises(sqlite3.DatabaseError, match=expected_error):
         validate_conversation_passage_schema(storage.conn, require_fts=True)
@@ -732,32 +771,36 @@ def test_exact_schema_or_data_tamper_fails_closed(
 def test_anchor_guard_rejects_cross_conversation_and_cross_owner_sources(
     storage: FridayStorage,
 ) -> None:
+    owner = "schema49-anchor-owner"
+    foreign = "schema49-foreign-owner"
     first = storage.create_conversation("schema49-anchor-owner")
     second = storage.create_conversation("schema49-anchor-owner")
-    storage.ensure_user("schema49-foreign-owner")
+    foreign_conversation = storage.create_conversation(foreign)
+    other_conversation_message_id = "msg_00000000000049b1"
+    foreign_owner_message_id = "msg_00000000000049b2"
     with storage.transaction() as conn:
         _insert_source_message(
             conn,
-            message_id="msg_schema49_other_conversation",
+            message_id=other_conversation_message_id,
             conversation_id=str(second["id"]),
-            user_id="schema49-anchor-owner",
+            user_id=owner,
             role="user",
             content="Other conversation",
             created_at="2026-08-29T11:00:00+00:00",
         )
         _insert_source_message(
             conn,
-            message_id="msg_schema49_foreign_owner",
-            conversation_id=str(first["id"]),
-            user_id="schema49-foreign-owner",
+            message_id=foreign_owner_message_id,
+            conversation_id=str(foreign_conversation["id"]),
+            user_id=foreign,
             role="user",
             content="Foreign owner",
             created_at="2026-08-29T11:00:01+00:00",
         )
 
     for passage_rowid, message_id in (
-        (9_001, "msg_schema49_other_conversation"),
-        (9_002, "msg_schema49_foreign_owner"),
+        (9_001, other_conversation_message_id),
+        (9_002, foreign_owner_message_id),
     ):
         with (
             storage.transaction() as conn,
@@ -782,14 +825,20 @@ def test_anchor_guard_rejects_cross_conversation_and_cross_owner_sources(
     assert storage.execute("SELECT COUNT(*) FROM conversation_passages").fetchone()[0] == 0
 
 
-def test_anchor_guard_rejects_noncanonical_source_identity_before_staging(
+def test_source_admission_rejects_noncanonical_identity_before_anchor_staging(
     storage: FridayStorage,
 ) -> None:
     owner = "schema49-anchor-identity-owner"
     conversation = storage.create_conversation(owner)
     conversation_id = str(conversation["id"])
     message_id = "private/path/secret.txt"
-    with storage.transaction() as conn:
+    with (
+        storage.transaction() as conn,
+        pytest.raises(
+            sqlite3.IntegrityError,
+            match="conversation_passage_message_identity_immutable",
+        ),
+    ):
         _insert_source_message(
             conn,
             message_id=message_id,
@@ -799,26 +848,8 @@ def test_anchor_guard_rejects_noncanonical_source_identity_before_staging(
             content="source body",
             created_at="2026-08-29T11:30:00+00:00",
         )
-    source_row = storage.execute(
-        "SELECT id,conversation_id,user_id,role,content,created_at FROM messages WHERE id=?",
-        (message_id,),
-    ).fetchone()
-    assert source_row is not None
-    revision, content_digest, locator, prefix = _anchor_material(dict(source_row), anchor_ordinal=0)
 
-    with (
-        storage.transaction() as conn,
-        pytest.raises(sqlite3.IntegrityError, match="conversation_passage_anchor_invalid"),
-    ):
-        conn.execute(
-            """INSERT INTO conversation_passages(
-                   passage_rowid,conversation_id,anchor_message_id,anchor_ordinal,
-                   anchor_message_revision_sha256,anchor_content_sha256,
-                   anchor_locator_sha256,conversation_prefix_sha256
-               ) VALUES(9003,?,?,0,?,?,?,?)""",
-            (conversation_id, message_id, revision, content_digest, locator, prefix),
-        )
-
+    assert storage.execute("SELECT 1 FROM messages WHERE id=?", (message_id,)).fetchone() is None
     assert storage.execute("SELECT COUNT(*) FROM conversation_passages").fetchone()[0] == 0
 
 
@@ -1015,7 +1046,11 @@ def test_projection_identity_fence_rejects_replace_without_cascading_children(
         "SELECT rowid AS projection_rowid,* FROM conversation_passage_projections WHERE conversation_id=?",
         (conversation["id"],),
     ).fetchone()
-    assert parent is not None
+    empty_parent = storage.execute(
+        "SELECT rowid AS projection_rowid FROM conversation_passage_projections WHERE conversation_id=?",
+        (empty_conversation["id"],),
+    ).fetchone()
+    assert parent is not None and empty_parent is not None
 
     with (
         storage.transaction() as conn,
@@ -1048,30 +1083,49 @@ def test_projection_identity_fence_rejects_replace_without_cascading_children(
                     (projection_rowid, empty_conversation["id"]),
                 )
 
-        conn.execute(
-            "DELETE FROM conversation_passage_projections WHERE conversation_id=?",
-            (empty_conversation["id"],),
-        )
         with pytest.raises(
             sqlite3.IntegrityError,
-            match="conversation_passage_projection_identity_immutable",
+            match="conversation_passage_projection_delete_invalid",
         ):
             conn.execute(
-                """INSERT OR REPLACE INTO conversation_passage_projections(
-                       rowid,conversation_id,indexed_message_count,
-                       indexed_through_message_id,indexed_conversation_revision_sha256,
-                       passage_set_sha256,passage_index_revision,projection_status,
-                       incomplete_reason,passage_count,projected_at
-                   ) VALUES(?,?,0,NULL,NULL,NULL,?,'incomplete',
-                            'backfill_pending',0,?)""",
-                (
-                    projection_rowid,
-                    empty_conversation["id"],
-                    CONVERSATION_PASSAGE_INDEX_REVISION,
-                    _PROJECTED_AT,
-                ),
+                "DELETE FROM conversation_passage_projections WHERE conversation_id=?",
+                (empty_conversation["id"],),
             )
-        install_conversation_passage_schema(conn)
+        history_guard = conn.execute(
+            """SELECT sql FROM sqlite_master
+                WHERE type='trigger' AND name='conversations_are_never_deleted'"""
+        ).fetchone()
+        assert history_guard is not None and isinstance(history_guard["sql"], str)
+        history_guard_sql = str(history_guard["sql"])
+        conn.execute("DROP TRIGGER conversations_are_never_deleted")
+        try:
+            conn.execute(
+                "DELETE FROM conversations WHERE id=?",
+                (empty_conversation["id"],),
+            )
+        finally:
+            conn.execute(history_guard_sql)  # nosec B608 - exact SQLite-owned canonical DDL
+        restored_history_guard = conn.execute(
+            """SELECT sql FROM sqlite_master
+                WHERE type='trigger' AND name='conversations_are_never_deleted'"""
+        ).fetchone()
+        assert restored_history_guard is not None
+        assert restored_history_guard["sql"] == history_guard_sql
+
+    assert (
+        storage.execute(
+            "SELECT 1 FROM conversation_passage_projections WHERE conversation_id=?",
+            (empty_conversation["id"],),
+        ).fetchone()
+        is None
+    )
+    replacement_conversation = storage.create_conversation(owner)
+    replacement_parent = storage.execute(
+        "SELECT rowid AS projection_rowid FROM conversation_passage_projections WHERE conversation_id=?",
+        (replacement_conversation["id"],),
+    ).fetchone()
+    assert replacement_parent is not None
+    assert int(replacement_parent["projection_rowid"]) == int(empty_parent["projection_rowid"])
 
     assert (
         storage.execute(
@@ -1083,7 +1137,7 @@ def test_projection_identity_fence_rejects_replace_without_cascading_children(
     assert (
         storage.execute(
             "SELECT COUNT(*) FROM conversation_passage_projections WHERE conversation_id=?",
-            (empty_conversation["id"],),
+            (replacement_conversation["id"],),
         ).fetchone()[0]
         == 1
     )
@@ -1447,10 +1501,7 @@ def test_backup_and_restore_preflight_rejects_conversation_projection_tamper(
     assert storage.verify_backup(database.name)["ok"] is True
 
     with sqlite3.connect(database) as forged:
-        forged.execute(
-            "DELETE FROM conversation_passage_projections WHERE conversation_id=?",
-            (conversation["id"],),
-        )
+        _delete_projection_without_delete_guard(forged, str(conversation["id"]))
         forged.commit()
     _rewrite_backup_manifest(database, manifest_path)
 

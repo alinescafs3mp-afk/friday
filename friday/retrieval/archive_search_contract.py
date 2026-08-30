@@ -1357,10 +1357,38 @@ class ArchiveSearchPage:
 
     @property
     def absence_decision(self) -> AbsenceDecision:
-        return aggregate_absence_decision(
+        decision = aggregate_absence_decision(
             self.coverage,
             requested_targets=self.coverage[0].execution_binding.requested_targets,
         )
+        if decision is not AbsenceDecision.NOT_ESTABLISHED:
+            return decision
+
+        # MESSAGE_HISTORY is the released complete conversation corpus reader.
+        # The productive lexical lane is deliberately capped/partial and DENSE
+        # remains unavailable, so requiring all three equivalent lanes to be
+        # complete would make an authenticated zero-hit history incapable of
+        # proving absence.  Keep unrelated corpora under the generic all-lanes
+        # rule and never substitute a partial, stale or denied history lane.
+        history = next(
+            (
+                item
+                for item in self.coverage
+                if item.corpus is SearchCorpus.CONVERSATION and item.lane is SearchLane.MESSAGE_HISTORY
+            ),
+            None,
+        )
+        if (
+            history is not None
+            and history.absence_decision() is AbsenceDecision.AUTHORIZED_ABSENCE_CONFIRMED
+            and all(
+                (item.corpus is SearchCorpus.CONVERSATION and item.matched_at_least == 0)
+                or item.absence_decision() is AbsenceDecision.AUTHORIZED_ABSENCE_CONFIRMED
+                for item in self.coverage
+            )
+        ):
+            return AbsenceDecision.AUTHORIZED_ABSENCE_CONFIRMED
+        return decision
 
     @property
     def exhaustive(self) -> bool:

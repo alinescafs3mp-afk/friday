@@ -21,6 +21,15 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from friday.config import FridaySettings
+from friday.conversation_passages.worker_state import (
+    CONVERSATION_PASSAGE_WORKER_STATE_KEY,
+    decode_conversation_passage_worker_state,
+    validate_conversation_passage_scan_cursor,
+)
+from friday.conversation_passages.writer import (
+    CONVERSATION_PASSAGE_DEFAULT_WORK_ITEMS,
+    CONVERSATION_PASSAGE_TEXT_WORK_BUDGET_BYTES,
+)
 from friday.document_catalog.worker_state import (
     DOCUMENT_CATALOG_WORKER_STATE_KEY,
     DocumentCatalogTenantState,
@@ -189,6 +198,8 @@ _VAULT_PAGE = 250
 # scan.
 _DOCUMENT_CATALOG_TICK_LIMIT = 128
 _DOCUMENT_CATALOG_CURSOR_KEY = DOCUMENT_CATALOG_WORKER_STATE_KEY
+_CONVERSATION_PASSAGE_TICK_LIMIT = CONVERSATION_PASSAGE_DEFAULT_WORK_ITEMS
+_CONVERSATION_PASSAGE_CURSOR_KEY = CONVERSATION_PASSAGE_WORKER_STATE_KEY
 
 # Ниже этого тик не считается нагрузкой и отдыха не назначает: пауза защищает
 # внешний сервис, а не расписание.
@@ -244,12 +255,72 @@ def _document_passage_processed(report: Any, *, maximum: int) -> int:
     return processed
 
 
+def _conversation_passage_phase_report(
+    report: Any,
+    *,
+    limit: int,
+) -> tuple[int, int, int, int, bool]:
+    """Authenticate one body-free bounded writer report before owner rotation."""
+
+    expected = {
+        "examined",
+        "anchors_written",
+        "current",
+        "explicit_incomplete",
+        "has_more",
+        "next_resume_conversation_id",
+        "message_bytes_examined",
+        "message_byte_budget",
+        "byte_budget_reached",
+    }
+    if not isinstance(report, dict) or set(report) != expected:
+        raise ValueError("conversation passage phase report is invalid")
+    examined = report["examined"]
+    anchors = report["anchors_written"]
+    current = report["current"]
+    incomplete = report["explicit_incomplete"]
+    has_more = report["has_more"]
+    next_cursor = report["next_resume_conversation_id"]
+    examined_bytes = report["message_bytes_examined"]
+    byte_budget = report["message_byte_budget"]
+    budget_reached = report["byte_budget_reached"]
+    if (
+        type(examined) is not int
+        or not 0 <= examined <= limit
+        or type(anchors) is not int
+        or not 0 <= anchors <= examined
+        or type(current) is not int
+        or current < 0
+        or type(incomplete) is not int
+        or incomplete < 0
+        or current + incomplete > examined
+        or type(has_more) is not bool
+        or type(examined_bytes) is not int
+        or byte_budget != CONVERSATION_PASSAGE_TEXT_WORK_BUDGET_BYTES
+        or not 0 <= examined_bytes <= byte_budget
+        or type(budget_reached) is not bool
+    ):
+        raise ValueError("conversation passage phase report is out of bounds")
+    if has_more:
+        try:
+            validate_conversation_passage_scan_cursor(next_cursor)
+        except ValueError:
+            raise ValueError("conversation passage phase did not return an exact cursor") from None
+    elif next_cursor is not None:
+        raise ValueError("exhausted conversation passage phase returned a cursor")
+    return examined, anchors, current, incomplete, has_more
+
+
 class WorkerBatchError(RuntimeError):
     """One task completed its tenant sweep with isolated failures."""
 
 
 class _DocumentCatalogPhaseError(RuntimeError):
     """One tenant allocation completed with an isolated catalog phase failure."""
+
+
+class _ConversationPassagePhaseError(RuntimeError):
+    """One physically completed conversation-passage owner phase failed."""
 
 
 class WorkerSupervisor:
@@ -741,7 +812,7 @@ class WorkersManager:
         )
         self.supervisor.register(
             "document_catalog_reconcile",
-            self._document_catalog_reconcile_all,
+            self._retrieval_projection_reconcile_all,
             60.0,
             run_immediately=True,
             timeout_sec=120,
@@ -952,6 +1023,76 @@ class WorkersManager:
                 "entity mentions backfilled: %d links over %d documents",
                 int(report["linked"]),
                 int(report.get("scanned") or 0),
+            )
+
+    async def _retrieval_projection_reconcile_all(self) -> None:
+        """Run both bounded projection phases in the existing Supervisor slot."""
+
+        labels = ("document catalog", "conversation passage")
+        outcomes = await asyncio.gather(
+            self._document_catalog_reconcile_all(),
+            self._conversation_passage_backfill_one_owner(),
+            return_exceptions=True,
+        )
+        failures = 0
+        for label, outcome in zip(labels, outcomes, strict=True):
+            if isinstance(outcome, asyncio.CancelledError):
+                raise outcome
+            if isinstance(outcome, BaseException):
+                failures += 1
+                LOGGER.error("%s projection phase failed (%s)", label.title(), type(outcome).__name__)
+        if failures:
+            raise WorkerBatchError(f"{failures} retrieval projection phase(s) failed")
+
+    async def _conversation_passage_backfill_one_owner(self) -> None:
+        """Advance one active person under one global 64-item/4-MiB tick bound."""
+
+        raw_state = await run_blocking(self.storage.kv_get, _CONVERSATION_PASSAGE_CURSOR_KEY)
+        _state, supported = decode_conversation_passage_worker_state(raw_state)
+        if raw_state is not None and not supported:
+            raise RuntimeError("conversation passage worker state is unsupported")
+        outcome = await run_blocking(
+            self.storage.run_conversation_passage_worker_tick,
+            expected_value=raw_state,
+            limit=_CONVERSATION_PASSAGE_TICK_LIMIT,
+        )
+        expected_outcome = {"admitted", "report", "phase_error"}
+        if (
+            not isinstance(outcome, dict)
+            or set(outcome) != expected_outcome
+            or type(outcome["admitted"]) is not bool
+        ):
+            raise RuntimeError("conversation passage worker admission result is invalid")
+        report = outcome["report"]
+        phase_error = outcome["phase_error"]
+        if outcome["admitted"] is False:
+            if report is not None or phase_error is not None:
+                raise RuntimeError("conversation passage worker admission result is invalid")
+            return
+        if phase_error is not None:
+            if type(phase_error) is not str or not phase_error or report is not None:
+                raise RuntimeError("conversation passage worker failure result is invalid")
+            raise _ConversationPassagePhaseError(
+                f"conversation passage owner phase failed ({phase_error})"
+            ) from None
+        if report is None:
+            return
+        try:
+            examined, anchors, current, incomplete, has_more = _conversation_passage_phase_report(
+                report,
+                limit=_CONVERSATION_PASSAGE_TICK_LIMIT,
+            )
+        except ValueError:
+            raise RuntimeError("conversation passage worker admission result is invalid") from None
+        if examined or has_more:
+            LOGGER.info(
+                "Conversation passage convergence: examined=%d anchors=%d current=%d "
+                "explicit_incomplete=%d has_more=%d",
+                examined,
+                anchors,
+                current,
+                incomplete,
+                int(has_more),
             )
 
     async def _document_catalog_reconcile_all(self) -> None:

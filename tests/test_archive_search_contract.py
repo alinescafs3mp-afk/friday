@@ -6,6 +6,7 @@ from datetime import UTC, datetime
 import pytest
 
 from friday.execution_kernel import ToolResult
+from friday.retrieval.archive_search_authority import canonical_archive_search_targets
 from friday.retrieval.archive_search_contract import (
     ArchiveContextWindow,
     ArchiveEvidenceAuthority,
@@ -843,6 +844,76 @@ def test_confirmed_only_page_rejects_pending_or_noncanonical_evidence() -> None:
             candidates=(archived,),
             coverage=_coverage(request),
         )
+
+
+def test_message_history_absence_does_not_override_unresolved_positive_sibling() -> None:
+    request = ArchiveSearchRequest.create(
+        query="private conversation fact",
+        corpora=(ArchiveSearchCorpus.MESSAGES,),
+    )
+    targets = canonical_archive_search_targets(request)
+    binding = SearchExecutionBinding.create(
+        normalized_private_request_json=request.to_identity_json(),
+        authority_scope=AuthorityScope.TENANT_PRINCIPAL,
+        tenant_id="tenant-private",
+        principal_id="owner-private",
+        requested_targets=targets,
+        snapshot_discriminator="snapshot-private",
+        run_discriminator="run-private",
+        privacy_key=_KEY,
+    )
+    coverage = []
+    for corpus, lane in targets:
+        if lane is SearchLane.MESSAGE_HISTORY:
+            coverage.append(
+                SearchCoverage.create(
+                    corpus=corpus,
+                    lane=lane,
+                    execution_binding=binding,
+                    states=(CoverageState.COMPLETE,),
+                    eligible_authorized=0,
+                    examined=0,
+                    matched_at_least=0,
+                    returned=0,
+                    authority_rechecked=True,
+                    snapshot_current=True,
+                )
+            )
+        elif lane is SearchLane.LEXICAL:
+            coverage.append(
+                SearchCoverage.create(
+                    corpus=corpus,
+                    lane=lane,
+                    execution_binding=binding,
+                    states=(CoverageState.PARTIAL, CoverageState.STALE),
+                    eligible_authorized=1,
+                    examined=1,
+                    matched_at_least=1,
+                    returned=0,
+                    authority_rechecked=True,
+                    snapshot_current=True,
+                )
+            )
+        else:
+            coverage.append(
+                SearchCoverage.create(
+                    corpus=corpus,
+                    lane=lane,
+                    execution_binding=binding,
+                    states=(CoverageState.UNAVAILABLE,),
+                    eligible_authorized=None,
+                    examined=0,
+                    matched_at_least=0,
+                    returned=0,
+                    authority_rechecked=True,
+                    snapshot_current=True,
+                )
+            )
+
+    page = ArchiveSearchPage.create(request=request, candidates=(), coverage=coverage)
+
+    assert page.absence_decision.value == "not_established"
+    assert page.to_public_payload(_KEY)["absence"] == "not_established"
 
 
 def test_public_projection_has_only_opaque_handles_and_safe_bounded_evidence() -> None:

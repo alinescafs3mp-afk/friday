@@ -52,7 +52,7 @@ def test_concurrent_current_schema_repairs_one_missing_fts_artifact_once(
 
     real_connect = sqlite3.connect
     with real_connect(database) as damaged:
-        assert damaged.execute("SELECT value FROM schema_meta WHERE key='fts_build'").fetchone() == ("49",)
+        assert damaged.execute("SELECT value FROM schema_meta WHERE key='fts_build'").fetchone() == ("50",)
         damaged.execute("DROP TABLE messages_fts")
 
     first_phase_committed = threading.Barrier(2, timeout=10)
@@ -114,7 +114,7 @@ def test_concurrent_current_schema_repairs_one_missing_fts_artifact_once(
     assert errors == []
     assert len(rebuild_statements) == 1
     with real_connect(f"file:{database}?mode=ro", uri=True) as repaired:
-        assert repaired.execute("SELECT value FROM schema_meta WHERE key='fts_build'").fetchone() == ("49",)
+        assert repaired.execute("SELECT value FROM schema_meta WHERE key='fts_build'").fetchone() == ("50",)
         assert repaired.execute(
             "SELECT COUNT(*) FROM messages_fts WHERE messages_fts MATCH 'synthetic'"
         ).fetchone() == (1,)
@@ -148,11 +148,11 @@ def test_conversation_fts_failure_preserves_released_message_search(
     initial.close(final=True)
 
     with sqlite3.connect(database) as damaged:
-        assert damaged.execute("SELECT value FROM schema_meta WHERE key='fts_build'").fetchone() == ("49",)
+        assert damaged.execute("SELECT value FROM schema_meta WHERE key='fts_build'").fetchone() == ("50",)
         assert damaged.execute(
             "SELECT value FROM schema_meta WHERE key=?",
             (_CONVERSATION_FTS_RECEIPT,),
-        ).fetchone() == ("49",)
+        ).fetchone() == ("50",)
         damaged.execute(
             "DELETE FROM schema_meta WHERE key=?",
             (_CONVERSATION_FTS_RECEIPT,),
@@ -178,7 +178,7 @@ def test_conversation_fts_failure_preserves_released_message_search(
     try:
         assert reopened._fts_available is True
         assert tuple(reopened.execute("SELECT value FROM schema_meta WHERE key='fts_build'").fetchone()) == (
-            "49",
+            "50",
         )
         assert (
             reopened.execute(

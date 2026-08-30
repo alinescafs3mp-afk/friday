@@ -160,9 +160,8 @@ if SCHEMA_VERSION >= 48:
     if passage_report["passage_changed"] != 1:
         raise RuntimeError(f"schema {{SCHEMA_VERSION}} fixture did not publish one passage set")
 if SCHEMA_VERSION >= 49:
-    # Schema 49 is deliberately reader-first.  Exercise its historical/new-source
-    # admission shape without importing the later writer activation: ordinary
-    # rows are body-free and every anchor remains honestly backfill_pending.
+    # Schema 49 is deliberately reader-first; schema 50 activates the bounded
+    # incremental writer without changing either ordinary table or the FTS view.
     conversation = storage.create_conversation(
         {SEED_USER!r},
         title="Synthetic migration conversation",
@@ -179,6 +178,12 @@ if SCHEMA_VERSION >= 49:
         "assistant",
         "Synthetic schema fixture assistant message",
     )
+    if SCHEMA_VERSION >= 50:
+        passage_report = storage.backfill_conversation_passages({SEED_USER!r}, limit=8)
+        if passage_report["anchors_written"] != 2 or passage_report["has_more"]:
+            raise RuntimeError(
+                f"schema {{SCHEMA_VERSION}} fixture did not publish its bounded conversation prefix"
+            )
     projection = storage.execute(
         "SELECT projection_status,incomplete_reason,indexed_message_count,passage_count "
         "FROM conversation_passage_projections WHERE conversation_id=?",
@@ -188,14 +193,19 @@ if SCHEMA_VERSION >= 49:
         "SELECT COUNT(*) FROM conversation_passages WHERE conversation_id=?",
         (conversation["id"],),
     ).fetchone()[0]
-    if projection is None or tuple(projection) != (
-        "incomplete",
-        "backfill_pending",
-        0,
-        0,
-    ) or child_count != 0:
+    expected_projection = (
+        ("incomplete", "backfill_pending", 0, 0)
+        if SCHEMA_VERSION == 49
+        else ("current", None, 2, 2)
+    )
+    expected_children = 0 if SCHEMA_VERSION == 49 else 2
+    if (
+        projection is None
+        or tuple(projection) != expected_projection
+        or child_count != expected_children
+    ):
         raise RuntimeError(
-            f"schema {{SCHEMA_VERSION}} fixture activated conversation passages prematurely"
+            f"schema {{SCHEMA_VERSION}} fixture has the wrong conversation-passage contour"
         )
 if SCHEMA_VERSION >= 31:
     # Schema 31's defining authoritative data is relation history. Seed one

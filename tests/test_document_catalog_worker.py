@@ -380,7 +380,7 @@ def test_catalog_worker_is_registered_immediately_with_a_short_timeout(settings)
         for task in manager.supervisor._tasks
         if task.name == "document_catalog_reconcile"  # noqa: SLF001
     )
-    assert task.func == manager._document_catalog_reconcile_all  # noqa: SLF001
+    assert task.func == manager._retrieval_projection_reconcile_all  # noqa: SLF001
     assert task.enabled is True
     assert task.run_immediately is True
     assert 45.0 <= task.interval_sec <= 75.0

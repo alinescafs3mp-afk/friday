@@ -36,6 +36,8 @@ def _drop_document_passage_schema(conn: sqlite3.Connection) -> None:
     )
     for trigger in triggers:
         conn.execute(f'DROP TRIGGER "{trigger}"')  # nosec B608 - SQLite-owned names
+    conn.execute("DROP INDEX IF EXISTS idx_conversation_passage_message_source_order")
+    conn.execute("DROP INDEX IF EXISTS idx_conversation_passage_conversation_owner_keyset")
     conn.execute("DROP TABLE IF EXISTS conversation_passages_fts")
     conn.execute("DROP VIEW IF EXISTS conversation_passage_search_content")
     conn.execute("DROP TABLE IF EXISTS conversation_passages")

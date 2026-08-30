@@ -124,6 +124,41 @@ def test_schema_49_fixture_carries_only_reader_first_conversation_passage_work(
     assert child_count == 0
 
 
+def test_schema_50_fixture_carries_incrementally_published_conversation_passages(
+    tmp_path,
+) -> None:
+    """The activated fixture must exercise both one-anchor guards and completion."""
+
+    database = _unpack(50, tmp_path)
+    with sqlite3.connect(f"file:{database}?mode=ro", uri=True) as fixture:
+        conversation = fixture.execute(
+            "SELECT id,user_id FROM conversations WHERE title=?",
+            (FIXTURE_CONVERSATION_TITLE,),
+        ).fetchone()
+        assert conversation is not None and conversation[1] == FIXTURE_USER
+        projection = fixture.execute(
+            """SELECT projection_status,incomplete_reason,
+                      indexed_message_count,passage_count
+                 FROM conversation_passage_projections
+                WHERE conversation_id=?""",
+            (conversation[0],),
+        ).fetchone()
+        children = fixture.execute(
+            """SELECT anchor_ordinal,anchor_message_id
+                 FROM conversation_passages WHERE conversation_id=?
+                ORDER BY anchor_ordinal""",
+            (conversation[0],),
+        ).fetchall()
+        source_ids = fixture.execute(
+            """SELECT id FROM messages WHERE conversation_id=?
+                 AND role IN ('user','assistant') ORDER BY rowid""",
+            (conversation[0],),
+        ).fetchall()
+
+    assert projection == ("current", None, 2, 2)
+    assert children == [(0, source_ids[0][0]), (1, source_ids[1][0])]
+
+
 @pytest.mark.parametrize("version", _fixture_versions())
 def test_a_database_at_this_schema_migrates_forward_and_keeps_its_data(version, settings, tmp_path):
     database = _unpack(version, tmp_path)

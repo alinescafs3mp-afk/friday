@@ -19,16 +19,18 @@ from friday.storage._obsidian import (
 
 
 def _drop_document_passage_schema(conn: sqlite3.Connection) -> None:
-    conversation_triggers = tuple(
-        str(row[0])
+    conversation_runtime_objects = tuple(
+        (str(row[0]), str(row[1]))
         for row in conn.execute(
-            """SELECT name FROM sqlite_master
-                WHERE type='trigger' AND name LIKE 'conversation_passage_%'
-                ORDER BY name"""
+            """SELECT type,name FROM sqlite_master
+                WHERE (type='trigger' AND name GLOB 'conversation_passage_*')
+                   OR (type='index' AND name GLOB 'idx_conversation_passage_*')
+                ORDER BY type DESC,name"""
         )
     )
-    for name in conversation_triggers:
-        conn.execute(f'DROP TRIGGER "{name}"')  # nosec B608 - SQLite-owned names
+    for kind, name in conversation_runtime_objects:
+        sql_kind = {"index": "INDEX", "trigger": "TRIGGER"}[kind]
+        conn.execute(f'DROP {sql_kind} "{name}"')  # nosec B608 - SQLite-owned names
     conn.execute("DROP TABLE IF EXISTS conversation_passages_fts")
     conn.execute("DROP VIEW IF EXISTS conversation_passage_search_content")
     conn.execute("DROP TABLE IF EXISTS conversation_passages")
@@ -98,9 +100,9 @@ def _age_current_database_to_released_schema_35(database: Path) -> None:
 
 
 def test_schema_36_installs_the_revision_graph_and_extended_operation_contract(storage) -> None:
-    assert SCHEMA_VERSION == 49
+    assert SCHEMA_VERSION == 50
     marker = storage.execute("SELECT value FROM schema_meta WHERE key='schema_version'").fetchone()
-    assert marker[0] == "49"
+    assert marker[0] == "50"
     tables = {
         str(row[0])
         for row in storage.execute(
@@ -145,7 +147,7 @@ def test_released_schema_35_migrates_atomically_and_preserves_operation_rows(set
     upgraded = FridayStorage(replace(settings, database_path=database))
     try:
         assert (
-            upgraded.execute("SELECT value FROM schema_meta WHERE key='schema_version'").fetchone()[0] == "49"
+            upgraded.execute("SELECT value FROM schema_meta WHERE key='schema_version'").fetchone()[0] == "50"
         )
         preserved = upgraded.get_obsidian_operation("alice", "released-schema35-operation")
         assert preserved is not None

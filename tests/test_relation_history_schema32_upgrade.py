@@ -70,16 +70,20 @@ def _make_schema_32(settings: Any, tmp_path: Path, name: str) -> Path:
     made.close(final=True)
     with sqlite3.connect(database) as predecessor:
         _remove_post_schema32_engineer_work_items(predecessor)
-        conversation_triggers = tuple(
-            str(row[0])
+        conversation_runtime_objects = tuple(
+            (str(row[0]), str(row[1]))
             for row in predecessor.execute(
-                """SELECT name FROM sqlite_master
-                    WHERE type='trigger' AND name LIKE 'conversation_passage_%'
-                    ORDER BY name"""
+                """SELECT type,name FROM sqlite_master
+                    WHERE (type='trigger' AND name GLOB 'conversation_passage_*')
+                       OR (type='index' AND name GLOB 'idx_conversation_passage_*')
+                    ORDER BY type DESC,name"""
             )
         )
-        for name in conversation_triggers:
-            predecessor.execute(f'DROP TRIGGER "{name}"')  # nosec B608 - SQLite-owned names
+        for kind, name in conversation_runtime_objects:
+            sql_kind = {"index": "INDEX", "trigger": "TRIGGER"}[kind]
+            predecessor.execute(
+                f'DROP {sql_kind} "{name}"'  # nosec B608 - SQLite-owned names
+            )
         predecessor.execute("DROP TABLE IF EXISTS conversation_passages_fts")
         predecessor.execute("DROP VIEW IF EXISTS conversation_passage_search_content")
         predecessor.execute("DROP TABLE IF EXISTS conversation_passages")
@@ -287,7 +291,7 @@ def test_schema_31_to_32_preserves_evidence_and_installs_the_exact_current_contr
         assert migrated.execute("SELECT value FROM schema_meta WHERE key='schema_version'").fetchone()[
             0
         ] == str(SCHEMA_VERSION)
-        assert SCHEMA_VERSION == 49
+        assert SCHEMA_VERSION == 50
         assert tuple(
             migrated.execute(
                 """SELECT singleton, batch_id, recorded_at, observed_at

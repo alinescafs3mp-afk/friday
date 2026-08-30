@@ -288,6 +288,7 @@ def _candidate(
     hits: tuple[ArchiveMessageHit, ...],
     *,
     rank: int,
+    lane: SearchLane,
 ) -> ArchiveSearchCandidate:
     first_hit = hits[0]
     ledger = first_hit.ledger
@@ -330,13 +331,19 @@ def _candidate(
     if not passages:
         raise ArchiveMessageAdapterError("archive message factual passage is unavailable")
     lifecycle = LifecycleState.ARCHIVED if ledger.conversation_archived else LifecycleState.ACTIVE
+    channel = {
+        SearchLane.MESSAGE_HISTORY: ArchiveMatchChannel.MESSAGE_HISTORY,
+        SearchLane.LEXICAL: ArchiveMatchChannel.LEXICAL,
+    }.get(lane)
+    if channel is None:
+        raise ArchiveMessageAdapterError("archive message match lane is invalid")
     return ArchiveSearchCandidate.create(
         corpus=ArchiveSearchCorpus.MESSAGES,
         resolved_source=resolved,
         review_state=ArchiveReviewState.NOT_APPLICABLE,
         evidence_authority=ArchiveEvidenceAuthority.CANONICAL,
         lifecycle_state=lifecycle,
-        matches=(ArchiveMatchRank(ArchiveMatchChannel.MESSAGE_HISTORY, rank),),
+        matches=(ArchiveMatchRank(channel, rank),),
         title=ledger.conversation_title or "Переписка",
         temporal_facts=facts,
         passages=passages,
@@ -358,6 +365,7 @@ class ArchiveMessageLaneProjection(_ProcessPrivate):
     backend_capped: bool
     applied_limit: int
     index_state: CatalogIndexState
+    selection_lane: SearchLane
     _request_identity: str
     _actor_handle: str
     _snapshot_handle: str
@@ -384,6 +392,8 @@ class ArchiveMessageLaneProjection(_ProcessPrivate):
             or type(self.applied_limit) is not int
             or not 1 <= self.applied_limit <= MAX_ARCHIVE_MATERIALIZED_CANDIDATES
             or type(self.index_state) is not CatalogIndexState
+            or type(self.selection_lane) is not SearchLane
+            or self.selection_lane not in {SearchLane.MESSAGE_HISTORY, SearchLane.LEXICAL}
             or type(self._request_identity) is not str
             or type(self._actor_handle) is not str
             or type(self._snapshot_handle) is not str
@@ -412,6 +422,7 @@ class ArchiveMessageLaneProjection(_ProcessPrivate):
             "index_state": self.index_state.to_private_payload(),
             "matched_at_least": self.matched_at_least,
             "request_identity": self._request_identity,
+            "selection_lane": self.selection_lane.value,
             "selection_handle": self._selection_handle,
             "snapshot_handle": self._snapshot_handle,
         }
@@ -463,8 +474,7 @@ class ArchiveMessageLaneProjection(_ProcessPrivate):
                 principal_id=principal,
             )
             or not execution_binding.attests_snapshot(snapshot)
-            or (SearchCorpus.CONVERSATION, SearchLane.MESSAGE_HISTORY)
-            not in execution_binding.requested_targets
+            or (SearchCorpus.CONVERSATION, self.selection_lane) not in execution_binding.requested_targets
             or not hmac.compare_digest(self._execution_handle, execution_binding.opaque_handle)
             or not hmac.compare_digest(self._actor_handle, actor_handle)
             or not hmac.compare_digest(self._snapshot_handle, snapshot_handle)
@@ -474,21 +484,21 @@ class ArchiveMessageLaneProjection(_ProcessPrivate):
             raise ArchiveMessageAdapterError("archive message coverage proof is invalid")
         status = self.index_state.status
         if status is CatalogIndexStatus.CURRENT:
-            states: tuple[CoverageState, ...]
+            current_states: tuple[CoverageState, ...]
             if self.backend_capped:
-                states = (CoverageState.CAPPED, CoverageState.PARTIAL)
+                current_states = (CoverageState.CAPPED, CoverageState.PARTIAL)
             else:
-                states = (CoverageState.COMPLETE,)
+                current_states = (CoverageState.COMPLETE,)
             return SearchCoverage.create(
                 corpus=SearchCorpus.CONVERSATION,
-                lane=SearchLane.MESSAGE_HISTORY,
+                lane=self.selection_lane,
                 execution_binding=execution_binding,
-                states=states,
+                states=current_states,
                 eligible_authorized=self.eligible_authorized,
                 examined=self.examined,
                 matched_at_least=self.matched_at_least,
                 returned=returned,
-                limit=self.applied_limit if CoverageState.CAPPED in states else None,
+                limit=(self.applied_limit if CoverageState.CAPPED in current_states else None),
                 next_cursor_available=False,
                 authority_rechecked=True,
                 snapshot_current=True,
@@ -502,17 +512,26 @@ class ArchiveMessageLaneProjection(_ProcessPrivate):
             self.index_state.incomplete_reason,
             CoverageState.UNAVAILABLE,
         )
+        selected_partial = bool(
+            self.selection_lane is SearchLane.LEXICAL
+            and status is CatalogIndexStatus.PARTIAL
+            and self.index_state.incomplete_reason is IndexIncompleteReason.BACKFILL_PENDING
+        )
+        partial_states = {CoverageState.PARTIAL, reason}
+        if selected_partial and self.backend_capped:
+            partial_states.add(CoverageState.CAPPED)
         return SearchCoverage.create(
             corpus=SearchCorpus.CONVERSATION,
-            lane=SearchLane.MESSAGE_HISTORY,
+            lane=self.selection_lane,
             execution_binding=execution_binding,
-            states=(CoverageState.PARTIAL, reason),
+            states=partial_states,
             eligible_authorized=None,
-            examined=0,
-            matched_at_least=0,
-            returned=0,
+            examined=self.examined if selected_partial else 0,
+            matched_at_least=self.matched_at_least if selected_partial else 0,
+            returned=returned if selected_partial else 0,
+            limit=self.applied_limit if selected_partial and self.backend_capped else None,
             authority_rechecked=True,
-            snapshot_current=False,
+            snapshot_current=selected_partial,
         )
 
 
@@ -525,6 +544,7 @@ def project_archive_message_page(
     index_state: CatalogIndexState,
     execution_binding: SearchExecutionBinding,
     snapshot_discriminator: str,
+    selection_lane: SearchLane = SearchLane.MESSAGE_HISTORY,
     current_conversation_id: str | None = None,
     boundary_user_message_id: str | None = None,
 ) -> ArchiveMessageLaneProjection:
@@ -539,6 +559,9 @@ def project_archive_message_page(
             or type(page) is not ArchiveMessageSearchPage
             or not page.is_valid()
             or type(execution_binding) is not SearchExecutionBinding
+            or type(selection_lane) is not SearchLane
+            or selection_lane not in {SearchLane.MESSAGE_HISTORY, SearchLane.LEXICAL}
+            or page.selection_lane is not selection_lane
         ):
             raise ArchiveMessageAdapterError("archive message projection input is invalid")
         request_identity = request.to_identity_json()
@@ -550,8 +573,7 @@ def project_archive_message_page(
                 principal_id=principal,
             )
             or not execution_binding.attests_snapshot(snapshot)
-            or (SearchCorpus.CONVERSATION, SearchLane.MESSAGE_HISTORY)
-            not in execution_binding.requested_targets
+            or (SearchCorpus.CONVERSATION, selection_lane) not in execution_binding.requested_targets
         ):
             raise ArchiveMessageAdapterError("archive message execution binding is invalid")
         controls = archive_message_storage_controls(request)
@@ -597,7 +619,12 @@ def project_archive_message_page(
         examined = 0
         matched = 0
         backend_capped = False
-        if derivative.status is CatalogIndexStatus.CURRENT:
+        selected_partial = bool(
+            selection_lane is SearchLane.LEXICAL
+            and derivative.status is CatalogIndexStatus.PARTIAL
+            and derivative.incomplete_reason is IndexIncompleteReason.BACKFILL_PENDING
+        )
+        if derivative.status is CatalogIndexStatus.CURRENT or selected_partial:
             grouped: dict[str, list[ArchiveMessageHit]] = defaultdict(list)
             for hit in page.hits:
                 grouped[hit.message.conversation_id].append(hit)
@@ -617,11 +644,12 @@ def project_archive_message_page(
                     principal,
                     tuple(sorted(values, key=lambda item: item.match_rank)),
                     rank=rank,
+                    lane=selection_lane,
                 )
                 for rank, values in enumerate(ordered, 1)
             )
             candidates = all_candidates[: page.limit]
-            eligible = page.examined
+            eligible = page.examined if derivative.status is CatalogIndexStatus.CURRENT else None
             examined = page.examined
             # Coverage ranks and returned values count stable conversation
             # candidates, not the individual matching rows grouped into them.
@@ -645,6 +673,7 @@ def project_archive_message_page(
             backend_capped,
             page.limit,
             derivative,
+            selection_lane,
             request_identity,
             actor_handle,
             snapshot_handle,

@@ -236,8 +236,8 @@ def _released_passage_database_snapshot(database: Path) -> tuple[object, ...]:
 def test_schema_48_is_exact_body_free_raw_bound_and_fingerprinted(
     storage: FridayStorage,
 ) -> None:
-    assert SCHEMA_VERSION == 49
-    assert storage.execute("SELECT value FROM schema_meta WHERE key='schema_version'").fetchone()[0] == "49"
+    assert SCHEMA_VERSION == 50
+    assert storage.execute("SELECT value FROM schema_meta WHERE key='schema_version'").fetchone()[0] == "50"
     assert DOCUMENT_PASSAGE_INDEX_REVISION == PROJECTION_PASSAGE_INDEX_REVISION
     observed = {
         (str(row[0]), str(row[1])): "".join(str(row[2]).split())
@@ -571,7 +571,7 @@ def test_exact_47_to_48_migration_carries_only_exact_v3_current_identity(
             ).fetchall()
         )
 
-        assert marker is not None and tuple(marker) == ("49",)
+        assert marker is not None and tuple(marker) == ("50",)
         assert parent is not None
         assert tuple(parent[:6]) == predecessor_parent[:6]
         assert parent["passage_index_revision"] == DOCUMENT_PASSAGE_INDEX_REVISION
@@ -746,7 +746,7 @@ def test_exact_46_migration_survives_and_reopen_is_idempotent(settings, tmp_path
     database = _unpack_schema_46(tmp_path, "schema46-to-48.sqlite3")
     first = FridayStorage(replace(settings, database_path=database, database_must_exist=True))
     try:
-        assert first.execute("SELECT value FROM schema_meta WHERE key='schema_version'").fetchone()[0] == "49"
+        assert first.execute("SELECT value FROM schema_meta WHERE key='schema_version'").fetchone()[0] == "50"
         live_files = first.execute(
             """SELECT COUNT(*) FROM raw_objects
                  WHERE content_type='file' AND deleted_at IS NULL"""

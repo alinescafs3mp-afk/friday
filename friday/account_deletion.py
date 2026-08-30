@@ -25,6 +25,14 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from friday.conversation_passages.worker_state import (
+    CONVERSATION_PASSAGE_OWNER_SCAN_PREFIX,
+    CONVERSATION_PASSAGE_WORKER_STATE_KEY,
+    conversation_passage_owner_scan_key,
+    decode_conversation_passage_scan_cursor,
+    decode_conversation_passage_worker_state,
+    load_conversation_passage_worker_namespace_key,
+)
 from friday.document_catalog.worker_state import (
     DOCUMENT_CATALOG_WORKER_STATE_KEY,
     document_catalog_worker_entry_fingerprint,
@@ -65,6 +73,13 @@ class _Scope:
     key: str
     table: str
     predicate: str
+
+
+@dataclass(frozen=True, slots=True)
+class _ConversationPassageOwnerScanInventory:
+    target_fingerprint: str | None
+    target_value: str | None
+    unknown_hashes: tuple[str, ...]
 
 
 # Every row which is owned directly by an account, in foreign-key-safe deletion
@@ -434,12 +449,32 @@ def _runtime_key_inventory(conn: sqlite3.Connection, user_id: str) -> tuple[list
 
     owned: list[str] = []
     ambiguous_hashes: list[str] = []
+    conversation_worker_row = conn.execute(
+        "SELECT value FROM runtime_kv WHERE key=?",
+        (CONVERSATION_PASSAGE_WORKER_STATE_KEY,),
+    ).fetchone()
+    conversation_worker_supported = True
+    if conversation_worker_row is not None:
+        _state, conversation_worker_supported = decode_conversation_passage_worker_state(
+            conversation_worker_row["value"]
+        )
     for row in conn.execute("SELECT key FROM runtime_kv ORDER BY key"):
-        key = str(row["key"])
-        if key == DOCUMENT_CATALOG_WORKER_STATE_KEY:
-            # Account ownership is hash-keyed inside this one shared row and is
-            # inventoried independently below; substring matching its global key
-            # would both miss ownership and falsely claim accounts named "catalog".
+        raw_key = row["key"]
+        if type(raw_key) is bytes and raw_key == CONVERSATION_PASSAGE_WORKER_STATE_KEY.encode("ascii"):
+            ambiguous_hashes.append(hashlib.sha256(raw_key).hexdigest())
+            continue
+        key = str(raw_key)
+        if key == CONVERSATION_PASSAGE_WORKER_STATE_KEY:
+            if not conversation_worker_supported:
+                ambiguous_hashes.append(hashlib.sha256(key.encode("utf-8")).hexdigest())
+            continue
+        if key == DOCUMENT_CATALOG_WORKER_STATE_KEY or key.startswith(CONVERSATION_PASSAGE_OWNER_SCAN_PREFIX):
+            # DocumentCatalog's shared row and each conversation scan key are
+            # inventoried by their exact keyed identities below. Substring matching
+            # these global/opaque keys would falsely claim accounts named "catalog",
+            # "workers" or another code-owned key fragment. The conversation
+            # rotation row is exempted above only after its exact identity-free v3
+            # representation has been authenticated.
             continue
         owners = known_runtime_key_owners(key)
         if owners == {user_id}:
@@ -465,6 +500,66 @@ def _document_catalog_worker_runtime_inventory(
         row["value"],
         user_id,
         namespace_key=load_document_catalog_worker_namespace_key(conn),
+    )
+
+
+def _conversation_passage_owner_scan_runtime_inventory(
+    conn: sqlite3.Connection,
+    user_id: str,
+) -> _ConversationPassageOwnerScanInventory:
+    """Close and inventory the finite HMAC checkpoint namespace."""
+
+    namespace_key = load_conversation_passage_worker_namespace_key(conn)
+    try:
+        target_key = conversation_passage_owner_scan_key(user_id, namespace_key=namespace_key)
+    except (TypeError, ValueError):
+        target_key = None
+    legitimate_keys: set[str] = set()
+    for row in conn.execute("SELECT id FROM users ORDER BY id"):
+        try:
+            legitimate_keys.add(
+                conversation_passage_owner_scan_key(
+                    row["id"],
+                    namespace_key=namespace_key,
+                )
+            )
+        except (TypeError, ValueError):
+            # Historical malformed user ids cannot have been admitted by the
+            # code-owned HMAC checkpoint writer. A row claiming one below is
+            # consequently outside the legitimate finite namespace.
+            continue
+
+    target_fingerprint: str | None = None
+    target_value: str | None = None
+    unknown_hashes: list[str] = []
+    for row in conn.execute(
+        "SELECT key,value FROM runtime_kv ORDER BY key",
+    ):
+        raw_key = row["key"]
+        if type(raw_key) is bytes:
+            if raw_key.startswith(CONVERSATION_PASSAGE_OWNER_SCAN_PREFIX.encode("ascii")):
+                unknown_hashes.append(hashlib.sha256(raw_key).hexdigest())
+            continue
+        if type(raw_key) is not str or not raw_key.startswith(CONVERSATION_PASSAGE_OWNER_SCAN_PREFIX):
+            continue
+        key = raw_key
+        value = row["value"]
+        if key not in legitimate_keys:
+            unknown_hashes.append(hashlib.sha256(key.encode("utf-8")).hexdigest())
+            continue
+        try:
+            decode_conversation_passage_scan_cursor(value)
+        except ValueError:
+            unknown_hashes.append(hashlib.sha256(key.encode("utf-8")).hexdigest())
+            continue
+        if key == target_key:
+            target_value = value
+            material = f"{key}\x00{value}".encode("utf-8", errors="strict")
+            target_fingerprint = hashlib.sha256(material).hexdigest()
+    return _ConversationPassageOwnerScanInventory(
+        target_fingerprint=target_fingerprint,
+        target_value=target_value,
+        unknown_hashes=tuple(sorted(unknown_hashes)),
     )
 
 
@@ -1312,6 +1407,14 @@ def _preflight(
     )
     if catalog_worker_fingerprint is not None:
         counts["document_catalog_worker_state"] = 1
+    conversation_passage_owner_scan_inventory = _conversation_passage_owner_scan_runtime_inventory(
+        conn, user_id
+    )
+    conversation_passage_owner_scan_fingerprint = conversation_passage_owner_scan_inventory.target_fingerprint
+    conversation_passage_owner_scan_unknown_hashes = conversation_passage_owner_scan_inventory.unknown_hashes
+    conversation_passage_owner_scan_supported = not conversation_passage_owner_scan_unknown_hashes
+    if conversation_passage_owner_scan_fingerprint is not None:
+        counts["conversation_passage_owner_scan_state"] = 1
 
     raw_files_row = conn.execute(
         "SELECT COUNT(*) AS count FROM raw_objects WHERE user_id=? AND content_type='file'",
@@ -1492,7 +1595,11 @@ def _preflight(
         block("runtime_event_history", runtime_event_references)
     if cross_account_chat_derivatives:
         block("cross_account_chat_derivatives", cross_account_chat_derivatives)
-    unknown_runtime_count = len(ambiguous_runtime_hashes) + int(not catalog_worker_state_supported)
+    unknown_runtime_count = (
+        len(ambiguous_runtime_hashes)
+        + int(not catalog_worker_state_supported)
+        + len(conversation_passage_owner_scan_unknown_hashes)
+    )
     if unknown_runtime_count:
         block("unknown_runtime_scope", unknown_runtime_count)
     if identity_collisions:
@@ -1523,6 +1630,7 @@ def _preflight(
     retained = {"audit_log": int(retained_audit_row["count"] if retained_audit_row else 0)}
     nonzero_counts = {key: value for key, value in counts.items() if value}
     deletion_keys = {scope.key for scope in _DELETE_SCOPES} | {
+        "conversation_passage_owner_scan_state",
         "deletion_eligibility",
         "document_catalog_worker_state",
         "runtime_kv",
@@ -1554,6 +1662,9 @@ def _preflight(
         "ambiguous_runtime_hashes": ambiguous_runtime_hashes,
         "document_catalog_worker_fingerprint": catalog_worker_fingerprint,
         "document_catalog_worker_state_supported": catalog_worker_state_supported,
+        "conversation_passage_owner_scan_fingerprint": (conversation_passage_owner_scan_fingerprint),
+        "conversation_passage_owner_scan_supported": conversation_passage_owner_scan_supported,
+        "conversation_passage_owner_scan_unknown_hashes": (conversation_passage_owner_scan_unknown_hashes),
         # Keys are opaque hashes.  Including them makes an identity swap with the
         # same row count invalidate the reviewed plan without exposing login ids.
         "identity_tombstone_keys": sorted(identity_tombstones),
@@ -1587,6 +1698,8 @@ def _preflight(
         "runtime_event_references": runtime_event_references,
         "cross_account_chat_derivatives": cross_account_chat_derivatives,
         "unknown_scopes": unknown_scopes,
+        "conversation_passage_owner_scan_fingerprint": (conversation_passage_owner_scan_fingerprint),
+        "conversation_passage_owner_scan_supported": conversation_passage_owner_scan_supported,
         "document_catalog_worker_fingerprint": catalog_worker_fingerprint,
         "engineer_command_inventory": engineer_inventory_payload,
     }
@@ -1735,6 +1848,34 @@ def delete_account(
             if runtime_cursor.rowcount != len(runtime_keys):
                 raise AccountDeletionConflict("Runtime-состояние изменилось во время удаления")
             deleted["runtime_kv"] = int(runtime_cursor.rowcount)
+
+        current_conversation_scan_inventory = _conversation_passage_owner_scan_runtime_inventory(
+            conn, user_id
+        )
+        current_conversation_scan_fingerprint = current_conversation_scan_inventory.target_fingerprint
+        current_conversation_scan_supported = not current_conversation_scan_inventory.unknown_hashes
+        expected_conversation_scan_fingerprint = report.get("conversation_passage_owner_scan_fingerprint")
+        if (
+            not current_conversation_scan_supported
+            or not report.get("conversation_passage_owner_scan_supported")
+            or current_conversation_scan_fingerprint != expected_conversation_scan_fingerprint
+        ):
+            raise AccountDeletionConflict("Conversation passage runtime-состояние изменилось")
+        if expected_conversation_scan_fingerprint is not None:
+            conversation_scan_key = conversation_passage_owner_scan_key(
+                user_id,
+                namespace_key=load_conversation_passage_worker_namespace_key(conn),
+            )
+            conversation_scan_cursor = conn.execute(
+                "DELETE FROM runtime_kv WHERE key=? AND value=?",
+                (
+                    conversation_scan_key,
+                    current_conversation_scan_inventory.target_value,
+                ),
+            )
+            if conversation_scan_cursor.rowcount != 1:
+                raise AccountDeletionConflict("Conversation passage runtime-состояние изменилось")
+            deleted["conversation_passage_owner_scan_state"] = 1
 
         if int(report["counts"].get("document_catalog_worker_state") or 0):
             catalog_state_row = conn.execute(

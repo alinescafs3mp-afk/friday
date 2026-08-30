@@ -997,7 +997,7 @@ async def test_missing_active_source_evidence_still_requires_reauth_before_mutat
 
 
 @pytest.mark.asyncio
-async def test_model_selected_source_search_lineage_persistence_failure_never_projects_private_row(
+async def test_internal_source_search_lineage_persistence_failure_never_projects_private_row(
     settings: Any,
     storage: Any,
     monkeypatch: pytest.MonkeyPatch,
@@ -1021,20 +1021,19 @@ async def test_model_selected_source_search_lineage_persistence_failure_never_pr
 
     response = await runtime.chat(
         _OWNER,
-        "Расскажи про ORION-LINEAGE",
+        "Найди в ранее загруженном файле ORION-LINEAGE marker",
         actor=authorization.actor_for_user(_OWNER, source="synthetic-test"),
         enable_tools=True,
         hybrid_searcher=_EmptySearcher(),
     )
 
-    assert model.primary_calls == 1
-    assert model.second_model_serialized
-    assert _LINEAGE_SOURCE_CANARY not in model.second_model_serialized
+    assert model.primary_calls == 0
+    assert model.second_model_serialized == ""
     assert model.second_offered_names == set()
     assert kernel.executed == [
         (
             "source_search",
-            {"query": "ORION-LINEAGE", "focus": "ORION-LINEAGE marker", "limit": 10},
+            {"query": "orion-lineage", "focus": "orion-lineage", "limit": 10},
         )
     ]
     public = json.dumps(response, ensure_ascii=False, sort_keys=True)

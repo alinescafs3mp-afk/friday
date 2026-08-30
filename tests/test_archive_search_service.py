@@ -11,6 +11,7 @@ from typing import Any
 import pytest
 
 import friday.retrieval.archive_search_service as service_module
+import friday.storage._archive_search_messages as message_storage_module
 from friday.organs.obsidian import OBSIDIAN_READ
 from friday.permissions import ActorContext, AuthorizationService
 from friday.retrieval.archive_search_authority import (
@@ -21,6 +22,7 @@ from friday.retrieval.archive_search_authority import (
     create_archive_model_batch_ledger,
 )
 from friday.retrieval.archive_search_contract import (
+    ArchiveContextWindow,
     ArchiveEvidenceAuthority,
     ArchiveMatchChannel,
     ArchiveMatchRank,
@@ -36,6 +38,11 @@ from friday.retrieval.archive_search_service import (
     reauthorize_archive_search_candidate,
     reauthorize_archive_search_coverage,
     refresh_archive_search_reauthorization_in_transaction,
+)
+from friday.retrieval.catalog_contract import (
+    CatalogIndexLane,
+    CatalogIndexState,
+    CatalogIndexStatus,
 )
 from friday.retrieval.contracts import (
     AuthorityScope,
@@ -317,9 +324,606 @@ def test_message_history_uses_authorized_context_and_leaves_other_lanes_unavaila
         )
     payload = _payload(prepared)
     assert len(payload["candidates"]) == 1
+    assert payload["absence"] == "evidence_found"
     assert _coverage(payload, SearchLane.MESSAGE_HISTORY)["states"] == ["complete"]
-    assert _coverage(payload, SearchLane.LEXICAL)["states"] == ["unavailable"]
+    assert _coverage(payload, SearchLane.LEXICAL)["states"] == [
+        CoverageState.BACKFILL_PENDING.value,
+        CoverageState.CAPPED.value,
+        CoverageState.PARTIAL.value,
+    ]
+    assert payload["candidates"][0]["match_channels"] == [ArchiveMatchChannel.MESSAGE_HISTORY.value]
     assert _coverage(payload, SearchLane.DENSE)["states"] == ["unavailable"]
+
+
+def test_complete_message_history_is_the_authoritative_zero_hit_conversation_lane(
+    storage: Any,
+) -> None:
+    authorization = _seed_authority(storage)
+    boundary = _message_boundary(storage)
+    request = ArchiveSearchRequest.create(
+        query="zero-hit-conversation-canary-absent",
+        corpora=(ArchiveSearchCorpus.MESSAGES,),
+    )
+    with storage.transaction() as conn:
+        prepared = prepare_archive_search_in_transaction(
+            conn,
+            authorization=authorization,
+            actor=_actor(),
+            tenant_id=TENANT,
+            principal_id=PRINCIPAL,
+            request=request,
+            snapshot_discriminator=SNAPSHOT,
+            run_discriminator="messages-authoritative-zero-hit",
+            turn_ledger=_ledger(),
+            current_conversation_id=boundary[0],
+            boundary_user_message_id=boundary[1],
+        )
+
+    payload = _payload(prepared)
+    history = _coverage(payload, SearchLane.MESSAGE_HISTORY)
+    lexical = _coverage(payload, SearchLane.LEXICAL)
+    assert payload["candidates"] == []
+    assert history["states"] == [CoverageState.COMPLETE.value]
+    assert history["matched_at_least"] == 0
+    assert history["authority_rechecked"] is True
+    assert history["snapshot_current"] is True
+    assert CoverageState.PARTIAL.value in lexical["states"]
+    assert payload["absence"] == "authorized_absence_confirmed"
+
+
+def test_conversation_lexical_lane_reuses_exact_context_when_legacy_fts_is_unavailable(
+    storage: Any,
+) -> None:
+    authorization = _seed_authority(storage)
+    conversation = storage.create_conversation(PRINCIPAL, "Conversation passage source")
+    storage.store_message(
+        conversation["id"],
+        PRINCIPAL,
+        "user",
+        "passage-lane-needle private body",
+    )
+    storage.store_message(
+        conversation["id"],
+        PRINCIPAL,
+        "assistant",
+        "Adjacent lexical context",
+    )
+    boundary = storage.store_message(
+        conversation["id"],
+        PRINCIPAL,
+        "user",
+        "current archive request",
+    )
+    report = storage.backfill_conversation_passages(PRINCIPAL, limit=8)
+    assert report["has_more"] is False
+    assert report["anchors_written"] == 3
+    with storage.transaction() as conn:
+        conn.execute("DROP TABLE messages_fts")
+
+    request = ArchiveSearchRequest.create(
+        query="passage-lane-needle",
+        corpora=(ArchiveSearchCorpus.MESSAGES,),
+        context=ArchiveContextWindow(before=0, after=1),
+    )
+    with storage.transaction() as conn:
+        prepared = prepare_archive_search_in_transaction(
+            conn,
+            authorization=authorization,
+            actor=_actor(),
+            tenant_id=TENANT,
+            principal_id=PRINCIPAL,
+            request=request,
+            snapshot_discriminator=SNAPSHOT,
+            run_discriminator="conversation-lexical-live",
+            turn_ledger=_ledger(),
+            current_conversation_id=conversation["id"],
+            boundary_user_message_id=boundary["id"],
+        )
+
+    payload = _payload(prepared)
+    assert len(payload["candidates"]) == 1
+    assert payload["candidates"][0]["match_channels"] == [ArchiveMatchChannel.LEXICAL.value]
+    assert "Adjacent lexical context" in payload["candidates"][0]["passages"][0]["excerpt"]
+    assert _coverage(payload, SearchLane.LEXICAL)["states"] == [
+        CoverageState.BACKFILL_PENDING.value,
+        CoverageState.CAPPED.value,
+        CoverageState.PARTIAL.value,
+    ]
+    assert _coverage(payload, SearchLane.MESSAGE_HISTORY)["states"] == [
+        CoverageState.PARTIAL.value,
+        CoverageState.UNAVAILABLE.value,
+    ]
+    assert _coverage(payload, SearchLane.DENSE)["states"] == [CoverageState.UNAVAILABLE.value]
+
+
+def test_conversation_lexical_and_legacy_lanes_merge_one_exact_replay_source(storage: Any) -> None:
+    authorization = _seed_authority(storage)
+    conversation = storage.create_conversation(PRINCIPAL, "Merged conversation source")
+    storage.store_message(
+        conversation["id"],
+        PRINCIPAL,
+        "user",
+        "merged-passage-needle private body",
+    )
+    boundary = storage.store_message(
+        conversation["id"],
+        PRINCIPAL,
+        "user",
+        "current archive request",
+    )
+    assert storage.backfill_conversation_passages(PRINCIPAL, limit=8)["has_more"] is False
+    request = ArchiveSearchRequest.create(
+        query="merged-passage-needle",
+        corpora=(ArchiveSearchCorpus.MESSAGES,),
+    )
+    ledger = _ledger()
+    with storage.transaction() as conn:
+        prepared = prepare_archive_search_in_transaction(
+            conn,
+            authorization=authorization,
+            actor=_actor(),
+            tenant_id=TENANT,
+            principal_id=PRINCIPAL,
+            request=request,
+            snapshot_discriminator=SNAPSHOT,
+            run_discriminator="conversation-lexical-merge",
+            turn_ledger=ledger,
+            current_conversation_id=conversation["id"],
+            boundary_user_message_id=boundary["id"],
+        )
+    payload = _payload(prepared)
+    assert len(payload["candidates"]) == 1
+    assert payload["candidates"][0]["match_channels"] == [
+        ArchiveMatchChannel.LEXICAL.value,
+        ArchiveMatchChannel.MESSAGE_HISTORY.value,
+    ]
+    assert _coverage(payload, SearchLane.LEXICAL)["states"] == [
+        CoverageState.BACKFILL_PENDING.value,
+        CoverageState.CAPPED.value,
+        CoverageState.PARTIAL.value,
+    ]
+    assert _coverage(payload, SearchLane.MESSAGE_HISTORY)["states"] == [CoverageState.COMPLETE.value]
+
+    ledger.admit_model_tool_bytes(
+        prepared.run_binding,
+        prepared.authorized_batch,
+        prepared.authorized_batch.model_visible_canonical_bytes,
+    )
+    ledger.freeze_for_publication()
+    with storage.transaction() as conn:
+        context = refresh_archive_search_reauthorization_in_transaction(
+            conn,
+            authorization=authorization,
+            actor=_actor(),
+            tenant_id=TENANT,
+            principal_id=PRINCIPAL,
+            prepared_searches=(prepared,),
+        )
+    attestation = attest_archive_search_before_publication(
+        tenant_id=TENANT,
+        principal_id=PRINCIPAL,
+        ledger=ledger,
+        answer="One exact merged source",
+        candidate_reauthorizer=reauthorize_archive_search_candidate,
+        coverage_reauthorizer=reauthorize_archive_search_coverage,
+        authority_context=context,
+    )
+    assert attestation.attests_answer("One exact merged source")
+
+
+def test_tampered_passage_fts_token_never_becomes_canonical_message_evidence(
+    storage: Any,
+) -> None:
+    authorization = _seed_authority(storage)
+    conversation = storage.create_conversation(PRINCIPAL, "Tampered passage token")
+    source = storage.store_message(
+        conversation["id"],
+        PRINCIPAL,
+        "user",
+        "canonical-body-token private body",
+    )
+    boundary = storage.store_message(
+        conversation["id"],
+        PRINCIPAL,
+        "user",
+        "current archive request",
+    )
+    assert storage.backfill_conversation_passages(PRINCIPAL, limit=8)["has_more"] is False
+    with storage.transaction() as conn:
+        row = conn.execute(
+            "SELECT passage_rowid FROM conversation_passages WHERE anchor_message_id=?",
+            (source["id"],),
+        ).fetchone()
+        assert row is not None
+        passage_rowid = int(row[0])
+        conn.execute(
+            "INSERT INTO conversation_passages_fts(conversation_passages_fts,rowid,content) "
+            "VALUES('delete',?,?)",
+            (passage_rowid, "canonical-body-token private body"),
+        )
+        conn.execute(
+            "INSERT INTO conversation_passages_fts(rowid,content) VALUES(?,?)",
+            (passage_rowid, "forged-passage-token"),
+        )
+
+    forged_request = ArchiveSearchRequest.create(
+        query="forged-passage-token",
+        corpora=(ArchiveSearchCorpus.MESSAGES,),
+    )
+    with storage.transaction() as conn:
+        forged = prepare_archive_search_in_transaction(
+            conn,
+            authorization=authorization,
+            actor=_actor(),
+            tenant_id=TENANT,
+            principal_id=PRINCIPAL,
+            request=forged_request,
+            snapshot_discriminator=SNAPSHOT,
+            run_discriminator="conversation-lexical-forged-token",
+            turn_ledger=_ledger(),
+            current_conversation_id=conversation["id"],
+            boundary_user_message_id=boundary["id"],
+        )
+    forged_payload = _payload(forged)
+    assert forged_payload["candidates"] == []
+    assert (
+        CoverageState.BACKFILL_PENDING.value
+        in _coverage(
+            forged_payload,
+            SearchLane.LEXICAL,
+        )["states"]
+    )
+    assert _coverage(forged_payload, SearchLane.MESSAGE_HISTORY)["states"] == [CoverageState.COMPLETE.value]
+
+    canonical_request = ArchiveSearchRequest.create(
+        query="canonical-body-token",
+        corpora=(ArchiveSearchCorpus.MESSAGES,),
+    )
+    with storage.transaction() as conn:
+        canonical = prepare_archive_search_in_transaction(
+            conn,
+            authorization=authorization,
+            actor=_actor(),
+            tenant_id=TENANT,
+            principal_id=PRINCIPAL,
+            request=canonical_request,
+            snapshot_discriminator=SNAPSHOT,
+            run_discriminator="conversation-lexical-legacy-fallback",
+            turn_ledger=_ledger(),
+            current_conversation_id=conversation["id"],
+            boundary_user_message_id=boundary["id"],
+        )
+    canonical_payload = _payload(canonical)
+    assert len(canonical_payload["candidates"]) == 1
+    assert canonical_payload["candidates"][0]["match_channels"] == [ArchiveMatchChannel.MESSAGE_HISTORY.value]
+    assert _coverage(canonical_payload, SearchLane.MESSAGE_HISTORY)["states"] == [
+        CoverageState.COMPLETE.value
+    ]
+    assert (
+        CoverageState.PARTIAL.value
+        in _coverage(
+            canonical_payload,
+            SearchLane.LEXICAL,
+        )["states"]
+    )
+
+
+def test_missing_conversation_passage_fts_degrades_to_complete_legacy_fallback(
+    storage: Any,
+) -> None:
+    authorization = _seed_authority(storage)
+    conversation = storage.create_conversation(PRINCIPAL, "Missing passage derivative")
+    storage.store_message(
+        conversation["id"],
+        PRINCIPAL,
+        "user",
+        "missing-passage-fts-needle private body",
+    )
+    boundary = storage.store_message(
+        conversation["id"],
+        PRINCIPAL,
+        "user",
+        "current archive request",
+    )
+    assert storage.backfill_conversation_passages(PRINCIPAL, limit=8)["has_more"] is False
+    with storage.transaction() as conn:
+        conn.execute("DROP TABLE conversation_passages_fts")
+
+    request = ArchiveSearchRequest.create(
+        query="missing-passage-fts-needle",
+        corpora=(ArchiveSearchCorpus.MESSAGES,),
+    )
+    with storage.transaction() as conn:
+        prepared = prepare_archive_search_in_transaction(
+            conn,
+            authorization=authorization,
+            actor=_actor(),
+            tenant_id=TENANT,
+            principal_id=PRINCIPAL,
+            request=request,
+            snapshot_discriminator=SNAPSHOT,
+            run_discriminator="missing-conversation-passage-fts",
+            turn_ledger=_ledger(),
+            current_conversation_id=conversation["id"],
+            boundary_user_message_id=boundary["id"],
+        )
+
+    payload = _payload(prepared)
+    assert len(payload["candidates"]) == 1
+    assert payload["candidates"][0]["match_channels"] == [ArchiveMatchChannel.MESSAGE_HISTORY.value]
+    assert _coverage(payload, SearchLane.LEXICAL)["states"] == [
+        CoverageState.BACKFILL_PENDING.value,
+        CoverageState.PARTIAL.value,
+        CoverageState.STALE.value,
+    ]
+    assert _coverage(payload, SearchLane.MESSAGE_HISTORY)["states"] == [CoverageState.COMPLETE.value]
+
+
+def test_conversation_lexical_request_is_shape_only_and_rechecks_a_fixed_selected_pool(
+    storage: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    authorization = _seed_authority(storage)
+    selected_owner_conversations: set[str] = set()
+    for index in range(5):
+        conversation = storage.create_conversation(PRINCIPAL, f"Selected lexical source {index}")
+        selected_owner_conversations.add(str(conversation["id"]))
+        storage.store_message(
+            conversation["id"],
+            PRINCIPAL,
+            "user",
+            f"bounded-reader-needle owner body {index}",
+        )
+    boundary_conversation = storage.create_conversation(PRINCIPAL, "Bounded reader boundary")
+    boundary = storage.store_message(
+        boundary_conversation["id"],
+        PRINCIPAL,
+        "user",
+        "current archive request",
+    )
+    foreign = "archive-service-foreign-lexical"
+    storage.ensure_user(foreign)
+    for index in range(5):
+        conversation = storage.create_conversation(foreign, f"Foreign lexical source {index}")
+        storage.store_message(
+            conversation["id"],
+            foreign,
+            "user",
+            f"bounded-reader-needle foreign body {index}",
+        )
+    assert storage.backfill_conversation_passages(PRINCIPAL, limit=32)["has_more"] is False
+    assert storage.backfill_conversation_passages(foreign, limit=32)["has_more"] is False
+
+    validation_modes: list[tuple[bool, bool]] = []
+    real_validate = message_storage_module.validate_conversation_passage_fts_schema
+
+    def recording_validate(  # noqa: ANN001, ANN202
+        conn,
+        *,
+        required=True,
+        validate_data=True,
+        _register_functions=True,
+    ):
+        validation_modes.append((bool(validate_data), bool(_register_functions)))
+        assert validate_data is False
+        assert _register_functions is False
+        return real_validate(
+            conn,
+            required=required,
+            validate_data=validate_data,
+            _register_functions=_register_functions,
+        )
+
+    reader_conversations: list[str] = []
+    real_reader = service_module.select_authorized_conversation_passage_projection_in_transaction
+
+    def recording_reader(conn, **kwargs):  # noqa: ANN001, ANN202
+        reader_conversations.append(str(kwargs["conversation_id"]))
+        return real_reader(conn, **kwargs)
+
+    monkeypatch.setattr(message_storage_module, "_CONVERSATION_LEXICAL_POOL_CAP", 2)
+    monkeypatch.setattr(
+        message_storage_module,
+        "validate_conversation_passage_fts_schema",
+        recording_validate,
+    )
+    monkeypatch.setattr(
+        service_module,
+        "select_authorized_conversation_passage_projection_in_transaction",
+        recording_reader,
+    )
+    request = ArchiveSearchRequest.create(
+        query="bounded-reader-needle",
+        corpora=(ArchiveSearchCorpus.MESSAGES,),
+    )
+    with storage.transaction() as conn:
+        prepared = prepare_archive_search_in_transaction(
+            conn,
+            authorization=authorization,
+            actor=_actor(),
+            tenant_id=TENANT,
+            principal_id=PRINCIPAL,
+            request=request,
+            snapshot_discriminator=SNAPSHOT,
+            run_discriminator="conversation-lexical-fixed-selected-pool",
+            turn_ledger=_ledger(),
+            current_conversation_id=str(boundary_conversation["id"]),
+            boundary_user_message_id=str(boundary["id"]),
+        )
+
+    payload = _payload(prepared)
+    assert validation_modes and set(validation_modes) == {(False, False)}
+    assert reader_conversations
+    assert len(reader_conversations) <= 2 * len(validation_modes)
+    assert all(reader_conversations.count(item) <= len(validation_modes) for item in reader_conversations)
+    assert set(reader_conversations) <= selected_owner_conversations
+    assert _coverage(payload, SearchLane.LEXICAL)["states"] == [
+        CoverageState.BACKFILL_PENDING.value,
+        CoverageState.CAPPED.value,
+        CoverageState.PARTIAL.value,
+    ]
+    assert _coverage(payload, SearchLane.MESSAGE_HISTORY)["states"] == [CoverageState.COMPLETE.value]
+
+
+def test_conversation_lexical_vm_work_is_flat_after_the_global_fts_pool_is_saturated(
+    storage: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _seed_authority(storage)
+    foreign = "archive-service-foreign-saturation"
+    storage.ensure_user(foreign)
+    owner_source = storage.create_conversation(PRINCIPAL, "Bounded lexical owner source")
+    owner_hit = storage.store_message(
+        owner_source["id"],
+        PRINCIPAL,
+        "user",
+        "flatpoolneedle exact owner hit",
+    )
+    boundary_conversation = storage.create_conversation(PRINCIPAL, "Bounded lexical boundary")
+    small_boundary = storage.store_message(
+        boundary_conversation["id"],
+        PRINCIPAL,
+        "user",
+        "small corpus boundary",
+    )
+    foreign_source = storage.create_conversation(foreign, "Foreign saturated postings")
+    for index in range(17):
+        storage.store_message(
+            foreign_source["id"],
+            foreign,
+            "user",
+            f"flatpoolneedle initial foreign posting {index}",
+        )
+
+    def converge(owner: str) -> None:
+        cursor: str | None = None
+        for _attempt in range(16):
+            report = storage.backfill_conversation_passages(
+                owner,
+                resume_at_conversation_id=cursor,
+                limit=256,
+            )
+            if report["has_more"] is False:
+                return
+            cursor = report["next_resume_conversation_id"]
+        raise AssertionError("conversation-passage setup did not converge")
+
+    converge(PRINCIPAL)
+    converge(foreign)
+    monkeypatch.setattr(message_storage_module, "_CONVERSATION_LEXICAL_POOL_CAP", 16)
+
+    def optimize_fts() -> None:
+        with storage.transaction() as conn:
+            conn.execute(
+                "INSERT INTO conversation_passages_fts(conversation_passages_fts) VALUES('optimize')"
+            )
+
+    def measured(boundary_id: str) -> tuple[Any, int, dict[str, int], tuple[str, ...]]:
+        instruction_blocks = 0
+        statement = "unknown"
+        per_statement: dict[str, int] = {}
+        main_sql: list[str] = []
+
+        def trace(sql: str) -> None:
+            nonlocal statement
+            normalized = " ".join(sql.split())
+            if "fts_pool_with_sentinel" in sql and not main_sql:
+                main_sql.append(sql)
+            statement = (
+                "main"
+                if "fts_pool_with_sentinel" in sql
+                else "ledger"
+                if "selected_owned AS MATERIALIZED" in sql
+                else "schema"
+                if "sqlite_master" in sql or "table_info" in sql or "foreign_key_list" in sql
+                else f"preflight:{normalized[:120]}"
+            )
+
+        def progress() -> int:
+            nonlocal instruction_blocks
+            instruction_blocks += 1
+            per_statement[statement] = per_statement.get(statement, 0) + 1
+            return 0
+
+        with storage.transaction() as conn:
+            conn.set_trace_callback(trace)
+            conn.set_progress_handler(progress, 100)
+            try:
+                page = message_storage_module._materialize_authorized_archive_message_page_in_transaction(  # noqa: SLF001
+                    conn,
+                    principal_id=PRINCIPAL,
+                    query="flatpoolneedle",
+                    selection_lane=SearchLane.LEXICAL,
+                    scope=message_storage_module.ArchiveMessageScope.ALL,
+                    conversation_id=str(boundary_conversation["id"]),
+                    boundary_user_message_id=boundary_id,
+                    limit=20,
+                )
+            finally:
+                conn.set_progress_handler(None, 0)
+                conn.set_trace_callback(None)
+            plan = tuple(str(row[3]) for row in conn.execute("EXPLAIN QUERY PLAN " + main_sql[0]).fetchall())
+        return page, instruction_blocks, per_statement, plan
+
+    optimize_fts()
+    small_page, small_blocks, small_statements, small_plan = measured(str(small_boundary["id"]))
+    assert small_page is not None and len(small_page.hits) == 1
+    assert small_page.hits[0].message.message_id == owner_hit["id"]
+
+    for index in range(512):
+        storage.store_message(
+            foreign_source["id"],
+            foreign,
+            "user",
+            f"flatpoolneedle added foreign posting {index}",
+        )
+    converge(foreign)
+    optimize_fts()
+    foreign_page, foreign_blocks, foreign_statements, foreign_plan = measured(str(small_boundary["id"]))
+    assert foreign_page is not None and len(foreign_page.hits) == 1
+    assert foreign_page.hits[0].message.message_id == owner_hit["id"]
+    owner_unrelated = storage.create_conversation(PRINCIPAL, "Owner nonmatching corpus")
+    for _index in range(512):
+        storage.store_message(
+            owner_unrelated["id"],
+            PRINCIPAL,
+            "user",
+            "owner nonmatching passage",
+        )
+    large_boundary = storage.store_message(
+        boundary_conversation["id"],
+        PRINCIPAL,
+        "user",
+        "large corpus boundary",
+    )
+    converge(PRINCIPAL)
+
+    optimize_fts()
+    large_page, large_blocks, large_statements, large_plan = measured(str(large_boundary["id"]))
+    assert large_page is not None and len(large_page.hits) == 1
+    assert large_page.hits[0].message.message_id == owner_hit["id"]
+    assert foreign_blocks <= small_blocks + max(25, small_blocks // 5), (
+        small_blocks,
+        foreign_blocks,
+        large_blocks,
+        small_statements,
+        foreign_statements,
+        large_statements,
+        small_plan,
+        foreign_plan,
+        large_plan,
+    )
+    assert large_blocks <= foreign_blocks + max(25, foreign_blocks // 5), (
+        small_blocks,
+        foreign_blocks,
+        large_blocks,
+        small_statements,
+        foreign_statements,
+        large_statements,
+        small_plan,
+        foreign_plan,
+        large_plan,
+    )
 
 
 def test_message_continuation_is_bound_to_the_original_accepted_turn(
@@ -463,6 +1067,156 @@ def test_message_publication_refresh_rejects_pre_boundary_drift(
         )
 
 
+def test_message_publication_refresh_rejects_boundary_identity_drift_with_stable_candidates(
+    storage: Any,
+) -> None:
+    authorization = _seed_authority(storage)
+    conversation = storage.create_conversation(PRINCIPAL, "Mutable accepted boundary")
+    storage.store_message(
+        conversation["id"],
+        PRINCIPAL,
+        "user",
+        "stable-boundary-candidate private body",
+    )
+    boundary = storage.store_message(
+        conversation["id"],
+        PRINCIPAL,
+        "user",
+        "current archive request",
+    )
+    request = ArchiveSearchRequest.create(
+        query="stable-boundary-candidate",
+        corpora=(ArchiveSearchCorpus.MESSAGES,),
+    )
+    ledger = _ledger()
+    with storage.transaction() as conn:
+        prepared = prepare_archive_search_in_transaction(
+            conn,
+            authorization=authorization,
+            actor=_actor(),
+            tenant_id=TENANT,
+            principal_id=PRINCIPAL,
+            request=request,
+            snapshot_discriminator=SNAPSHOT,
+            run_discriminator="message-boundary-identity-refresh",
+            turn_ledger=ledger,
+            current_conversation_id=conversation["id"],
+            boundary_user_message_id=boundary["id"],
+        )
+    original_candidate = prepared.authorized_batch._page.results[0].candidate.to_private_payload()
+    original_boundary_identity = prepared._recipe.accepted_boundary_identity_sha256
+    assert original_boundary_identity is not None
+
+    with storage.transaction() as conn:
+        conn.execute("DROP TRIGGER messages_are_never_rewritten")
+        conn.execute(
+            "UPDATE messages SET content='changed accepted boundary' WHERE id=?",
+            (boundary["id"],),
+        )
+
+    controls = service_module.archive_message_storage_controls(request)
+    with storage.transaction() as conn:
+        fresh_page = service_module.select_authorized_archive_message_page_in_transaction(
+            conn,
+            principal_id=PRINCIPAL,
+            query=request.query,
+            selection_lane=SearchLane.MESSAGE_HISTORY,
+            scope=controls["scope"],
+            conversation_id=conversation["id"],
+            boundary_user_message_id=boundary["id"],
+            roles=controls["roles"],
+            lifecycle_states=controls["lifecycle_states"],
+            since=controls["since"],
+            until=controls["until"],
+            limit=service_module._materialized_lane_limit(request),
+            context_before=controls["context_before"],
+            context_after=controls["context_after"],
+        )
+        assert fresh_page is not None
+        assert fresh_page.boundary_identity_sha256 != original_boundary_identity
+        fresh_projection = service_module.project_archive_message_page(
+            tenant_id=TENANT,
+            principal_id=PRINCIPAL,
+            request=request,
+            page=fresh_page,
+            index_state=CatalogIndexState(
+                CatalogIndexLane.LEXICAL,
+                CatalogIndexStatus.CURRENT,
+                None,
+            ),
+            execution_binding=prepared.run_binding.execution_binding,
+            snapshot_discriminator=prepared._recipe.snapshot_discriminator,
+            selection_lane=SearchLane.MESSAGE_HISTORY,
+            current_conversation_id=conversation["id"],
+            boundary_user_message_id=boundary["id"],
+        )
+    assert fresh_projection.candidates[0].to_private_payload() == original_candidate
+
+    with storage.transaction() as conn, pytest.raises(ArchiveSearchServiceError):
+        refresh_archive_search_reauthorization_in_transaction(
+            conn,
+            authorization=authorization,
+            actor=_actor(),
+            tenant_id=TENANT,
+            principal_id=PRINCIPAL,
+            prepared_searches=(prepared,),
+        )
+
+
+def test_boundary_drift_cannot_hide_behind_two_unchanged_unavailable_message_lanes(
+    storage: Any,
+) -> None:
+    authorization = _seed_authority(storage)
+    conversation = storage.create_conversation(PRINCIPAL, "Unavailable message lanes")
+    boundary = storage.store_message(
+        conversation["id"],
+        PRINCIPAL,
+        "user",
+        "current archive request",
+    )
+    with storage.transaction() as conn:
+        conn.execute("UPDATE schema_meta SET value='stale' WHERE key='fts_build'")
+        conn.execute("UPDATE schema_meta SET value='stale' WHERE key='conversation_passage_fts_build'")
+    request = ArchiveSearchRequest.create(
+        query="no materialized candidate",
+        corpora=(ArchiveSearchCorpus.MESSAGES,),
+    )
+    with storage.transaction() as conn:
+        prepared = prepare_archive_search_in_transaction(
+            conn,
+            authorization=authorization,
+            actor=_actor(),
+            tenant_id=TENANT,
+            principal_id=PRINCIPAL,
+            request=request,
+            snapshot_discriminator=SNAPSHOT,
+            run_discriminator="message-boundary-unavailable-refresh",
+            turn_ledger=_ledger(),
+            current_conversation_id=conversation["id"],
+            boundary_user_message_id=boundary["id"],
+        )
+    payload = _payload(prepared)
+    assert payload["candidates"] == []
+    assert CoverageState.UNAVAILABLE.value in _coverage(payload, SearchLane.MESSAGE_HISTORY)["states"]
+    assert CoverageState.BACKFILL_PENDING.value in _coverage(payload, SearchLane.LEXICAL)["states"]
+
+    with storage.transaction() as conn:
+        conn.execute("DROP TRIGGER messages_are_never_rewritten")
+        conn.execute(
+            "UPDATE messages SET content='changed unavailable boundary' WHERE id=?",
+            (boundary["id"],),
+        )
+    with storage.transaction() as conn, pytest.raises(ArchiveSearchServiceError):
+        refresh_archive_search_reauthorization_in_transaction(
+            conn,
+            authorization=authorization,
+            actor=_actor(),
+            tenant_id=TENANT,
+            principal_id=PRINCIPAL,
+            prepared_searches=(prepared,),
+        )
+
+
 def test_obsidian_lanes_verify_exact_bytes_and_merge_one_stable_source(storage: Any) -> None:
     authorization = _seed_authority(storage)
     storage.create_obsidian_bundle(
@@ -563,6 +1317,12 @@ def test_initial_explicit_corpus_denial_is_honest_and_reads_no_lane(
     monkeypatch.setattr(service_module, "_collect_obsidian_target", forbidden)
     request = ArchiveSearchRequest.create(query="private denied", corpora=(corpus,))
     boundary = _message_boundary(storage) if corpus is ArchiveSearchCorpus.MESSAGES else (None, None)
+    if corpus is ArchiveSearchCorpus.MESSAGES:
+        monkeypatch.setattr(
+            service_module,
+            "_accepted_archive_message_boundary_identity_in_transaction",
+            forbidden,
+        )
     with storage.transaction() as conn:
         prepared = prepare_archive_search_in_transaction(
             conn,

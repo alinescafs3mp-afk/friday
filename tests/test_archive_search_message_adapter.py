@@ -88,6 +88,8 @@ def _database() -> Iterator[sqlite3.Connection]:
                    id TEXT PRIMARY KEY,
                    status TEXT NOT NULL
                );
+               CREATE INDEX idx_messages_conversation
+                   ON messages(user_id, conversation_id, created_at);
                CREATE TABLE schema_meta (
                    key TEXT PRIMARY KEY,
                    value TEXT NOT NULL
@@ -341,6 +343,26 @@ def test_current_page_projects_exact_ledger_windows_and_honest_complete_coverage
     assert coverage.authority_rechecked is coverage.snapshot_current is True
     assert coverage.eligible_authorized == coverage.examined == 3
     assert coverage.matched_at_least == coverage.returned == 1
+
+
+def test_message_history_page_cannot_be_relabelled_as_conversation_lexical() -> None:
+    request = _request()
+    with _database() as conn:
+        page = _page(conn, request)
+        assert page is not None and page.selection_lane is SearchLane.MESSAGE_HISTORY
+        with pytest.raises(ArchiveMessageAdapterError):
+            project_archive_message_page(
+                principal_id="alice",
+                request=request,
+                page=page,
+                index_state=_current_index(),
+                selection_lane=SearchLane.LEXICAL,
+                current_conversation_id=CURRENT,
+                boundary_user_message_id=BOUNDARY,
+            )
+
+        object.__setattr__(page, "selection_lane", SearchLane.LEXICAL)
+        assert page.is_valid() is False
 
 
 def test_temporal_selection_replays_against_full_pre_boundary_ledger() -> None:

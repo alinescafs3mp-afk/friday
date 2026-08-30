@@ -1,4 +1,4 @@
-"""Exact schema-49 contract for body-free conversation-passage projections.
+"""Exact schema-50 contract for body-free conversation-passage projections.
 
 ``messages.content`` remains the only ordinary-table source of chat text.  The
 sidecar stores one authenticated anchor per eligible message and an incremental
@@ -25,9 +25,11 @@ from friday.conversation_passages.contract import (
     ConversationPassageProjectionStatus,
 )
 
-CONVERSATION_PASSAGE_SCHEMA_VERSION = 49
+CONVERSATION_PASSAGE_SCHEMA_VERSION = 50
+CONVERSATION_PASSAGE_TEXT_WORK_BUDGET_BYTES = 4 * 1024 * 1024
 
 _DIGEST = re.compile(r"[0-9a-f]{64}\Z")
+_CONVERSATION_ID = re.compile(r"conv_[0-9a-f]{16}\Z")
 _MESSAGE_ID = re.compile(r"msg_[0-9a-f]{16}\Z")
 _OWNED_REFERENCE_RE = re.compile(
     r"(?<![0-9A-Za-z_])(?:conversation_passage_projections|conversation_passages"
@@ -37,7 +39,8 @@ _OWNED_REFERENCE_RE = re.compile(
 _REASONS = tuple(item.value for item in ConversationPassageIncompleteReason)
 _REASON_SQL = ", ".join(f"'{item}'" for item in _REASONS)
 # Frozen over all nine normalized schema-49 optional objects (the declared
-# view/vtable/triggers and FTS5's four shadow tables).  This lets a SQLite build
+# view/vtable/triggers and FTS5's four shadow tables).  Schema 50 deliberately
+# preserves that public/FTS layout byte for byte.  This lets a SQLite build
 # without FTS5 authenticate sealed derivative DDL without trying to load it.
 _CONVERSATION_PASSAGE_FTS_SCHEMA_SHA256 = "dfe1007e5af973a050bfbc9e95b048c34373461c2ec7efee91964b6c472b0ede"
 
@@ -165,7 +168,7 @@ _PROJECTION_ROLLUP_VALID_SQL = """(
 )"""
 
 
-CONVERSATION_PASSAGE_SCHEMA = f"""
+_RELEASED_CONVERSATION_PASSAGE_SCHEMA_V49 = f"""
 CREATE TABLE IF NOT EXISTS conversation_passage_projections (
     conversation_id TEXT NOT NULL PRIMARY KEY
         REFERENCES conversations(id) ON DELETE CASCADE ON UPDATE CASCADE,
@@ -576,6 +579,880 @@ END;
 """
 
 
+_SCHEMA_50_MESSAGE_SOURCE_INDEX_SQL = """
+CREATE INDEX IF NOT EXISTS idx_conversation_passage_message_source_order
+    ON messages(user_id,conversation_id)
+    WHERE role IN ('user','assistant');
+"""
+
+
+_SCHEMA_50_CONVERSATION_KEYSET_INDEX_SQL = """
+CREATE INDEX IF NOT EXISTS idx_conversation_passage_conversation_owner_keyset
+    ON conversations(user_id,id);
+"""
+
+
+_SCHEMA_50_CONVERSATION_BI_IDENTITY_SQL = """
+CREATE TRIGGER IF NOT EXISTS conversation_passage_conversation_bi_identity
+BEFORE INSERT ON conversations
+WHEN friday_conversation_passage_conversation_identity_valid(NEW.id)<>1
+BEGIN
+    SELECT RAISE(ABORT,'conversation_passage_conversation_identity_invalid');
+END;
+"""
+
+
+_SCHEMA_50_MESSAGE_BI_IDENTITY_SQL = """
+CREATE TRIGGER IF NOT EXISTS conversation_passage_message_bi_identity_immutable
+BEFORE INSERT ON messages
+WHEN EXISTS (
+        SELECT 1 FROM messages existing WHERE existing.id=NEW.id
+    )
+    OR EXISTS (
+        SELECT 1 FROM messages existing WHERE existing.rowid=NEW.rowid
+    )
+    OR (
+        NEW.role IN ('user','assistant')
+        AND NOT EXISTS (
+            SELECT 1 FROM conversations conversation
+             WHERE conversation.id=NEW.conversation_id
+               AND friday_conversation_passage_source_descriptor_valid(
+                       NEW.id,NEW.conversation_id,conversation.id,
+                       NEW.user_id,conversation.user_id,NEW.role,
+                       typeof(NEW.content),NEW.created_at)=1
+               AND friday_conversation_passage_utf8_valid(
+                       CAST(NEW.content AS BLOB))=1
+        )
+    )
+BEGIN
+    SELECT RAISE(ABORT,'conversation_passage_message_identity_immutable');
+END;
+"""
+
+
+_SCHEMA_50_MESSAGE_AU_RESET_SQL = f"""
+CREATE TRIGGER IF NOT EXISTS conversation_passage_message_au_reset
+BEFORE UPDATE OF created_at ON messages
+WHEN OLD.role IN ('user','assistant') OR NEW.role IN ('user','assistant')
+BEGIN
+    SELECT CASE WHEN NEW.role IN ('user','assistant') AND NOT EXISTS (
+        SELECT 1 FROM conversations conversation
+         WHERE conversation.id=NEW.conversation_id
+           AND friday_conversation_passage_source_descriptor_valid(
+                   NEW.id,NEW.conversation_id,conversation.id,
+                   NEW.user_id,conversation.user_id,NEW.role,
+                   typeof(NEW.content),NEW.created_at)=1
+           AND friday_conversation_passage_utf8_valid(
+                   CAST(NEW.content AS BLOB))=1
+    ) THEN RAISE(ABORT,'conversation_passage_message_identity_immutable') END;
+
+    UPDATE conversation_passage_projections
+       SET indexed_message_count=0,
+           indexed_through_message_id=NULL,
+           indexed_conversation_revision_sha256=NULL,
+           passage_set_sha256=NULL,
+           passage_index_revision='{CONVERSATION_PASSAGE_INDEX_REVISION}',
+           projection_status='incomplete',
+           incomplete_reason='source_changed',
+           passage_count=0,
+           projected_at=strftime('%Y-%m-%dT%H:%M:%SZ','now')
+     WHERE conversation_id IN (OLD.conversation_id,NEW.conversation_id)
+       AND incomplete_reason IS NOT 'source_unavailable';
+END;
+"""
+
+
+_SCHEMA_50_CONVERSATION_BU_IDENTITY_SQL = """
+CREATE TRIGGER IF NOT EXISTS conversation_passage_conversation_bu_reset
+BEFORE UPDATE OF id,user_id ON conversations
+WHEN NEW.id IS NOT OLD.id OR NEW.user_id IS NOT OLD.user_id
+BEGIN
+    SELECT RAISE(ABORT,'conversation_passage_conversation_identity_immutable');
+END;
+"""
+
+
+def _first_oversized_source_valid_sql(
+    *,
+    conversation_id_sql: str,
+    principal_id_sql: str,
+    force_source_order_index: bool,
+) -> str:
+    index_clause = (
+        " INDEXED BY idx_conversation_passage_message_source_order" if force_source_order_index else ""
+    )
+    return f"""EXISTS (
+        SELECT 1
+          FROM messages first_source
+         WHERE first_source.rowid=(
+                   SELECT candidate.rowid
+                     FROM messages candidate{index_clause}
+                    WHERE candidate.user_id={principal_id_sql}
+                      AND candidate.conversation_id={conversation_id_sql}
+                      AND candidate.role IN ('user','assistant')
+                    ORDER BY candidate.rowid ASC
+                    LIMIT 1
+               )
+           AND first_source.user_id={principal_id_sql}
+           AND first_source.conversation_id={conversation_id_sql}
+           AND first_source.role IN ('user','assistant')
+           AND friday_conversation_passage_source_descriptor_valid(
+                   first_source.id,
+                   first_source.conversation_id,
+                   {conversation_id_sql},
+                   first_source.user_id,
+                   {principal_id_sql},
+                   first_source.role,
+                   typeof(first_source.content),
+                   first_source.created_at
+               )=1
+           AND friday_conversation_passage_utf8_valid(
+                   CAST(first_source.content AS BLOB))=1
+           AND length(CAST(first_source.content AS BLOB))>
+                   {CONVERSATION_PASSAGE_TEXT_WORK_BUDGET_BYTES}
+           AND NOT EXISTS (
+               SELECT 1
+                 FROM messages predecessor{index_clause}
+                WHERE predecessor.user_id={principal_id_sql}
+                  AND predecessor.conversation_id={conversation_id_sql}
+                  AND predecessor.role IN ('user','assistant')
+                  AND predecessor.rowid<first_source.rowid
+                LIMIT 1
+           )
+    )"""
+
+
+_SCHEMA_50_SOURCE_UNAVAILABLE_UPDATE_VALID_SQL = _first_oversized_source_valid_sql(
+    conversation_id_sql="conversation.id",
+    principal_id_sql="conversation.user_id",
+    force_source_order_index=True,
+)
+
+
+_SCHEMA_50_MESSAGE_AI_INVALIDATE_SQL = f"""
+CREATE TRIGGER IF NOT EXISTS conversation_passage_message_ai_invalidate
+AFTER INSERT ON messages
+WHEN NEW.role IN ('user','assistant')
+BEGIN
+    UPDATE conversation_passage_projections
+       SET projection_status='incomplete',
+           incomplete_reason=CASE
+               WHEN projection_status='current' THEN 'source_changed'
+               ELSE incomplete_reason
+           END,
+           projected_at=strftime('%Y-%m-%dT%H:%M:%SZ','now')
+     WHERE conversation_id=NEW.conversation_id;
+    INSERT INTO conversation_passage_projections(
+        conversation_id,indexed_message_count,indexed_through_message_id,
+        indexed_conversation_revision_sha256,passage_set_sha256,
+        passage_index_revision,projection_status,incomplete_reason,
+        passage_count,projected_at
+    )
+    SELECT NEW.conversation_id,0,NULL,NULL,NULL,
+           '{CONVERSATION_PASSAGE_INDEX_REVISION}',
+           'incomplete','source_changed',0,
+           strftime('%Y-%m-%dT%H:%M:%SZ','now')
+     WHERE NOT EXISTS (
+         SELECT 1 FROM conversation_passage_projections projection
+          WHERE projection.conversation_id=NEW.conversation_id
+     );
+
+    -- Admission has already authenticated the complete TEXT body. Settle an
+    -- exact oversized first source here so the bounded writer never has to
+    -- read or validate more than its fixed per-tick body budget.
+    UPDATE conversation_passage_projections
+       SET indexed_message_count=0,
+           indexed_through_message_id=NULL,
+           indexed_conversation_revision_sha256=NULL,
+           passage_set_sha256=NULL,
+           projection_status='incomplete',
+           incomplete_reason='source_unavailable',
+           passage_count=0,
+           projected_at=strftime('%Y-%m-%dT%H:%M:%SZ','now')
+     WHERE conversation_id=NEW.conversation_id
+       AND projection_status='incomplete'
+       AND incomplete_reason IN ('backfill_pending','source_changed')
+       AND passage_count=0
+       AND length(CAST(NEW.content AS BLOB))>
+               {CONVERSATION_PASSAGE_TEXT_WORK_BUDGET_BYTES}
+       AND EXISTS (
+           SELECT 1
+             FROM conversations conversation
+            WHERE conversation.id=NEW.conversation_id
+              AND conversation.user_id=NEW.user_id
+              AND NEW.rowid=(
+                  SELECT candidate.rowid
+                    FROM messages candidate
+                         INDEXED BY idx_conversation_passage_message_source_order
+                   WHERE candidate.user_id=conversation.user_id
+                     AND candidate.conversation_id=conversation.id
+                     AND candidate.role IN ('user','assistant')
+                   ORDER BY candidate.rowid ASC
+                   LIMIT 1
+              )
+       );
+END;
+"""
+
+
+_SCHEMA_50_PROJECTION_BI_VALIDATE_SQL = """
+CREATE TRIGGER IF NOT EXISTS conversation_passage_projection_bi_validate
+BEFORE INSERT ON conversation_passage_projections
+WHEN NOT EXISTS (
+    SELECT 1
+      FROM conversations conversation
+     WHERE conversation.id=NEW.conversation_id
+       AND friday_conversation_passage_projection_valid(
+               NEW.conversation_id,NEW.indexed_message_count,
+               NEW.indexed_through_message_id,
+               NEW.indexed_conversation_revision_sha256,
+               NEW.passage_set_sha256,NEW.passage_index_revision,
+               NEW.projection_status,NEW.incomplete_reason,
+               NEW.passage_count)=1
+       AND NEW.passage_count=0
+       AND NEW.incomplete_reason IS NOT 'source_unavailable'
+       AND NOT EXISTS (
+               SELECT 1 FROM conversation_passages passage
+                WHERE passage.conversation_id=NEW.conversation_id
+                LIMIT 1
+           )
+       AND (
+           NEW.projection_status='incomplete'
+           OR (
+               NEW.projection_status='current'
+               AND NOT EXISTS (
+                   SELECT 1
+                     FROM messages AS source
+                          INDEXED BY idx_conversation_passage_message_source_order
+                    WHERE source.user_id=conversation.user_id
+                      AND source.conversation_id=conversation.id
+                      AND source.role IN ('user','assistant')
+                    LIMIT 1
+               )
+           )
+       )
+)
+BEGIN
+    SELECT RAISE(ABORT,'conversation_passage_projection_invalid');
+END;
+"""
+
+
+_SCHEMA_50_PROJECTION_BU_VALIDATE_SQL = f"""
+CREATE TRIGGER IF NOT EXISTS conversation_passage_projection_bu_validate
+BEFORE UPDATE ON conversation_passage_projections
+WHEN NEW.conversation_id IS NOT OLD.conversation_id
+  OR NOT EXISTS (
+    SELECT 1
+      FROM conversations conversation
+     WHERE conversation.id=NEW.conversation_id
+       AND friday_conversation_passage_projection_valid(
+               NEW.conversation_id,NEW.indexed_message_count,
+               NEW.indexed_through_message_id,
+               NEW.indexed_conversation_revision_sha256,
+               NEW.passage_set_sha256,NEW.passage_index_revision,
+               NEW.projection_status,NEW.incomplete_reason,
+               NEW.passage_count)=1
+       AND (
+           -- A timestamp-only refresh is body-free and does not republish state.
+           (
+               NEW.indexed_message_count IS OLD.indexed_message_count
+               AND NEW.indexed_through_message_id IS OLD.indexed_through_message_id
+               AND NEW.indexed_conversation_revision_sha256
+                       IS OLD.indexed_conversation_revision_sha256
+               AND NEW.passage_set_sha256 IS OLD.passage_set_sha256
+               AND NEW.passage_index_revision IS OLD.passage_index_revision
+               AND NEW.projection_status IS OLD.projection_status
+               AND NEW.incomplete_reason IS OLD.incomplete_reason
+               AND NEW.passage_count IS OLD.passage_count
+           )
+           OR
+           -- A derivative-only reset is one atomic parent transition.  Its
+           -- AFTER trigger removes every old child before this statement can
+           -- commit, leaving an exact retryable source_changed/0 contour.
+           (
+               OLD.incomplete_reason IS NOT 'source_unavailable'
+               AND NEW.indexed_message_count=0
+               AND NEW.indexed_through_message_id IS NULL
+               AND NEW.indexed_conversation_revision_sha256 IS NULL
+               AND NEW.passage_set_sha256 IS NULL
+               AND NEW.passage_index_revision IS OLD.passage_index_revision
+               AND NEW.projection_status='incomplete'
+               AND NEW.incomplete_reason='source_changed'
+               AND NEW.passage_count=0
+           )
+           OR
+           -- An eligible append invalidates a previously exact CURRENT tail.
+           (
+               OLD.projection_status='current'
+               AND NEW.projection_status='incomplete'
+               AND NEW.incomplete_reason='source_changed'
+               AND NEW.indexed_message_count=OLD.indexed_message_count
+               AND NEW.indexed_through_message_id IS OLD.indexed_through_message_id
+               AND NEW.indexed_conversation_revision_sha256
+                       IS OLD.indexed_conversation_revision_sha256
+               AND NEW.passage_set_sha256 IS OLD.passage_set_sha256
+               AND NEW.passage_index_revision IS OLD.passage_index_revision
+               AND NEW.passage_count=OLD.passage_count
+               AND (
+                   (OLD.passage_count=0 AND EXISTS (
+                       SELECT 1
+                         FROM messages AS next_source
+                              INDEXED BY idx_conversation_passage_message_source_order
+                        WHERE next_source.user_id=conversation.user_id
+                          AND next_source.conversation_id=conversation.id
+                          AND next_source.role IN ('user','assistant')
+                        LIMIT 1
+                   ))
+                   OR
+                   (OLD.passage_count>0 AND EXISTS (
+                       SELECT 1
+                         FROM conversation_passages tail
+                         JOIN messages tail_source
+                           ON tail_source.id=tail.anchor_message_id
+                          AND tail_source.user_id=conversation.user_id
+                          AND tail_source.conversation_id=conversation.id
+                          AND tail_source.role IN ('user','assistant')
+                        WHERE tail.conversation_id=conversation.id
+                          AND tail.anchor_ordinal=OLD.passage_count-1
+                          AND tail.anchor_message_id=OLD.indexed_through_message_id
+                          AND tail.conversation_prefix_sha256=
+                                OLD.indexed_conversation_revision_sha256
+                          AND EXISTS (
+                              SELECT 1
+                                FROM messages AS next_source
+                                     INDEXED BY idx_conversation_passage_message_source_order
+                               WHERE next_source.user_id=conversation.user_id
+                                 AND next_source.conversation_id=conversation.id
+                                 AND next_source.role IN ('user','assistant')
+                                 AND next_source.rowid>tail_source.rowid
+                               LIMIT 1
+                          )
+                   ))
+               )
+           )
+           OR
+           -- Only this transition may inspect a complete oversized body. A
+           -- lazy CASE prevents ordinary writer CAS updates from evaluating
+           -- strict UTF-8 outside their body-work accounting.
+           CASE WHEN
+               OLD.projection_status='incomplete'
+               AND OLD.incomplete_reason IN ('backfill_pending','source_changed')
+               AND OLD.passage_count=0
+               AND NEW.projection_status='incomplete'
+               AND NEW.incomplete_reason='source_unavailable'
+               AND NEW.indexed_message_count=0
+               AND NEW.indexed_through_message_id IS NULL
+               AND NEW.indexed_conversation_revision_sha256 IS NULL
+               AND NEW.passage_set_sha256 IS NULL
+               AND NEW.passage_index_revision IS OLD.passage_index_revision
+               AND NEW.passage_count=0
+               AND NOT EXISTS (
+                   SELECT 1 FROM conversation_passages passage
+                    WHERE passage.conversation_id=conversation.id
+                    LIMIT 1
+               )
+           THEN CASE WHEN {_SCHEMA_50_SOURCE_UNAVAILABLE_UPDATE_VALID_SQL}
+                     THEN 1 ELSE 0 END
+           ELSE 0 END=1
+           OR
+           -- Completion is a one-parent CAS over the already stored tail.
+           (
+               OLD.projection_status='incomplete'
+               AND OLD.incomplete_reason IN ('backfill_pending','source_changed')
+               AND NEW.projection_status='current'
+               AND NEW.incomplete_reason IS NULL
+               AND NEW.indexed_message_count=OLD.indexed_message_count
+               AND NEW.indexed_through_message_id IS OLD.indexed_through_message_id
+               AND NEW.passage_index_revision IS OLD.passage_index_revision
+               AND NEW.passage_count=OLD.passage_count
+               AND NOT EXISTS (
+                   SELECT 1 FROM conversation_passages suffix
+                    WHERE suffix.conversation_id=conversation.id
+                      AND suffix.anchor_ordinal>=OLD.passage_count
+                    LIMIT 1
+               )
+               AND (
+                   (OLD.passage_count=0
+                    AND NEW.indexed_conversation_revision_sha256=
+                            '{CONVERSATION_PASSAGE_EMPTY_PREFIX_SHA256}'
+                    AND NEW.passage_set_sha256=
+                            '{CONVERSATION_PASSAGE_EMPTY_SET_SHA256}'
+                    AND NOT EXISTS (
+                        SELECT 1
+                          FROM messages AS next_source
+                               INDEXED BY idx_conversation_passage_message_source_order
+                         WHERE next_source.user_id=conversation.user_id
+                           AND next_source.conversation_id=conversation.id
+                           AND next_source.role IN ('user','assistant')
+                         LIMIT 1
+                    ))
+                   OR
+                   (OLD.passage_count>0
+                    AND NEW.indexed_conversation_revision_sha256=
+                            OLD.indexed_conversation_revision_sha256
+                    AND NEW.passage_set_sha256=OLD.passage_set_sha256
+                    AND EXISTS (
+                        SELECT 1
+                          FROM conversation_passages tail
+                          JOIN messages tail_source
+                            ON tail_source.id=tail.anchor_message_id
+                           AND tail_source.user_id=conversation.user_id
+                           AND tail_source.conversation_id=conversation.id
+                           AND tail_source.role IN ('user','assistant')
+                         WHERE tail.conversation_id=conversation.id
+                           AND tail.anchor_ordinal=OLD.passage_count-1
+                           AND tail.anchor_message_id=OLD.indexed_through_message_id
+                           AND tail.conversation_prefix_sha256=
+                                 OLD.indexed_conversation_revision_sha256
+                           AND NOT EXISTS (
+                               SELECT 1
+                                 FROM messages AS next_source
+                                      INDEXED BY idx_conversation_passage_message_source_order
+                                WHERE next_source.user_id=conversation.user_id
+                                  AND next_source.conversation_id=conversation.id
+                                  AND next_source.role IN ('user','assistant')
+                                  AND next_source.rowid>tail_source.rowid
+                                LIMIT 1
+                           )
+                    ))
+               )
+           )
+           OR
+           -- Exactly one newly admitted child advances both digest chains.
+           (
+               OLD.projection_status='incomplete'
+               AND OLD.incomplete_reason IN ('backfill_pending','source_changed')
+               AND OLD.passage_count<{CONVERSATION_PASSAGE_MAX_COUNT}
+               AND NEW.indexed_message_count=OLD.indexed_message_count+1
+               AND NEW.passage_count=OLD.passage_count+1
+               AND NEW.passage_index_revision IS OLD.passage_index_revision
+               AND NOT EXISTS (
+                   SELECT 1 FROM conversation_passages suffix
+                    WHERE suffix.conversation_id=conversation.id
+                      AND suffix.anchor_ordinal>=NEW.passage_count
+                    LIMIT 1
+               )
+               AND EXISTS (
+                   SELECT 1
+                     FROM conversation_passages child
+                     JOIN messages source
+                       ON source.id=child.anchor_message_id
+                      AND source.user_id=conversation.user_id
+                      AND source.conversation_id=conversation.id
+                      AND source.role IN ('user','assistant')
+                    WHERE child.conversation_id=conversation.id
+                      AND child.anchor_ordinal=OLD.passage_count
+                      AND NEW.indexed_through_message_id=child.anchor_message_id
+                      AND NEW.indexed_conversation_revision_sha256=
+                            child.conversation_prefix_sha256
+                      AND child.conversation_prefix_sha256=
+                            friday_conversation_passage_prefix_sha256(
+                                CASE WHEN OLD.passage_count=0 THEN NULL
+                                     ELSE OLD.indexed_conversation_revision_sha256 END,
+                                OLD.passage_count,
+                                child.anchor_message_revision_sha256)
+                      AND NEW.passage_set_sha256=
+                            friday_conversation_passage_set_extend_sha256(
+                                CASE WHEN OLD.passage_count=0
+                                     THEN '{CONVERSATION_PASSAGE_EMPTY_SET_SHA256}'
+                                     ELSE OLD.passage_set_sha256 END,
+                                child.anchor_ordinal,
+                                child.anchor_message_id,
+                                child.anchor_message_revision_sha256,
+                                child.anchor_content_sha256,
+                                child.anchor_locator_sha256,
+                                child.conversation_prefix_sha256)
+                      AND (
+                          (OLD.passage_count=0 AND NOT EXISTS (
+                              SELECT 1
+                                FROM messages AS predecessor
+                                     INDEXED BY idx_conversation_passage_message_source_order
+                               WHERE predecessor.user_id=conversation.user_id
+                                 AND predecessor.conversation_id=conversation.id
+                                 AND predecessor.role IN ('user','assistant')
+                                 AND predecessor.rowid<source.rowid
+                               LIMIT 1
+                          ))
+                          OR
+                          (OLD.passage_count>0 AND EXISTS (
+                              SELECT 1
+                                FROM conversation_passages previous
+                                JOIN messages previous_source
+                                  ON previous_source.id=previous.anchor_message_id
+                                 AND previous_source.user_id=conversation.user_id
+                                 AND previous_source.conversation_id=conversation.id
+                                 AND previous_source.role IN ('user','assistant')
+                               WHERE previous.conversation_id=conversation.id
+                                 AND previous.anchor_ordinal=OLD.passage_count-1
+                                 AND previous.anchor_message_id=
+                                       OLD.indexed_through_message_id
+                                 AND previous.conversation_prefix_sha256=
+                                       OLD.indexed_conversation_revision_sha256
+                                 AND previous_source.rowid<source.rowid
+                                 AND NOT EXISTS (
+                                     SELECT 1
+                                       FROM messages AS skipped
+                                            INDEXED BY idx_conversation_passage_message_source_order
+                                      WHERE skipped.user_id=conversation.user_id
+                                        AND skipped.conversation_id=conversation.id
+                                        AND skipped.role IN ('user','assistant')
+                                        AND skipped.rowid>previous_source.rowid
+                                        AND skipped.rowid<source.rowid
+                                      LIMIT 1
+                                 )
+                          ))
+                      )
+                      AND (
+                          (NEW.projection_status='current'
+                           AND NEW.incomplete_reason IS NULL
+                           AND NOT EXISTS (
+                               SELECT 1
+                                 FROM messages AS next_source
+                                      INDEXED BY idx_conversation_passage_message_source_order
+                                WHERE next_source.user_id=conversation.user_id
+                                  AND next_source.conversation_id=conversation.id
+                                  AND next_source.role IN ('user','assistant')
+                                  AND next_source.rowid>source.rowid
+                                LIMIT 1
+                           ))
+                          OR
+                          (NEW.projection_status='incomplete'
+                           AND NEW.incomplete_reason=OLD.incomplete_reason
+                           AND EXISTS (
+                               SELECT 1
+                                 FROM messages AS next_source
+                                      INDEXED BY idx_conversation_passage_message_source_order
+                                WHERE next_source.user_id=conversation.user_id
+                                  AND next_source.conversation_id=conversation.id
+                                  AND next_source.role IN ('user','assistant')
+                                  AND next_source.rowid>source.rowid
+                                LIMIT 1
+                           ))
+                      )
+               )
+           )
+       )
+)
+BEGIN
+    SELECT RAISE(ABORT,'conversation_passage_projection_invalid');
+END;
+"""
+
+
+_SCHEMA_50_PROJECTION_BD_VALIDATE_SQL = """
+CREATE TRIGGER IF NOT EXISTS conversation_passage_projection_bd_validate
+BEFORE DELETE ON conversation_passage_projections
+WHEN EXISTS (
+    SELECT 1 FROM conversations conversation
+     WHERE conversation.id=OLD.conversation_id
+)
+BEGIN
+    SELECT RAISE(ABORT,'conversation_passage_projection_delete_invalid');
+END;
+"""
+
+
+_SCHEMA_50_PROJECTION_AU_RESET_CHILDREN_SQL = f"""
+CREATE TRIGGER IF NOT EXISTS conversation_passage_projection_au_reset_children
+AFTER UPDATE ON conversation_passage_projections
+WHEN NEW.indexed_message_count=0
+ AND NEW.indexed_through_message_id IS NULL
+ AND NEW.indexed_conversation_revision_sha256 IS NULL
+ AND NEW.passage_set_sha256 IS NULL
+ AND NEW.projection_status='incomplete'
+ AND NEW.incomplete_reason='source_changed'
+ AND NEW.passage_count=0
+BEGIN
+    DELETE FROM conversation_passages
+     WHERE conversation_id=NEW.conversation_id;
+
+    -- Every authorized derivative reset closes an exact oversized first source
+    -- after its old children are gone. The bounded writer never executes this
+    -- reset transition and therefore never inherits the strict body proof.
+    UPDATE conversation_passage_projections
+       SET incomplete_reason='source_unavailable',
+           projected_at=strftime('%Y-%m-%dT%H:%M:%SZ','now')
+     WHERE conversation_id=NEW.conversation_id
+       AND projection_status='incomplete'
+       AND incomplete_reason='source_changed'
+       AND passage_count=0
+       AND EXISTS (
+           SELECT 1
+             FROM conversations conversation
+            WHERE conversation.id=NEW.conversation_id
+              AND {_SCHEMA_50_SOURCE_UNAVAILABLE_UPDATE_VALID_SQL}
+       );
+END;
+"""
+
+
+_SCHEMA_50_PASSAGE_BI_VALIDATE_SQL = """
+CREATE TRIGGER IF NOT EXISTS conversation_passage_bi_validate
+BEFORE INSERT ON conversation_passages
+WHEN NOT EXISTS (
+    SELECT 1
+      FROM conversation_passage_projections projection
+      JOIN conversations conversation
+        ON conversation.id=projection.conversation_id
+      JOIN messages source
+        ON source.id=NEW.anchor_message_id
+       AND source.conversation_id=conversation.id
+       AND source.user_id=conversation.user_id
+       AND source.role IN ('user','assistant')
+     WHERE projection.conversation_id=NEW.conversation_id
+       AND projection.projection_status='incomplete'
+       AND projection.incomplete_reason IN ('backfill_pending','source_changed')
+       AND NEW.anchor_ordinal=projection.passage_count
+       AND NOT EXISTS (
+               SELECT 1 FROM conversation_passages suffix
+                WHERE suffix.conversation_id=NEW.conversation_id
+                  AND suffix.anchor_ordinal>=projection.passage_count
+                LIMIT 1
+           )
+       AND friday_conversation_passage_utf8_valid(
+               CAST(source.content AS BLOB))=1
+       AND friday_conversation_passage_anchor_valid(
+               source.id,source.conversation_id,source.user_id,
+               conversation.user_id,source.role,
+               CAST(source.content AS BLOB),source.created_at,
+               NEW.conversation_id,NEW.anchor_message_id,NEW.anchor_ordinal,
+               NEW.anchor_message_revision_sha256,NEW.anchor_content_sha256,
+               NEW.anchor_locator_sha256)=1
+       AND friday_conversation_passage_source_descriptor_valid(
+               source.id,source.conversation_id,conversation.id,
+               source.user_id,conversation.user_id,source.role,
+               typeof(source.content),source.created_at)=1
+       AND NEW.conversation_prefix_sha256=
+               friday_conversation_passage_prefix_sha256(
+                   CASE WHEN projection.passage_count=0 THEN NULL
+                        ELSE projection.indexed_conversation_revision_sha256 END,
+                   NEW.anchor_ordinal,
+                   NEW.anchor_message_revision_sha256)
+       AND (
+           (projection.passage_count=0 AND NOT EXISTS (
+               SELECT 1
+                 FROM messages AS predecessor
+                      INDEXED BY idx_conversation_passage_message_source_order
+                WHERE predecessor.user_id=conversation.user_id
+                  AND predecessor.conversation_id=conversation.id
+                  AND predecessor.role IN ('user','assistant')
+                  AND predecessor.rowid<source.rowid
+                LIMIT 1
+           ))
+           OR
+           (projection.passage_count>0 AND EXISTS (
+               SELECT 1
+                 FROM conversation_passages previous
+                 JOIN messages previous_source
+                   ON previous_source.id=previous.anchor_message_id
+                  AND previous_source.user_id=conversation.user_id
+                  AND previous_source.conversation_id=conversation.id
+                  AND previous_source.role IN ('user','assistant')
+                WHERE previous.conversation_id=NEW.conversation_id
+                  AND previous.anchor_ordinal=projection.passage_count-1
+                  AND previous.anchor_message_id=projection.indexed_through_message_id
+                  AND previous.conversation_prefix_sha256=
+                        projection.indexed_conversation_revision_sha256
+                  AND previous_source.rowid<source.rowid
+                  AND NOT EXISTS (
+                      SELECT 1
+                        FROM messages AS skipped
+                             INDEXED BY idx_conversation_passage_message_source_order
+                       WHERE skipped.user_id=conversation.user_id
+                         AND skipped.conversation_id=conversation.id
+                         AND skipped.role IN ('user','assistant')
+                         AND skipped.rowid>previous_source.rowid
+                         AND skipped.rowid<source.rowid
+                       LIMIT 1
+                  )
+           ))
+       )
+)
+BEGIN
+    SELECT RAISE(ABORT,'conversation_passage_anchor_invalid');
+END;
+"""
+
+
+_SCHEMA_50_NEW_CHILD_HAS_SUCCESSOR_SQL = """EXISTS (
+    SELECT 1
+      FROM messages source
+      JOIN conversations conversation
+        ON conversation.id=NEW.conversation_id
+       AND conversation.user_id=source.user_id
+     WHERE source.id=NEW.anchor_message_id
+       AND source.conversation_id=NEW.conversation_id
+       AND source.role IN ('user','assistant')
+       AND EXISTS (
+           SELECT 1
+             FROM messages successor
+                  INDEXED BY idx_conversation_passage_message_source_order
+            WHERE successor.user_id=conversation.user_id
+              AND successor.conversation_id=NEW.conversation_id
+              AND successor.role IN ('user','assistant')
+              AND successor.rowid>source.rowid
+            LIMIT 1
+       )
+)"""
+
+
+_SCHEMA_50_PASSAGE_AI_PARENT_CAS_SQL = f"""
+CREATE TRIGGER IF NOT EXISTS conversation_passage_ai_parent_cas
+AFTER INSERT ON conversation_passages
+BEGIN
+    UPDATE conversation_passage_projections
+       SET indexed_message_count=NEW.anchor_ordinal+1,
+           indexed_through_message_id=NEW.anchor_message_id,
+           indexed_conversation_revision_sha256=NEW.conversation_prefix_sha256,
+           passage_set_sha256=friday_conversation_passage_set_extend_sha256(
+               CASE WHEN passage_count=0
+                    THEN '{CONVERSATION_PASSAGE_EMPTY_SET_SHA256}'
+                    ELSE passage_set_sha256 END,
+               NEW.anchor_ordinal,
+               NEW.anchor_message_id,
+               NEW.anchor_message_revision_sha256,
+               NEW.anchor_content_sha256,
+               NEW.anchor_locator_sha256,
+               NEW.conversation_prefix_sha256
+           ),
+           projection_status=CASE
+               WHEN {_SCHEMA_50_NEW_CHILD_HAS_SUCCESSOR_SQL}
+               THEN 'incomplete' ELSE 'current' END,
+           incomplete_reason=CASE
+               WHEN {_SCHEMA_50_NEW_CHILD_HAS_SUCCESSOR_SQL}
+               THEN incomplete_reason ELSE NULL END,
+           passage_count=NEW.anchor_ordinal+1,
+           projected_at=strftime('%Y-%m-%dT%H:%M:%SZ','now')
+     WHERE conversation_id=NEW.conversation_id
+       AND projection_status='incomplete'
+       AND incomplete_reason IN ('backfill_pending','source_changed')
+       AND passage_count=NEW.anchor_ordinal;
+
+    SELECT CASE WHEN NOT EXISTS (
+        SELECT 1
+          FROM conversation_passage_projections projection
+         WHERE projection.conversation_id=NEW.conversation_id
+           AND projection.indexed_message_count=NEW.anchor_ordinal+1
+           AND projection.indexed_through_message_id=NEW.anchor_message_id
+           AND projection.indexed_conversation_revision_sha256=
+                   NEW.conversation_prefix_sha256
+           AND projection.passage_count=NEW.anchor_ordinal+1
+    ) THEN RAISE(ABORT,'conversation_passage_projection_invalid') END;
+END;
+"""
+
+
+_SCHEMA_50_PASSAGE_BU_VALIDATE_SQL = """
+CREATE TRIGGER IF NOT EXISTS conversation_passage_bu_validate
+BEFORE UPDATE ON conversation_passages
+WHEN NEW.passage_rowid IS NOT OLD.passage_rowid
+  OR NEW.conversation_id IS NOT OLD.conversation_id
+  OR NEW.anchor_message_id IS NOT OLD.anchor_message_id
+  OR NEW.anchor_ordinal IS NOT OLD.anchor_ordinal
+  OR NEW.anchor_message_revision_sha256 IS NOT OLD.anchor_message_revision_sha256
+  OR NEW.anchor_content_sha256 IS NOT OLD.anchor_content_sha256
+  OR NEW.anchor_locator_sha256 IS NOT OLD.anchor_locator_sha256
+  OR NEW.conversation_prefix_sha256 IS NOT OLD.conversation_prefix_sha256
+BEGIN
+    SELECT RAISE(ABORT,'conversation_passage_anchor_invalid');
+END;
+"""
+
+
+_SCHEMA_50_PASSAGE_BD_VALIDATE_SQL = """
+CREATE TRIGGER IF NOT EXISTS conversation_passage_bd_validate
+BEFORE DELETE ON conversation_passages
+WHEN EXISTS (
+    SELECT 1 FROM conversation_passage_projections projection
+     WHERE projection.conversation_id=OLD.conversation_id
+       AND NOT (
+           projection.indexed_message_count=0
+           AND projection.indexed_through_message_id IS NULL
+           AND projection.indexed_conversation_revision_sha256 IS NULL
+           AND projection.passage_set_sha256 IS NULL
+           AND projection.projection_status='incomplete'
+           AND projection.incomplete_reason='source_changed'
+           AND projection.passage_count=0
+       )
+)
+BEGIN
+    SELECT RAISE(ABORT,'conversation_passage_anchor_invalid');
+END;
+"""
+
+
+def _replace_schema_trigger(script: str, name: str, replacement: str) -> str:
+    marker = f"CREATE TRIGGER IF NOT EXISTS {name}"
+    start = script.index(marker)
+    end = script.index("\nEND;", start) + len("\nEND;")
+    return f"{script[:start]}{replacement.strip()}{script[end:]}"
+
+
+def _schema_50_conversation_passage_sql() -> str:
+    anchor_index = """CREATE INDEX IF NOT EXISTS idx_conversation_passage_anchor_revision
+    ON conversation_passages(anchor_message_revision_sha256,conversation_id,anchor_ordinal);
+"""
+    script = _RELEASED_CONVERSATION_PASSAGE_SCHEMA_V49.replace(
+        anchor_index,
+        (
+            f"{anchor_index}\n{_SCHEMA_50_MESSAGE_SOURCE_INDEX_SQL.strip()}\n"
+            f"{_SCHEMA_50_CONVERSATION_KEYSET_INDEX_SQL.strip()}\n"
+        ),
+        1,
+    )
+    for name, replacement in (
+        ("conversation_passage_projection_bi_validate", _SCHEMA_50_PROJECTION_BI_VALIDATE_SQL),
+        ("conversation_passage_projection_bu_validate", _SCHEMA_50_PROJECTION_BU_VALIDATE_SQL),
+        ("conversation_passage_bi_validate", _SCHEMA_50_PASSAGE_BI_VALIDATE_SQL),
+        ("conversation_passage_bu_validate", _SCHEMA_50_PASSAGE_BU_VALIDATE_SQL),
+        (
+            "conversation_passage_message_bi_identity_immutable",
+            _SCHEMA_50_MESSAGE_BI_IDENTITY_SQL,
+        ),
+        (
+            "conversation_passage_message_ai_invalidate",
+            _SCHEMA_50_MESSAGE_AI_INVALIDATE_SQL,
+        ),
+        ("conversation_passage_message_au_reset", _SCHEMA_50_MESSAGE_AU_RESET_SQL),
+        (
+            "conversation_passage_conversation_bu_reset",
+            _SCHEMA_50_CONVERSATION_BU_IDENTITY_SQL,
+        ),
+    ):
+        script = _replace_schema_trigger(script, name, replacement)
+    parent_update_guard = _SCHEMA_50_PROJECTION_BU_VALIDATE_SQL.strip()
+    script = script.replace(
+        parent_update_guard,
+        (
+            f"{parent_update_guard}\n\n{_SCHEMA_50_PROJECTION_BD_VALIDATE_SQL.strip()}\n\n"
+            f"{_SCHEMA_50_PROJECTION_AU_RESET_CHILDREN_SQL.strip()}"
+        ),
+        1,
+    )
+    passage_insert_guard = _SCHEMA_50_PASSAGE_BI_VALIDATE_SQL.strip()
+    script = script.replace(
+        passage_insert_guard,
+        f"{passage_insert_guard}\n\n{_SCHEMA_50_PASSAGE_AI_PARENT_CAS_SQL.strip()}",
+        1,
+    )
+    passage_update_guard = _SCHEMA_50_PASSAGE_BU_VALIDATE_SQL.strip()
+    script = script.replace(
+        passage_update_guard,
+        f"{passage_update_guard}\n\n{_SCHEMA_50_PASSAGE_BD_VALIDATE_SQL.strip()}",
+        1,
+    )
+    conversation_seed = "CREATE TRIGGER IF NOT EXISTS conversation_passage_conversation_ai_seed"
+    return script.replace(
+        conversation_seed,
+        f"{_SCHEMA_50_CONVERSATION_BI_IDENTITY_SQL.strip()}\n\n{conversation_seed}",
+        1,
+    )
+
+
+CONVERSATION_PASSAGE_SCHEMA = _schema_50_conversation_passage_sql()
+
+
 # The view is the only non-authoritative SQL object which exposes message text.
 # FTS5 stores only its token derivative; ordinary sidecar tables remain body-free.
 CONVERSATION_PASSAGE_FTS_SCHEMA = """
@@ -678,6 +1555,53 @@ def _canonical_source_utc(value: object) -> str:
     if parsed.astimezone(UTC).isoformat() != value:
         raise ValueError("conversation-passage source timestamp is invalid")
     return value
+
+
+def _conversation_identity_valid(value: object) -> int:
+    return int(type(value) is str and _CONVERSATION_ID.fullmatch(value) is not None)
+
+
+def _source_descriptor_valid(*values: object) -> int:
+    """Validate one body-free canonical eligible-source descriptor."""
+
+    try:
+        if len(values) != 8:
+            return 0
+        (
+            source_id,
+            source_conversation_id,
+            authoritative_conversation_id,
+            source_principal_id,
+            conversation_principal_id,
+            role,
+            content_storage_class,
+            created_at,
+        ) = values
+        return int(
+            type(source_id) is str
+            and _MESSAGE_ID.fullmatch(source_id) is not None
+            and type(source_conversation_id) is str
+            and _CONVERSATION_ID.fullmatch(source_conversation_id) is not None
+            and source_conversation_id == authoritative_conversation_id
+            and _safe_text(source_principal_id) == _safe_text(conversation_principal_id)
+            and role in {"user", "assistant"}
+            and content_storage_class == "text"
+            and _canonical_source_utc(created_at) == created_at
+        )
+    except (TypeError, ValueError, UnicodeError, OverflowError):
+        return 0
+
+
+def _utf8_valid(value: object) -> int:
+    """Validate a SQLite TEXT body through its lossless BLOB representation."""
+
+    if type(value) is not bytes:
+        return 0
+    try:
+        value.decode("utf-8", errors="strict")
+    except UnicodeError:
+        return 0
+    return 1
 
 
 def conversation_passage_message_revision_sha256(
@@ -902,6 +1826,11 @@ def _anchor_valid(*values: object) -> int:
             content_digest,
             locator_digest,
         ) = values
+        if type(content) is bytes:
+            try:
+                content = content.decode("utf-8", errors="strict")
+            except UnicodeError:
+                return 0
         if (
             type(source_id) is not str
             or _MESSAGE_ID.fullmatch(source_id) is None
@@ -943,6 +1872,34 @@ def _prefix_udf(previous: object, ordinal: object, message_revision: object) -> 
         if previous is not None and type(previous) is not str:
             return ""
         return conversation_passage_prefix_sha256(previous, ordinal, message_revision)
+    except (TypeError, ValueError, UnicodeError, OverflowError):
+        return ""
+
+
+def _set_extend_udf(*values: object) -> str:
+    try:
+        if len(values) != 7:
+            return ""
+        previous, ordinal, anchor_id, message_revision, content_digest, locator_digest, prefix_digest = values
+        if (
+            type(previous) is not str
+            or type(ordinal) is not int
+            or any(
+                type(item) is not str
+                for item in (
+                    anchor_id,
+                    message_revision,
+                    content_digest,
+                    locator_digest,
+                    prefix_digest,
+                )
+            )
+        ):
+            return ""
+        return conversation_passage_set_extend_sha256(
+            previous,
+            cast(_PassageSetRow, values[1:]),
+        )
     except (TypeError, ValueError, UnicodeError, OverflowError):
         return ""
 
@@ -993,10 +1950,34 @@ class _PassageSetSha256:
 
 def register_conversation_passage_connection_functions(conn: sqlite3.Connection) -> None:
     conn.create_function(
+        "friday_conversation_passage_conversation_identity_valid",
+        1,
+        _conversation_identity_valid,
+        deterministic=True,
+    )
+    conn.create_function(
+        "friday_conversation_passage_source_descriptor_valid",
+        8,
+        _source_descriptor_valid,
+        deterministic=True,
+    )
+    conn.create_function(
+        "friday_conversation_passage_utf8_valid",
+        1,
+        _utf8_valid,
+        deterministic=True,
+    )
+    conn.create_function(
         "friday_conversation_passage_projection_valid", 9, _projection_valid, deterministic=True
     )
     conn.create_function("friday_conversation_passage_anchor_valid", 13, _anchor_valid, deterministic=True)
     conn.create_function("friday_conversation_passage_prefix_sha256", 3, _prefix_udf, deterministic=True)
+    conn.create_function(
+        "friday_conversation_passage_set_extend_sha256",
+        7,
+        _set_extend_udf,
+        deterministic=True,
+    )
     conn.create_aggregate(
         "friday_conversation_passage_set_sha256",
         6,
@@ -1093,6 +2074,42 @@ def _canonical_schema_objects(*, include_fts: bool) -> dict[tuple[str, str], str
         conn.close()
 
 
+@lru_cache(maxsize=2)
+def _canonical_released_schema_v49_objects(
+    *,
+    include_fts: bool,
+) -> dict[tuple[str, str], str]:
+    """Return the exact reader-first sidecar shipped by schema 49."""
+
+    conn = sqlite3.connect(":memory:")
+    try:
+        conn.execute("PRAGMA foreign_keys=ON")
+        register_conversation_passage_connection_functions(conn)
+        conn.executescript(
+            """
+            CREATE TABLE users(id TEXT PRIMARY KEY);
+            CREATE TABLE conversations(
+                id TEXT PRIMARY KEY,
+                user_id TEXT NOT NULL REFERENCES users(id)
+            );
+            CREATE TABLE messages(
+                id TEXT PRIMARY KEY,
+                conversation_id TEXT NOT NULL REFERENCES conversations(id),
+                user_id TEXT NOT NULL REFERENCES users(id),
+                role TEXT NOT NULL,
+                content TEXT NOT NULL DEFAULT '',
+                created_at TEXT NOT NULL
+            );
+            """
+        )
+        _execute_schema(conn, _RELEASED_CONVERSATION_PASSAGE_SCHEMA_V49)
+        if include_fts:
+            _execute_schema(conn, CONVERSATION_PASSAGE_FTS_SCHEMA)
+        return _schema_objects(conn)
+    finally:
+        conn.close()
+
+
 def _canonical_fts_objects_if_available() -> dict[tuple[str, str], str] | None:
     try:
         return _fts_objects(_canonical_schema_objects(include_fts=True))
@@ -1102,9 +2119,20 @@ def _canonical_fts_objects_if_available() -> dict[tuple[str, str], str] | None:
         return None
 
 
+def _canonical_released_fts_objects_if_available() -> dict[tuple[str, str], str] | None:
+    try:
+        return _fts_objects(_canonical_released_schema_v49_objects(include_fts=True))
+    except sqlite3.OperationalError as exc:
+        if str(exc).strip().casefold() != "no such module: fts5":
+            raise
+        return None
+
+
 def _validate_no_external_dependencies(
     conn: sqlite3.Connection,
     canonical: dict[tuple[str, str], str],
+    *,
+    schema_version: int,
 ) -> None:
     for kind, name, sql in conn.execute(
         "SELECT type,name,sql FROM sqlite_master WHERE sql IS NOT NULL ORDER BY type,name"
@@ -1113,10 +2141,17 @@ def _validate_no_external_dependencies(
         if key in canonical:
             continue
         if _OWNED_REFERENCE_RE.search(str(sql)) is not None:
-            raise sqlite3.DatabaseError("Schema 49 conversation passage external dependency is unexpected")
+            raise sqlite3.DatabaseError(
+                f"Schema {schema_version} conversation passage external dependency is unexpected"
+            )
 
 
-def _validate_shape(conn: sqlite3.Connection, *, include_fts: bool) -> None:
+def _validate_shape(
+    conn: sqlite3.Connection,
+    *,
+    include_fts: bool,
+    schema_version: int,
+) -> None:
     projection_columns = {
         str(row[1]): (str(row[2]).upper(), int(row[3]), int(row[5]))
         for row in conn.execute("PRAGMA table_info(conversation_passage_projections)")
@@ -1133,7 +2168,9 @@ def _validate_shape(conn: sqlite3.Connection, *, include_fts: bool) -> None:
         "passage_count": ("INTEGER", 1, 0),
         "projected_at": ("TEXT", 1, 0),
     }:
-        raise sqlite3.DatabaseError("Schema 49 conversation passage projection shape is invalid")
+        raise sqlite3.DatabaseError(
+            f"Schema {schema_version} conversation passage projection shape is invalid"
+        )
     passage_columns = {
         str(row[1]): (str(row[2]).upper(), int(row[3]), int(row[5]))
         for row in conn.execute("PRAGMA table_info(conversation_passages)")
@@ -1148,7 +2185,7 @@ def _validate_shape(conn: sqlite3.Connection, *, include_fts: bool) -> None:
         "anchor_locator_sha256": ("TEXT", 1, 0),
         "conversation_prefix_sha256": ("TEXT", 1, 0),
     }:
-        raise sqlite3.DatabaseError("Schema 49 conversation passage row shape is invalid")
+        raise sqlite3.DatabaseError(f"Schema {schema_version} conversation passage row shape is invalid")
     projection_fks = {
         (str(row[3]), str(row[2]), str(row[4]), str(row[5]), str(row[6]))
         for row in conn.execute("PRAGMA foreign_key_list(conversation_passage_projections)")
@@ -1163,7 +2200,7 @@ def _validate_shape(conn: sqlite3.Connection, *, include_fts: bool) -> None:
         ("conversation_id", "conversation_passage_projections", "conversation_id", "CASCADE", "CASCADE"),
         ("anchor_message_id", "messages", "id", "CASCADE", "CASCADE"),
     }:
-        raise sqlite3.DatabaseError("Schema 49 conversation passage ownership is invalid")
+        raise sqlite3.DatabaseError(f"Schema {schema_version} conversation passage ownership is invalid")
     if include_fts:
         fts_columns = tuple(
             str(row[1]) for row in conn.execute("PRAGMA table_info(conversation_passages_fts)")
@@ -1172,11 +2209,39 @@ def _validate_shape(conn: sqlite3.Connection, *, include_fts: bool) -> None:
             str(row[1]) for row in conn.execute("PRAGMA table_info(conversation_passage_search_content)")
         )
         if fts_columns != ("content",) or view_columns != ("passage_rowid", "content"):
-            raise sqlite3.DatabaseError("Schema 49 conversation passage FTS shape is invalid")
+            raise sqlite3.DatabaseError(f"Schema {schema_version} conversation passage FTS shape is invalid")
 
 
-def _validate_authoritative_rows(conn: sqlite3.Connection) -> None:
+def _validate_authoritative_rows(
+    conn: sqlite3.Connection,
+    *,
+    schema_version: int,
+    source_order_index_available: bool,
+) -> None:
     invalid_message_rowid = conn.execute("SELECT 1 FROM messages WHERE rowid<1 LIMIT 1").fetchone()
+    invalid_conversation_identity = conn.execute(
+        """SELECT 1 FROM conversations conversation
+            WHERE friday_conversation_passage_conversation_identity_valid(
+                      conversation.id)<>1
+            LIMIT 1"""
+    ).fetchone()
+    invalid_source_descriptor = conn.execute(
+        """SELECT 1
+             FROM messages source
+             LEFT JOIN conversations conversation
+               ON conversation.id=source.conversation_id
+            WHERE source.role IN ('user','assistant')
+              AND (
+                  conversation.id IS NULL
+                  OR friday_conversation_passage_source_descriptor_valid(
+                         source.id,source.conversation_id,conversation.id,
+                         source.user_id,conversation.user_id,source.role,
+                         typeof(source.content),source.created_at)<>1
+                  OR friday_conversation_passage_utf8_valid(
+                         CAST(source.content AS BLOB))<>1
+              )
+            LIMIT 1"""
+    ).fetchone()
     missing = conn.execute(
         """SELECT 1 FROM conversations source
             WHERE NOT EXISTS (
@@ -1197,6 +2262,21 @@ def _validate_authoritative_rows(conn: sqlite3.Connection) -> None:
                       projection.projection_status,projection.incomplete_reason,
                       projection.passage_count)<>1
             LIMIT 1"""
+    ).fetchone()
+    source_unavailable_valid_sql = _first_oversized_source_valid_sql(
+        conversation_id_sql="conversation.id",
+        principal_id_sql="conversation.user_id",
+        force_source_order_index=source_order_index_available,
+    )
+    invalid_source_unavailable = conn.execute(
+        f"""SELECT 1
+              FROM conversation_passage_projections projection
+              JOIN conversations conversation
+                ON conversation.id=projection.conversation_id
+             WHERE projection.projection_status='incomplete'
+               AND projection.incomplete_reason='source_unavailable'
+               AND NOT ({source_unavailable_valid_sql})
+             LIMIT 1"""
     ).fetchone()
     invalid_anchor = conn.execute(
         """WITH canonical_source_order AS MATERIALIZED (
@@ -1235,7 +2315,8 @@ def _validate_authoritative_rows(conn: sqlite3.Connection) -> None:
                    OR source.anchor_ordinal<>passage.anchor_ordinal
                    OR friday_conversation_passage_anchor_valid(
                           source.message_id,source.conversation_id,source.user_id,
-                          source.conversation_user_id,source.role,source.content,
+                          source.conversation_user_id,source.role,
+                          CAST(source.content AS BLOB),
                           source.created_at,passage.conversation_id,
                           passage.anchor_message_id,passage.anchor_ordinal,
                           passage.anchor_message_revision_sha256,
@@ -1318,17 +2399,24 @@ def _validate_authoritative_rows(conn: sqlite3.Connection) -> None:
         item is not None
         for item in (
             invalid_message_rowid,
+            invalid_conversation_identity,
+            invalid_source_descriptor,
             missing,
             invalid_projection,
+            invalid_source_unavailable,
             invalid_anchor,
             invalid_chain,
             invalid_rollup,
         )
     ):
-        raise sqlite3.DatabaseError("Schema 49 conversation passage data is invalid")
+        raise sqlite3.DatabaseError(f"Schema {schema_version} conversation passage data is invalid")
 
 
-def _validate_fts_rows(conn: sqlite3.Connection) -> None:
+def _validate_fts_rows(
+    conn: sqlite3.Connection,
+    *,
+    schema_version: int,
+) -> None:
     fts_mismatch = conn.execute(
         """SELECT 1 FROM conversation_passages passage
              LEFT JOIN conversation_passages_fts_docsize fts
@@ -1342,7 +2430,7 @@ def _validate_fts_rows(conn: sqlite3.Connection) -> None:
             LIMIT 1"""
     ).fetchone()
     if fts_mismatch is not None:
-        raise sqlite3.DatabaseError("Schema 49 conversation passage data is invalid")
+        raise sqlite3.DatabaseError(f"Schema {schema_version} conversation passage data is invalid")
     if conn.in_transaction and int(conn.execute("PRAGMA query_only").fetchone()[0]) == 0:
         try:
             cursor = conn.execute(
@@ -1351,7 +2439,62 @@ def _validate_fts_rows(conn: sqlite3.Connection) -> None:
             )
             cursor.close()
         except sqlite3.DatabaseError:
-            raise sqlite3.DatabaseError("Schema 49 conversation passage FTS data is invalid") from None
+            raise sqlite3.DatabaseError(
+                f"Schema {schema_version} conversation passage FTS data is invalid"
+            ) from None
+
+
+def _validate_released_conversation_passage_schema_v49(
+    conn: sqlite3.Connection,
+    *,
+    required: bool = True,
+    validate_data: bool = True,
+    require_fts: bool = False,
+    validate_fts_data: bool = True,
+) -> None:
+    """Authenticate the exact released schema-49 sidecar before replacement."""
+
+    register_conversation_passage_connection_functions(conn)
+    installed = _schema_objects(conn)
+    if not installed:
+        if required:
+            raise sqlite3.DatabaseError("Schema 49 conversation passage projection is missing")
+        return
+    installed_ordinary = _ordinary_objects(installed)
+    installed_fts = _fts_objects(installed)
+    canonical_ordinary = _ordinary_objects(_canonical_released_schema_v49_objects(include_fts=False))
+    if installed_ordinary != canonical_ordinary:
+        raise sqlite3.DatabaseError("Schema 49 conversation passage DDL is incomplete or altered")
+    if installed_fts and _schema_objects_sha256(installed_fts) != _CONVERSATION_PASSAGE_FTS_SCHEMA_SHA256:
+        raise sqlite3.DatabaseError("Schema 49 conversation passage FTS DDL is incomplete or altered")
+    canonical_fts: dict[tuple[str, str], str] | None = {}
+    if installed_fts or require_fts:
+        canonical_fts = _canonical_released_fts_objects_if_available()
+    fts_available = canonical_fts is not None
+    if fts_available:
+        if installed_fts and installed_fts != canonical_fts:
+            raise sqlite3.DatabaseError("Schema 49 conversation passage FTS DDL is incomplete or altered")
+        if require_fts and installed_fts != canonical_fts:
+            raise sqlite3.DatabaseError("Schema 49 conversation passage FTS projection is missing")
+    elif require_fts or validate_fts_data:
+        raise sqlite3.OperationalError("no such module: fts5")
+    authenticated = dict(canonical_ordinary)
+    if installed_fts:
+        authenticated.update(installed_fts)
+    _validate_no_external_dependencies(conn, authenticated, schema_version=49)
+    _validate_shape(
+        conn,
+        include_fts=bool(installed_fts) and fts_available,
+        schema_version=49,
+    )
+    if validate_data:
+        _validate_authoritative_rows(
+            conn,
+            schema_version=49,
+            source_order_index_available=False,
+        )
+        if installed_fts and fts_available and validate_fts_data:
+            _validate_fts_rows(conn, schema_version=49)
 
 
 def validate_conversation_passage_schema(
@@ -1378,24 +2521,24 @@ def validate_conversation_passage_schema(
     installed = _schema_objects(conn)
     if not installed:
         if required:
-            raise sqlite3.DatabaseError("Schema 49 conversation passage projection is missing")
+            raise sqlite3.DatabaseError("Schema 50 conversation passage projection is missing")
         return
     installed_ordinary = _ordinary_objects(installed)
     installed_fts = _fts_objects(installed)
     canonical_ordinary = _canonical_schema_objects(include_fts=False)
     if installed_ordinary != canonical_ordinary:
-        raise sqlite3.DatabaseError("Schema 49 conversation passage DDL is incomplete or altered")
+        raise sqlite3.DatabaseError("Schema 50 conversation passage DDL is incomplete or altered")
     if installed_fts and _schema_objects_sha256(installed_fts) != _CONVERSATION_PASSAGE_FTS_SCHEMA_SHA256:
-        raise sqlite3.DatabaseError("Schema 49 conversation passage FTS DDL is incomplete or altered")
+        raise sqlite3.DatabaseError("Schema 50 conversation passage FTS DDL is incomplete or altered")
     canonical_fts: dict[tuple[str, str], str] | None = {}
     if installed_fts or require_fts:
         canonical_fts = _canonical_fts_objects_if_available()
     fts_available = canonical_fts is not None
     if fts_available:
         if installed_fts and installed_fts != canonical_fts:
-            raise sqlite3.DatabaseError("Schema 49 conversation passage FTS DDL is incomplete or altered")
+            raise sqlite3.DatabaseError("Schema 50 conversation passage FTS DDL is incomplete or altered")
         if require_fts and installed_fts != canonical_fts:
-            raise sqlite3.DatabaseError("Schema 49 conversation passage FTS projection is missing")
+            raise sqlite3.DatabaseError("Schema 50 conversation passage FTS projection is missing")
     elif require_fts or validate_fts_data:
         raise sqlite3.OperationalError("no such module: fts5")
     authenticated = dict(canonical_ordinary)
@@ -1403,13 +2546,21 @@ def validate_conversation_passage_schema(
         # The frozen digest above authenticates these exact raw sqlite_master
         # definitions even when this process cannot instantiate their module.
         authenticated.update(installed_fts)
-    _validate_no_external_dependencies(conn, authenticated)
-    _validate_shape(conn, include_fts=bool(installed_fts) and fts_available)
+    _validate_no_external_dependencies(conn, authenticated, schema_version=50)
+    _validate_shape(
+        conn,
+        include_fts=bool(installed_fts) and fts_available,
+        schema_version=50,
+    )
     if validate_data:
         if _validate_authoritative_data:
-            _validate_authoritative_rows(conn)
+            _validate_authoritative_rows(
+                conn,
+                schema_version=50,
+                source_order_index_available=True,
+            )
         if installed_fts and fts_available and validate_fts_data:
-            _validate_fts_rows(conn)
+            _validate_fts_rows(conn, schema_version=50)
 
 
 def validate_conversation_passage_fts_schema(
@@ -1431,6 +2582,90 @@ def validate_conversation_passage_fts_schema(
         _register_functions=_register_functions,
         _validate_authoritative_data=_validate_authoritative_data,
     )
+
+
+_SCHEMA_49_PUBLICATION_GUARDS = (
+    "conversation_passage_projection_bi_validate",
+    "conversation_passage_projection_bu_validate",
+    "conversation_passage_bi_validate",
+    "conversation_passage_bu_validate",
+    "conversation_passage_message_bi_identity_immutable",
+    "conversation_passage_message_ai_invalidate",
+    "conversation_passage_message_au_reset",
+    "conversation_passage_conversation_bu_reset",
+)
+
+
+def _terminalize_valid_oversized_first_sources(conn: sqlite3.Connection) -> None:
+    """Settle admitted historical oversize without charging a writer tick."""
+
+    valid_source_sql = _first_oversized_source_valid_sql(
+        conversation_id_sql="conversation.id",
+        principal_id_sql="conversation.user_id",
+        force_source_order_index=True,
+    )
+    conn.execute(
+        f"""UPDATE conversation_passage_projections
+               SET indexed_message_count=0,
+                   indexed_through_message_id=NULL,
+                   indexed_conversation_revision_sha256=NULL,
+                   passage_set_sha256=NULL,
+                   projection_status='incomplete',
+                   incomplete_reason='source_unavailable',
+                   passage_count=0,
+                   projected_at=strftime('%Y-%m-%dT%H:%M:%SZ','now')
+             WHERE projection_status='incomplete'
+               AND incomplete_reason IN ('backfill_pending','source_changed')
+               AND passage_count=0
+               AND EXISTS (
+                   SELECT 1
+                     FROM conversations conversation
+                    WHERE conversation.id=
+                          conversation_passage_projections.conversation_id
+                      AND {valid_source_sql}
+               )"""
+    )
+
+
+def upgrade_conversation_passage_schema_49_to_50(
+    conn: sqlite3.Connection,
+    *,
+    required: bool = True,
+) -> None:
+    """Replace schema-49 publication guards and add the two bounded-work indexes."""
+
+    if not conn.in_transaction:
+        raise RuntimeError("Conversation passage schema upgrade requires an existing transaction")
+    installed = _schema_objects(conn)
+    if not installed:
+        if required:
+            raise sqlite3.DatabaseError("Schema 49 conversation passage projection is missing")
+        return
+
+    # An exact schema-50 contour under the schema-49 marker is not an interrupted
+    # migration: this upgrade and the marker move share one outer transaction.
+    _validate_released_conversation_passage_schema_v49(
+        conn,
+        validate_fts_data=False,
+    )
+    savepoint = "conversation_passage_49_to_50"
+    conn.execute(f'SAVEPOINT "{savepoint}"')
+    try:
+        for trigger_name in _SCHEMA_49_PUBLICATION_GUARDS:
+            conn.execute(f'DROP TRIGGER "{trigger_name}"')  # nosec B608 - fixed allowlist
+        _execute_schema(conn, CONVERSATION_PASSAGE_SCHEMA)
+        _terminalize_valid_oversized_first_sources(conn)
+        validate_conversation_passage_schema(
+            conn,
+            require_fts=False,
+            validate_fts_data=False,
+            _register_functions=False,
+        )
+    except BaseException:
+        conn.execute(f'ROLLBACK TO SAVEPOINT "{savepoint}"')
+        conn.execute(f'RELEASE SAVEPOINT "{savepoint}"')
+        raise
+    conn.execute(f'RELEASE SAVEPOINT "{savepoint}"')
 
 
 def conversation_passage_schema_fingerprint(conn: sqlite3.Connection) -> str:
@@ -1458,12 +2693,12 @@ def install_conversation_passage_schema(conn: sqlite3.Connection) -> None:
     installed_fts = _fts_objects(installed)
     canonical_ordinary = _canonical_schema_objects(include_fts=False)
     if installed_ordinary and installed_ordinary != canonical_ordinary:
-        raise sqlite3.DatabaseError("Schema 49 conversation passage DDL is incomplete or altered")
+        raise sqlite3.DatabaseError("Schema 50 conversation passage DDL is incomplete or altered")
     if installed_fts and _schema_objects_sha256(installed_fts) != _CONVERSATION_PASSAGE_FTS_SCHEMA_SHA256:
-        raise sqlite3.DatabaseError("Schema 49 conversation passage FTS DDL is incomplete or altered")
+        raise sqlite3.DatabaseError("Schema 50 conversation passage FTS DDL is incomplete or altered")
     if not installed_ordinary:
         if installed_fts:
-            raise sqlite3.DatabaseError("Schema 49 conversation passage DDL is incomplete or altered")
+            raise sqlite3.DatabaseError("Schema 50 conversation passage DDL is incomplete or altered")
         _execute_schema(conn, CONVERSATION_PASSAGE_SCHEMA)
     conn.execute(
         f"""INSERT INTO conversation_passage_projections(
@@ -1483,6 +2718,7 @@ def install_conversation_passage_schema(conn: sqlite3.Connection) -> None:
                         WHERE projection.conversation_id=source.id
                    )"""
     )
+    _terminalize_valid_oversized_first_sources(conn)
     validate_conversation_passage_schema(
         conn,
         require_fts=False,
@@ -1511,7 +2747,7 @@ def install_conversation_passage_fts_schema(
     installed_fts = _fts_objects(_schema_objects(conn))
     canonical_fts = _fts_objects(_canonical_schema_objects(include_fts=True))
     if installed_fts and installed_fts != canonical_fts:
-        raise sqlite3.DatabaseError("Schema 49 conversation passage FTS DDL is incomplete or altered")
+        raise sqlite3.DatabaseError("Schema 50 conversation passage FTS DDL is incomplete or altered")
     if not installed_fts:
         _execute_schema(conn, CONVERSATION_PASSAGE_FTS_SCHEMA)
     cursor = conn.execute(
@@ -1532,6 +2768,7 @@ __all__ = [
     "CONVERSATION_PASSAGE_INDEX_REVISION",
     "CONVERSATION_PASSAGE_SCHEMA",
     "CONVERSATION_PASSAGE_SCHEMA_VERSION",
+    "CONVERSATION_PASSAGE_TEXT_WORK_BUDGET_BYTES",
     "conversation_passage_anchor_locator_sha256",
     "conversation_passage_content_sha256",
     "conversation_passage_fts_schema_fingerprint",
@@ -1543,6 +2780,7 @@ __all__ = [
     "install_conversation_passage_fts_schema",
     "install_conversation_passage_schema",
     "register_conversation_passage_connection_functions",
+    "upgrade_conversation_passage_schema_49_to_50",
     "validate_conversation_passage_fts_schema",
     "validate_conversation_passage_schema",
 ]

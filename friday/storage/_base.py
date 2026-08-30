@@ -182,7 +182,11 @@ LOGGER = logging.getLogger("friday.storage")
 # conversations start explicitly backfill_pending; the released schema already
 # accepts future authenticated CURRENT rows so it can be sealed as the rollback
 # binary before the independently reversible writer/search activation.
-SCHEMA_VERSION = 49
+# 50 — bounded incremental guards for conversation-passage publication.  The
+# schema-49 tables, row identities and FTS/public layout remain unchanged; only
+# the incremental publication guards and two bounded-work indexes are installed
+# after authenticating the exact released predecessor.
+SCHEMA_VERSION = 50
 
 #: Определение таблицы внешних источников отдельной константой: миграция схемы 29
 #: пересоздаёт её, чтобы ключом стала ПАРА `(user_id, name)`, и должна брать ровно

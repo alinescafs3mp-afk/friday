@@ -7124,6 +7124,18 @@ class ExecutionKernel:
             promoted_plan is not None or promoted_timezone_name is not None
         ):
             raise ValueError("promoted message window authority is unavailable to ordinary calls")
+
+        def require_conversation_read() -> None:
+            authorization = self.authorization
+            if (
+                authorization is None
+                or not authorization.authorize(
+                    actor,
+                    "conversations.read",
+                ).allowed
+            ):
+                raise PermissionError("conversation read authorization denied")
+
         if promoted_current_conversation is True:
             if (
                 type(promoted_plan) is not LegacyMessageWindowPlan
@@ -7146,15 +7158,7 @@ class ExecutionKernel:
                 ZoneInfo(promoted_timezone_name)
             except (KeyError, ValueError) as exc:
                 raise ValueError("promoted message window requires an installed IANA timezone") from exc
-            authorization = self.authorization
-            if (
-                authorization is None
-                or not authorization.authorize(
-                    actor,
-                    "conversations.read",
-                ).allowed
-            ):
-                raise PermissionError("conversation read authorization denied")
+            require_conversation_read()
             with storage.transaction() as conn:
                 projection = select_promoted_current_conversation_window_in_transaction(
                     conn,
@@ -7179,6 +7183,7 @@ class ExecutionKernel:
                     projection=projection,
                 )
         if since is not None and until is not None:
+            require_conversation_read()
             page = storage.list_messages_window(
                 actor.own_id,
                 since,
@@ -7254,6 +7259,7 @@ class ExecutionKernel:
                 "content_chars": content_chars,
                 "full_content": full_content,
             }
+        require_conversation_read()
         message_rows = storage.search_messages(
             actor.own_id,
             query,

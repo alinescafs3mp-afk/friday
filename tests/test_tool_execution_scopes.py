@@ -18,6 +18,7 @@ from friday.execution_kernel import (
     ExecutionKernel,
     ToolSpec,
 )
+from friday.executive.service import ExecutiveService
 from friday.ingestion import IngestionPipeline
 from friday.knowledge_graph import KnowledgeGraph
 from friday.permissions import AuthorizationService
@@ -70,6 +71,75 @@ async def test_a_dialogue_tool_named_directly_by_a_mission_has_no_effect(setting
             execution_scope="mission",
         )
         assert allowed.success is True
+    finally:
+        await web.close()
+
+
+@pytest.mark.asyncio
+async def test_executive_mission_model_receives_and_executes_released_recall_tools(settings, storage):
+    """The mission journey keeps its legacy recall lane until a real replacement exists."""
+
+    storage.ensure_user("alice", preset_key="owner")
+    authorization = AuthorizationService(storage)
+    graph = KnowledgeGraph(storage)
+    ingestion = IngestionPipeline(settings, storage, graph)
+    web = WebSurfer(settings)
+    kernel = ExecutionKernel(authorization, settings)
+    kernel.bind_services(storage, graph, web, ingestion)
+
+    class _RecallMissionLLM:
+        enabled = True
+        model = "mission-recall-test"
+
+        def __init__(self) -> None:
+            self.rounds = 0
+            self.offered: set[str] = set()
+
+        async def chat(self, messages, *, tools=None, **kwargs):  # noqa: ANN001, ANN003
+            del kwargs
+            self.rounds += 1
+            if self.rounds == 1:
+                self.offered = {str(item.get("function", {}).get("name") or "") for item in tools or []}
+                return {
+                    "content": "",
+                    "tool_calls": [
+                        {
+                            "id": "call_memory",
+                            "function": {
+                                "name": "memory_search",
+                                "arguments": '{"query":"synthetic absent knowledge"}',
+                            },
+                        },
+                        {
+                            "id": "call_messages",
+                            "function": {
+                                "name": "message_search",
+                                "arguments": '{"query":"synthetic absent conversation"}',
+                            },
+                        },
+                    ],
+                }
+            tool_messages = [item for item in messages if item.get("role") == "tool"]
+            assert len(tool_messages) == 2
+            assert all("Ошибка инструмента" not in str(item.get("content") or "") for item in tool_messages)
+            return {"content": "Сведения собраны.", "finish_reason": "stop"}
+
+    llm = _RecallMissionLLM()
+    service = ExecutiveService(settings, storage, authorization, kernel, llm, ingestion)
+    actor = authorization.actor_for_user("alice", source="mission-recall-test")
+
+    try:
+        answer, tools_used = await service._run_tool_loop(  # noqa: SLF001
+            "Найди в моих знаниях и прошлой переписке",
+            actor,
+        )
+
+        assert llm.offered & {"archive_search", "memory_search", "message_search"} == {
+            "memory_search",
+            "message_search",
+        }
+        assert tools_used == ["memory_search", "message_search"]
+        assert answer == "Сведения собраны."
     finally:
         await web.close()
 

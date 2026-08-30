@@ -34,6 +34,7 @@ from friday.conversation_passages.schema import (
     install_conversation_passage_fts_schema,
     install_conversation_passage_schema,
     register_conversation_passage_connection_functions,
+    upgrade_conversation_passage_schema_49_to_50,
     validate_conversation_passage_fts_schema,
     validate_conversation_passage_schema,
 )
@@ -2624,8 +2625,13 @@ class CoreMixin(StorageShared):
                 # authoritative transaction commits. Authenticate any installed
                 # FTS DDL here while leaving derivative-data repair to that phase.
                 validate_conversation_passage_schema(conn, validate_fts_data=False)
+            elif parsed_version == 49:
+                # Schema 50 preserves both authoritative tables and the optional
+                # FTS contour.  Authenticate the exact released reader-first DDL
+                # and rows before replacing only its unbounded publication guards.
+                upgrade_conversation_passage_schema_49_to_50(conn)
             else:
-                # Exact interrupted schema-49 artifacts may resume; partial or
+                # Exact interrupted schema-50 artifacts may resume; partial or
                 # counterfeit DDL under an older marker is never concealed by
                 # the idempotent installer below.
                 validate_conversation_passage_schema(

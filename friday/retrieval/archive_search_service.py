@@ -64,6 +64,7 @@ from friday.retrieval.catalog_contract import (
     CatalogIndexLane,
     CatalogIndexState,
     CatalogIndexStatus,
+    IndexIncompleteReason,
 )
 from friday.retrieval.contracts import (
     AuthorityScope,
@@ -80,6 +81,8 @@ from friday.storage._archive_search_documents import (
 )
 from friday.storage._archive_search_messages import (
     ArchiveMessageScope,
+    ArchiveMessageStorageError,
+    _accepted_archive_message_boundary_identity_in_transaction,
 )
 from friday.storage._archive_search_messages import (
     _materialize_authorized_archive_message_page_in_transaction as select_authorized_archive_message_page_in_transaction,
@@ -89,6 +92,9 @@ from friday.storage._archive_search_obsidian import (
     ArchiveObsidianReadPhase,
     ArchiveObsidianUnavailableReason,
     select_archive_obsidian_lane_in_transaction,
+)
+from friday.storage._conversation_passages import (
+    select_authorized_conversation_passage_projection_in_transaction,
 )
 
 _PROCESS_KEY = secrets.token_bytes(32)
@@ -124,6 +130,10 @@ class ArchiveSearchServiceError(RuntimeError):
     """Body-free failure at the application facade boundary."""
 
 
+class _ArchiveAcceptedBoundaryDrift(ArchiveSearchServiceError):
+    """The accepted message boundary changed during one sealed search run."""
+
+
 def _fail() -> ArchiveSearchServiceError:
     return ArchiveSearchServiceError("archive search service is unavailable")
 
@@ -137,7 +147,7 @@ def _materialized_lane_limit(request: ArchiveSearchRequest) -> int:
             corpus in _DOCUMENT_CORPUS
             and lane in _DOCUMENT_LANES
             or corpus is SearchCorpus.CONVERSATION
-            and lane is SearchLane.MESSAGE_HISTORY
+            and lane in {SearchLane.LEXICAL, SearchLane.MESSAGE_HISTORY}
         )
         for corpus, lane in targets
     )
@@ -330,19 +340,30 @@ def _accepted_turn_snapshot(
     *,
     current_conversation_id: str | None,
     boundary_user_message_id: str | None,
+    accepted_boundary_identity_sha256: str | None,
 ) -> str:
     """Bind message continuations to the exact accepted current-user row."""
 
     if ArchiveSearchCorpus.MESSAGES not in request.corpora:
+        if accepted_boundary_identity_sha256 is not None:
+            raise _fail()
         return snapshot
     conversation = _identity(current_conversation_id)
     boundary = _identity(boundary_user_message_id)
+    boundary_identity = accepted_boundary_identity_sha256
+    if boundary_identity is not None and (
+        type(boundary_identity) is not str
+        or len(boundary_identity) != 64
+        or any(character not in "0123456789abcdef" for character in boundary_identity)
+    ):
+        raise _fail()
     return (
         "archive-message-boundary:"
         + _mac(
             b"friday/archive-search-accepted-turn-snapshot/v1",
             {
                 "boundary_user_message_id": boundary,
+                "accepted_boundary_identity_sha256": boundary_identity,
                 "current_conversation_id": conversation,
                 "snapshot_discriminator": snapshot,
             },
@@ -618,12 +639,14 @@ class _ArchiveSearchRecipe:
     snapshot_discriminator: str
     current_conversation_id: str | None
     boundary_user_message_id: str | None
+    accepted_boundary_identity_sha256: str | None
     continuation: bool
     target_authority: tuple[_ArchiveTargetAuthority, ...]
     seal: bytes
 
     def material(self) -> dict[str, object]:
         return {
+            "accepted_boundary_identity_sha256": self.accepted_boundary_identity_sha256,
             "boundary_user_message_id": self.boundary_user_message_id,
             "continuation": self.continuation,
             "current_conversation_id": self.current_conversation_id,
@@ -654,9 +677,21 @@ class _ArchiveSearchRecipe:
                 and (self.current_conversation_id is None or type(self.current_conversation_id) is str)
                 and (self.boundary_user_message_id is None or type(self.boundary_user_message_id) is str)
                 and (
-                    not messages_requested
+                    self.accepted_boundary_identity_sha256 is None
                     or (
-                        type(self.current_conversation_id) is str
+                        type(self.accepted_boundary_identity_sha256) is str
+                        and len(self.accepted_boundary_identity_sha256) == 64
+                        and not any(
+                            character not in "0123456789abcdef"
+                            for character in self.accepted_boundary_identity_sha256
+                        )
+                    )
+                )
+                and (
+                    (not messages_requested and self.accepted_boundary_identity_sha256 is None)
+                    or (
+                        messages_requested
+                        and type(self.current_conversation_id) is str
                         and type(self.boundary_user_message_id) is str
                     )
                 )
@@ -679,19 +714,21 @@ def _new_recipe(
     snapshot_discriminator: str,
     current_conversation_id: str | None,
     boundary_user_message_id: str | None,
+    accepted_boundary_identity_sha256: str | None,
     continuation: bool,
     target_authority: tuple[_ArchiveTargetAuthority, ...],
 ) -> _ArchiveSearchRecipe:
     recipe = _ArchiveSearchRecipe(
-        tenant_id,
-        principal_id,
-        request,
-        snapshot_discriminator,
-        current_conversation_id,
-        boundary_user_message_id,
-        continuation,
-        target_authority,
-        b"0" * 32,
+        tenant_id=tenant_id,
+        principal_id=principal_id,
+        request=request,
+        snapshot_discriminator=snapshot_discriminator,
+        current_conversation_id=current_conversation_id,
+        boundary_user_message_id=boundary_user_message_id,
+        accepted_boundary_identity_sha256=accepted_boundary_identity_sha256,
+        continuation=continuation,
+        target_authority=target_authority,
+        seal=b"0" * 32,
     )
     object.__setattr__(
         recipe,
@@ -780,6 +817,7 @@ class PreparedArchiveSearch(_ProcessPrivate):
                 storage_request,
                 current_conversation_id=self._recipe.current_conversation_id,
                 boundary_user_message_id=self._recipe.boundary_user_message_id,
+                accepted_boundary_identity_sha256=(self._recipe.accepted_boundary_identity_sha256),
             )
             return bool(
                 hmac.compare_digest(
@@ -919,23 +957,88 @@ def _collect_message_target(
     target: tuple[SearchCorpus, SearchLane],
 ) -> tuple[tuple[ArchiveSearchCandidate, ...], SearchCoverage]:
     controls = archive_message_storage_controls(recipe.request)
-    page = select_authorized_archive_message_page_in_transaction(
+    if (
+        recipe.accepted_boundary_identity_sha256 is None
+        or recipe.current_conversation_id is None
+        or recipe.boundary_user_message_id is None
+    ):
+        return (), _permission_filtered(target, run.execution_binding)
+    fresh_boundary_identity = _accepted_archive_message_boundary_identity_in_transaction(
         conn,
         principal_id=recipe.principal_id,
-        query=recipe.request.query,
-        scope=cast(ArchiveMessageScope, controls["scope"]),
         conversation_id=recipe.current_conversation_id,
         boundary_user_message_id=recipe.boundary_user_message_id,
-        roles=cast(tuple[MessageRole, ...], controls["roles"]),
-        lifecycle_states=cast(tuple[LifecycleState, ...], controls["lifecycle_states"]),
-        since=cast(str | None, controls["since"]),
-        until=cast(str | None, controls["until"]),
-        limit=_materialized_lane_limit(recipe.request),
-        context_before=cast(int, controls["context_before"]),
-        context_after=cast(int, controls["context_after"]),
     )
+    if fresh_boundary_identity is None:
+        return (), _permission_filtered(target, run.execution_binding)
+    if not hmac.compare_digest(
+        fresh_boundary_identity,
+        recipe.accepted_boundary_identity_sha256,
+    ):
+        raise _ArchiveAcceptedBoundaryDrift("archive search service is unavailable")
+    try:
+        page = select_authorized_archive_message_page_in_transaction(
+            conn,
+            principal_id=recipe.principal_id,
+            query=recipe.request.query,
+            selection_lane=target[1],
+            scope=cast(ArchiveMessageScope, controls["scope"]),
+            conversation_id=recipe.current_conversation_id,
+            boundary_user_message_id=recipe.boundary_user_message_id,
+            roles=cast(tuple[MessageRole, ...], controls["roles"]),
+            lifecycle_states=cast(tuple[LifecycleState, ...], controls["lifecycle_states"]),
+            since=cast(str | None, controls["since"]),
+            until=cast(str | None, controls["until"]),
+            limit=_materialized_lane_limit(recipe.request),
+            context_before=cast(int, controls["context_before"]),
+            context_after=cast(int, controls["context_after"]),
+        )
+    except ArchiveMessageStorageError:
+        if target[1] is not SearchLane.LEXICAL:
+            raise
+        return (), _coverage(
+            target,
+            run.execution_binding,
+            states=(CoverageState.PARTIAL, CoverageState.BACKFILL_PENDING),
+            authority_rechecked=True,
+            snapshot_current=False,
+        )
     if page is None:
         return (), _permission_filtered(target, run.execution_binding)
+    if (
+        recipe.accepted_boundary_identity_sha256 is None
+        or page.boundary_identity_sha256 is None
+        or not hmac.compare_digest(
+            page.boundary_identity_sha256,
+            recipe.accepted_boundary_identity_sha256,
+        )
+    ):
+        raise _ArchiveAcceptedBoundaryDrift("archive search service is unavailable")
+    if target[1] is SearchLane.LEXICAL:
+        for ledger in page.ledgers:
+            selected = select_authorized_conversation_passage_projection_in_transaction(
+                conn,
+                principal_id=recipe.principal_id,
+                boundary_conversation_id=recipe.current_conversation_id,
+                origin_boundary_user_message_id=recipe.boundary_user_message_id,
+                conversation_id=ledger.conversation_id,
+                limit=1,
+            )
+            if (
+                selected is None
+                or not selected.authorized_projection_complete
+                or not hmac.compare_digest(
+                    selected.boundary_identity_sha256,
+                    recipe.accepted_boundary_identity_sha256,
+                )
+            ):
+                return (), _coverage(
+                    target,
+                    run.execution_binding,
+                    states=(CoverageState.PARTIAL, CoverageState.BACKFILL_PENDING),
+                    authority_rechecked=True,
+                    snapshot_current=False,
+                )
     projection = project_archive_message_page(
         tenant_id=recipe.tenant_id,
         principal_id=recipe.principal_id,
@@ -943,11 +1046,12 @@ def _collect_message_target(
         page=page,
         index_state=CatalogIndexState(
             CatalogIndexLane.LEXICAL,
-            CatalogIndexStatus.CURRENT,
-            None,
+            (CatalogIndexStatus.PARTIAL if target[1] is SearchLane.LEXICAL else CatalogIndexStatus.CURRENT),
+            (IndexIncompleteReason.BACKFILL_PENDING if target[1] is SearchLane.LEXICAL else None),
         ),
         execution_binding=run.execution_binding,
         snapshot_discriminator=recipe.snapshot_discriminator,
+        selection_lane=target[1],
         current_conversation_id=recipe.current_conversation_id,
         boundary_user_message_id=recipe.boundary_user_message_id,
     )
@@ -1064,7 +1168,10 @@ def _collect_federated_in_transaction(
                     run=run,
                     target=target,
                 )
-            elif target == (SearchCorpus.CONVERSATION, SearchLane.MESSAGE_HISTORY):
+            elif target[0] is SearchCorpus.CONVERSATION and target[1] in {
+                SearchLane.LEXICAL,
+                SearchLane.MESSAGE_HISTORY,
+            }:
                 candidates, coverage = _collect_message_target(
                     conn,
                     recipe=recipe,
@@ -1080,6 +1187,8 @@ def _collect_federated_in_transaction(
                     phase=phase,
                     exact_file_reader=exact_file_reader,
                 )
+        except _ArchiveAcceptedBoundaryDrift:
+            raise
         except Exception:
             candidates = ()
             coverage = _storage_unavailable(target, binding)
@@ -1580,12 +1689,6 @@ def prepare_archive_search_in_transaction(
             raise _fail()
         request_value = ArchiveSearchRequest.parse_private(request.to_private_json())
         storage_request = _storage_request(request_value)
-        snapshot = _accepted_turn_snapshot(
-            snapshot,
-            storage_request,
-            current_conversation_id=current_conversation_id,
-            boundary_user_message_id=boundary_user_message_id,
-        )
         continuation = request_value.continuation is not None
         targets = canonical_archive_search_targets(storage_request)
         current_authority = _fresh_target_authority_in_transaction(
@@ -1595,6 +1698,26 @@ def prepare_archive_search_in_transaction(
             tenant_id=tenant,
             principal_id=principal,
             targets=targets,
+        )
+        messages_authorized = any(
+            item.corpus is SearchCorpus.CONVERSATION and item.allowed for item in current_authority
+        )
+        accepted_boundary_identity_sha256 = (
+            _accepted_archive_message_boundary_identity_in_transaction(
+                conn,
+                principal_id=principal,
+                conversation_id=_identity(current_conversation_id),
+                boundary_user_message_id=_identity(boundary_user_message_id),
+            )
+            if ArchiveSearchCorpus.MESSAGES in storage_request.corpora and messages_authorized
+            else None
+        )
+        snapshot = _accepted_turn_snapshot(
+            snapshot,
+            storage_request,
+            current_conversation_id=current_conversation_id,
+            boundary_user_message_id=boundary_user_message_id,
+            accepted_boundary_identity_sha256=accepted_boundary_identity_sha256,
         )
         run = create_archive_search_run_binding(
             tenant_id=tenant,
@@ -1626,6 +1749,7 @@ def prepare_archive_search_in_transaction(
             snapshot_discriminator=snapshot,
             current_conversation_id=current_conversation_id,
             boundary_user_message_id=boundary_user_message_id,
+            accepted_boundary_identity_sha256=accepted_boundary_identity_sha256,
             continuation=continuation,
             target_authority=target_authority,
         )

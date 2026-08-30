@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import base64
 import concurrent.futures
 import hashlib
 import json
@@ -16,6 +17,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from friday.account_deletion import (
+    AccountDeletionBlocked,
     AccountDeletionConflict,
     _account_files_directory,
     _mark_account_deletion_history_clean,
@@ -24,12 +26,21 @@ from friday.account_deletion import (
     preflight_account_deletion,
 )
 from friday.account_gate import AccountActivityGate, AccountGateClosed
+from friday.conversation_passages.worker_state import (
+    CONVERSATION_PASSAGE_OWNER_SCAN_PREFIX,
+    CONVERSATION_PASSAGE_WORKER_STATE_KEY,
+    conversation_passage_owner_scan_key,
+    decode_conversation_passage_scan_cursor,
+    encode_conversation_passage_scan_cursor,
+    load_conversation_passage_worker_namespace_key,
+)
 from friday.host_control.jobs import HostJobStore
 from friday.memory import VaultAccountWriteBlocked, _safe_component
 from friday.permissions import LEGACY_OWNER_USER_ID
 from friday.server import create_app
 from friday.storage import (
     DeletedAccountError,
+    FridayStorage,
     deleted_account_tombstone_key,
     deleted_identity_tombstone_key,
 )
@@ -1765,6 +1776,222 @@ def test_runtime_key_boundaries_never_delete_a_neighbour_or_global_state(storage
     assert blocked["ready"] is False
     assert {item["code"] for item in blocked["blockers"]} == {"unknown_runtime_scope"}
     assert storage.kv_get("quota:team:bob:2026-08-09") is not None
+
+
+def test_hard_delete_removes_hmac_owner_scan_checkpoint_across_reopen(settings) -> None:
+    actor = "local:conversation-scan-admin"
+    # Every opaque worker key contains this text in its code-owned prefix.  It
+    # must not make a neighbour's HMAC checkpoint look owned by this account.
+    target = "workers"
+    neighbour = "local:conversation-scan-neighbour"
+    target_cursor = "cpw2:conv_0123456789abcdef:1:0:0:-:0:1:0:s"
+    neighbour_cursor = "cpw2:-:0:1:0:conv_fedcba9876543210:1:0:0:b"
+    first = FridayStorage(settings)
+    try:
+        first.ensure_user(actor, preset_key="admin")
+        first.ensure_user(target)
+        first.ensure_user(neighbour)
+        assert _mark_account_deletion_history_clean(first, target) is True
+        namespace_key = load_conversation_passage_worker_namespace_key(first)
+        target_key = conversation_passage_owner_scan_key(
+            target,
+            namespace_key=namespace_key,
+        )
+        neighbour_key = conversation_passage_owner_scan_key(
+            neighbour,
+            namespace_key=namespace_key,
+        )
+        target_payload = encode_conversation_passage_scan_cursor(target_cursor)
+        neighbour_payload = encode_conversation_passage_scan_cursor(neighbour_cursor)
+        first.kv_set(target_key, target_payload)
+        first.kv_set(neighbour_key, neighbour_payload)
+        first.update_user(target, status="disabled")
+
+        plan = preflight_account_deletion(first, target, quiescence_available=True)
+        assert plan["ready"] is True, plan
+        assert plan["counts"]["conversation_passage_owner_scan_state"] == 1
+        public_plan = json.dumps(plan, ensure_ascii=True, sort_keys=True)
+        assert target_key not in public_plan
+        assert target_payload not in public_plan
+        assert target_cursor not in public_plan
+        result = delete_account(
+            first,
+            target,
+            expected_fingerprint=plan["fingerprint"],
+            actor_user_id=actor,
+            quiescence_verified=True,
+        )
+        assert result["deleted"]["conversation_passage_owner_scan_state"] == 1
+        assert result["deleted_rows"] == plan["planned_delete_rows"]
+    finally:
+        first.close()
+
+    reopened = FridayStorage(replace(settings, database_must_exist=True))
+    try:
+        assert reopened.get_user(target) is None
+        assert reopened.kv_get(target_key) is None
+        assert reopened.kv_get(deleted_account_tombstone_key(target)) is not None
+        assert decode_conversation_passage_scan_cursor(reopened.kv_get(neighbour_key)) == (neighbour_cursor)
+        runtime_rows = reopened.execute("SELECT key,value FROM runtime_kv ORDER BY key").fetchall()
+        runtime_material = "\n".join(f"{row['key']}\x00{row['value']}" for row in runtime_rows)
+        assert target_key not in runtime_material
+        assert target_payload not in runtime_material
+        assert "conv_0123456789abcdef" not in runtime_material
+    finally:
+        reopened.close()
+
+
+@pytest.mark.parametrize(
+    "initial_cursor",
+    [None, "cpw2:conv_1111111111111111:0:0:0:-:0:0:0:s"],
+)
+def test_owner_scan_checkpoint_change_after_preflight_fails_closed(storage, initial_cursor) -> None:
+    suffix = "absent" if initial_cursor is None else "changed"
+    actor = f"local:conversation-scan-race-admin-{suffix}"
+    target = f"local:conversation-scan-race-target-{suffix}"
+    storage.ensure_user(actor, preset_key="admin")
+    storage.ensure_user(target)
+    assert _mark_account_deletion_history_clean(storage, target) is True
+    owner_scan_key = conversation_passage_owner_scan_key(
+        target,
+        namespace_key=load_conversation_passage_worker_namespace_key(storage),
+    )
+    if initial_cursor is not None:
+        storage.kv_set(
+            owner_scan_key,
+            encode_conversation_passage_scan_cursor(initial_cursor),
+        )
+    storage.update_user(target, status="disabled")
+    plan = preflight_account_deletion(storage, target, quiescence_available=True)
+    assert plan["ready"] is True, plan
+
+    changed_cursor = "cpw2:-:0:0:0:conv_2222222222222222:1:0:0:b"
+    storage.kv_set(
+        owner_scan_key,
+        encode_conversation_passage_scan_cursor(changed_cursor),
+    )
+    with pytest.raises(AccountDeletionConflict, match="изменилась"):
+        delete_account(
+            storage,
+            target,
+            expected_fingerprint=plan["fingerprint"],
+            actor_user_id=actor,
+            quiescence_verified=True,
+        )
+
+    assert storage.get_user(target) is not None
+    assert decode_conversation_passage_scan_cursor(storage.kv_get(owner_scan_key)) == changed_cursor
+    assert storage.kv_get(deleted_account_tombstone_key(target)) is None
+
+
+def test_malformed_owner_scan_checkpoint_is_a_named_fail_closed_blocker(storage) -> None:
+    target = "local:conversation-scan-malformed"
+    storage.ensure_user(target)
+    assert _mark_account_deletion_history_clean(storage, target) is True
+    owner_scan_key = conversation_passage_owner_scan_key(
+        target,
+        namespace_key=load_conversation_passage_worker_namespace_key(storage),
+    )
+    storage.kv_set(owner_scan_key, "not-a-canonical-cursor")
+    storage.update_user(target, status="disabled")
+
+    plan = preflight_account_deletion(storage, target, quiescence_available=True)
+
+    assert plan["ready"] is False
+    assert {item["code"] for item in plan["blockers"]} == {"unknown_runtime_scope"}
+    assert storage.kv_get(owner_scan_key) == "not-a-canonical-cursor"
+
+
+@pytest.mark.parametrize(
+    "malformation",
+    (
+        "bad_suffix",
+        "unknown_suffix",
+        "known_key_non_cpw2",
+        "unknown_key_deleted_owner_payload",
+    ),
+)
+def test_owner_scan_prefix_namespace_is_closed_and_fail_closed(storage, malformation) -> None:
+    target = f"local:conversation-scan-namespace-{malformation}"
+    storage.ensure_user(target)
+    assert _mark_account_deletion_history_clean(storage, target) is True
+    namespace_key = load_conversation_passage_worker_namespace_key(storage)
+    legitimate_key = conversation_passage_owner_scan_key(
+        target,
+        namespace_key=namespace_key,
+    )
+    valid_payload = encode_conversation_passage_scan_cursor("cpw2:conv_3333333333333333:0:1:0:-:0:0:0:s")
+    if malformation == "bad_suffix":
+        checkpoint_key = f"{CONVERSATION_PASSAGE_OWNER_SCAN_PREFIX}not-64-hex"
+        checkpoint_value = valid_payload
+    elif malformation == "known_key_non_cpw2":
+        checkpoint_key = legitimate_key
+        checkpoint_value = base64.urlsafe_b64encode(b"cpw1:conv_3333333333333333:0:0").decode("ascii")
+    else:
+        suffix = "0" * 64 if malformation == "unknown_suffix" else "1" * 64
+        checkpoint_key = f"{CONVERSATION_PASSAGE_OWNER_SCAN_PREFIX}{suffix}"
+        assert checkpoint_key != legitimate_key
+        checkpoint_value = (
+            valid_payload
+            if malformation == "unknown_suffix"
+            else base64.urlsafe_b64encode(target.encode("utf-8")).decode("ascii")
+        )
+    storage.kv_set(checkpoint_key, checkpoint_value)
+    storage.update_user(target, status="disabled")
+
+    plan = preflight_account_deletion(storage, target, quiescence_available=True)
+
+    assert plan["ready"] is False
+    assert {item["code"] for item in plan["blockers"]} == {"unknown_runtime_scope"}
+    with pytest.raises(AccountDeletionBlocked):
+        delete_account(
+            storage,
+            target,
+            expected_fingerprint=plan["fingerprint"],
+            actor_user_id=target,
+            quiescence_verified=True,
+        )
+    assert storage.get_user(target) is not None
+    assert storage.kv_get(checkpoint_key) == checkpoint_value
+    assert storage.kv_get(deleted_account_tombstone_key(target)) is None
+
+
+def test_identity_bearing_global_conversation_worker_state_blocks_without_disclosure(
+    storage,
+) -> None:
+    actor = "local:conversation-global-state-admin"
+    target = "local:conversation-global-state-target"
+    private_marker = "PRIVATE-CONVERSATION-WORKER-OWNER-MARKER"
+    unsupported_state = json.dumps(
+        {"owner_id": private_marker, "version": 3},
+        ensure_ascii=True,
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    storage.ensure_user(actor, preset_key="admin")
+    storage.ensure_user(target)
+    assert _mark_account_deletion_history_clean(storage, target) is True
+    storage.kv_set(CONVERSATION_PASSAGE_WORKER_STATE_KEY, unsupported_state)
+    storage.update_user(target, status="disabled")
+
+    plan = preflight_account_deletion(storage, target, quiescence_available=True)
+
+    assert plan["ready"] is False
+    assert {item["code"] for item in plan["blockers"]} == {"unknown_runtime_scope"}
+    serialized_plan = json.dumps(plan, ensure_ascii=True, sort_keys=True)
+    assert private_marker not in serialized_plan
+    assert unsupported_state not in serialized_plan
+    with pytest.raises(AccountDeletionBlocked):
+        delete_account(
+            storage,
+            target,
+            expected_fingerprint=plan["fingerprint"],
+            actor_user_id=actor,
+            quiescence_verified=True,
+        )
+    assert storage.get_user(target) is not None
+    assert storage.kv_get(CONVERSATION_PASSAGE_WORKER_STATE_KEY) == unsupported_state
+    assert storage.kv_get(deleted_account_tombstone_key(target)) is None
 
 
 def test_ambiguous_bare_and_graph_runtime_keys_are_never_claimed(storage) -> None:

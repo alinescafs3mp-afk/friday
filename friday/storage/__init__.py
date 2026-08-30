@@ -33,6 +33,7 @@ from friday.storage._base import (
     validate_user_id,
 )
 from friday.storage._compacts import CompactsMixin
+from friday.storage._conversation_passages import ConversationPassagesMixin
 from friday.storage._conversations import ConversationsMixin
 from friday.storage._core import CoreMixin, iso_date
 from friday.storage._document_catalog import DocumentCatalogMixin
@@ -79,6 +80,7 @@ class FridayStorage(
     AccountsMixin,
     ApprovalsMixin,
     CompactsMixin,
+    ConversationPassagesMixin,
     ConversationsMixin,
     CoreMixin,
     DocumentCatalogMixin,

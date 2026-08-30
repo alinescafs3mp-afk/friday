@@ -1,9 +1,10 @@
 """One-snapshot, principal-authorized lexical recall over private messages.
 
-The caller owns the SQLite transaction.  This module neither starts nor ends a
-transaction.  Its only write-shaped statement is FTS5's diagnostic
-``integrity-check`` command, which changes no durable rows; cancellation can
-therefore only abort verification/read work.
+The caller owns the durable SQLite transaction.  This module neither starts nor
+ends it.  Legacy message-index validation may issue FTS5's diagnostic
+``integrity-check`` command, which changes no durable rows.  The conversation
+lane re-tokenizes only its bounded selected bodies in an isolated in-memory FTS
+table; it never writes to the caller's database.
 Returned values contain message bodies and storage identities; they are
 process-private inputs to the archive authority layer, never public payloads.
 """
@@ -22,6 +23,9 @@ from dataclasses import InitVar, dataclass, field
 from datetime import UTC, datetime, timedelta
 from typing import Any, NoReturn, SupportsIndex, TypeAlias
 
+from friday.conversation_passages.schema import (
+    validate_conversation_passage_fts_schema,
+)
 from friday.retrieval.archive_search_contract import (
     MAX_ARCHIVE_MATERIALIZED_CANDIDATES,
     ConversationScope,
@@ -37,6 +41,7 @@ from friday.retrieval.contracts import (
     ResolvedSource,
     RevalidationTarget,
     RevisionKind,
+    SearchLane,
     SourceKind,
     SourceRef,
     SourceRepresentation,
@@ -57,6 +62,7 @@ _MAX_RESULTS = MAX_ARCHIVE_MATERIALIZED_CANDIDATES
 _MAX_MATCHES_PER_CONVERSATION = 8
 _MAX_HITS = _MAX_RESULTS
 _MAX_NEIGHBORS = 3
+_CONVERSATION_LEXICAL_POOL_CAP = _MAX_HITS * _MAX_MATCHES_PER_CONVERSATION
 
 
 class ArchiveMessageStorageError(ValueError):
@@ -202,6 +208,58 @@ def _boundary_identity(values: dict[str, Any]) -> str:
             "created_at": _utc(values["boundary_created_at"], label="stored boundary timestamp"),
         }
     )
+
+
+def _accepted_archive_message_boundary_identity_in_transaction(
+    conn: sqlite3.Connection,
+    *,
+    principal_id: str,
+    conversation_id: str,
+    boundary_user_message_id: str,
+) -> str | None:
+    """Read the exact authenticated accepted-turn identity without an archive body."""
+
+    if type(conn) is not sqlite3.Connection or not conn.in_transaction:
+        raise RuntimeError("archive message boundary requires a caller-owned transaction")
+    principal = _private_scope(principal_id, label="principal identity")
+    conversation = _conversation_id(
+        conversation_id,
+        label="current conversation identity",
+    )
+    boundary = _message_id(
+        boundary_user_message_id,
+        label="current message boundary",
+    )
+    cursor = conn.execute(
+        """SELECT source.id AS boundary_id,
+                         source.conversation_id AS boundary_conversation_id,
+                         source.user_id AS boundary_principal_id,
+                         source.content AS boundary_content,
+                         source.created_at AS boundary_created_at
+                    FROM users principal
+                    JOIN conversations owned
+                      ON owned.user_id=principal.id AND owned.id=?
+                    JOIN messages source
+                      ON source.id=?
+                     AND source.conversation_id=owned.id
+                     AND source.user_id=principal.id
+                   WHERE principal.id=? AND principal.status='active'
+                     AND source.role='user'""",
+        (conversation, boundary, principal),
+    )
+    columns = tuple(str(item[0]) for item in (cursor.description or ()))
+    row = cursor.fetchone()
+    cursor.close()
+    if row is None:
+        return None
+    values = dict(zip(columns, tuple(row), strict=True))
+    if (
+        values["boundary_id"] != boundary
+        or values["boundary_conversation_id"] != conversation
+        or values["boundary_principal_id"] != principal
+    ):
+        raise ArchiveMessageStorageError("stored accepted boundary is invalid")
+    return _boundary_identity(values)
 
 
 def _roles(values: Iterable[MessageRole]) -> tuple[MessageRole, ...]:
@@ -452,6 +510,7 @@ class ArchiveMessageSearchPage(_ProcessPrivate):
     scope: ArchiveMessageScope
     conversation_id: str | None
     boundary_user_message_id: str | None
+    selection_lane: SearchLane
     hits: tuple[ArchiveMessageHit, ...]
     ledgers: tuple[ArchiveMessageLedgerEvidence, ...]
     roles: tuple[MessageRole, ...]
@@ -477,6 +536,8 @@ class ArchiveMessageSearchPage(_ProcessPrivate):
             or type(self.scope) is not ArchiveMessageScope
             or _CONVERSATION_ID.fullmatch(self.conversation_id or "") is None
             or _MESSAGE_ID.fullmatch(self.boundary_user_message_id or "") is None
+            or type(self.selection_lane) is not SearchLane
+            or self.selection_lane not in {SearchLane.MESSAGE_HISTORY, SearchLane.LEXICAL}
             or self.boundary_identity_sha256 is None
             or type(self.roles) is not tuple
             or self.roles != _roles(self.roles)
@@ -560,7 +621,11 @@ class ArchiveMessageSearchPage(_ProcessPrivate):
             or len(self.ledgers) > self.limit
             or len(self.hits) > self.limit
             or type(self.has_more) is not bool
-            or self.has_more is not (self.total > len(self.ledgers))
+            or (
+                self.selection_lane is SearchLane.MESSAGE_HISTORY
+                and self.has_more is not (self.total > len(self.ledgers))
+            )
+            or (self.selection_lane is SearchLane.LEXICAL and self.has_more is not True)
             or (
                 self.boundary_identity_sha256 is not None
                 and _SHA256.fullmatch(self.boundary_identity_sha256) is None
@@ -629,6 +694,7 @@ def _page_seal(page: ArchiveMessageSearchPage) -> bytes:
     material = {
         "boundary_identity_sha256": page.boundary_identity_sha256,
         "boundary_user_message_id": page.boundary_user_message_id,
+        "selection_lane": page.selection_lane.value,
         "context_after": page.context_after,
         "context_before": page.context_before,
         "conversation_id": page.conversation_id,
@@ -679,7 +745,11 @@ def _page_seal(page: ArchiveMessageSearchPage) -> bytes:
 
 def _records(cursor: sqlite3.Cursor) -> list[dict[str, Any]]:
     columns = tuple(item[0] for item in (cursor.description or ()))
-    return [dict(zip(columns, row, strict=True)) for row in cursor.fetchall()]
+    try:
+        rows = cursor.fetchall()
+    finally:
+        cursor.close()
+    return [dict(zip(columns, row, strict=True)) for row in rows]
 
 
 def _require_active_principal_and_current_lexical_index(
@@ -725,6 +795,38 @@ def _require_active_principal_and_current_lexical_index(
         integrity_cursor.close()
     except sqlite3.DatabaseError:
         raise ArchiveMessageStorageError("message lexical index is unavailable") from None
+    return expected
+
+
+def _require_current_conversation_passage_lexical_index(
+    conn: sqlite3.Connection,
+    *,
+    principal_id: str,
+) -> str:
+    authority = conn.execute(
+        "SELECT 1 FROM users WHERE id=? AND status='active'",
+        (principal_id,),
+    ).fetchone()
+    if authority is None:
+        raise ArchiveMessageStorageError("message principal authority is unavailable")
+    marker = conn.execute(
+        "SELECT value FROM schema_meta WHERE key='conversation_passage_fts_build'",
+    ).fetchone()
+    expected = str(SCHEMA_VERSION)
+    if marker is None or type(marker[0]) is not str or marker[0] != expected:
+        raise ArchiveMessageStorageError("conversation passage lexical index is unavailable")
+    try:
+        validate_conversation_passage_fts_schema(
+            conn,
+            validate_data=False,
+            # FridayStorage registers the schema UDFs when it opens the
+            # connection.  A preceding legacy FTS integrity check makes this
+            # transaction write-shaped, at which point SQLite rejects an
+            # otherwise identical create_function call.
+            _register_functions=False,
+        )
+    except sqlite3.DatabaseError:
+        raise ArchiveMessageStorageError("conversation passage lexical index is unavailable") from None
     return expected
 
 
@@ -885,10 +987,10 @@ def _ledger_evidence(
                             m.created_at AS ledger_created_at,
                             c.title AS ledger_conversation_title,
                             c.is_archived AS ledger_conversation_archived
-                       FROM messages m
-                       JOIN selected_owned c
-                         ON c.id=m.conversation_id AND c.user_id=m.user_id
-                      WHERE m.user_id=?
+                       FROM selected_owned c
+                       CROSS JOIN messages m INDEXED BY idx_messages_conversation
+                      WHERE m.conversation_id=c.id AND m.user_id=c.user_id
+                        AND m.user_id=?
                         AND m.role IN ('user', 'assistant')
                         AND m.rowid<?
                         AND (?='all' OR m.conversation_id=?)
@@ -1177,6 +1279,451 @@ def select_authorized_archive_message_replay_source_in_transaction(
         raise ArchiveMessageStorageError("message replay selection is unavailable") from None
 
 
+def _archive_message_page_from_records(
+    conn: sqlite3.Connection,
+    records: list[dict[str, Any]],
+    *,
+    principal: str,
+    normalized_query: str,
+    scope: ArchiveMessageScope,
+    current_conversation: str,
+    boundary_id: str,
+    selection_lane: SearchLane,
+    selected_roles: tuple[MessageRole, ...],
+    selected_lifecycles: tuple[LifecycleState, ...],
+    start: str | None,
+    end: str | None,
+    page_size: int,
+    before: int,
+    after: int,
+    lexical_index_build: str,
+    force_has_more: bool = False,
+) -> ArchiveMessageSearchPage | None:
+    """Materialize one already-authorized SQL page without widening its scope."""
+
+    if not records:
+        return None
+    first = records[0]
+    if int(first["invalid_lifecycle"]):
+        raise ArchiveMessageStorageError("stored conversation lifecycle is invalid")
+    if int(first["invalid_timestamp"]):
+        raise ArchiveMessageStorageError("stored message timestamp is invalid")
+    examined = int(first["examined"])
+    total = int(first["total"])
+    boundary_digest = _boundary_identity(first)
+    boundary_rowid = int(first["boundary_rowid"])
+    boundary_conversation = _conversation_id(
+        first["boundary_conversation_id"],
+        label="stored boundary conversation",
+    )
+
+    grouped: dict[int, list[dict[str, Any]]] = {}
+    for values in records:
+        if values["match_rank"] is not None:
+            grouped.setdefault(int(values["match_rank"]), []).append(values)
+    conversation_ids = tuple(
+        sorted(
+            {
+                _conversation_id(rows[0]["window_conversation_id"], label="stored conversation identity")
+                for rows in grouped.values()
+            }
+        )
+    )
+    ledgers = (
+        _ledger_evidence(
+            conn,
+            principal_id=principal,
+            conversation_ids=conversation_ids,
+            scope=scope,
+            boundary_conversation_id=boundary_conversation,
+            boundary_rowid=boundary_rowid,
+            boundary_identity_sha256=boundary_digest,
+        )
+        if conversation_ids
+        else ()
+    )
+    ledger_by_conversation = {item.conversation_id: item for item in ledgers}
+    hits: list[ArchiveMessageHit] = []
+    for rank in sorted(grouped):
+        rows = grouped[rank]
+        contexts = tuple(
+            ArchiveMessageContextRow(
+                row=_row(values, prefix="window"),
+                relative_position=int(values["relative_position"]),
+                _factory=_FACTORY,
+            )
+            for values in rows
+        )
+        hit_context = next((item for item in contexts if item.relative_position == 0), None)
+        if hit_context is None:
+            raise ArchiveMessageStorageError("message hit lost its exact context")
+        ledger = ledger_by_conversation.get(hit_context.row.conversation_id)
+        if ledger is None:
+            raise ArchiveMessageStorageError("message hit lost its exact ledger")
+        score = float(rows[0]["lexical_score"])
+        hits.append(
+            ArchiveMessageHit(
+                match_rank=rank,
+                source_rank=int(rows[0]["source_rank"]),
+                lexical_score=score,
+                message=hit_context.row,
+                context=contexts,
+                ledger=ledger,
+                _factory=_FACTORY,
+            )
+        )
+    return ArchiveMessageSearchPage(
+        principal_id=principal,
+        query=normalized_query,
+        scope=scope,
+        conversation_id=current_conversation,
+        boundary_user_message_id=boundary_id,
+        selection_lane=selection_lane,
+        hits=tuple(hits),
+        ledgers=ledgers,
+        roles=selected_roles,
+        lifecycle_states=selected_lifecycles,
+        since=start,
+        until=end,
+        limit=page_size,
+        context_before=before,
+        context_after=after,
+        lexical_index_build=lexical_index_build,
+        total=total,
+        examined=examined,
+        has_more=force_has_more or total > len(ledgers),
+        boundary_identity_sha256=boundary_digest,
+        _factory=_FACTORY,
+    )
+
+
+def _attest_selected_lexical_bodies(
+    records: list[dict[str, Any]],
+    *,
+    match_queries: tuple[str, ...],
+    require_all_terms: bool,
+) -> None:
+    """Re-tokenize only selected hit bodies so a corrupt FTS row cannot become evidence."""
+
+    selected: dict[int, str] = {}
+    for values in records:
+        rank = values.get("match_rank")
+        if rank is None or values.get("relative_position") != 0:
+            continue
+        match_rank = int(rank)
+        body = _private_content(values.get("window_content"))
+        if match_rank in selected and selected[match_rank] != body:
+            raise ArchiveMessageStorageError("conversation lexical hit is inconsistent")
+        selected[match_rank] = body
+    if not selected:
+        return
+    verifier = sqlite3.connect(":memory:", isolation_level=None)
+    try:
+        verifier.execute(
+            "CREATE VIRTUAL TABLE selected_lexical_bodies USING "
+            "fts5(content, tokenize='unicode61 remove_diacritics 2')"
+        )
+        verifier.executemany(
+            "INSERT INTO selected_lexical_bodies(rowid,content) VALUES(?,?)",
+            tuple(sorted(selected.items())),
+        )
+        for match_rank in sorted(selected):
+            matched = tuple(
+                verifier.execute(
+                    "SELECT EXISTS(SELECT 1 FROM selected_lexical_bodies WHERE rowid=? AND content MATCH ?)",
+                    (match_rank, query),
+                ).fetchone()[0]
+                == 1
+                for query in match_queries
+            )
+            if (all(matched) if require_all_terms else any(matched)) is not True:
+                raise ArchiveMessageStorageError("conversation lexical index is stale")
+    except sqlite3.DatabaseError:
+        raise ArchiveMessageStorageError("conversation lexical index is unavailable") from None
+    finally:
+        verifier.close()
+
+
+def _select_bounded_conversation_lexical_page(
+    conn: sqlite3.Connection,
+    *,
+    principal: str,
+    normalized_query: str,
+    match_queries: tuple[str, ...],
+    require_all_terms: bool,
+    scope: ArchiveMessageScope,
+    current_conversation: str,
+    boundary_id: str,
+    selected_roles: tuple[MessageRole, ...],
+    selected_lifecycles: tuple[LifecycleState, ...],
+    start: str | None,
+    end: str | None,
+    page_size: int,
+    before: int,
+    after: int,
+    lexical_index_build: str,
+) -> ArchiveMessageSearchPage | None:
+    """Search one fixed global FTS pool, then authorize only its selected IDs.
+
+    Schema 49 has no owner-partitioned FTS key.  A foreign posting can therefore
+    consume the fixed pool; callers must keep this lane permanently partial and
+    capped.  The complete legacy MESSAGE_HISTORY lane remains the absence proof.
+    """
+
+    combined_match = " OR ".join(f"({item})" for item in match_queries)
+    local_score = " + ".join(
+        f"""CASE WHEN EXISTS (
+                         SELECT 1
+                           FROM conversation_passages passage_{index}
+                           JOIN conversation_passages_fts AS authorized_fts_{index}
+                             ON authorized_fts_{index}.rowid=passage_{index}.passage_rowid
+                          WHERE passage_{index}.conversation_id=eligible.conversation_id
+                            AND passage_{index}.anchor_message_id=eligible.id
+                            AND authorized_fts_{index}.content MATCH ?
+                     ) THEN 1 ELSE 0 END"""
+        for index, _query_value in enumerate(match_queries)
+    )
+    lexical_filter = f"lexical_score={-len(match_queries)}" if require_all_terms else "lexical_score<0"
+    include_user = int(MessageRole.USER in selected_roles)
+    include_assistant = int(MessageRole.ASSISTANT in selected_roles)
+    include_active = int(LifecycleState.ACTIVE in selected_lifecycles)
+    include_archived = int(LifecycleState.ARCHIVED in selected_lifecycles)
+    cursor = conn.execute(
+        f"""WITH scope_gate AS MATERIALIZED (
+                   SELECT boundary.id AS boundary_id,
+                          boundary.conversation_id AS boundary_conversation_id,
+                          boundary.user_id AS boundary_principal_id,
+                          boundary.content AS boundary_content,
+                          boundary.created_at AS boundary_created_at,
+                          boundary.rowid AS boundary_rowid
+                     FROM users principal
+                     JOIN conversations boundary_conversation
+                       ON boundary_conversation.user_id=principal.id
+                      AND boundary_conversation.id=?
+                     JOIN messages boundary
+                       ON boundary.id=?
+                      AND boundary.conversation_id=boundary_conversation.id
+                      AND boundary.user_id=principal.id
+                    WHERE principal.id=? AND principal.status='active'
+                      AND boundary.role='user'
+               ),
+               fts_pool_with_sentinel AS MATERIALIZED (
+                   SELECT rowid AS passage_rowid
+                     FROM conversation_passages_fts
+                    WHERE conversation_passages_fts MATCH ?
+                    LIMIT ?
+               ),
+               fts_pool AS MATERIALIZED (
+                   SELECT passage_rowid FROM fts_pool_with_sentinel
+                    ORDER BY passage_rowid ASC LIMIT ?
+               ),
+               pooled_owned AS MATERIALIZED (
+                   SELECT source.id,source.conversation_id,source.user_id,
+                          source.role,source.created_at,source.rowid AS message_rowid,
+                          conversation.is_archived AS conversation_archived
+                     FROM fts_pool pool
+                     CROSS JOIN conversation_passages passage
+                     CROSS JOIN conversation_passage_projections projection
+                     CROSS JOIN messages source
+                     CROSS JOIN conversations conversation
+                     CROSS JOIN scope_gate gate
+                    WHERE passage.passage_rowid=pool.passage_rowid
+                      AND projection.conversation_id=passage.conversation_id
+                      AND projection.projection_status='current'
+                      AND projection.incomplete_reason IS NULL
+                      AND source.id=passage.anchor_message_id
+                      AND source.conversation_id=passage.conversation_id
+                      AND conversation.id=source.conversation_id
+                      AND conversation.user_id=source.user_id
+                      AND conversation.user_id=? AND source.user_id=?
+                      AND source.rowid<gate.boundary_rowid
+                      AND (?='all' OR source.conversation_id=gate.boundary_conversation_id)
+               ),
+               eligible AS MATERIALIZED (
+                   SELECT * FROM pooled_owned
+                    WHERE ((conversation_archived=0 AND ?=1)
+                           OR (conversation_archived=1 AND ?=1))
+                      AND (? IS NULL OR julianday(created_at)>=julianday(?))
+                      AND (? IS NULL OR julianday(created_at)<julianday(?))
+                      AND ((role='user' AND ?=1) OR (role='assistant' AND ?=1))
+               ),
+               scored AS MATERIALIZED (
+                   SELECT eligible.*,-CAST(({local_score}) AS REAL) AS lexical_score
+                     FROM eligible
+               ),
+               lexical AS MATERIALIZED (
+                   SELECT * FROM scored WHERE {lexical_filter}
+               ),
+               source_hits AS MATERIALIZED (
+                   SELECT lexical.*,
+                          ROW_NUMBER() OVER (
+                              PARTITION BY conversation_id
+                              ORDER BY lexical_score ASC,
+                                       julianday(created_at) DESC,message_rowid DESC
+                          ) AS source_hit_rank
+                     FROM lexical
+               ),
+               source_heads AS MATERIALIZED (
+                   SELECT * FROM source_hits WHERE source_hit_rank=1
+               ),
+               ranked_sources AS MATERIALIZED (
+                   SELECT source_heads.conversation_id,
+                          ROW_NUMBER() OVER (
+                              ORDER BY lexical_score ASC,
+                                       julianday(created_at) DESC,message_rowid DESC,
+                                       conversation_id ASC
+                          ) AS source_rank
+                     FROM source_heads
+               ),
+               page_sources AS MATERIALIZED (
+                   SELECT * FROM ranked_sources WHERE source_rank<=?
+               ),
+               ranked_page_hits AS MATERIALIZED (
+                   SELECT source_hits.*,page_sources.source_rank,
+                          ROW_NUMBER() OVER (
+                              ORDER BY source_hits.source_hit_rank ASC,
+                                       page_sources.source_rank ASC
+                          ) AS match_rank
+                     FROM source_hits
+                     JOIN page_sources USING(conversation_id)
+                    WHERE source_hits.source_hit_rank<=?
+               ),
+               page AS MATERIALIZED (
+                   SELECT * FROM ranked_page_hits WHERE match_rank<=?
+               ),
+               selected_context_source AS MATERIALIZED (
+                   SELECT context.id,context.conversation_id,context.user_id,
+                          context.role,context.content,context.created_at,
+                          context.rowid AS message_rowid,
+                          conversation.is_archived AS conversation_archived
+                     FROM page_sources selected
+                     CROSS JOIN conversations conversation
+                     CROSS JOIN messages context INDEXED BY idx_messages_conversation
+                     CROSS JOIN scope_gate gate
+                    WHERE conversation.id=selected.conversation_id
+                      AND context.conversation_id=conversation.id
+                      AND context.user_id=conversation.user_id
+                      AND context.user_id=?
+                      AND context.role IN ('user','assistant')
+                      AND context.rowid<gate.boundary_rowid
+                      AND (? IS NULL OR julianday(context.created_at)>=julianday(?))
+                      AND (? IS NULL OR julianday(context.created_at)<julianday(?))
+               ),
+               authorized_context AS MATERIALIZED (
+                   SELECT selected_context_source.*,
+                          ROW_NUMBER() OVER (
+                              PARTITION BY conversation_id
+                              ORDER BY julianday(created_at) ASC,message_rowid ASC
+                          ) AS conversation_sequence
+                     FROM selected_context_source
+               ),
+               page_with_sequence AS MATERIALIZED (
+                   SELECT page.*,hit.conversation_sequence
+                     FROM page
+                     JOIN authorized_context hit
+                       ON hit.id=page.id
+                      AND hit.conversation_id=page.conversation_id
+               ),
+               statistics AS MATERIALIZED (
+                   SELECT (SELECT COUNT(*) FROM eligible) AS examined,
+                          (SELECT COUNT(*) FROM ranked_sources) AS total,
+                          (SELECT COUNT(*) FROM pooled_owned
+                            WHERE typeof(conversation_archived)!='integer'
+                               OR conversation_archived NOT IN (0,1)) AS invalid_lifecycle,
+                          (SELECT COUNT(*) FROM pooled_owned
+                            WHERE julianday(created_at) IS NULL) AS invalid_timestamp
+               ),
+               expanded AS MATERIALIZED (
+                   SELECT page.match_rank,page.source_rank,page.lexical_score,
+                          page.message_rowid AS hit_rowid,page.id AS hit_id,
+                          context.id AS window_id,
+                          context.conversation_id AS window_conversation_id,
+                          context.user_id AS window_principal_id,
+                          context.role AS window_role,
+                          context.content AS window_content,
+                          context.created_at AS window_created_at,
+                          context.conversation_archived AS window_conversation_archived,
+                          context.message_rowid AS window_rowid,
+                          context.conversation_sequence-page.conversation_sequence
+                              AS relative_position
+                     FROM page_with_sequence page
+                     JOIN authorized_context context
+                       ON context.conversation_id=page.conversation_id
+                      AND context.conversation_sequence BETWEEN
+                          page.conversation_sequence-? AND page.conversation_sequence+?
+               )
+               SELECT gate.boundary_id,gate.boundary_conversation_id,
+                      gate.boundary_principal_id,gate.boundary_content,
+                      gate.boundary_created_at,gate.boundary_rowid,
+                      statistics.examined,statistics.total,
+                      statistics.invalid_lifecycle,statistics.invalid_timestamp,
+                      expanded.*
+                 FROM scope_gate gate
+                 CROSS JOIN statistics
+                 LEFT JOIN expanded ON 1=1
+                ORDER BY expanded.match_rank ASC,
+                         julianday(expanded.window_created_at) ASC,
+                         expanded.window_rowid ASC""",  # nosec B608 - closed SQL fragments only
+        (
+            current_conversation,
+            boundary_id,
+            principal,
+            combined_match,
+            _CONVERSATION_LEXICAL_POOL_CAP + 1,
+            _CONVERSATION_LEXICAL_POOL_CAP,
+            principal,
+            principal,
+            scope.value,
+            include_active,
+            include_archived,
+            start,
+            start,
+            end,
+            end,
+            include_user,
+            include_assistant,
+            *match_queries,
+            page_size,
+            _MAX_MATCHES_PER_CONVERSATION,
+            page_size,
+            principal,
+            start,
+            start,
+            end,
+            end,
+            before,
+            after,
+        ),
+    )
+    records = _records(cursor)
+    _attest_selected_lexical_bodies(
+        records,
+        match_queries=match_queries,
+        require_all_terms=require_all_terms,
+    )
+    return _archive_message_page_from_records(
+        conn,
+        records,
+        principal=principal,
+        normalized_query=normalized_query,
+        scope=scope,
+        current_conversation=current_conversation,
+        boundary_id=boundary_id,
+        selection_lane=SearchLane.LEXICAL,
+        selected_roles=selected_roles,
+        selected_lifecycles=selected_lifecycles,
+        start=start,
+        end=end,
+        page_size=page_size,
+        before=before,
+        after=after,
+        lexical_index_build=lexical_index_build,
+        # The global FTS derivative has no principal partition.  Even an empty
+        # retained pool cannot prove owner-complete absence schema-neutrally.
+        force_has_more=True,
+    )
+
+
 def _select_authorized_archive_message_page_once_in_transaction(
     conn: sqlite3.Connection,
     *,
@@ -1184,6 +1731,7 @@ def _select_authorized_archive_message_page_once_in_transaction(
     query: str,
     effective_query: str,
     require_all_terms: bool,
+    selection_lane: SearchLane = SearchLane.MESSAGE_HISTORY,
     scope: ArchiveMessageScope = ArchiveMessageScope.ALL,
     conversation_id: str | None = None,
     boundary_user_message_id: str | None = None,
@@ -1205,10 +1753,18 @@ def _select_authorized_archive_message_page_once_in_transaction(
     """
 
     principal = _private_scope(principal_id, label="principal identity")
-    lexical_index_build = _require_active_principal_and_current_lexical_index(
-        conn,
-        principal_id=principal,
-    )
+    if selection_lane is SearchLane.MESSAGE_HISTORY:
+        lexical_index_build = _require_active_principal_and_current_lexical_index(
+            conn,
+            principal_id=principal,
+        )
+    elif selection_lane is SearchLane.LEXICAL:
+        lexical_index_build = _require_current_conversation_passage_lexical_index(
+            conn,
+            principal_id=principal,
+        )
+    else:
+        raise ArchiveMessageStorageError("message selection lane is invalid")
     if type(scope) is not ArchiveMessageScope:
         raise ArchiveMessageStorageError("message scope is invalid")
     normalized_query = _query(query)
@@ -1240,6 +1796,26 @@ def _select_authorized_archive_message_page_once_in_transaction(
     include_assistant = int(MessageRole.ASSISTANT in selected_roles)
     include_active = int(LifecycleState.ACTIVE in selected_lifecycles)
     include_archived = int(LifecycleState.ARCHIVED in selected_lifecycles)
+    match_queries = _match_queries(_query(effective_query))
+    if selection_lane is SearchLane.LEXICAL:
+        return _select_bounded_conversation_lexical_page(
+            conn,
+            principal=principal,
+            normalized_query=normalized_query,
+            match_queries=match_queries,
+            require_all_terms=require_all_terms,
+            scope=scope,
+            current_conversation=current_conversation,
+            boundary_id=boundary_id,
+            selected_roles=selected_roles,
+            selected_lifecycles=selected_lifecycles,
+            start=start,
+            end=end,
+            page_size=page_size,
+            before=before,
+            after=after,
+            lexical_index_build=lexical_index_build,
+        )
     _validate_authorized_scope_timestamps(
         conn,
         principal_id=principal,
@@ -1250,7 +1826,6 @@ def _select_authorized_archive_message_page_once_in_transaction(
         include_archived=include_archived,
     )
 
-    match_queries = _match_queries(_query(effective_query))
     local_score = " + ".join(
         f"""CASE WHEN EXISTS (
                          SELECT 1
@@ -1436,98 +2011,23 @@ def _select_authorized_archive_message_page_once_in_transaction(
         ),
     )
     records = _records(cursor)
-    if not records:
-        return None
-    first = records[0]
-    if int(first["invalid_lifecycle"]):
-        raise ArchiveMessageStorageError("stored conversation lifecycle is invalid")
-    if int(first["invalid_timestamp"]):
-        raise ArchiveMessageStorageError("stored message timestamp is invalid")
-    examined = int(first["examined"])
-    total = int(first["total"])
-    boundary_digest = _boundary_identity(first)
-    boundary_rowid = int(first["boundary_rowid"])
-    boundary_conversation = _conversation_id(
-        first["boundary_conversation_id"],
-        label="stored boundary conversation",
-    )
-
-    grouped: dict[int, list[dict[str, Any]]] = {}
-    for values in records:
-        if values["match_rank"] is not None:
-            grouped.setdefault(int(values["match_rank"]), []).append(values)
-    conversation_ids = tuple(
-        sorted(
-            {
-                _conversation_id(rows[0]["window_conversation_id"], label="stored conversation identity")
-                for rows in grouped.values()
-            }
-        )
-    )
-    ledgers = (
-        _ledger_evidence(
-            conn,
-            principal_id=principal,
-            conversation_ids=conversation_ids,
-            scope=scope,
-            boundary_conversation_id=boundary_conversation,
-            boundary_rowid=boundary_rowid,
-            boundary_identity_sha256=boundary_digest,
-        )
-        if conversation_ids
-        else ()
-    )
-    ledger_by_conversation = {item.conversation_id: item for item in ledgers}
-    hits: list[ArchiveMessageHit] = []
-    for rank in sorted(grouped):
-        rows = grouped[rank]
-        contexts = tuple(
-            ArchiveMessageContextRow(
-                row=_row(values, prefix="window"),
-                relative_position=int(values["relative_position"]),
-                _factory=_FACTORY,
-            )
-            for values in rows
-        )
-        hit_context = next((item for item in contexts if item.relative_position == 0), None)
-        if hit_context is None:
-            raise ArchiveMessageStorageError("message hit lost its exact context")
-        ledger = ledger_by_conversation.get(hit_context.row.conversation_id)
-        if ledger is None:
-            raise ArchiveMessageStorageError("message hit lost its exact ledger")
-        score = float(rows[0]["lexical_score"])
-        hits.append(
-            ArchiveMessageHit(
-                match_rank=rank,
-                source_rank=int(rows[0]["source_rank"]),
-                lexical_score=score,
-                message=hit_context.row,
-                context=contexts,
-                ledger=ledger,
-                _factory=_FACTORY,
-            )
-        )
-    return ArchiveMessageSearchPage(
-        principal_id=principal,
-        query=normalized_query,
+    return _archive_message_page_from_records(
+        conn,
+        records,
+        principal=principal,
+        normalized_query=normalized_query,
         scope=scope,
-        conversation_id=current_conversation,
-        boundary_user_message_id=boundary_id,
-        hits=tuple(hits),
-        ledgers=ledgers,
-        roles=selected_roles,
-        lifecycle_states=selected_lifecycles,
-        since=start,
-        until=end,
-        limit=page_size,
-        context_before=before,
-        context_after=after,
+        current_conversation=current_conversation,
+        boundary_id=boundary_id,
+        selection_lane=selection_lane,
+        selected_roles=selected_roles,
+        selected_lifecycles=selected_lifecycles,
+        start=start,
+        end=end,
+        page_size=page_size,
+        before=before,
+        after=after,
         lexical_index_build=lexical_index_build,
-        total=total,
-        examined=examined,
-        has_more=total > len(ledgers),
-        boundary_identity_sha256=boundary_digest,
-        _factory=_FACTORY,
     )
 
 
@@ -1536,6 +2036,7 @@ def _select_authorized_archive_message_page_in_transaction(
     *,
     principal_id: str,
     query: str,
+    selection_lane: SearchLane = SearchLane.MESSAGE_HISTORY,
     scope: ArchiveMessageScope = ArchiveMessageScope.ALL,
     conversation_id: str | None = None,
     boundary_user_message_id: str | None = None,
@@ -1566,6 +2067,7 @@ def _select_authorized_archive_message_page_in_transaction(
         query=query,
         effective_query=query,
         require_all_terms=False,
+        selection_lane=selection_lane,
         scope=scope,
         conversation_id=conversation_id,
         boundary_user_message_id=boundary_user_message_id,
@@ -1591,6 +2093,7 @@ def _select_authorized_archive_message_page_in_transaction(
         query=page.query,
         effective_query=repaired_query,
         require_all_terms=True,
+        selection_lane=selection_lane,
         scope=page.scope,
         conversation_id=page.conversation_id,
         boundary_user_message_id=page.boundary_user_message_id,
@@ -1609,6 +2112,7 @@ def _materialize_authorized_archive_message_page_in_transaction(
     *,
     principal_id: str,
     query: str,
+    selection_lane: SearchLane = SearchLane.MESSAGE_HISTORY,
     scope: ArchiveMessageScope = ArchiveMessageScope.ALL,
     conversation_id: str | None = None,
     boundary_user_message_id: str | None = None,
@@ -1632,6 +2136,7 @@ def _materialize_authorized_archive_message_page_in_transaction(
             conn,
             principal_id=principal_id,
             query=query,
+            selection_lane=selection_lane,
             scope=scope,
             conversation_id=conversation_id,
             boundary_user_message_id=boundary_user_message_id,
