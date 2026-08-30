@@ -3,6 +3,7 @@ from __future__ import annotations
 import ast
 import hashlib
 import json
+import os
 import re
 import subprocess
 from dataclasses import dataclass, replace
@@ -87,7 +88,7 @@ ENVIRONMENT_BY_CLASS = {
 _CHECK_ID_SUFFIXES_BY_CLASS = {
     "deterministic contract": ("contract_suite",),
     "integration path": ("integration_suite",),
-    "clean artifact path": ("installed_surface", "schema_migration", "wheel_reproducibility"),
+    "clean artifact path": ("installed_journey_suite",),
     "synthetic live path": ("synthetic_live_battery",),
     "production read-only observation": (
         "database_integrity",
@@ -203,8 +204,8 @@ _OBSERVATION_FIELDS = frozenset(
     }
 )
 _MANIFEST_SCHEMA = "friday.golden-journey-evidence.v1"
-_RECEIPT_SCHEMA = exact_evidence.RECEIPT_SCHEMA
 _LEGACY_SELF_DECLARED_RECEIPT_SCHEMA = "friday.golden-journey-sanitized-receipt.v1"
+_CLEAN_RELEASE_ROOT_ENV = "FRIDAY_GOLDEN_JOURNEY_RELEASE_ROOT"
 _SHA256 = re.compile(r"[0-9a-f]{64}")
 _CHECK_ID = re.compile(r"[a-z0-9][a-z0-9_.:-]{0,127}")
 _JOURNEY_ID = re.compile(r"[a-z][a-z0-9_]{1,63}")
@@ -630,13 +631,14 @@ def _validate_sanitized_receipt(
     expected_result: str,
     manifest_identity: ReleaseIdentity,
     repo_root: Path,
+    release_root: Path | None = None,
 ) -> None:
     artifact_ref = observation.get("artifact_ref")
     artifact_schema = observation.get("artifact_schema")
     if (
         type(artifact_ref) is not str
         or type(artifact_schema) is not str
-        or artifact_schema != _RECEIPT_SCHEMA
+        or artifact_schema != exact_evidence.receipt_schema(evidence_class)
     ):
         raise RegistryValidationError("manifest does not bind a canonical sanitized receipt")
     expected_artifact_ref = _expected_artifact_ref(
@@ -667,6 +669,7 @@ def _validate_sanitized_receipt(
             expected_journey_id=journey_id,
             expected_evidence_class=evidence_class,
             repo_root=ROOT,
+            release_root=release_root,
         )
     except exact_evidence.ExactReleaseEvidenceError as exc:
         raise RegistryValidationError(
@@ -689,6 +692,7 @@ def _validate_manifest_payload(
     require_current: bool,
     repo_root: Path,
     expected_result: str = "VERIFIED",
+    release_root: Path | None = None,
 ) -> None:
     if (
         journey_id not in CURRENT_JOURNEYS
@@ -748,6 +752,7 @@ def _validate_manifest_payload(
         expected_result=expected_result,
         manifest_identity=manifest_identity,
         repo_root=repo_root,
+        release_root=release_root,
     )
     if require_current and manifest_identity != current:
         raise RegistryValidationError("manifest is not bound to the current exact release")
@@ -759,6 +764,7 @@ def _validate_claim(
     evidence_class: str,
     claim: EvidenceClaim,
     current: ReleaseIdentity,
+    release_root: Path | None = None,
 ) -> None:
     if len({ref.label for ref in claim.refs}) != len(claim.refs):
         raise RegistryValidationError("journey evidence references must be unique")
@@ -799,7 +805,22 @@ def _validate_claim(
             require_current=claim.state in {"VERIFIED", "FAILED"},
             repo_root=ROOT,
             expected_result="FAILED" if claim.state == "FAILED" else "VERIFIED",
+            release_root=release_root,
         )
+
+
+def _clean_release_root_for_registry(rows: tuple[JourneyRow, ...]) -> Path | None:
+    required = any(
+        row.evidence["clean artifact path"].state in {"VERIFIED", "FAILED", "STALE"} for row in rows
+    )
+    raw = os.environ.get(_CLEAN_RELEASE_ROOT_ENV)
+    if not required:
+        return None
+    if raw is None or not raw:
+        raise RegistryValidationError(
+            f"clean artifact manifests require authenticated release root via {_CLEAN_RELEASE_ROOT_ENV}"
+        )
+    return Path(raw)
 
 
 def _validate_applicability(row: JourneyRow) -> None:
@@ -959,31 +980,30 @@ def _machine_manifest(
         journey_id=journey_id,
         evidence_class=evidence_class,
     )
-    receipt = json.loads(raw)
-    assert isinstance(receipt, dict)
-    artifact_ref = _expected_artifact_ref(journey_id, evidence_class, result, identity)
-    artifact_path = repo_root / artifact_ref
+    bundle = exact_evidence._bundle_from_receipt(  # noqa: SLF001 - producer-owned projection
+        raw,
+        identity=exact_identity,
+        journey_id=journey_id,
+        evidence_class=evidence_class,
+    )
+    assert bundle.receipt_ref == _expected_artifact_ref(
+        journey_id,
+        evidence_class,
+        result,
+        identity,
+    )
+    assert bundle.manifest_ref == _expected_manifest_ref(
+        journey_id,
+        evidence_class,
+        result,
+        identity,
+    )
+    artifact_path = repo_root / bundle.receipt_ref
     artifact_path.parent.mkdir(parents=True, exist_ok=True)
     artifact_path.write_bytes(raw)
-    manifest_ref = _expected_manifest_ref(journey_id, evidence_class, result, identity)
-    return (
-        {
-            "$schema": _MANIFEST_SCHEMA,
-            "evidence_class": evidence_class,
-            "journey_id": journey_id,
-            "observation": {
-                "artifact_ref": artifact_ref,
-                "artifact_schema": _RECEIPT_SCHEMA,
-                "artifact_sha256": hashlib.sha256(raw).hexdigest(),
-                "check_ids": _expected_check_ids(journey_id, evidence_class),
-                "environment": ENVIRONMENT_BY_CLASS[evidence_class],
-                "observed_at_utc": receipt["observed_at_utc"],
-            },
-            "release": _release_payload(identity),
-            "result": result,
-        },
-        manifest_ref,
-    )
+    manifest = json.loads(bundle.manifest)
+    assert isinstance(manifest, dict)
+    return manifest, bundle.manifest_ref
 
 
 def test_canonical_golden_journey_registry_is_closed_current_and_privacy_safe(
@@ -993,8 +1013,10 @@ def test_canonical_golden_journey_registry_is_closed_current_and_privacy_safe(
     markdown = STATUS_PATH.read_text(encoding="utf-8")
     identity = _release_identity(markdown)
     rows = _registry_rows(markdown)
+    clean_release_root = _clean_release_root_for_registry(rows)
 
     assert len(rows) == len(CURRENT_JOURNEYS) == 6
+    assert clean_release_root is None
     assert tuple(row.journey_id for row in rows) == tuple(CURRENT_JOURNEYS)
     assert {row.journey_id: (row.journey, row.readiness, row.limitations) for row in rows} == CURRENT_JOURNEYS
     assert sum(row.readiness == "READY" for row in rows) == 0
@@ -1004,7 +1026,13 @@ def test_canonical_golden_journey_registry_is_closed_current_and_privacy_safe(
         assert tuple(row.evidence) == EVIDENCE_CLASSES
         _validate_applicability(row)
         for evidence_class, claim in row.evidence.items():
-            _validate_claim(row, evidence_class, claim, identity)
+            _validate_claim(
+                row,
+                evidence_class,
+                claim,
+                identity,
+                release_root=(clean_release_root if evidence_class == "clean artifact path" else None),
+            )
         _validate_readiness(row)
     assert all(
         row.evidence[evidence_class].state == "MISSING"
@@ -1050,7 +1078,14 @@ def test_canonical_golden_journey_registry_is_closed_current_and_privacy_safe(
     _validate_readiness(ready_conversation)
     future_evidence = dict(conversation.evidence)
     future_evidence["clean artifact path"] = EvidenceClaim("VERIFIED", ())
-    _validate_applicability(replace(conversation, evidence=future_evidence))
+    future_conversation = replace(conversation, evidence=future_evidence)
+    _validate_applicability(future_conversation)
+    monkeypatch.delenv(_CLEAN_RELEASE_ROOT_ENV, raising=False)
+    with pytest.raises(RegistryValidationError, match="authenticated release root"):
+        _clean_release_root_for_registry((future_conversation,))
+    future_release_root = tmp_path / "future-sealed-release"
+    monkeypatch.setenv(_CLEAN_RELEASE_ROOT_ENV, str(future_release_root))
+    assert _clean_release_root_for_registry((future_conversation,)) == future_release_root
     generic_operator = RepositoryLink(
         "tools/immutable_release_operator.py",
         "../tools/immutable_release_operator.py",

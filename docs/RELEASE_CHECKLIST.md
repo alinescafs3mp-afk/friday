@@ -728,6 +728,62 @@ schema-33 DB/inbox snapshot. Начиная с `backend_start_attempted`, даж
 - `jericho status`, `doctor`, `backup`, `verify-backup`, `restore-backup`, `export-user`;
 - основные ingestion/retrieval/agent/Admin сценарии из раздела 2.
 
+### 6.1 Release-bound journey evidence
+
+Evidence для `conversation_recall`, `document_recall_answer`,
+`durable_scheduled_work` и `honest_degradation` выпускается в два этапа.
+Сначала verifier, его закрытые nodeid inventories и тесты должны войти в exact
+candidate commit. Только затем Mainline строит sealed wheel этого же commit и
+из чистого checkout запускает:
+
+```bash
+<SOURCE_PYTHON> -I -B tools/exact_release_evidence.py bundle \
+  --release-root <SEALED_CANDIDATE> \
+  --repo-root <EXACT_CLEAN_CANDIDATE_CHECKOUT> \
+  --journey-id <CLOSED_JOURNEY_ID> \
+  --output-root <EMPTY_EXTERNAL_EVIDENCE_STAGING_ROOT>
+```
+
+Команда сама выводит единственные canonical receipt и manifest paths из
+journey, environment, machine-derived результата и SHA-256 полного release
+identity: commit, tree, wheel и schema. Caller не передаёт result, timestamp,
+check IDs, hashes или artifact names. Оба JSON body-free, canonical и
+публикуются create-only через fsynced staging и atomic link. Manifest является
+commit marker: receipt без manifest не создаёт claim, а повторный запуск
+принимает только byte-identical artifact, чтобы завершить прерванную публикацию
+без overwrite. Output root находится вне exact checkout, иначе первый bundle
+сделает checkout dirty и заблокирует следующие code-owned inventories; после
+выпуска всех bundle Mainline переносит только canonical receipt/manifest bytes.
+
+Clean-artifact receipt использует schema v4 и запускает source-owned тесты так,
+чтобы весь first-party `friday*` код импортировался только из единственного
+sealed `venv/lib/python*/site-packages` проверенного release. Origin witness
+содержит лишь digest, release-relative site ref и policy
+`subprocess=cpython_audit_deny`. Это точная граница CPython audit, а не Linux
+seccomp: closed inventories не должны использовать native syscall/extension
+child launch. Audited fork/exec/subprocess либо Python-level чтение first-party
+кода из checkout делает запуск недействительным, а не превращается в обычный
+journey failure. Единственный journey check ID —
+`<journey>.installed_journey_suite`: release-level installed surface, migration
+и wheel reproducibility не переименовываются в journey proof. Clean receipt
+нельзя публиковать отдельным receipt-only API — только canonical bundle.
+Canonical registry передаёт sealed root через
+`FRIDAY_GOLDEN_JOURNEY_RELEASE_ROOT`; путь не является authority и принимается
+только если verifier заново выводит из него те же commit/tree/wheel/schema.
+
+Нельзя выпускать decisive evidence задним числом для commit, в котором ещё нет
+этого verifier/inventory: post-release inventory или receipt-selected producer
+не являются exact-release evidence. В частности, этот foundation сам по себе
+не создаёт receipt для ранее выпущенного release; decisive bytes появляются
+только после следующего Mainline release.
+
+Generic release-tree/installed-surface, rollback и backup/restore proof остаются
+однократными release-level prerequisites. Их test nodeids не копируются в
+journey inventories и manifests. Journey bundle не является production
+read-only observation, physical-device evidence, owner Telegram smoke,
+rollback evidence или backup/restore evidence; такие claims остаются
+`MISSING`/`NOT_APPLICABLE`, пока их отдельный authority реально не наблюдал.
+
 ## 7. Distribution ownership
 
 Перед публичной публикацией владелец проекта отдельно выбирает лицензию и политику disclosure. Отсутствие файла `LICENSE` означает, что публичная open-source лицензия не предоставлена. Для внешнего релиза также зафиксируйте SBOM/список зависимостей, результаты online CVE audit и канал для security reports. Эти решения нельзя придумывать автоматически от имени владельца.
