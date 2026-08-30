@@ -731,8 +731,7 @@ def test_candidate_cannot_persistently_poison_lazy_tooling_callable(
 ) -> None:
     source, release, site, probe = _write_bootstrap_fixture(
         tmp_path,
-        "import friday\n\ndef test_lazy_tooling_callable_stays_authenticated():\n"
-        "    assert True\n",
+        "import friday\n\ndef test_lazy_tooling_callable_stays_authenticated():\n    assert True\n",
     )
     (site / "friday/__init__.py").write_text(
         "import importlib, sys, types\n"
@@ -865,8 +864,7 @@ def test_installed_bootstrap_rejects_caught_unchecked_hash_bytecode_seeding(
 ) -> None:
     source, release, site, probe = _write_bootstrap_fixture(
         tmp_path,
-        "import friday\n\ndef test_candidate_cannot_seed_bytecode():\n"
-        "    assert friday.LATER == 'forged'\n",
+        "import friday\n\ndef test_candidate_cannot_seed_bytecode():\n    assert friday.LATER == 'forged'\n",
     )
     (site / "friday/later.py").write_text("LATER = 'source'\n", encoding="ascii")
     (site / "friday/__init__.py").write_text(
@@ -1482,8 +1480,7 @@ def test_bundle_retry_fsyncs_adopted_receipt_before_directory_and_manifest(
     leaf_fsync = events.index(("file_fsync", receipt))
     manifest_link = events.index(("manifest_link", manifest))
     assert any(
-        event == ("directory_fsync", receipt.parent)
-        for event in events[leaf_fsync + 1 : manifest_link]
+        event == ("directory_fsync", receipt.parent) for event in events[leaf_fsync + 1 : manifest_link]
     )
     assert leaf_fsync < manifest_link
 
