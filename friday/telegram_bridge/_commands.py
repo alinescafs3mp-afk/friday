@@ -24,6 +24,7 @@ from friday.telegram_bridge._base import (
     MediaTooLargeError,
     PermanentUpdateError,
     asyncio,
+    callback_data_fits,
     httpx,
     quote,
     refusal_notice,
@@ -1710,8 +1711,13 @@ class CommandsMixin(BridgeShared):
                 if excerpt:
                     lines.append(f"   {excerpt}")
                 knowledge_id = str(item.get("knowledge_object_id") or "")
-                if knowledge_id:
-                    buttons.append({"text": str(index), "callback_data": f"doc:show:{knowledge_id}"})
+                callback_data = f"doc:show:{knowledge_id}"
+                if (
+                    knowledge_id
+                    and CALLBACK_TARGET_RE.fullmatch(knowledge_id)
+                    and callback_data_fits(callback_data)
+                ):
+                    buttons.append({"text": str(index), "callback_data": callback_data})
             markup = {"inline_keyboard": [buttons]} if buttons else None
             if buttons:
                 lines.append("")

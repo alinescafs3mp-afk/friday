@@ -110,6 +110,57 @@ async def test_an_opened_record_offers_deletion(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_an_openable_boundary_id_never_breaks_the_full_document_send(tmp_path):
+    """Every derived button has its own Telegram 64-byte boundary.
+
+    A document id can fit ``doc:show`` exactly while no longer fitting the
+    longer edit/delete/more actions.  Those actions are optional; rejecting the
+    complete document message is not.
+    """
+
+    boundary_id = "k" * (64 - len("doc:show:"))
+    bridge = _bridge(tmp_path)
+    telegram, backend = _Telegram(), _Backend()
+    try:
+        await bridge._process_callback_query(telegram, backend, _press(f"doc:show:{boundary_id}"))
+    finally:
+        bridge._inbox.close()
+
+    sent = telegram.sent()[-1]
+    assert "Текст заметки" in sent["text"]
+    assert all(
+        len(button["callback_data"].encode("utf-8")) <= 64
+        for row in sent.get("reply_markup", {}).get("inline_keyboard", [])
+        for button in row
+    )
+
+
+def test_an_oversized_next_page_button_is_omitted():
+    boundary_id = "k" * (64 - len("doc:show:"))
+    document = {"item": {"content": "x" * (TelegramBridge._FULL_DOCUMENT_CHARS + 1)}}
+
+    assert TelegramBridge._document_more_markup(document, boundary_id, 0) is None
+
+
+@pytest.mark.asyncio
+async def test_a_legacy_delete_button_never_emits_an_oversized_confirmation(tmp_path):
+    legacy_id = "k" * (64 - len("know:del:") - len(".5001"))
+    assert len(f"know:del:{legacy_id}.5001".encode()) == 64
+    assert len(f"know:delok:{legacy_id}.5001".encode()) > 64
+
+    bridge = _bridge(tmp_path)
+    telegram, backend = _Telegram(), _Backend()
+    try:
+        await bridge._process_callback_query(telegram, backend, _press(f"know:del:{legacy_id}.5001"))
+    finally:
+        bridge._inbox.close()
+
+    sent = telegram.sent()[-1]
+    assert "Запись не удалена" in sent["text"]
+    assert "reply_markup" not in sent
+
+
+@pytest.mark.asyncio
 async def test_the_first_press_asks_instead_of_deleting(tmp_path):
     """Мутация: удалять сразу по `know:del` — краснеет.
 

@@ -68,6 +68,15 @@ RETRY_DELAYS_SEC = (2.0, 10.0, 30.0, 60.0, 300.0)
 #: без срока годности строка осталась бы в очереди навсегда.
 DELIVERED_NOTIFICATION_TTL_SEC = 7 * 24 * 3600.0
 CALLBACK_TARGET_RE = re.compile(r"^[A-Za-z0-9_.-]{1,96}$")
+CALLBACK_DATA_LIMIT_BYTES = 64
+
+
+def callback_data_fits(value: str) -> bool:
+    """Return whether Telegram can carry one complete callback payload."""
+
+    return len(value.encode("utf-8")) <= CALLBACK_DATA_LIMIT_BYTES
+
+
 BOT_COMMANDS: tuple[tuple[str, str], ...] = (
     ("chat", "обычный разговор"),
     ("work", "работа с личными знаниями"),
@@ -433,6 +442,7 @@ __all__ = [
     "BATCH_SIZE",
     "BOT_COMMANDS",
     "BridgeShared",
+    "CALLBACK_DATA_LIMIT_BYTES",
     "CALLBACK_TARGET_RE",
     "LOGGER",
     "MAX_ATTEMPTS",
@@ -452,6 +462,7 @@ __all__ = [
     "_redact_userinfo",
     "asyncio",
     "base64",
+    "callback_data_fits",
     "dataclass",
     "field",
     "httpx",

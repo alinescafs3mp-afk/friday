@@ -16,6 +16,7 @@ from friday.telegram_bridge._base import (
     Any,
     BridgeShared,
     PermanentUpdateError,
+    callback_data_fits,
     httpx,
     json,
     quote,
@@ -1192,7 +1193,13 @@ class ViewsMixin(BridgeShared):
             snippet = str(item.get("summary") or item.get("content") or "").strip().replace("\n", " ")
             if snippet:
                 lines.append(f"  {snippet[:160]}")
-        if any(isinstance(item, dict) and item.get("id") for item in results):
+        if any(
+            isinstance(item, dict)
+            and item.get("id")
+            and CALLBACK_TARGET_RE.fullmatch(str(item["id"]))
+            and callback_data_fits(f"doc:show:{item['id']}")
+            for item in results
+        ):
             lines.append("")
             lines.append("Кнопкой ниже — открыть документ целиком.")
         return "\n".join(lines)
@@ -1273,11 +1280,12 @@ class ViewsMixin(BridgeShared):
         following = start + cls._FULL_DOCUMENT_CHARS
         if following >= len(body):
             return None
-        if not CALLBACK_TARGET_RE.fullmatch(f"{document_id}.{following}"):
+        callback_data = f"doc:more:{document_id}.{following}"
+        if not CALLBACK_TARGET_RE.fullmatch(f"{document_id}.{following}") or not callback_data_fits(
+            callback_data
+        ):
             return None
-        return {
-            "inline_keyboard": [[{"text": "Дальше", "callback_data": f"doc:more:{document_id}.{following}"}]]
-        }
+        return {"inline_keyboard": [[{"text": "Дальше", "callback_data": callback_data}]]}
 
     @staticmethod
     def _format_lineage_footer(envelope: dict[str, Any]) -> str:
@@ -1414,7 +1422,8 @@ class ViewsMixin(BridgeShared):
                 # периоде», и документы за первую половину месяца для человека просто
                 # не существуют. Экран «Хроника» в такой же ситуации пишет то же самое.
                 lines.append(f"Показаны первые {_TIMELINE_SHOWN} из {total_documents} — сузьте период.")
-            lines.append("Кнопкой ниже — открыть документ целиком.")
+            if cls._timeline_reply_markup(documents) is not None:
+                lines.append("Кнопкой ниже — открыть документ целиком.")
         return "\n".join(lines)
 
     @staticmethod
@@ -1425,7 +1434,10 @@ class ViewsMixin(BridgeShared):
         buttons = [
             {"text": str(index), "callback_data": f"doc:show:{item['id']}"}
             for index, item in enumerate(items[:_TIMELINE_SHOWN], start=1)
-            if isinstance(item, dict) and item.get("id") and CALLBACK_TARGET_RE.fullmatch(str(item["id"]))
+            if isinstance(item, dict)
+            and item.get("id")
+            and CALLBACK_TARGET_RE.fullmatch(str(item["id"]))
+            and callback_data_fits(f"doc:show:{item['id']}")
         ]
         # По четыре в ряд, как под выдачей поиска: десять кнопок в одну строку Telegram
         # сжимает в нечитаемое. Правило там закреплено тестом, а сюда не доехало.
@@ -1453,7 +1465,7 @@ class ViewsMixin(BridgeShared):
             if (
                 knowledge_id
                 and CALLBACK_TARGET_RE.fullmatch(knowledge_id)
-                and len(callback_data.encode("utf-8")) <= 64
+                and callback_data_fits(callback_data)
             ):
                 buttons.append({"text": str(position), "callback_data": callback_data})
         if not buttons:

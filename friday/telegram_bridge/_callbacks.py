@@ -22,6 +22,7 @@ from friday.telegram_bridge._base import (
     BridgeShared,
     PermanentUpdateError,
     base64,
+    callback_data_fits,
     httpx,
     quote,
     refusal_notice,
@@ -640,20 +641,22 @@ class CallbacksMixin(BridgeShared):
                 # учётка, нажав первой, действовала бы на чужом экране. Найдено
                 # аудитом Grok по пути ответа (2026-08-07): у `conv`, `ent` и
                 # `relation` привязка была, у заведённого мной `know` — нет.
-                rows.append(
-                    [
-                        {"text": "Исправить", "callback_data": f"know:fix:{target_id}.{external_user_id}"},
-                        {
-                            "text": "Удалить запись",
-                            "callback_data": f"know:del:{target_id}.{external_user_id}",
-                        },
-                    ]
-                )
+                callback_target = f"{target_id}.{external_user_id}"
+                fix_data = f"know:fix:{callback_target}"
+                delete_data = f"know:del:{callback_target}"
+                delete_confirm_data = f"know:delok:{callback_target}"
+                actions: list[dict[str, str]] = []
+                if callback_data_fits(fix_data):
+                    actions.append({"text": "Исправить", "callback_data": fix_data})
+                if callback_data_fits(delete_data) and callback_data_fits(delete_confirm_data):
+                    actions.append({"text": "Удалить запись", "callback_data": delete_data})
+                if actions:
+                    rows.append(actions)
                 await self._send_message(
                     telegram,
                     chat_id,
                     self._format_full_document(document),
-                    reply_markup={"inline_keyboard": rows},
+                    reply_markup={"inline_keyboard": rows} if rows else None,
                 )
             elif family == "acc" and action == "grant":
                 # Цель приходит как «{id}.{id нажавшего}»: идентификаторы записей
@@ -709,6 +712,26 @@ class CallbacksMixin(BridgeShared):
                     await self._answer_callback(telegram, callback_id, "Эта кнопка не для вас", alert=True)
                     return
                 if action == "del":
+                    confirm_data = f"know:delok:{target_id}.{external_user_id}"
+                    if not callback_data_fits(confirm_data):
+                        # Old messages survive bridge upgrades.  A formerly
+                        # accepted ``know:del`` may fit Telegram while the
+                        # longer confirmation payload does not; never make the
+                        # entire notice fail with an oversized inline button.
+                        await self._answer_callback(
+                            telegram,
+                            callback_id,
+                            "Подтверждение недоступно",
+                            alert=True,
+                        )
+                        await self._send_message(
+                            telegram,
+                            chat_id,
+                            "Telegram не вмещает безопасное подтверждение для этой старой "
+                            "кнопки. Запись не удалена; удалите её через админку.",
+                        )
+                        clear_markup = True
+                        return
                     await self._answer_callback(telegram, callback_id, "Точно удалить?")
                     await self._send_message(
                         telegram,
@@ -1285,10 +1308,13 @@ class CallbacksMixin(BridgeShared):
             knowledge_id = str(item.get("knowledge_id") or "")
             if not knowledge_id or not CALLBACK_TARGET_RE.fullmatch(knowledge_id):
                 continue
+            callback_data = f"doc:show:{knowledge_id}"
+            if not callback_data_fits(callback_data):
+                continue
             label = str(item.get("label") or "").strip()
             text = label if label else str(len(buttons) + 1)
             # Telegram: 64 байта на callback_data; ko_<hex> + префикс укладываются.
-            buttons.append({"text": text, "callback_data": f"doc:show:{knowledge_id}"})
+            buttons.append({"text": text, "callback_data": callback_data})
         return buttons
 
     @staticmethod

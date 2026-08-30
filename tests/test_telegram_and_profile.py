@@ -1879,6 +1879,88 @@ async def test_source_command_searches_raw_files(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_source_command_omits_an_oversized_document_callback(tmp_path):
+    bridge = _ux_bridge(tmp_path)
+    telegram = _FakeTelegramClient()
+    backend = _FakeBackendClient(
+        {
+            "/api/knowledge/sources": {
+                "items": [
+                    {
+                        "source_ref": "приказ.docx",
+                        "excerpt": "дословная фраза",
+                        "knowledge_object_id": "k" * (64 - len("doc:show:") + 1),
+                    }
+                ]
+            }
+        }
+    )
+    user = {"id": 1001, "first_name": "Alice"}
+    try:
+        await bridge._process_update(
+            telegram,
+            backend,
+            {
+                "update_id": 55,
+                "message": {
+                    "message_id": 83,
+                    "chat": {"id": 5001},
+                    "from": user,
+                    "text": "/source дословная фраза",
+                },
+            },
+            cached_response=None,
+        )
+        sent = [payload for url, payload in telegram.calls if url.endswith("/sendMessage")][-1]
+        assert "приказ.docx" in sent["text"]
+        assert "Кнопкой ниже" not in sent["text"]
+        assert "reply_markup" not in sent
+    finally:
+        bridge._inbox.close()
+
+
+@pytest.mark.asyncio
+async def test_source_command_keeps_boundary_button_numbering_aligned(tmp_path):
+    safe_id = "k" * (64 - len("doc:show:"))
+    too_long_id = safe_id + "k"
+    bridge = _ux_bridge(tmp_path)
+    telegram = _FakeTelegramClient()
+    backend = _FakeBackendClient(
+        {
+            "/api/knowledge/sources": {
+                "items": [
+                    {"source_ref": "one.txt", "knowledge_object_id": safe_id},
+                    {"source_ref": "two.txt", "knowledge_object_id": too_long_id},
+                ]
+            }
+        }
+    )
+    user = {"id": 1001, "first_name": "Alice"}
+    try:
+        await bridge._process_update(
+            telegram,
+            backend,
+            {
+                "update_id": 56,
+                "message": {
+                    "message_id": 84,
+                    "chat": {"id": 5001},
+                    "from": user,
+                    "text": "/source phrase",
+                },
+            },
+            cached_response=None,
+        )
+        sent = [payload for url, payload in telegram.calls if url.endswith("/sendMessage")][-1]
+        buttons = [button for row in sent["reply_markup"]["inline_keyboard"] for button in row]
+        assert "1. one.txt" in sent["text"] and "2. two.txt" in sent["text"]
+        assert buttons == [{"text": "1", "callback_data": f"doc:show:{safe_id}"}]
+        assert len(buttons[0]["callback_data"].encode()) == 64
+    finally:
+        bridge._inbox.close()
+
+
+@pytest.mark.asyncio
 async def test_an_edited_message_gets_an_honest_answer(tmp_path):
     """Правка сообщения не подхватывается — и раньше система просто не знала о ней:
     в чате один текст, в базе навсегда другой."""

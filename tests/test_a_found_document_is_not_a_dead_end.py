@@ -85,6 +85,16 @@ def test_a_result_callback_never_exceeds_telegrams_64_byte_limit():
     assert len(buttons[0]["callback_data"].encode("utf-8")) == 64
 
 
+def test_every_document_open_surface_omits_an_oversized_callback():
+    too_long_id = "k" * (64 - len("doc:show:") + 1)
+    documents = {"items": [{"id": too_long_id, "title": "Без кнопки"}]}
+
+    assert TelegramBridge._timeline_reply_markup(documents) is None
+    assert "Кнопкой ниже" not in TelegramBridge._format_timeline("за день", documents, {})
+    assert "Кнопкой ниже" not in TelegramBridge._format_search_results("за день", documents["items"])
+    assert TelegramBridge._citation_open_buttons([{"knowledge_id": too_long_id}]) == []
+
+
 def test_no_results_means_no_keyboard():
     assert TelegramBridge._search_reply_markup([]) is None
     assert TelegramBridge._search_reply_markup([{"title": "без id"}]) is None
