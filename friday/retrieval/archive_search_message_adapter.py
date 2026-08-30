@@ -193,21 +193,82 @@ def _instant(value: str) -> datetime:
     return parsed.astimezone(UTC)
 
 
-def _excerpt(hit: ArchiveMessageHit) -> str:
-    parts: list[str] = []
-    for context in hit.context:
-        role = "Пользователь" if context.row.role is MessageRole.USER else "Friday"
-        content = " ".join(context.row.content.split())
+def _bounded_message_excerpt(
+    rows: tuple[tuple[MessageRole, str], ...],
+    *,
+    matched_index: int,
+) -> str:
+    """Bound one exact window while retaining its complete short matched row."""
+
+    if (
+        type(rows) is not tuple
+        or not rows
+        or type(matched_index) is not int
+        or not 0 <= matched_index < len(rows)
+    ):
+        raise ArchiveMessageAdapterError("archive message excerpt input is invalid")
+    parts: list[tuple[int, str]] = []
+    for index, (role, raw_content) in enumerate(rows):
+        if type(role) is not MessageRole or not isinstance(raw_content, str):
+            raise ArchiveMessageAdapterError("archive message excerpt input is invalid")
+        label = "Пользователь" if role is MessageRole.USER else "Friday"
+        content = " ".join(raw_content.split())
         if content:
-            parts.append(f"{role}: {content}")
-    text = " | ".join(parts) or "Сообщение без текстового содержимого"
+            parts.append((index, f"{label}: {content}"))
+    if not parts:
+        return "Сообщение без текстового содержимого"
+    text = " | ".join(part for _index, part in parts)
     if len(text) <= _MAX_EXCERPT_CHARS:
         return text
-    # Keep both ends of a long window: the matched row is normally near the
-    # middle and a head-only slice silently discards the requested neighbours.
-    left = (_MAX_EXCERPT_CHARS - 5) // 2
-    right = _MAX_EXCERPT_CHARS - 5 - left
-    return f"{text[:left].rstrip()} … {text[-right:].lstrip()}"
+
+    matched_positions = tuple(
+        position for position, (index, _part) in enumerate(parts) if index == matched_index
+    )
+    if len(matched_positions) != 1:
+        left = (_MAX_EXCERPT_CHARS - 3) // 2
+        right = _MAX_EXCERPT_CHARS - 3 - left
+        return f"{text[:left].rstrip()} … {text[-right:].lstrip()}"
+
+    matched_position = matched_positions[0]
+    matched = parts[matched_position][1]
+    if len(matched) > _MAX_EXCERPT_CHARS:
+        left = (_MAX_EXCERPT_CHARS - 3) // 2
+        right = _MAX_EXCERPT_CHARS - 3 - left
+        return f"{matched[:left].rstrip()} … {matched[-right:].lstrip()}"
+
+    match_start = sum(len(part) + 3 for _index, part in parts[:matched_position])
+    match_end = match_start + len(matched)
+    left_marker = "… " if match_start else ""
+    right_marker = " …" if match_end < len(text) else ""
+    available = _MAX_EXCERPT_CHARS - len(left_marker) - len(right_marker) - len(matched)
+    if available < 0:
+        return matched
+    left_available = match_start
+    right_available = len(text) - match_end
+    left_take = min(left_available, available // 2)
+    right_take = min(right_available, available - left_take)
+    remaining = available - left_take - right_take
+    if remaining:
+        extra_left = min(left_available - left_take, remaining)
+        left_take += extra_left
+        remaining -= extra_left
+    if remaining:
+        right_take += min(right_available - right_take, remaining)
+    return (
+        f"{left_marker}{text[match_start - left_take : match_start]}"
+        f"{matched}{text[match_end : match_end + right_take]}{right_marker}"
+    )
+
+
+def _excerpt(hit: ArchiveMessageHit) -> str:
+    ordered = tuple(sorted(hit.context, key=lambda item: item.relative_position))
+    matched = tuple(index for index, item in enumerate(ordered) if item.relative_position == 0)
+    if len(matched) != 1:
+        raise ArchiveMessageAdapterError("archive message matched row is unavailable")
+    return _bounded_message_excerpt(
+        tuple((item.row.role, item.row.content) for item in ordered),
+        matched_index=matched[0],
+    )
 
 
 def _resolved_source(

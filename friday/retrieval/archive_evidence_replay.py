@@ -27,7 +27,10 @@ from friday.retrieval.archive_search_document_locator import (
     DOCUMENT_STORED_PASSAGE_INDEX_VERSION,
     LEGACY_DOCUMENT_PASSAGE_INDEX_VERSION,
 )
-from friday.retrieval.archive_search_message_adapter import MESSAGE_PASSAGE_INDEX_VERSION
+from friday.retrieval.archive_search_message_adapter import (
+    MESSAGE_PASSAGE_INDEX_VERSION,
+    _bounded_message_excerpt,
+)
 from friday.retrieval.contracts import (
     AuthorityScope,
     CanonicalObjectKind,
@@ -72,7 +75,6 @@ _DIGEST = re.compile(r"[0-9a-f]{64}\Z")
 _MESSAGE_ID = re.compile(r"msg_[0-9a-f]{16}\Z")
 _MAX_ACTOR_BYTES = 200
 _MAX_DOCUMENT_EXCERPT_CHARS = 720
-_MAX_MESSAGE_EXCERPT_CHARS = 1_900
 _FACTORY = object()
 _PROCESS_KEY = secrets.token_bytes(32)
 
@@ -637,19 +639,36 @@ def _document_texts(
     return tuple(texts)
 
 
-def _message_excerpt(window: ArchiveMessageReplayWindow) -> str:
+def _message_excerpt(
+    window: ArchiveMessageReplayWindow,
+    *,
+    matched_index: int,
+) -> str:
+    return _bounded_message_excerpt(
+        tuple((row.role, row.content) for row in window.rows),
+        matched_index=matched_index,
+    )
+
+
+def _legacy_bounded_message_excerpt(rows: tuple[tuple[MessageRole, str], ...]) -> str:
+    """Render the released v1 head/tail form for durable pre-R5 snapshots."""
+
     parts: list[str] = []
-    for row in window.rows:
-        role = "Пользователь" if row.role is MessageRole.USER else "Friday"
-        content = " ".join(row.content.split())
+    for row_role, row_content in rows:
+        role = "Пользователь" if row_role is MessageRole.USER else "Friday"
+        content = " ".join(row_content.split())
         if content:
             parts.append(f"{role}: {content}")
     text = " | ".join(parts) or "Сообщение без текстового содержимого"
-    if len(text) <= _MAX_MESSAGE_EXCERPT_CHARS:
+    if len(text) <= 1_900:
         return text
-    left = (_MAX_MESSAGE_EXCERPT_CHARS - 5) // 2
-    right = _MAX_MESSAGE_EXCERPT_CHARS - 5 - left
+    left = (1_900 - 5) // 2
+    right = 1_900 - 5 - left
     return f"{text[:left].rstrip()} … {text[-right:].lstrip()}"
+
+
+def _legacy_message_excerpt(window: ArchiveMessageReplayWindow) -> str:
+    return _legacy_bounded_message_excerpt(tuple((row.role, row.content) for row in window.rows))
 
 
 def replay_archive_evidence_in_transaction(
@@ -729,6 +748,7 @@ def replay_archive_evidence_in_transaction(
         return _closed_result(origin_status, corpus)
 
     try:
+        legacy_texts: tuple[str, ...] | None = None
         if corpus in {ArchiveSearchCorpus.DOCUMENTS, ArchiveSearchCorpus.KNOWLEDGE}:
             knowledge_object_id = (
                 None
@@ -761,7 +781,18 @@ def replay_archive_evidence_in_transaction(
             if replay_messages is None:
                 return _closed_result(ArchiveEvidenceReplayStatus.DRIFTED, corpus)
             resolved_source = replay_messages.resolved_source
-            texts = tuple(_message_excerpt(window) for window in replay_messages.windows)
+            texts = tuple(
+                _message_excerpt(
+                    window,
+                    matched_index=cast(MessageWindowLocator, passage_ref.locator).context_before,
+                )
+                for window, passage_ref in zip(
+                    replay_messages.windows,
+                    passage_refs,
+                    strict=True,
+                )
+            )
+            legacy_texts = tuple(_legacy_message_excerpt(window) for window in replay_messages.windows)
     except (ArchiveDocumentStorageError, ArchiveMessageStorageError, sqlite3.Error):
         return _closed_result(ArchiveEvidenceReplayStatus.UNAVAILABLE, corpus)
     except Exception:
@@ -774,21 +805,33 @@ def replay_archive_evidence_in_transaction(
             or texts is None
             or len(texts) != len(passage_refs)
         )
+        exact_texts: tuple[str, ...] | None = None
         if not drifted:
-            exact_texts = cast(tuple[str, ...], texts)
-            drifted = not hmac.compare_digest(
+            current_texts = cast(tuple[str, ...], texts)
+            if hmac.compare_digest(
                 archive_selected_evidence_snapshot_sha256(
                     resolved_source,
                     passage_refs,
-                    exact_texts,
+                    current_texts,
                 ),
                 expected_source_snapshot_sha256,
-            )
+            ):
+                exact_texts = current_texts
+            elif legacy_texts is not None and hmac.compare_digest(
+                archive_selected_evidence_snapshot_sha256(
+                    resolved_source,
+                    passage_refs,
+                    legacy_texts,
+                ),
+                expected_source_snapshot_sha256,
+            ):
+                exact_texts = legacy_texts
+            else:
+                drifted = True
     except Exception:
         return _closed_result(ArchiveEvidenceReplayStatus.UNAVAILABLE, corpus)
-    if drifted:
+    if drifted or exact_texts is None:
         return _closed_result(ArchiveEvidenceReplayStatus.DRIFTED, corpus)
-    exact_texts = cast(tuple[str, ...], texts)
     try:
         return _exact_result(
             corpus=corpus,
