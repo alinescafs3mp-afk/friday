@@ -22,20 +22,14 @@ from tools import release_dr_generation_authentication as dr_auth
 from tools import release_dr_generation_index as dr_index
 
 ENROLLMENT_RECEIPT_SCHEMA = "friday.immutable-release-dr-enrollment-receipt.v1"
-REQUIRED_CURRENT_IDENTITY_API_DELTA = (
-    "DurableDRGenerationIndex must expose the exact validated current generation "
-    "candidate (including all receipt and source identities) before idempotent "
-    "already-current enrollment can be admitted"
-)
 
 
 class DRGenerationEnrollmentError(RuntimeError):
     """A closed terminal-backup admission failure."""
 
-    def __init__(self, code: str, *, required_api_delta: str | None = None) -> None:
+    def __init__(self, code: str) -> None:
         super().__init__(code)
         self.code = code
-        self.required_api_delta = required_api_delta
 
 
 def _canonical(value: object) -> bytes:
@@ -94,15 +88,6 @@ def _candidate_sha256(candidate: Mapping[str, Any]) -> str:
     return _sha256(_canonical(normalized))
 
 
-def _current_backup_directory(
-    index: dr_index.DurableDRGenerationIndex,
-) -> Path:
-    current = [pin for pin in index.pins() if pin.role == "current"]
-    if len(current) != 1:
-        raise DRGenerationEnrollmentError("dr_enrollment_current_pin_invalid")
-    return current[0].backup_directory
-
-
 def _prepare_or_resume(
     *,
     index: dr_index.DurableDRGenerationIndex,
@@ -123,12 +108,21 @@ def _prepare_or_resume(
                 raise DRGenerationEnrollmentError("dr_enrollment_index_state_invalid")
             intent = "bootstrap_current"
         else:
-            current_backup = _current_backup_directory(index)
-            if current_backup == Path(candidate["backup_directory"]):
-                raise DRGenerationEnrollmentError(
-                    "dr_enrollment_current_identity_unprovable",
-                    required_api_delta=REQUIRED_CURRENT_IDENTITY_API_DELTA,
-                )
+            current_identity = index.current_generation_identity(
+                expected_journal_sha256=str(state.get("journal_sha256") or ""),
+            )
+            if current_identity is None:
+                raise DRGenerationEnrollmentError("dr_enrollment_index_state_invalid")
+            current_backup = Path(current_identity.candidate["backup_directory"])
+            candidate_backup = Path(candidate["backup_directory"])
+            if current_backup == candidate_backup:
+                if (
+                    current_identity.candidate != candidate
+                    or current_identity.candidate_sha256 != _candidate_sha256(candidate)
+                    or current_identity.authentication_receipt != expected_receipt
+                ):
+                    raise DRGenerationEnrollmentError("dr_enrollment_current_conflict")
+                return dict(state), "rotate_current", "already_current"
             intent = "rotate_current"
         prepared = index.prepare(
             intent=intent,
@@ -175,8 +169,8 @@ def _enrollment_receipt(
         "index_phase": state["phase"],
         "index_revision": state["revision"],
         "intent": intent,
-        "published": False,
-        "rehearsal_present": state["phase"] == "rehearsed",
+        "published": action == "already_current",
+        "rehearsal_present": action == "already_current" or state["phase"] == "rehearsed",
         "schema": ENROLLMENT_RECEIPT_SCHEMA,
         "status": "admitted",
     }
@@ -246,6 +240,5 @@ def enroll_terminal_activation_backup(
 __all__ = [
     "DRGenerationEnrollmentError",
     "ENROLLMENT_RECEIPT_SCHEMA",
-    "REQUIRED_CURRENT_IDENTITY_API_DELTA",
     "enroll_terminal_activation_backup",
 ]

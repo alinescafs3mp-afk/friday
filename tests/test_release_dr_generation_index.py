@@ -182,6 +182,110 @@ def test_bootstrap_publishes_exact_immutable_receipt_then_clear_cas(tmp_path: Pa
     assert status.st_nlink == 1
 
 
+def test_current_generation_identity_is_exact_compact_and_detached(tmp_path: Path) -> None:
+    index = _index(tmp_path)
+    candidate = _candidate(tmp_path, 2)
+    authentication = _external_receipt("authentication", 201)
+    rehearsal = _external_receipt("rehearsal", 202)
+    state = index.load()
+    state = index.prepare(
+        intent="bootstrap_current",
+        candidate=candidate,
+        expected_journal_sha256=state["journal_sha256"],
+    )
+    state = index.record_authenticated(
+        receipt=authentication,
+        expected_journal_sha256=state["journal_sha256"],
+    )
+    state = index.record_rehearsed(
+        receipt=rehearsal,
+        expected_journal_sha256=state["journal_sha256"],
+    )
+    clear = index.publish(expected_journal_sha256=state["journal_sha256"])
+
+    identity = index.current_generation_identity(
+        expected_journal_sha256=clear["journal_sha256"],
+    )
+
+    assert identity is not None
+    assert identity.index_journal_sha256 == clear["journal_sha256"]
+    assert identity.index_phase == "clear"
+    assert identity.index_revision == clear["revision"]
+    assert identity.generation_id == clear["current"]["generation_id"]
+    assert identity.generation_receipt_sha256 == clear["current"]["receipt_sha256"]
+    assert identity.candidate == candidate
+    assert identity.candidate_sha256 == hashlib.sha256(_canonical(candidate)).hexdigest()
+    assert identity.authentication_receipt == _external_receipt_ref(authentication)
+    assert identity.rehearsal_receipt == _external_receipt_ref(rehearsal)
+    assert set(identity.authentication_receipt) == {"schema", "sha256"}
+    assert set(identity.rehearsal_receipt) == {"schema", "sha256"}
+    assert "status" not in identity.authentication_receipt
+    assert "status" not in identity.rehearsal_receipt
+
+    identity.candidate["source_kind"] = "caller_mutation"
+    durable = index.current_generation_identity(
+        expected_journal_sha256=clear["journal_sha256"],
+    )
+    assert durable is not None
+    assert durable.candidate == candidate
+
+
+def test_current_generation_identity_requires_exact_index_epoch(tmp_path: Path) -> None:
+    index = _index(tmp_path)
+    empty = index.load()
+    assert (
+        index.current_generation_identity(
+            expected_journal_sha256=empty["journal_sha256"],
+        )
+        is None
+    )
+
+    clear = _advance(
+        index,
+        _candidate(tmp_path, 3),
+        intent="bootstrap_current",
+        ordinal=300,
+    )
+    with pytest.raises(dr_index.DRGenerationIndexError, match="^dr_generation_cas_mismatch$"):
+        index.current_generation_identity(
+            expected_journal_sha256=empty["journal_sha256"],
+        )
+    assert index.load() == clear
+
+
+def test_current_generation_identity_rejects_receipt_namespace_swap(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    index = _index(tmp_path)
+    clear = _advance(
+        index,
+        _candidate(tmp_path, 4),
+        intent="bootstrap_current",
+        ordinal=400,
+    )
+    receipt_directory = index.receipt_directory
+    displaced = tmp_path / "receipts-displaced"
+    real_load_receipt = index._load_receipt  # noqa: SLF001
+    calls = 0
+
+    def swap_after_load(reference: Any, receipt_fd: int) -> dict[str, Any]:
+        nonlocal calls
+        payload = real_load_receipt(reference, receipt_fd)
+        calls += 1
+        if calls == 1:
+            receipt_directory.rename(displaced)
+            _private_directory(receipt_directory)
+        return payload
+
+    monkeypatch.setattr(index, "_load_receipt", swap_after_load)
+    with pytest.raises(dr_index.DRGenerationIndexError, match="dr_generation_directory_changed"):
+        index.current_generation_identity(
+            expected_journal_sha256=clear["journal_sha256"],
+        )
+    assert calls >= 1
+
+
 def test_explicit_older_and_rotation_use_only_exact_inputs_not_mtime_or_globs(tmp_path: Path) -> None:
     index = _index(tmp_path)
     current = _candidate(tmp_path, 2)

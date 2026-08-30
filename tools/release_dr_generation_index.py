@@ -87,6 +87,27 @@ class DRGenerationAuthoritySnapshot:
 
 
 @dataclass(frozen=True)
+class CurrentDRGenerationIdentity:
+    """Validated, detached identity of the generation in the current slot.
+
+    Authentication and rehearsal receipt bodies intentionally stay private to
+    this module.  Their compact references, the complete candidate identity,
+    and the exact index revision are sufficient for a caller to prove an
+    already-current admission without reopening authority files by path.
+    """
+
+    index_journal_sha256: str
+    index_phase: str
+    index_revision: int
+    generation_id: str
+    generation_receipt_sha256: str
+    candidate: dict[str, Any]
+    candidate_sha256: str
+    authentication_receipt: dict[str, str]
+    rehearsal_receipt: dict[str, str]
+
+
+@dataclass(frozen=True)
 class _PinnedDirectories:
     state_fd: int
     receipt_fd: int
@@ -1091,6 +1112,50 @@ class DurableDRGenerationIndex:
         with self._guard() as pins:
             return self._load_unlocked(pins)
 
+    def current_generation_identity(
+        self,
+        *,
+        expected_journal_sha256: str,
+    ) -> CurrentDRGenerationIdentity | None:
+        """Return the fully validated current identity from one guard epoch.
+
+        The caller must bind the observation to an index journal it already
+        authenticated.  Generation, authentication, and rehearsal receipt
+        bodies are all validated while the state and receipt directory inodes
+        remain pinned; only compact external-receipt references escape.
+        """
+
+        with self._guard() as pins:
+            state = self._load_unlocked(pins)
+            self._require_cas(state, expected_journal_sha256)
+            current = state["current"]
+            if current is None:
+                return None
+            generation_receipt = self._load_receipt(current, pins.receipt_fd)
+            generation = _normalize_generation(generation_receipt["generation"])
+            candidate = normalize_generation_candidate(generation["candidate"])
+            current_ref = _normalize_generation_ref(current, code="generation_ref_invalid")
+            authentication_ref = _normalize_external_receipt(
+                generation["authentication_receipt"],
+                code="authentication_receipt_invalid",
+            )
+            rehearsal_ref = _normalize_external_receipt(
+                generation["rehearsal_receipt"],
+                code="rehearsal_receipt_invalid",
+            )
+            self._require_pinned_namespace(pins)
+            return CurrentDRGenerationIdentity(
+                index_journal_sha256=str(state["journal_sha256"]),
+                index_phase=str(state["phase"]),
+                index_revision=int(state["revision"]),
+                generation_id=current_ref["generation_id"],
+                generation_receipt_sha256=current_ref["receipt_sha256"],
+                candidate=candidate,
+                candidate_sha256=_sha256(_canonical_json(candidate)),
+                authentication_receipt=authentication_ref,
+                rehearsal_receipt=rehearsal_ref,
+            )
+
     @staticmethod
     def _core_from_state(state: Mapping[str, Any]) -> dict[str, Any]:
         return {key: value for key, value in state.items() if key != "journal_sha256"}
@@ -1408,6 +1473,7 @@ class DurableDRGenerationIndex:
 
 __all__ = [
     "AUTHENTICATION_RECEIPT_KIND",
+    "CurrentDRGenerationIdentity",
     "DRGenerationAuthoritySnapshot",
     "DRGenerationIndexError",
     "DurableDRGenerationIndex",

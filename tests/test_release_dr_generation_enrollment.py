@@ -267,7 +267,7 @@ def test_clear_index_rotates_only_a_distinct_backup_candidate(
     assert receipt["intent"] == "rotate_current"
 
 
-def test_already_current_backup_reports_required_public_api_delta(
+def test_exact_already_current_backup_is_body_free_and_does_not_mutate(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -276,14 +276,82 @@ def test_already_current_backup_reports_required_public_api_delta(
     current = _candidate(home, 8)
     before = _publish(index, current, ordinal=88)
     authenticated = _authenticated(current, ordinal=88)
-    _install_authenticator(monkeypatch, home, activation_receipt, [authenticated])
+    calls = _install_authenticator(monkeypatch, home, activation_receipt, [authenticated])
+    receipts_before = {path.name: path.read_bytes() for path in index.receipt_directory.iterdir()}
 
-    with pytest.raises(enrollment.DRGenerationEnrollmentError) as captured:
+    receipt = enrollment.enroll_terminal_activation_backup(activation_receipt=activation_receipt)
+
+    assert len(calls) == 2
+    assert index.load() == before
+    assert {path.name: path.read_bytes() for path in index.receipt_directory.iterdir()} == receipts_before
+    assert receipt["action"] == "already_current"
+    assert receipt["intent"] == "rotate_current"
+    assert receipt["published"] is True
+    assert receipt["rehearsal_present"] is True
+    assert receipt["index_phase"] == "clear"
+    assert receipt["index_revision"] == before["revision"]
+    assert str(home) not in json.dumps(receipt)
+    assert "candidate" not in receipt
+
+
+@pytest.mark.parametrize("mismatch", ("candidate", "authentication"))
+def test_same_backup_path_identity_mismatch_fails_without_rotation_or_overwrite(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    mismatch: str,
+) -> None:
+    home, activation_receipt = _home(tmp_path, monkeypatch)
+    index = _index(home)
+    current = _candidate(home, 81)
+    before = _publish(index, current, ordinal=810)
+    candidate = current
+    authentication_ordinal = 810
+    if mismatch == "candidate":
+        candidate = _candidate(home, 82)
+        candidate["backup_directory"] = current["backup_directory"]
+    else:
+        authentication_ordinal = 811
+    authenticated = _authenticated(candidate, ordinal=authentication_ordinal)
+    _install_authenticator(monkeypatch, home, activation_receipt, [authenticated])
+    receipts_before = {path.name: path.read_bytes() for path in index.receipt_directory.iterdir()}
+
+    with pytest.raises(
+        enrollment.DRGenerationEnrollmentError,
+        match="^dr_enrollment_current_conflict$",
+    ):
         enrollment.enroll_terminal_activation_backup(activation_receipt=activation_receipt)
 
-    assert captured.value.code == "dr_enrollment_current_identity_unprovable"
-    assert captured.value.required_api_delta == enrollment.REQUIRED_CURRENT_IDENTITY_API_DELTA
     assert index.load() == before
+    assert {path.name: path.read_bytes() for path in index.receipt_directory.iterdir()} == receipts_before
+    unexpected = (
+        index.receipt_directory
+        / f"authentication-{authenticated.authentication_receipt['receipt_sha256']}.json"
+    )
+    if mismatch == "authentication":
+        assert not unexpected.exists()
+
+
+def test_already_current_reauthentication_drift_leaves_authority_unchanged(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    home, activation_receipt = _home(tmp_path, monkeypatch)
+    index = _index(home)
+    current = _candidate(home, 83)
+    before = _publish(index, current, ordinal=830)
+    first = _authenticated(current, ordinal=830)
+    second = _authenticated(current, ordinal=831)
+    _install_authenticator(monkeypatch, home, activation_receipt, [first, second])
+    receipts_before = {path.name: path.read_bytes() for path in index.receipt_directory.iterdir()}
+
+    with pytest.raises(
+        enrollment.DRGenerationEnrollmentError,
+        match="^dr_enrollment_reauthentication_mismatch$",
+    ):
+        enrollment.enroll_terminal_activation_backup(activation_receipt=activation_receipt)
+
+    assert index.load() == before
+    assert {path.name: path.read_bytes() for path in index.receipt_directory.iterdir()} == receipts_before
 
 
 def test_rehearsed_retry_never_publishes_without_a_separate_controller(
