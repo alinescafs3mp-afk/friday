@@ -424,9 +424,7 @@ def _authenticate_locked(
         code="dr_restore_operator_invalid",
     )
     receipt_core: dict[str, Any] = {
-        "allowed_rollback_tree_sha256s": list(
-            candidate["allowed_rollback_tree_sha256s"]
-        ),
+        "allowed_rollback_tree_sha256s": list(candidate["allowed_rollback_tree_sha256s"]),
         "activation_journal_file_sha256": _sha256(journal_raw_before),
         "activation_journal_sha256": activation_journal_sha256,
         "activation_receipt_file_sha256": _sha256(activation_raw),
@@ -530,9 +528,10 @@ def reauthenticate_generation_candidate(
         if _sha256(manifest_raw) != receipt["backup_manifest_sha256"]:
             raise DRGenerationAuthenticationError("dr_retained_backup_manifest_mismatch")
         manifest = _json(manifest_raw, code="dr_retained_backup_manifest_invalid")
-        if set(manifest) != {"database_schema", "files", "schema"} or manifest.get(
-            "schema"
-        ) != "friday.immutable-cutover-exact-backup.v1":
+        if (
+            set(manifest) != {"database_schema", "files", "schema"}
+            or manifest.get("schema") != "friday.immutable-cutover-exact-backup.v1"
+        ):
             raise DRGenerationAuthenticationError("dr_retained_backup_manifest_invalid")
         schema_version = manifest.get("database_schema")
         files_raw = manifest.get("files")
@@ -799,15 +798,23 @@ def _authenticate_material_locked(
         raise DRGenerationAuthenticationError("dr_activation_backup_missing")
     activation_candidate, activation_previous, fallback = journal.release_identities()
     payload = backup.opaque
+    allowed_rollback_tree_sha256s = sorted(
+        {
+            activation_previous.tree_manifest_sha256,
+            fallback.tree_manifest_sha256,
+        }
+    )
     if (
         not isinstance(payload, release_operator._ExactBackupPayload)  # noqa: SLF001
         or payload.obsidian is None
         or payload.engineer is None
         or str(payload.directory) != first.candidate["backup_directory"]
         or backup.receipt_sha256 != first.candidate["database_receipt_sha256"]
+        or backup.schema_version != first.candidate["database_schema"]
         or backup.inbox_receipt_sha256 != first.candidate["inbox_receipt_sha256"]
         or backup.obsidian_receipt_sha256 != first.candidate["obsidian_receipt_sha256"]
         or backup.engineer_receipt_sha256 != first.candidate["engineer_receipt_sha256"]
+        or allowed_rollback_tree_sha256s != first.candidate["allowed_rollback_tree_sha256s"]
         or _release_record(fallback) != first.candidate["restore_release"]
     ):
         raise DRGenerationAuthenticationError("dr_rehearsal_material_mismatch")

@@ -592,16 +592,13 @@ def validate_authentication_receipt(
     if (
         reference["schema"] != AUTHENTICATION_RECEIPT_SCHEMA
         or payload.get("status") != "authenticated"
-        or payload.get("candidate_sha256")
-        != _sha256(_canonical_json(normalized_candidate))
+        or payload.get("candidate_sha256") != _sha256(_canonical_json(normalized_candidate))
         or type(payload.get("database_schema")) is not int
         or payload.get("database_schema") != normalized_candidate["database_schema"]
         or payload.get("allowed_rollback_tree_sha256s")
         != normalized_candidate["allowed_rollback_tree_sha256s"]
-        or payload.get("source_transaction_id")
-        != normalized_candidate["source_transaction_id"]
-        or payload.get("activation_receipt_sha256")
-        != normalized_candidate["source_receipt_sha256"]
+        or payload.get("source_transaction_id") != normalized_candidate["source_transaction_id"]
+        or payload.get("activation_receipt_sha256") != normalized_candidate["source_receipt_sha256"]
         or not isinstance(directory, dict)
         or set(directory) != {"device", "inode", "path"}
         or type(directory.get("device")) is not int
@@ -729,8 +726,7 @@ def validate_rehearsal_receipt(
     if (
         reference["schema"] != REHEARSAL_RECEIPT_SCHEMA
         or payload.get("status") != "rehearsed"
-        or payload.get("candidate_sha256")
-        != _sha256(_canonical_json(normalized_candidate))
+        or payload.get("candidate_sha256") != _sha256(_canonical_json(normalized_candidate))
         or payload.get("authentication_receipt_sha256") != auth_ref["sha256"]
         or payload.get("index_transaction_id")
         != _hex64(index_transaction_id, code="rehearsal_receipt_invalid")
@@ -755,9 +751,7 @@ def validate_rehearsal_receipt(
         or any(payload.get(key) is not True for key in boolean_keys)
     ):
         raise DRGenerationIndexError("rehearsal_receipt_invalid")
-    if payload.get("rollback_tree_sha256") not in normalized_candidate[
-        "allowed_rollback_tree_sha256s"
-    ]:
+    if payload.get("rollback_tree_sha256") not in normalized_candidate["allowed_rollback_tree_sha256s"]:
         raise DRGenerationIndexError("rehearsal_receipt_invalid")
     return reference, raw, payload
 
@@ -841,10 +835,7 @@ def normalize_generation_candidate(value: object) -> dict[str, Any]:
         not isinstance(allowed_rollbacks, list)
         or not 1 <= len(allowed_rollbacks) <= 2
         or allowed_rollbacks != sorted(set(allowed_rollbacks))
-        or any(
-            not isinstance(item, str) or _HEX64_RE.fullmatch(item) is None
-            for item in allowed_rollbacks
-        )
+        or any(not isinstance(item, str) or _HEX64_RE.fullmatch(item) is None for item in allowed_rollbacks)
         or type(database_schema) is not int
         or database_schema <= 0
     ):
@@ -920,17 +911,11 @@ def _normalize_rehearsal_binding(
             value.get("authentication_receipt_sha256"),
             code="rehearsal_binding_invalid",
         ),
-        "candidate_sha256": _hex64(
-            value.get("candidate_sha256"), code="rehearsal_binding_invalid"
-        ),
+        "candidate_sha256": _hex64(value.get("candidate_sha256"), code="rehearsal_binding_invalid"),
         "database_schema": value.get("database_schema"),
-        "index_journal_sha256": _hex64(
-            value.get("index_journal_sha256"), code="rehearsal_binding_invalid"
-        ),
+        "index_journal_sha256": _hex64(value.get("index_journal_sha256"), code="rehearsal_binding_invalid"),
         "index_revision": revision,
-        "index_transaction_id": _hex64(
-            value.get("index_transaction_id"), code="rehearsal_binding_invalid"
-        ),
+        "index_transaction_id": _hex64(value.get("index_transaction_id"), code="rehearsal_binding_invalid"),
         "schema": value.get("schema"),
     }
     if (
@@ -944,8 +929,7 @@ def _normalize_rehearsal_binding(
         or normalized["candidate_sha256"] != _sha256(_canonical_json(candidate))
         or normalized["authentication_receipt_sha256"] != authentication_receipt["sha256"]
         or normalized["database_schema"] != candidate["database_schema"]
-        or normalized["allowed_rollback_tree_sha256s"]
-        != candidate["allowed_rollback_tree_sha256s"]
+        or normalized["allowed_rollback_tree_sha256s"] != candidate["allowed_rollback_tree_sha256s"]
     ):
         raise DRGenerationIndexError("rehearsal_binding_invalid")
     return normalized
@@ -966,19 +950,13 @@ def _rehearsal_binding(
     )
     return _normalize_rehearsal_binding(
         {
-            "allowed_rollback_tree_sha256s": normalized_candidate[
-                "allowed_rollback_tree_sha256s"
-            ],
+            "allowed_rollback_tree_sha256s": normalized_candidate["allowed_rollback_tree_sha256s"],
             "authentication_receipt_sha256": normalized_authentication["sha256"],
             "candidate_sha256": _sha256(_canonical_json(normalized_candidate)),
             "database_schema": normalized_candidate["database_schema"],
-            "index_journal_sha256": _hex64(
-                index_journal_sha256, code="rehearsal_binding_invalid"
-            ),
+            "index_journal_sha256": _hex64(index_journal_sha256, code="rehearsal_binding_invalid"),
             "index_revision": index_revision,
-            "index_transaction_id": _hex64(
-                index_transaction_id, code="rehearsal_binding_invalid"
-            ),
+            "index_transaction_id": _hex64(index_transaction_id, code="rehearsal_binding_invalid"),
             "schema": REHEARSAL_BINDING_SCHEMA,
         },
         candidate=normalized_candidate,
@@ -1216,9 +1194,7 @@ class DurableDRGenerationIndex:
                 raise DRGenerationIndexError("dr_generation_head_directory_invalid") from exc
             if not self._directory_is_private(head_named):
                 raise DRGenerationIndexError("dr_generation_head_directory_invalid")
-            directory_flags = (
-                os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_DIRECTORY", 0)
-            )
+            directory_flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_DIRECTORY", 0)
             directory_flags |= getattr(os, "O_NOFOLLOW", 0)
             head_fd = os.open(self.head_directory.name, directory_flags, dir_fd=parent_fd)
             head_open = os.fstat(head_fd)
@@ -2333,9 +2309,7 @@ class DurableDRGenerationIndex:
                         else None
                     ),
                     authentication_receipt_sha256=(
-                        str(authentication_ref["sha256"])
-                        if authentication_ref is not None
-                        else None
+                        str(authentication_ref["sha256"]) if authentication_ref is not None else None
                     ),
                     rehearsal_receipt_path=(
                         self._external_receipt_path(

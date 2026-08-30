@@ -378,9 +378,11 @@ def _candidate(home: Path, ordinal: int = 1) -> dict[str, Any]:
     release = _private(home / "releases" / f"{ordinal:040x}")
     digest = lambda offset: f"{ordinal * 16 + offset:064x}"  # noqa: E731
     return {
+        "allowed_rollback_tree_sha256s": sorted({digest(6), "a" * 64}),
         "backup_directory": str(backup),
         "backup_record_sha256": digest(1),
         "database_receipt_sha256": digest(2),
+        "database_schema": 46,
         "engineer_receipt_sha256": digest(3),
         "inbox_receipt_sha256": digest(4),
         "obsidian_receipt_sha256": digest(5),
@@ -404,6 +406,7 @@ def _auth_receipt(candidate: dict[str, Any], ordinal: int = 1) -> dict[str, Any]
     backup = Path(candidate["backup_directory"])
     backup_status = backup.stat()
     core: dict[str, Any] = {
+        "allowed_rollback_tree_sha256s": candidate["allowed_rollback_tree_sha256s"],
         "activation_journal_file_sha256": digest(1),
         "activation_journal_sha256": digest(2),
         "activation_receipt_file_sha256": digest(3),
@@ -417,8 +420,10 @@ def _auth_receipt(candidate: dict[str, Any], ordinal: int = 1) -> dict[str, Any]
         "candidate_sha256": hashlib.sha256(
             _canonical(dr_index.normalize_generation_candidate(candidate))
         ).hexdigest(),
+        "database_schema": candidate["database_schema"],
         "restore_operator_sha256": digest(6),
         "schema": dr_auth.AUTHENTICATION_RECEIPT_SCHEMA,
+        "source_transaction_id": candidate["source_transaction_id"],
         "status": "authenticated",
         "surface_receipts": {
             "database": candidate["database_receipt_sha256"],
@@ -438,6 +443,92 @@ def _release(root: Path, character: str) -> release_operator.ReleaseIdentity:
         tree_manifest_sha256=character * 64,
         max_schema=50,
     )
+
+
+@pytest.mark.parametrize("mismatch", ("database_schema", "allowed_rollback_trees"))
+def test_material_authentication_binds_candidate_schema_and_rollback_authority(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    mismatch: str,
+) -> None:
+    tmp_path.chmod(0o700)
+    source = _source_config(_private(tmp_path / "source"))
+    backup = release_operator._exact_sqlite_backup(source)  # noqa: SLF001
+    payload = backup.opaque
+    assert isinstance(payload, release_operator._ExactBackupPayload)  # noqa: SLF001
+    releases = (
+        _release(tmp_path / "candidate", "c"),
+        _release(tmp_path / "previous", "a"),
+        _release(tmp_path / "fallback", "f"),
+    )
+
+    def release_record(release: release_operator.ReleaseIdentity) -> dict[str, Any]:
+        return {
+            "commit": release.commit,
+            "max_schema": release.max_schema,
+            "root": str(release.root),
+            "tree_manifest_sha256": release.tree_manifest_sha256,
+            "version": release.version,
+            "wheel_sha256": "1" * 64,
+        }
+
+    monkeypatch.setattr(dr_auth, "_release_record", release_record)
+    candidate = {
+        **_candidate(source.friday_home),
+        "allowed_rollback_tree_sha256s": sorted(
+            {releases[1].tree_manifest_sha256, releases[2].tree_manifest_sha256}
+        ),
+        "backup_directory": str(payload.directory),
+        "database_receipt_sha256": backup.receipt_sha256,
+        "database_schema": backup.schema_version,
+        "engineer_receipt_sha256": backup.engineer_receipt_sha256,
+        "inbox_receipt_sha256": backup.inbox_receipt_sha256,
+        "obsidian_receipt_sha256": backup.obsidian_receipt_sha256,
+        "restore_release": release_record(releases[2]),
+    }
+    authenticated = dr_auth.AuthenticatedDRCandidate(candidate, _auth_receipt(candidate))
+    observed_backup = backup
+    observed_releases = releases
+    if mismatch == "database_schema":
+        observed_backup = release_operator.DatabaseBackup(
+            backup.schema_version + 1,
+            backup.receipt_sha256,
+            backup.inbox_receipt_sha256,
+            backup.opaque,
+            backup.obsidian_receipt_sha256,
+            backup.engineer_receipt_sha256,
+        )
+    else:
+        observed_releases = (releases[0], _release(tmp_path / "changed-previous", "d"), releases[2])
+
+    class FakeJournal:
+        def __init__(self, *_args: Any, **_kwargs: Any) -> None:
+            pass
+
+        def database_backup(self, **_kwargs: Any) -> release_operator.DatabaseBackup:
+            return observed_backup
+
+        def release_identities(
+            self,
+        ) -> tuple[
+            release_operator.ReleaseIdentity,
+            release_operator.ReleaseIdentity,
+            release_operator.ReleaseIdentity,
+        ]:
+            return observed_releases
+
+    monkeypatch.setattr(dr_auth, "_authenticate_locked", lambda **_kwargs: authenticated)
+    monkeypatch.setattr(release_operator, "DurableActivationJournal", FakeJournal)
+
+    with pytest.raises(
+        dr_auth.DRGenerationAuthenticationError,
+        match="^dr_rehearsal_material_mismatch$",
+    ):
+        dr_auth._authenticate_material_locked(  # noqa: SLF001
+            activation_journal=tmp_path / "activation-journal.json",
+            activation_receipt=tmp_path / "activation-receipt.json",
+            backup_root=source.backup_dir,
+        )
 
 
 def _capable_release(root: Path, character: str) -> release_operator.ReleaseIdentity:
@@ -1102,6 +1193,7 @@ def _authenticated_home(
 def test_controller_records_only_rehearsal_and_retry_does_not_rerun(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
+    isolated_operator_transaction_domain: Path,
 ) -> None:
     home, index, material, activation_receipt = _authenticated_home(tmp_path, monkeypatch)
     monkeypatch.setattr(rehearsal, "_SCRATCH_PARENT", tmp_path)
@@ -1141,6 +1233,7 @@ def test_controller_records_only_rehearsal_and_retry_does_not_rerun(
 def test_controller_source_drift_after_run_never_records_rehearsal(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
+    isolated_operator_transaction_domain: Path,
 ) -> None:
     _home, index, material, activation_receipt = _authenticated_home(tmp_path, monkeypatch)
     monkeypatch.setattr(rehearsal, "_SCRATCH_PARENT", tmp_path)
@@ -1175,6 +1268,7 @@ def test_controller_source_drift_after_run_never_records_rehearsal(
 def test_controller_run_failure_cleans_scratch_and_leaves_authenticated_state(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
+    isolated_operator_transaction_domain: Path,
 ) -> None:
     _home, index, material, activation_receipt = _authenticated_home(tmp_path, monkeypatch)
     monkeypatch.setattr(rehearsal, "_SCRATCH_PARENT", tmp_path)
@@ -1196,6 +1290,7 @@ def test_controller_run_failure_cleans_scratch_and_leaves_authenticated_state(
 def test_controller_refuses_scratch_namespace_replacement_without_deleting_it(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
+    isolated_operator_transaction_domain: Path,
 ) -> None:
     _home, index, material, activation_receipt = _authenticated_home(tmp_path, monkeypatch)
     monkeypatch.setattr(rehearsal, "_SCRATCH_PARENT", tmp_path)
@@ -1340,6 +1435,7 @@ def test_cleanup_never_deletes_a_quarantine_path_replacement(
 def test_unrelated_sigkill_leftover_is_never_discovered_or_deleted(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
+    isolated_operator_transaction_domain: Path,
 ) -> None:
     _home, index, material, activation_receipt = _authenticated_home(tmp_path, monkeypatch)
     monkeypatch.setattr(rehearsal, "_SCRATCH_PARENT", tmp_path)
@@ -1369,6 +1465,7 @@ def test_unrelated_sigkill_leftover_is_never_discovered_or_deleted(
 def test_receipt_publication_before_cas_is_restart_safe(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
+    isolated_operator_transaction_domain: Path,
 ) -> None:
     home, index, material, activation_receipt = _authenticated_home(tmp_path, monkeypatch)
     monkeypatch.setattr(rehearsal, "_SCRATCH_PARENT", tmp_path)
@@ -1819,6 +1916,7 @@ def test_exact_fallback_restore_projects_only_authenticated_operator_and_checkpo
 def test_retry_rejects_forged_alternate_four_surface_digest(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
+    isolated_operator_transaction_domain: Path,
 ) -> None:
     _home, index, material, activation_receipt = _authenticated_home(tmp_path, monkeypatch)
     monkeypatch.setattr(rehearsal, "_SCRATCH_PARENT", tmp_path)

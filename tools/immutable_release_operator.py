@@ -6261,11 +6261,10 @@ class OperatorTransactionLock:
             parent_fd = os.open(self._runtime_parent, self._directory_flags())
             parent_open = os.fstat(parent_fd)
             parent_named = os.stat(self._runtime_parent, follow_symlinks=False)
-            if (
-                not self._shared_temporary_parent_status(parent_open)
-                or (parent_open.st_dev, parent_open.st_ino)
-                != (parent_named.st_dev, parent_named.st_ino)
-            ):
+            if not self._shared_temporary_parent_status(parent_open) or (
+                parent_open.st_dev,
+                parent_open.st_ino,
+            ) != (parent_named.st_dev, parent_named.st_ino):
                 raise ReleaseFailure("operator_transaction_runtime_lock_invalid")
             name = f"{self._RUNTIME_DIRECTORY_PREFIX}-{os.geteuid()}"
             try:
@@ -6279,8 +6278,7 @@ class OperatorTransactionLock:
             if (
                 not self._private_directory_status(child_open)
                 or stat.S_IMODE(child_open.st_mode) != 0o700
-                or (child_open.st_dev, child_open.st_ino)
-                != (child_named.st_dev, child_named.st_ino)
+                or (child_open.st_dev, child_open.st_ino) != (child_named.st_dev, child_named.st_ino)
             ):
                 raise ReleaseFailure("operator_transaction_runtime_lock_invalid")
             path = self._runtime_parent / name
@@ -6312,12 +6310,7 @@ class OperatorTransactionLock:
         runtime_descriptors: list[tuple[str, int, tuple[int, int]]] = []
         try:
             runtime_path, runtime_fd, runtime_identity = self._open_runtime_root()
-            lock_flags = (
-                os.O_RDWR
-                | os.O_CREAT
-                | getattr(os, "O_CLOEXEC", 0)
-                | getattr(os, "O_NOFOLLOW", 0)
-            )
+            lock_flags = os.O_RDWR | os.O_CREAT | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0)
             name = self._GLOBAL_RUNTIME_LOCK_NAME
             created = False
             try:
@@ -6336,9 +6329,9 @@ class OperatorTransactionLock:
                 )
             status = os.fstat(runtime_lock)
             named = os.stat(name, dir_fd=runtime_fd, follow_symlinks=False)
-            if (
-                not self._private_lock_status(status)
-                or (status.st_dev, status.st_ino) != (named.st_dev, named.st_ino)
+            if not self._private_lock_status(status) or (status.st_dev, status.st_ino) != (
+                named.st_dev,
+                named.st_ino,
             ):
                 os.close(runtime_lock)
                 runtime_lock = -1
@@ -6349,9 +6342,7 @@ class OperatorTransactionLock:
                 os.close(runtime_lock)
                 runtime_lock = -1
                 raise ReleaseFailure("operator_transaction_in_progress") from exc
-            runtime_descriptors.append(
-                (name, runtime_lock, (int(status.st_dev), int(status.st_ino)))
-            )
+            runtime_descriptors.append((name, runtime_lock, (int(status.st_dev), int(status.st_ino))))
             runtime_lock = -1
             if created:
                 os.fsync(runtime_fd)
@@ -6361,18 +6352,17 @@ class OperatorTransactionLock:
             state_fd = os.open(self.state_dir, self._directory_flags())
             state_status = os.fstat(state_fd)
             state_named = os.stat(self.state_dir, follow_symlinks=False)
-            if (
-                not self._private_directory_status(state_status)
-                or (state_status.st_dev, state_status.st_ino)
-                != (state_named.st_dev, state_named.st_ino)
-            ):
+            if not self._private_directory_status(state_status) or (
+                state_status.st_dev,
+                state_status.st_ino,
+            ) != (state_named.st_dev, state_named.st_ino):
                 raise ReleaseFailure("operator_transaction_state_directory_changed")
             descriptor = os.open(self.path.name, lock_flags, 0o600, dir_fd=state_fd)
             status = os.fstat(descriptor)
             lexical = os.stat(self.path.name, dir_fd=state_fd, follow_symlinks=False)
-            if (
-                not self._private_lock_status(status)
-                or (status.st_dev, status.st_ino) != (lexical.st_dev, lexical.st_ino)
+            if not self._private_lock_status(status) or (status.st_dev, status.st_ino) != (
+                lexical.st_dev,
+                lexical.st_ino,
             ):
                 raise ReleaseFailure("operator_transaction_lock_invalid")
             try:
@@ -6440,14 +6430,10 @@ class OperatorTransactionLock:
             if (
                 not self._private_directory_status(runtime_open)
                 or not self._private_directory_status(state_open)
-                or (int(runtime_open.st_dev), int(runtime_open.st_ino))
-                != self._runtime_directory_identity
-                or (int(runtime_named.st_dev), int(runtime_named.st_ino))
-                != self._runtime_directory_identity
-                or (int(state_open.st_dev), int(state_open.st_ino))
-                != self._state_directory_identity
-                or (int(state_named.st_dev), int(state_named.st_ino))
-                != self._state_directory_identity
+                or (int(runtime_open.st_dev), int(runtime_open.st_ino)) != self._runtime_directory_identity
+                or (int(runtime_named.st_dev), int(runtime_named.st_ino)) != self._runtime_directory_identity
+                or (int(state_open.st_dev), int(state_open.st_ino)) != self._state_directory_identity
+                or (int(state_named.st_dev), int(state_named.st_ino)) != self._state_directory_identity
                 or not self._private_lock_status(local_open)
                 or (int(local_open.st_dev), int(local_open.st_ino)) != self._local_lock_identity
                 or (int(local_named.st_dev), int(local_named.st_ino)) != self._local_lock_identity
