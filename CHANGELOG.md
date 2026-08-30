@@ -1,3 +1,15 @@
+## 0.207.81 — 2026-08-30
+
+### Telegram browse-to-document closure
+
+- Makes tag, entity, namesake and profile-document browse results numbered and
+  opens each valid result through the existing tenant-gated full-document
+  callback instead of ending at a title-only list.
+- Omits buttons for malformed or oversized callback identities, keeps Telegram
+  payloads within 64 bytes and preserves the existing empty-result behavior.
+- Keeps SQLite at schema 50; exact `0.207.80/schema50` is both the stable
+  predecessor and immutable fallback.
+
 ## 0.207.80 — 2026-08-30
 
 ### Bounded conversation passage activation
