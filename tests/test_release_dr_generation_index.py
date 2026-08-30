@@ -60,11 +60,28 @@ def _candidate(
     }
 
 
-def _external_receipt(label: str, ordinal: int) -> dict[str, str]:
-    return {
+def _external_receipt(label: str, ordinal: int) -> dict[str, Any]:
+    core = {
+        "ordinal": ordinal,
         "schema": f"friday.test-{label}.v1",
-        "sha256": f"{ordinal:064x}",
+        "status": label,
     }
+    return {**core, "receipt_sha256": hashlib.sha256(_canonical(core)).hexdigest()}
+
+
+def _external_receipt_ref(receipt: dict[str, Any]) -> dict[str, str]:
+    return {
+        "schema": str(receipt["schema"]),
+        "sha256": str(receipt["receipt_sha256"]),
+    }
+
+
+def _external_receipt_path(
+    index: dr_index.DurableDRGenerationIndex,
+    kind: str,
+    receipt: dict[str, Any],
+) -> Path:
+    return index.receipt_directory / f"{kind}-{receipt['receipt_sha256']}.json"
 
 
 def _index(tmp_path: Path) -> dr_index.DurableDRGenerationIndex:
@@ -98,6 +115,19 @@ def _advance(
     return index.publish(expected_journal_sha256=state["journal_sha256"])
 
 
+def _assert_restore_release_pin(
+    pin: dr_index.GenerationPin,
+    candidate: dict[str, Any],
+) -> None:
+    release = candidate["restore_release"]
+    assert pin.restore_release_root == Path(release["root"])
+    assert pin.restore_release_commit == release["commit"]
+    assert pin.restore_release_tree_manifest_sha256 == release["tree_manifest_sha256"]
+    assert pin.restore_release_wheel_sha256 == release["wheel_sha256"]
+    assert pin.restore_release_max_schema == release["max_schema"]
+    assert pin.restore_release_version == release["version"]
+
+
 def test_bootstrap_publishes_exact_immutable_receipt_then_clear_cas(tmp_path: Path) -> None:
     index = _index(tmp_path)
     initial = index.load()
@@ -110,14 +140,25 @@ def test_bootstrap_publishes_exact_immutable_receipt_then_clear_cas(tmp_path: Pa
     )
     assert prepared["phase"] == "prepared"
     assert prepared["base_clear_sha256"] == initial["journal_sha256"]
+    authentication_body = _external_receipt("authentication", 101)
     authenticated = index.record_authenticated(
-        receipt=_external_receipt("authentication", 101),
+        receipt=authentication_body,
         expected_journal_sha256=prepared["journal_sha256"],
     )
+    rehearsal_body = _external_receipt("rehearsal", 102)
     rehearsed = index.record_rehearsed(
-        receipt=_external_receipt("rehearsal", 102),
+        receipt=rehearsal_body,
         expected_journal_sha256=authenticated["journal_sha256"],
     )
+    authentication_path = _external_receipt_path(index, "authentication", authentication_body)
+    rehearsal_path = _external_receipt_path(index, "rehearsal", rehearsal_body)
+    assert authenticated["pending"]["authentication_receipt"] == _external_receipt_ref(authentication_body)
+    assert rehearsed["pending"]["rehearsal_receipt"] == _external_receipt_ref(rehearsal_body)
+    assert authentication_path.read_bytes() == _canonical(authentication_body) + b"\n"
+    assert rehearsal_path.read_bytes() == _canonical(rehearsal_body) + b"\n"
+    assert stat.S_IMODE(authentication_path.stat().st_mode) == 0o400
+    assert stat.S_IMODE(rehearsal_path.stat().st_mode) == 0o400
+    assert authentication_path.stat().st_nlink == rehearsal_path.stat().st_nlink == 1
     reference = rehearsed["pending"]["generation"]
     receipt_path = index.receipt_directory / f"{reference['generation_id']}.json"
     assert not receipt_path.exists()
@@ -131,6 +172,8 @@ def test_bootstrap_publishes_exact_immutable_receipt_then_clear_cas(tmp_path: Pa
     assert published["older"] is None
     assert published["pending"] is None
     receipt = json.loads(receipt_path.read_text(encoding="ascii"))
+    assert receipt["generation"]["authentication_receipt"] == _external_receipt_ref(authentication_body)
+    assert receipt["generation"]["rehearsal_receipt"] == _external_receipt_ref(rehearsal_body)
     assert reference["generation_id"] == hashlib.sha256(_canonical(receipt["generation"])).hexdigest()
     receipt_core = {key: value for key, value in receipt.items() if key != "receipt_sha256"}
     assert reference["receipt_sha256"] == hashlib.sha256(_canonical(receipt_core)).hexdigest()
@@ -186,11 +229,16 @@ def test_unfinished_transaction_pins_current_older_and_pending(tmp_path: Path) -
         Path(older["backup_directory"]),
         Path(pending["backup_directory"]),
     }
+    for pin, candidate in zip(pins, (current, older, pending), strict=True):
+        _assert_restore_release_pin(pin, candidate)
     assert pins[-1].generation_id is None
     authenticated = index.record_authenticated(
         receipt=_external_receipt("authentication", 70),
         expected_journal_sha256=prepared["journal_sha256"],
     )
+    authenticated_pending_pin = index.pins()[-1]
+    assert authenticated_pending_pin.generation_id is None
+    _assert_restore_release_pin(authenticated_pending_pin, pending)
     rehearsed = index.record_rehearsed(
         receipt=_external_receipt("rehearsal", 71),
         expected_journal_sha256=authenticated["journal_sha256"],
@@ -199,6 +247,7 @@ def test_unfinished_transaction_pins_current_older_and_pending(tmp_path: Path) -
     assert pending_pin.generation_id == rehearsed["pending"]["generation"]["generation_id"]
     assert pending_pin.receipt_path is not None
     assert not pending_pin.receipt_path.exists()
+    _assert_restore_release_pin(pending_pin, pending)
 
 
 def test_stale_cas_and_out_of_order_transitions_leave_state_unchanged(tmp_path: Path) -> None:
@@ -210,16 +259,20 @@ def test_stale_cas_and_out_of_order_transitions_leave_state_unchanged(tmp_path: 
         expected_journal_sha256=initial["journal_sha256"],
     )
 
+    stale_authentication = _external_receipt("authentication", 80)
     with pytest.raises(dr_index.DRGenerationIndexError, match="dr_generation_cas_mismatch"):
         index.record_authenticated(
-            receipt=_external_receipt("authentication", 80),
+            receipt=stale_authentication,
             expected_journal_sha256=initial["journal_sha256"],
         )
+    assert not _external_receipt_path(index, "authentication", stale_authentication).exists()
+    out_of_order_rehearsal = _external_receipt("rehearsal", 81)
     with pytest.raises(dr_index.DRGenerationIndexError, match="dr_generation_transition_invalid"):
         index.record_rehearsed(
-            receipt=_external_receipt("rehearsal", 81),
+            receipt=out_of_order_rehearsal,
             expected_journal_sha256=prepared["journal_sha256"],
         )
+    assert not _external_receipt_path(index, "rehearsal", out_of_order_rehearsal).exists()
     with pytest.raises(
         dr_index.DRGenerationIndexError,
         match="dr_generation_recovery_receipt_required",
@@ -271,6 +324,56 @@ def test_crash_after_no_replace_receipt_before_state_cas_recovers_idempotently(
     assert index.recover(expected_journal_sha256=recovered["journal_sha256"]) == recovered
 
 
+@pytest.mark.parametrize("kind", ("authentication", "rehearsal"))
+def test_crash_after_evidence_body_before_cas_replays_without_replacement(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    kind: str,
+) -> None:
+    index = _index(tmp_path)
+    initial = index.load()
+    prepared = index.prepare(
+        intent="bootstrap_current",
+        candidate=_candidate(tmp_path, 25),
+        expected_journal_sha256=initial["journal_sha256"],
+    )
+    prior = prepared
+    if kind == "rehearsal":
+        prior = index.record_authenticated(
+            receipt=_external_receipt("authentication", 250),
+            expected_journal_sha256=prepared["journal_sha256"],
+        )
+    body = _external_receipt(kind, 251)
+    before = index.path.read_bytes()
+    real_cas = index._cas_replace_locked  # noqa: SLF001
+
+    def crash(
+        _current: dict[str, Any],
+        _following: dict[str, Any],
+        _pins: Any,
+    ) -> dict[str, Any]:
+        raise OSError(f"crash after {kind} body")
+
+    monkeypatch.setattr(index, "_cas_replace_locked", crash)
+    transition = index.record_authenticated if kind == "authentication" else index.record_rehearsed
+    with pytest.raises(OSError, match=f"crash after {kind} body"):
+        transition(receipt=body, expected_journal_sha256=prior["journal_sha256"])
+
+    body_path = _external_receipt_path(index, kind, body)
+    body_status = body_path.stat()
+    assert body_path.read_bytes() == _canonical(body) + b"\n"
+    assert stat.S_IMODE(body_status.st_mode) == 0o400
+    assert body_status.st_nlink == 1
+    assert index.path.read_bytes() == before
+    assert index.load() == prior
+
+    monkeypatch.setattr(index, "_cas_replace_locked", real_cas)
+    recovered = transition(receipt=body, expected_journal_sha256=prior["journal_sha256"])
+    durable_status = body_path.stat()
+    assert (durable_status.st_dev, durable_status.st_ino) == (body_status.st_dev, body_status.st_ino)
+    assert recovered["pending"][f"{kind}_receipt"] == _external_receipt_ref(body)
+
+
 def test_foreign_receipt_at_exact_generation_name_is_never_overwritten(tmp_path: Path) -> None:
     index = _index(tmp_path)
     initial = index.load()
@@ -302,6 +405,41 @@ def test_foreign_receipt_at_exact_generation_name_is_never_overwritten(tmp_path:
     assert index.path.read_bytes() == index_raw
 
 
+@pytest.mark.parametrize("kind", ("authentication", "rehearsal"))
+def test_foreign_evidence_at_exact_digest_name_is_never_overwritten(
+    tmp_path: Path,
+    kind: str,
+) -> None:
+    index = _index(tmp_path)
+    initial = index.load()
+    prepared = index.prepare(
+        intent="bootstrap_current",
+        candidate=_candidate(tmp_path, 26),
+        expected_journal_sha256=initial["journal_sha256"],
+    )
+    prior = prepared
+    if kind == "rehearsal":
+        prior = index.record_authenticated(
+            receipt=_external_receipt("authentication", 260),
+            expected_journal_sha256=prepared["journal_sha256"],
+        )
+    body = _external_receipt(kind, 261)
+    target = _external_receipt_path(index, kind, body)
+    target.write_bytes(b'{"foreign":true}\n')
+    target.chmod(0o400)
+    index_raw = index.path.read_bytes()
+    transition = index.record_authenticated if kind == "authentication" else index.record_rehearsed
+
+    with pytest.raises(
+        dr_index.DRGenerationIndexError,
+        match=f"{kind}_receipt_publication_failed",
+    ):
+        transition(receipt=body, expected_journal_sha256=prior["journal_sha256"])
+
+    assert target.read_bytes() == b'{"foreign":true}\n'
+    assert index.path.read_bytes() == index_raw
+
+
 def test_committed_receipt_mode_link_or_body_drift_fails_closed(tmp_path: Path) -> None:
     index = _index(tmp_path)
     clear = _advance(index, _candidate(tmp_path, 11), intent="bootstrap_current", ordinal=110)
@@ -323,6 +461,119 @@ def test_committed_receipt_mode_link_or_body_drift_fails_closed(tmp_path: Path) 
     receipt.chmod(0o400)
     with pytest.raises(dr_index.DRGenerationIndexError, match="generation_receipt_invalid"):
         index.load()
+
+
+@pytest.mark.parametrize(
+    ("phase", "kind", "error"),
+    (
+        ("authenticated", "authentication", "authentication_receipt_invalid"),
+        ("rehearsed", "rehearsal", "rehearsal_receipt_invalid"),
+        ("clear", "authentication", "authentication_receipt_invalid"),
+        ("clear", "rehearsal", "rehearsal_receipt_invalid"),
+    ),
+)
+def test_missing_evidence_body_fails_every_referencing_state_load(
+    tmp_path: Path,
+    phase: str,
+    kind: str,
+    error: str,
+) -> None:
+    index = _index(tmp_path)
+    initial = index.load()
+    prepared = index.prepare(
+        intent="bootstrap_current",
+        candidate=_candidate(tmp_path, 23),
+        expected_journal_sha256=initial["journal_sha256"],
+    )
+    authentication_body = _external_receipt("authentication", 230)
+    authenticated = index.record_authenticated(
+        receipt=authentication_body,
+        expected_journal_sha256=prepared["journal_sha256"],
+    )
+    rehearsal_body = _external_receipt("rehearsal", 231)
+    state = authenticated
+    if phase in {"rehearsed", "clear"}:
+        state = index.record_rehearsed(
+            receipt=rehearsal_body,
+            expected_journal_sha256=state["journal_sha256"],
+        )
+    if phase == "clear":
+        state = index.publish(expected_journal_sha256=state["journal_sha256"])
+    assert state["phase"] == phase
+
+    body = authentication_body if kind == "authentication" else rehearsal_body
+    path = _external_receipt_path(index, kind, body)
+    path.unlink()
+
+    with pytest.raises(dr_index.DRGenerationIndexError, match=error):
+        index.load()
+
+
+@pytest.mark.parametrize("kind", ("authentication", "rehearsal"))
+def test_evidence_body_mode_link_hash_schema_and_canonical_drift_fail_closed(
+    tmp_path: Path,
+    kind: str,
+) -> None:
+    index = _index(tmp_path)
+    authentication_body = _external_receipt("authentication", 240)
+    rehearsal_body = _external_receipt("rehearsal", 241)
+    initial = index.load()
+    prepared = index.prepare(
+        intent="bootstrap_current",
+        candidate=_candidate(tmp_path, 24),
+        expected_journal_sha256=initial["journal_sha256"],
+    )
+    authenticated = index.record_authenticated(
+        receipt=authentication_body,
+        expected_journal_sha256=prepared["journal_sha256"],
+    )
+    rehearsed = index.record_rehearsed(
+        receipt=rehearsal_body,
+        expected_journal_sha256=authenticated["journal_sha256"],
+    )
+    clear = index.publish(expected_journal_sha256=rehearsed["journal_sha256"])
+    body = authentication_body if kind == "authentication" else rehearsal_body
+    path = _external_receipt_path(index, kind, body)
+    error = f"{kind}_receipt_invalid"
+    original = path.read_bytes()
+
+    path.chmod(0o600)
+    with pytest.raises(dr_index.DRGenerationIndexError, match=error):
+        index.load()
+    path.chmod(0o400)
+    alias = index.receipt_directory / f"forbidden-{kind}-hardlink"
+    os.link(path, alias)
+    with pytest.raises(dr_index.DRGenerationIndexError, match=error):
+        index.load()
+    alias.unlink()
+
+    path.chmod(0o600)
+    path.write_bytes(json.dumps(body, indent=2, sort_keys=True).encode("ascii") + b"\n")
+    path.chmod(0o400)
+    with pytest.raises(dr_index.DRGenerationIndexError, match=error):
+        index.load()
+
+    changed = dict(body)
+    changed["status"] = "tampered"
+    path.chmod(0o600)
+    path.write_bytes(_canonical(changed) + b"\n")
+    path.chmod(0o400)
+    with pytest.raises(dr_index.DRGenerationIndexError, match=error):
+        index.load()
+
+    changed["schema"] = f"friday.tampered-{kind}.v1"
+    changed_core = {key: value for key, value in changed.items() if key != "receipt_sha256"}
+    changed["receipt_sha256"] = hashlib.sha256(_canonical(changed_core)).hexdigest()
+    path.chmod(0o600)
+    path.write_bytes(_canonical(changed) + b"\n")
+    path.chmod(0o400)
+    with pytest.raises(dr_index.DRGenerationIndexError, match=error):
+        index.load()
+
+    path.chmod(0o600)
+    path.write_bytes(original)
+    path.chmod(0o400)
+    assert index.load() == clear
 
 
 def test_index_symlink_hardlink_or_digest_drift_fails_closed(tmp_path: Path) -> None:
@@ -710,11 +961,80 @@ def test_state_lock_serializes_two_writers_across_receipt_directory_replacement(
     assert isinstance(outcomes["a"], dr_index.DRGenerationIndexError)
     assert "dr_generation_directory_changed" in str(outcomes["a"])
     assert isinstance(outcomes["b"], dr_index.DRGenerationIndexError)
-    assert "dr_generation_cas_mismatch" in str(outcomes["b"])
-    durable = index_b.load()
+    assert "authentication_receipt_invalid" in str(outcomes["b"])
+    with pytest.raises(dr_index.DRGenerationIndexError, match="authentication_receipt_invalid"):
+        index_b.load()
+    durable = json.loads(index_b.path.read_text(encoding="ascii"))
+    authentication_a = _external_receipt("authentication-a", 210)
     assert durable["phase"] == "authenticated"
     assert durable["revision"] == prepared["revision"] + 1
-    assert durable["pending"]["authentication_receipt"] == _external_receipt("authentication-a", 210)
+    assert durable["pending"]["authentication_receipt"] == _external_receipt_ref(authentication_a)
+    displaced_body = displaced_receipts / f"authentication-{authentication_a['receipt_sha256']}.json"
+    assert displaced_body.read_bytes() == _canonical(authentication_a) + b"\n"
+
+
+@pytest.mark.parametrize(
+    ("boundary", "staging_mode"),
+    (("content_fsync_0600", 0o600), ("metadata_fsync_0400", 0o400)),
+)
+def test_evidence_body_staging_crash_boundaries_replay_after_ordered_fsyncs(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    boundary: str,
+    staging_mode: int,
+) -> None:
+    index = _index(tmp_path)
+    initial = index.load()
+    prepared = index.prepare(
+        intent="bootstrap_current",
+        candidate=_candidate(tmp_path, 27),
+        expected_journal_sha256=initial["journal_sha256"],
+    )
+    body = _external_receipt("authentication", 270)
+    body_raw = _canonical(body) + b"\n"
+    receipt_name = f"authentication-{body['receipt_sha256']}.json"
+    staging = index.receipt_directory / f".{receipt_name}.{hashlib.sha256(body_raw).hexdigest()}.new"
+    real_fsync = os.fsync
+    crashed = False
+
+    def crash_at_boundary(descriptor: int) -> None:
+        nonlocal crashed
+        status = os.fstat(descriptor)
+        mode = stat.S_IMODE(status.st_mode)
+        real_fsync(descriptor)
+        should_crash = (
+            boundary == "content_fsync_0600" and stat.S_ISREG(status.st_mode) and mode == 0o600
+        ) or (boundary == "metadata_fsync_0400" and stat.S_ISREG(status.st_mode) and mode == 0o400)
+        if should_crash and not crashed:
+            crashed = True
+            raise OSError(f"crash at {boundary}")
+
+    monkeypatch.setattr(dr_index.os, "fsync", crash_at_boundary)
+    with pytest.raises(
+        dr_index.DRGenerationIndexError,
+        match="authentication_receipt_publication_failed",
+    ):
+        index.record_authenticated(
+            receipt=body,
+            expected_journal_sha256=prepared["journal_sha256"],
+        )
+    assert crashed
+    assert staging.read_bytes() == body_raw
+    assert stat.S_IMODE(staging.stat().st_mode) == staging_mode
+    assert staging.stat().st_nlink == 1
+    assert index.path.read_bytes() == _canonical(prepared) + b"\n"
+
+    monkeypatch.setattr(dr_index.os, "fsync", real_fsync)
+    authenticated = index.record_authenticated(
+        receipt=body,
+        expected_journal_sha256=prepared["journal_sha256"],
+    )
+    durable = index.receipt_directory / receipt_name
+    assert authenticated["phase"] == "authenticated"
+    assert not staging.exists()
+    assert durable.read_bytes() == body_raw
+    assert durable.stat().st_nlink == 1
+    assert stat.S_IMODE(durable.stat().st_mode) == 0o400
 
 
 @pytest.mark.parametrize(

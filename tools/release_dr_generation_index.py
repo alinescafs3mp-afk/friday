@@ -43,6 +43,9 @@ MAX_RECEIPT_BYTES = 1 << 20
 MAX_CANDIDATE_BYTES = 1 << 18
 ZERO_SHA256 = "0" * 64
 
+AUTHENTICATION_RECEIPT_KIND = "authentication"
+REHEARSAL_RECEIPT_KIND = "rehearsal"
+
 _HEX40_RE = re.compile(r"[0-9a-f]{40}")
 _HEX64_RE = re.compile(r"[0-9a-f]{64}")
 _SCHEMA_RE = re.compile(r"[a-z0-9][a-z0-9._-]{0,127}")
@@ -65,6 +68,12 @@ class GenerationPin:
     generation_id: str | None
     receipt_path: Path | None
     receipt_sha256: str | None
+    restore_release_root: Path
+    restore_release_commit: str
+    restore_release_tree_manifest_sha256: str
+    restore_release_wheel_sha256: str
+    restore_release_max_schema: int
+    restore_release_version: str
 
 
 @dataclass(frozen=True)
@@ -372,6 +381,44 @@ def _normalize_external_receipt(value: object, *, code: str) -> dict[str, str]:
         "schema": _schema(value.get("schema"), code=code),
         "sha256": _hex64(value.get("sha256"), code=code),
     }
+
+
+def _external_receipt_body(
+    value: object,
+    *,
+    code: str,
+) -> tuple[dict[str, str], bytes]:
+    """Validate and detach one complete producer receipt body.
+
+    External producers own the fields beyond the common self-authenticating
+    envelope.  The index retains the whole canonical body but journals only the
+    schema and core digest needed to name and reauthenticate it.
+    """
+
+    if not isinstance(value, dict) or not {"receipt_sha256", "schema"} <= set(value):
+        raise DRGenerationIndexError(code)
+    try:
+        canonical = _canonical_json(value)
+    except DRGenerationIndexError as exc:
+        raise DRGenerationIndexError(code) from exc
+    if not canonical or len(canonical) + 1 > MAX_RECEIPT_BYTES:
+        raise DRGenerationIndexError(code)
+    payload = _unique_json(canonical, code=code)
+    if canonical != _canonical_json(payload):
+        raise DRGenerationIndexError(code)
+    schema = _schema(payload.get("schema"), code=code)
+    supplied = _hex64(payload.get("receipt_sha256"), code=code)
+    core = {key: item for key, item in payload.items() if key != "receipt_sha256"}
+    if supplied != _sha256(_canonical_json(core)):
+        raise DRGenerationIndexError(code)
+    return {"schema": schema, "sha256": supplied}, canonical + b"\n"
+
+
+def _external_receipt_name(kind: str, sha256: str) -> str:
+    if kind not in {AUTHENTICATION_RECEIPT_KIND, REHEARSAL_RECEIPT_KIND}:
+        raise DRGenerationIndexError("external_receipt_kind_invalid")
+    digest = _hex64(sha256, code="external_receipt_ref_invalid")
+    return f"{kind}-{digest}.json"
 
 
 def _normalize_restore_release(value: object) -> dict[str, Any]:
@@ -758,6 +805,54 @@ class DurableDRGenerationIndex:
     def _receipt_path(self, generation_id: str) -> Path:
         return self.receipt_directory / f"{_hex64(generation_id, code='generation_ref_invalid')}.json"
 
+    def _load_external_receipt(
+        self,
+        reference: Mapping[str, str],
+        receipt_fd: int,
+        *,
+        kind: str,
+        code: str,
+    ) -> dict[str, Any]:
+        normalized_ref = _normalize_external_receipt(reference, code=code)
+        raw = _stable_private_file_at(
+            receipt_fd,
+            _external_receipt_name(kind, normalized_ref["sha256"]),
+            mode=0o400,
+            maximum_bytes=MAX_RECEIPT_BYTES,
+            code=code,
+        )
+        payload = _unique_json(raw, code=code)
+        body_ref, expected_raw = _external_receipt_body(payload, code=code)
+        if raw != expected_raw or body_ref != normalized_ref:
+            raise DRGenerationIndexError(code)
+        return payload
+
+    def _publish_external_receipt(
+        self,
+        *,
+        reference: Mapping[str, str],
+        raw: bytes,
+        pins: _PinnedDirectories,
+        kind: str,
+        code: str,
+    ) -> None:
+        normalized_ref = _normalize_external_receipt(reference, code=code)
+        self._publish_no_replace(
+            directory_fd=pins.receipt_fd,
+            name=_external_receipt_name(kind, normalized_ref["sha256"]),
+            raw=raw,
+            final_mode=0o400,
+            maximum_bytes=MAX_RECEIPT_BYTES,
+            code=f"{kind}_receipt_publication_failed",
+        )
+        self._load_external_receipt(
+            normalized_ref,
+            pins.receipt_fd,
+            kind=kind,
+            code=code,
+        )
+        self._require_pinned_namespace(pins)
+
     def _load_receipt(self, reference: Mapping[str, str], receipt_fd: int) -> dict[str, Any]:
         normalized_ref = _normalize_generation_ref(reference, code="generation_ref_invalid")
         raw = _stable_private_file_at(
@@ -787,6 +882,18 @@ class DurableDRGenerationIndex:
         generation_id = _sha256(_canonical_json(generation))
         if generation_id != payload.get("generation_id") or generation_id != normalized_ref["generation_id"]:
             raise DRGenerationIndexError("generation_receipt_invalid")
+        self._load_external_receipt(
+            generation["authentication_receipt"],
+            receipt_fd,
+            kind=AUTHENTICATION_RECEIPT_KIND,
+            code="authentication_receipt_invalid",
+        )
+        self._load_external_receipt(
+            generation["rehearsal_receipt"],
+            receipt_fd,
+            kind=REHEARSAL_RECEIPT_KIND,
+            code="rehearsal_receipt_invalid",
+        )
         return payload
 
     def _reference_backup_directory(
@@ -881,45 +988,58 @@ class DurableDRGenerationIndex:
             authentication = pending.get("authentication_receipt")
             rehearsal = pending.get("rehearsal_receipt")
             generation_ref = pending.get("generation")
+            normalized_generation_ref: dict[str, str] | None = None
             if phase == "prepared":
                 if authentication is not None or rehearsal is not None or generation_ref is not None:
-                    raise DRGenerationIndexError("dr_generation_index_invalid")
-            elif phase == "authenticated":
-                _normalize_external_receipt(authentication, code="authentication_receipt_invalid")
-                if rehearsal is not None or generation_ref is not None:
                     raise DRGenerationIndexError("dr_generation_index_invalid")
             else:
                 authentication_ref = _normalize_external_receipt(
                     authentication, code="authentication_receipt_invalid"
                 )
-                rehearsal_ref = _normalize_external_receipt(rehearsal, code="rehearsal_receipt_invalid")
-                normalized_generation_ref = _normalize_generation_ref(
-                    generation_ref, code="generation_ref_invalid"
+                self._load_external_receipt(
+                    authentication_ref,
+                    receipt_fd,
+                    kind=AUTHENTICATION_RECEIPT_KIND,
+                    code="authentication_receipt_invalid",
                 )
-                expected_ref, expected_raw = _generation_receipt(
-                    {
-                        "authentication_receipt": authentication_ref,
-                        "candidate": candidate,
-                        "rehearsal_receipt": rehearsal_ref,
-                        "schema": GENERATION_SCHEMA,
-                    }
-                )
-                if normalized_generation_ref != expected_ref:
-                    raise DRGenerationIndexError("dr_generation_index_invalid")
-                receipt_name = f"{expected_ref['generation_id']}.json"
-                if _entry_exists_at(receipt_fd, receipt_name):
-                    self._load_receipt(expected_ref, receipt_fd)
-                    if (
-                        _stable_private_file_at(
-                            receipt_fd,
-                            receipt_name,
-                            mode=0o400,
-                            maximum_bytes=MAX_RECEIPT_BYTES,
-                            code="generation_receipt_invalid",
-                        )
-                        != expected_raw
-                    ):
-                        raise DRGenerationIndexError("generation_receipt_invalid")
+                if phase == "authenticated":
+                    if rehearsal is not None or generation_ref is not None:
+                        raise DRGenerationIndexError("dr_generation_index_invalid")
+                else:
+                    rehearsal_ref = _normalize_external_receipt(rehearsal, code="rehearsal_receipt_invalid")
+                    self._load_external_receipt(
+                        rehearsal_ref,
+                        receipt_fd,
+                        kind=REHEARSAL_RECEIPT_KIND,
+                        code="rehearsal_receipt_invalid",
+                    )
+                    normalized_generation_ref = _normalize_generation_ref(
+                        generation_ref, code="generation_ref_invalid"
+                    )
+                    expected_ref, expected_raw = _generation_receipt(
+                        {
+                            "authentication_receipt": authentication_ref,
+                            "candidate": candidate,
+                            "rehearsal_receipt": rehearsal_ref,
+                            "schema": GENERATION_SCHEMA,
+                        }
+                    )
+                    if normalized_generation_ref != expected_ref:
+                        raise DRGenerationIndexError("dr_generation_index_invalid")
+                    receipt_name = f"{expected_ref['generation_id']}.json"
+                    if _entry_exists_at(receipt_fd, receipt_name):
+                        self._load_receipt(expected_ref, receipt_fd)
+                        if (
+                            _stable_private_file_at(
+                                receipt_fd,
+                                receipt_name,
+                                mode=0o400,
+                                maximum_bytes=MAX_RECEIPT_BYTES,
+                                code="generation_receipt_invalid",
+                            )
+                            != expected_raw
+                        ):
+                            raise DRGenerationIndexError("generation_receipt_invalid")
 
             if intent == "bootstrap_current" and (current_ref is not None or older_ref is not None):
                 raise DRGenerationIndexError("dr_generation_index_invalid")
@@ -1051,9 +1171,9 @@ class DurableDRGenerationIndex:
         receipt: Mapping[str, Any],
         expected_journal_sha256: str,
     ) -> dict[str, Any]:
-        """Bind an external exact authentication receipt to the pending candidate."""
+        """Retain a complete authentication body before binding its compact ref."""
 
-        normalized_receipt = _normalize_external_receipt(
+        normalized_receipt, receipt_raw = _external_receipt_body(
             receipt,
             code="authentication_receipt_invalid",
         )
@@ -1062,6 +1182,13 @@ class DurableDRGenerationIndex:
             self._require_cas(state, expected_journal_sha256)
             if state["phase"] != "prepared":
                 raise DRGenerationIndexError("dr_generation_transition_invalid")
+            self._publish_external_receipt(
+                reference=normalized_receipt,
+                raw=receipt_raw,
+                pins=pins,
+                kind=AUTHENTICATION_RECEIPT_KIND,
+                code="authentication_receipt_invalid",
+            )
             pending = dict(state["pending"])
             pending["authentication_receipt"] = normalized_receipt
             following = {
@@ -1078,9 +1205,9 @@ class DurableDRGenerationIndex:
         receipt: Mapping[str, Any],
         expected_journal_sha256: str,
     ) -> dict[str, Any]:
-        """Bind an external exact restore/rollback rehearsal receipt."""
+        """Retain a complete rehearsal body before binding its compact ref."""
 
-        normalized_receipt = _normalize_external_receipt(
+        normalized_receipt, receipt_raw = _external_receipt_body(
             receipt,
             code="rehearsal_receipt_invalid",
         )
@@ -1106,6 +1233,13 @@ class DurableDRGenerationIndex:
                 and generation_ref != state["current"]
             ):
                 raise DRGenerationIndexError("dr_generation_duplicate_slot")
+            self._publish_external_receipt(
+                reference=normalized_receipt,
+                raw=receipt_raw,
+                pins=pins,
+                kind=REHEARSAL_RECEIPT_KIND,
+                code="rehearsal_receipt_invalid",
+            )
             pending["generation"] = generation_ref
             following = {
                 **self._core_from_state(state),
@@ -1190,11 +1324,23 @@ class DurableDRGenerationIndex:
             return self._publish_locked(state, pins)
 
     def pins(self) -> tuple[GenerationPin, ...]:
-        """Return exact pins; a non-clear transaction always includes pending."""
+        """Return exact backup and restore-release pins from authenticated state."""
 
         with self._guard() as directories:
             state = self._load_unlocked(directories)
             pins: list[GenerationPin] = []
+
+            def restore_release_fields(candidate: Mapping[str, Any]) -> dict[str, Any]:
+                release = candidate["restore_release"]
+                return {
+                    "restore_release_root": Path(release["root"]),
+                    "restore_release_commit": str(release["commit"]),
+                    "restore_release_tree_manifest_sha256": str(release["tree_manifest_sha256"]),
+                    "restore_release_wheel_sha256": str(release["wheel_sha256"]),
+                    "restore_release_max_schema": int(release["max_schema"]),
+                    "restore_release_version": str(release["version"]),
+                }
+
             for role in ("current", "older"):
                 reference = state[role]
                 if reference is None:
@@ -1208,6 +1354,7 @@ class DurableDRGenerationIndex:
                         generation_id=str(reference["generation_id"]),
                         receipt_path=self._receipt_path(str(reference["generation_id"])),
                         receipt_sha256=str(reference["receipt_sha256"]),
+                        **restore_release_fields(candidate),
                     )
                 )
             if state["phase"] != "clear":
@@ -1224,12 +1371,14 @@ class DurableDRGenerationIndex:
                             else None
                         ),
                         receipt_sha256=(str(reference["receipt_sha256"]) if reference is not None else None),
+                        **restore_release_fields(pending["candidate"]),
                     )
                 )
             return tuple(pins)
 
 
 __all__ = [
+    "AUTHENTICATION_RECEIPT_KIND",
     "DRGenerationIndexError",
     "DurableDRGenerationIndex",
     "GENERATION_CANDIDATE_SCHEMA",
@@ -1241,5 +1390,6 @@ __all__ = [
     "INDEX_PHASES",
     "INDEX_SCHEMA",
     "RECEIPT_DIRECTORY_NAME",
+    "REHEARSAL_RECEIPT_KIND",
     "normalize_generation_candidate",
 ]
