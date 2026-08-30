@@ -737,7 +737,7 @@ candidate commit. Только затем Mainline строит sealed wheel э�
 из чистого checkout запускает:
 
 ```bash
-<SOURCE_PYTHON> -I -B tools/exact_release_evidence.py bundle \
+<SOURCE_PYTHON> -I -S -B tools/exact_release_evidence.py bundle \
   --release-root <SEALED_CANDIDATE> \
   --repo-root <EXACT_CLEAN_CANDIDATE_CHECKOUT> \
   --journey-id <CLOSED_JOURNEY_ID> \
@@ -752,20 +752,70 @@ check IDs, hashes или artifact names. Оба JSON body-free, canonical и
 commit marker: receipt без manifest не создаёт claim. При повторном запуске
 первый canonical timestamp переиспользуется только если все остальные
 canonical поля receipt идентичны; затем принимаются только byte-identical
-receipt/manifest, чтобы завершить прерванную публикацию без overwrite. Output root
-находится вне exact checkout, иначе первый bundle
-сделает checkout dirty и заблокирует следующие code-owned inventories; после
-выпуска всех bundle Mainline переносит только canonical receipt/manifest bytes.
+receipt/manifest, чтобы завершить прерванную публикацию без overwrite. Manifest
+без receipt является terminal invalid recovery state. Каждый новый ancestor
+fsync-ится до receipt, а receipt-directory — до manifest. До создания этих
+ancestor-ов fsync-ятся сам output root и его immediate parent. Output root
+должен быть physical owner-exact `0700` под private/sticky parent; абсолютная
+цепочка parent открывается и повторно проверяется component-wise с
+`O_NOFOLLOW`, а parent privacy/sticky predicate проверяется до каждого commit
+шага. Один locked root fd остаётся authority для descriptor-relative traversal,
+publication и финальной lexical inode revalidation. Byte-identical leaf при
+recovery сначала fsync-ится и повторно связывается с exact name/inode, и
+только затем fsync-ится directory или публикуется manifest. Rollback удаляет
+receipt только после подтверждённого и fsynced отсутствия manifest;
+неизвестная manifest identity либо ошибка cleanup сохраняет receipt как
+безопасный non-claim. Root находится вне exact checkout, иначе
+первый bundle сделает checkout dirty и заблокирует следующие code-owned
+inventories; после выпуска всех bundle Mainline переносит только canonical
+receipt/manifest bytes.
 
-Clean-artifact receipt использует schema v4 и запускает source-owned тесты так,
-чтобы весь first-party `friday*` код импортировался только из единственного
-sealed `venv/lib/python*/site-packages` проверенного release. Origin witness
-содержит лишь digest, release-relative site ref и policy
-`subprocess=cpython_audit_deny`. Это точная граница CPython audit, а не Linux
-seccomp: closed inventories не должны использовать native syscall/extension
-child launch. Audited fork/exec/subprocess либо Python-level чтение first-party
-кода из checkout делает запуск недействительным, а не превращается в обычный
-journey failure. Единственный journey check ID —
+Clean-artifact receipt использует schema v4 и запускает source-owned тесты
+только через аутентифицированный sealed `venv/bin/python`; `sys.executable`,
+`sys.prefix` и release-relative interpreter ref проверяются в child. Весь
+first-party `friday*` код импортируется только из единственного sealed
+`venv/lib/python*/site-packages`. Producer helper-модули загружаются лениво из
+аутентифицированных Git blob bytes только после запуска source controller с
+`-I -S -B`, проверки stdlib-only initial `sys.path`, отсутствия `site` и
+startup/loader environment, а затем exact-checkout preflight; ignored executable
+bytecode запрещён. Все Git identity/status/blob queries используют только
+physical root-owned non-writable `/usr/bin/git`, global `--no-replace-objects`,
+явный worktree и закрытый environment без ambient `PATH`, `GIT_*`, config и
+loader authority. Physical tooling site выводится явно из source-venv
+`sysconfig` без импорта `site`. Pytest, pytest-asyncio, xdist, execnet и AnyIO
+runner plugin загружаются и закрепляются из read-only private snapshot до первого
+исполнения candidate `friday`; замена `sys.modules`, loader или runner callable
+до запуска либо остающаяся после него закрывает запуск. Baseline и lazy tooling,
+как и first-party modules, разрешаются direct physical source mapping без доверия
+к `PathFinder`/importer cache и получают identity/spec/loader/origin attestation;
+их Python callable code/default bindings также закреплены, а preinsert с
+правдоподобным `__file__` attestation не получает. Snapshot проверяется до и
+после запуска. Body-free
+content digest связывает все его package, data и dist-info bytes между
+production и validation runs, а отдельный digest фиксирует фактически
+загруженные tooling modules. Origin witness запускается с `-I -S -B` и точным
+code-owned environment allowlist, поэтому ambient loader variables,
+`sitecustomize` и system-site packages не достигают child до установки guards.
+Code-owned `PYTHONPYCACHEPREFIX` совпадает с `-X pycache_prefix`, начинается
+отсутствующим и остаётся пустым; любой audited open `.pyc`/`.pyo` или доступ
+внутри этого prefix делает запуск недействительным как
+`bytecode_execution_unattested`, поэтому `-B` не считается запретом чтения
+bytecode само по себе.
+Witness содержит лишь digests, release-relative refs и policies
+`tooling=explicit_single_site_v1`/`subprocess=cpython_audit_deny`. Это точная
+граница CPython audit, а не Linux seccomp: closed inventories не должны
+использовать native syscall/extension child launch. Audited fork/exec/subprocess
+либо Python-level чтение first-party кода из checkout делает запуск
+недействительным, а не превращается в обычный journey failure. Source-product
+preflight требует physical regular files с `nlink=1`; audited `link`/`rename`
+с source-product endpoint (включая `dir_fd`) запрещён, поэтому hardlink alias не
+обходит pathname guard. Authenticated
+exact candidate здесь является проверяемой correctness surface, а не
+adversarial peer тестового harness. Он всё ещё выполняется in-process под pytest:
+произвольный sabotage runner/evidence channels через transient self-restoring
+mutation, `__main__`, `atexit` или `os._exit` не заявлен как изолированный и
+требует redesigned out-of-process oracle/test surface. Единственный
+journey check ID —
 `<journey>.installed_journey_suite`: release-level installed surface, migration
 и wheel reproducibility не переименовываются в journey proof. Clean receipt
 нельзя публиковать отдельным receipt-only API — только canonical bundle.

@@ -3,6 +3,8 @@ from __future__ import annotations
 import hashlib
 import inspect
 import json
+import os
+import py_compile
 import subprocess
 import sys
 from contextlib import contextmanager
@@ -13,6 +15,7 @@ from pathlib import Path
 import pytest
 
 from tools import exact_release_evidence as evidence
+from tools import quality_gate
 
 JOURNEY_ID = "conversation_recall"
 EVIDENCE_CLASS = "deterministic contract"
@@ -325,7 +328,7 @@ def test_strict_junit_derives_each_machine_outcome(
     report = tmp_path / "results.xml"
     _write_junit(report, nodeids, reported)
 
-    assert evidence._pytest_outcomes(report, nodeids) == expected
+    assert evidence._pytest_outcomes(report, nodeids, gate=quality_gate) == expected
 
 
 @pytest.mark.parametrize("case", ["missing", "extra", "duplicate", "skip", "error"])
@@ -360,7 +363,7 @@ def test_strict_junit_rejects_incomplete_or_non_test_failure_reports(
     _write_junit(report, nodeids, outcomes)
 
     with pytest.raises(evidence.ExactReleaseEvidenceError, match="^pytest_report_invalid$"):
-        evidence._pytest_outcomes(report, expected)
+        evidence._pytest_outcomes(report, expected, gate=quality_gate)
 
 
 def test_closed_runner_uses_hermetic_plugins_and_exact_collection(
@@ -420,7 +423,8 @@ def test_closed_runner_uses_hermetic_plugins_and_exact_collection(
         environments.append(dict(env))
         return subprocess.CompletedProcess(command, 0)
 
-    monkeypatch.setattr(evidence.quality_gate, "_isolated_test_environment", isolated_environment)
+    monkeypatch.setattr(evidence, "_authenticated_quality_gate", lambda: quality_gate)
+    monkeypatch.setattr(quality_gate, "_isolated_test_environment", isolated_environment)
     monkeypatch.setattr(evidence.subprocess, "run", run_pytest)
     monkeypatch.setattr(evidence, "_require_exact_checkout", lambda *_arguments: None)
     monkeypatch.setattr(
@@ -494,7 +498,7 @@ def test_closed_runner_uses_hermetic_plugins_and_exact_collection(
         evidence._run_closed_pytest(tmp_path, identity, JOURNEY_ID, EVIDENCE_CLASS)
 
 
-def test_ignored_checkout_scan_allows_only_neutralized_regular_cache_files(
+def test_ignored_checkout_scan_rejects_forged_valid_helper_bytecode(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -502,7 +506,6 @@ def test_ignored_checkout_scan_allows_only_neutralized_regular_cache_files(
         ".pytest_cache/v/cache/nodeids",
         ".ruff_cache/CACHEDIR.TAG",
         ".mypy_cache/3.14/cache.db",
-        "friday/__pycache__/module.cpython-314.pyc",
     )
     for path_text in allowed:
         path = tmp_path / path_text
@@ -513,9 +516,13 @@ def test_ignored_checkout_scan_allows_only_neutralized_regular_cache_files(
     monkeypatch.setattr(evidence, "_git", lambda *_arguments: ignored[0])
     evidence._require_neutralized_ignored_files(tmp_path)
 
-    forbidden = tmp_path / "pytest.pyc"
-    forbidden.write_bytes(b"sourceless shadow")
-    ignored[0] = b"pytest.pyc\0"
+    helper = tmp_path / "tools/quality_gate.py"
+    helper.parent.mkdir(parents=True)
+    helper.write_text("raise RuntimeError('forged helper executed')\n", encoding="ascii")
+    forbidden = tmp_path / "tools/__pycache__/quality_gate.cpython-314.pyc"
+    forbidden.parent.mkdir()
+    py_compile.compile(str(helper), cfile=str(forbidden), doraise=True)
+    ignored[0] = b"tools/__pycache__/quality_gate.cpython-314.pyc\0"
     with pytest.raises(evidence.ExactReleaseEvidenceError, match="^checkout_ignored_artifact$"):
         evidence._require_neutralized_ignored_files(tmp_path)
 
@@ -524,6 +531,185 @@ def test_ignored_checkout_scan_allows_only_neutralized_regular_cache_files(
     ignored[0] = b".pytest_cache/linked\0"
     with pytest.raises(evidence.ExactReleaseEvidenceError, match="^checkout_ignored_artifact$"):
         evidence._require_neutralized_ignored_files(tmp_path)
+
+
+def test_producer_helper_executes_tracked_blob_only_after_stdlib_preflight(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module_name = "tools.s6_exact_helper_probe"
+    relative_path = "tools/s6_exact_helper_probe.py"
+    source = tmp_path / relative_path
+    source.parent.mkdir()
+    tracked = b"VALUE = 'tracked'\n"
+    source.write_bytes(tracked)
+    marker = tmp_path / "forged-executed"
+    forged_source = tmp_path / "forged.py"
+    forged_source.write_text(
+        f"from pathlib import Path\nPath({str(marker)!r}).write_text('forged')\n",
+        encoding="utf-8",
+    )
+    forged_pyc = source.parent / "__pycache__/s6_exact_helper_probe.cpython-314.pyc"
+    forged_pyc.parent.mkdir()
+    py_compile.compile(str(forged_source), cfile=str(forged_pyc), doraise=True)
+    events: list[str] = []
+    commit = "a" * 40
+
+    def preflight() -> tuple[Path, str]:
+        events.append("preflight")
+        return tmp_path, commit
+
+    monkeypatch.setattr(evidence, "_running_exact_checkout", preflight)
+    monkeypatch.setattr(
+        evidence,
+        "_exact_git_blob",
+        lambda *_args: events.append("tracked_blob") or tracked,
+    )
+    monkeypatch.setattr(
+        evidence,
+        "_require_exact_checkout",
+        lambda *_args: events.append("post_checkout"),
+    )
+    monkeypatch.setattr(
+        evidence,
+        "_require_running_producer",
+        lambda *_args: events.append("post_producer"),
+    )
+    evidence._AUTHENTICATED_PRODUCER_HELPERS.pop(module_name, None)  # noqa: SLF001
+    sys.modules.pop(module_name, None)
+    try:
+        module = evidence._authenticated_producer_helper(module_name, relative_path)  # noqa: SLF001
+        assert module.VALUE == "tracked"
+        assert events == ["preflight", "tracked_blob", "post_checkout", "post_producer"]
+        assert not marker.exists()
+    finally:
+        evidence._AUTHENTICATED_PRODUCER_HELPERS.pop(module_name, None)  # noqa: SLF001
+        sys.modules.pop(module_name, None)
+
+
+@pytest.mark.parametrize(
+    ("options", "startup_environment"),
+    (
+        (("-I", "-S"), {}),
+        (("-I", "-B"), {}),
+        (("-S", "-B"), {}),
+        (("-I", "-S", "-B"), {"PYTHONSTARTUP": "/private/producer-startup.py"}),
+    ),
+)
+def test_producer_authority_rejects_unsealed_startup_before_helper_authentication(
+    options: tuple[str, ...],
+    startup_environment: dict[str, str],
+) -> None:
+    producer = Path(evidence.__file__).resolve(strict=True)
+    probe = (
+        "import runpy,sys;"
+        "namespace=runpy.run_path(sys.argv[1]);"
+        "namespace['_require_producer_process_authority']();"
+        "print('AUTHORIZED')"
+    )
+    environment = {
+        name: value
+        for name, value in os.environ.items()
+        if (
+            name not in evidence._FORBIDDEN_PRODUCER_STARTUP_ENVIRONMENT  # noqa: SLF001
+            and not name.startswith(("PYTHON", "LD_", "DYLD_", "GLIBC_"))
+        )
+    }
+    environment.update(startup_environment)
+
+    completed = subprocess.run(
+        (sys.executable, *options, "-c", probe, str(producer)),
+        check=False,
+        capture_output=True,
+        env=environment,
+        timeout=30,
+    )
+
+    assert completed.returncode != 0
+    assert b"producer_process_authority_invalid" in completed.stderr
+
+
+def test_producer_authority_accepts_isolated_stdlib_only_startup() -> None:
+    producer = Path(evidence.__file__).resolve(strict=True)
+    probe = (
+        "import runpy,sys;"
+        "namespace=runpy.run_path(sys.argv[1]);"
+        "namespace['_require_producer_process_authority']();"
+        "print('AUTHORIZED')"
+    )
+    environment = {
+        name: value
+        for name, value in os.environ.items()
+        if (
+            name not in evidence._FORBIDDEN_PRODUCER_STARTUP_ENVIRONMENT  # noqa: SLF001
+            and not name.startswith(("PYTHON", "LD_", "DYLD_", "GLIBC_"))
+        )
+    }
+
+    completed = subprocess.run(
+        (sys.executable, "-I", "-S", "-B", "-c", probe, str(producer)),
+        check=False,
+        capture_output=True,
+        env=environment,
+        timeout=30,
+    )
+
+    assert completed.returncode == 0, completed.stderr.decode(errors="replace")
+    assert completed.stdout == b"AUTHORIZED\n"
+
+
+def test_git_authority_ignores_a_forged_ambient_path(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repository = tmp_path / "repository"
+    repository.mkdir()
+    _git(repository, "init", "-q")
+    forged_bin = tmp_path / "forged-bin"
+    forged_bin.mkdir()
+    marker = tmp_path / "forged-git-executed"
+    forged_git = forged_bin / "git"
+    forged_git.write_text(
+        "#!/bin/sh\n"
+        f"printf executed > '{marker}'\n"
+        "printf '/forged/repository\\n'\n",
+        encoding="ascii",
+    )
+    forged_git.chmod(0o700)
+    monkeypatch.setenv("PATH", str(forged_bin))
+
+    observed = evidence._git(repository, "rev-parse", "--show-toplevel")  # noqa: SLF001
+
+    assert observed == f"{repository}\n".encode()
+    assert not marker.exists()
+
+
+def test_git_authority_ignores_ambient_repository_and_config_overrides(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repository = tmp_path / "repository"
+    alternate = tmp_path / "alternate"
+    repository.mkdir()
+    alternate.mkdir()
+    _git(repository, "init", "-q")
+    _git(alternate, "init", "-q")
+    fake_global = tmp_path / "forged-gitconfig"
+    fake_global.write_text("[core]\nworktree = /forged/worktree\n", encoding="ascii")
+    monkeypatch.setenv("GIT_DIR", str(alternate / ".git"))
+    monkeypatch.setenv("GIT_WORK_TREE", str(alternate))
+    monkeypatch.setenv("GIT_COMMON_DIR", str(alternate / ".git"))
+    monkeypatch.setenv("GIT_INDEX_FILE", str(alternate / ".git/index"))
+    monkeypatch.setenv("GIT_OBJECT_DIRECTORY", str(alternate / ".git/objects"))
+    monkeypatch.setenv("GIT_ALTERNATE_OBJECT_DIRECTORIES", str(alternate / ".git/objects"))
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(fake_global))
+    monkeypatch.setenv("GIT_CONFIG_COUNT", "1")
+    monkeypatch.setenv("GIT_CONFIG_KEY_0", "core.worktree")
+    monkeypatch.setenv("GIT_CONFIG_VALUE_0", "/forged/worktree")
+
+    observed = evidence._git(repository, "rev-parse", "--show-toplevel")  # noqa: SLF001
+
+    assert observed == f"{repository}\n".encode()
 
 
 @pytest.mark.parametrize(
