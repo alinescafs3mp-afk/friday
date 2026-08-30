@@ -117,6 +117,25 @@ def storage(settings):
         instance.close()
 
 
+@pytest.fixture
+def isolated_operator_transaction_domain(
+    tmp_path_factory: pytest.TempPathFactory,
+    monkeypatch: pytest.MonkeyPatch,
+) -> Path:
+    """Keep xdist lock-contract tests isolated while preserving one domain per test."""
+
+    from tools import immutable_release_operator as release_operator
+
+    parent = tmp_path_factory.mktemp("operator-lock-parent")
+    parent.chmod(0o1777)
+    monkeypatch.setattr(
+        release_operator.OperatorTransactionLock,
+        "_RUNTIME_PARENT",
+        parent,
+    )
+    return parent
+
+
 async def run_with_approval(kernel, storage, name: str, arguments: dict, *, actor):
     """Пройти опасное действие целиком: запрос → решение человека → исполнение.
 

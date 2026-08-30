@@ -14,6 +14,8 @@ from tools import release_dr_generation_authentication as dr_auth
 from tools import release_dr_generation_enrollment as enrollment
 from tools import release_dr_generation_index as dr_index
 
+pytestmark = pytest.mark.usefixtures("isolated_operator_transaction_domain")
+
 
 def _canonical(value: Any) -> bytes:
     return json.dumps(
@@ -47,8 +49,10 @@ def _candidate(home: Path, ordinal: int) -> dict[str, Any]:
     release = _private_directory(home / "wheel-only-releases" / f"{ordinal:040x}")
     digest = lambda offset: f"{ordinal * 16 + offset:064x}"  # noqa: E731
     return {
+        "allowed_rollback_tree_sha256s": [digest(6)],
         "backup_directory": str(backup),
         "backup_record_sha256": digest(1),
+        "database_schema": 46,
         "database_receipt_sha256": digest(2),
         "engineer_receipt_sha256": digest(3),
         "inbox_receipt_sha256": digest(4),
@@ -71,6 +75,7 @@ def _candidate(home: Path, ordinal: int) -> dict[str, Any]:
 def _authentication_receipt(candidate: dict[str, Any], ordinal: int) -> dict[str, Any]:
     status = Path(candidate["backup_directory"]).stat()
     core = {
+        "allowed_rollback_tree_sha256s": candidate["allowed_rollback_tree_sha256s"],
         "activation_journal_file_sha256": f"{ordinal + 1:064x}",
         "activation_journal_sha256": f"{ordinal + 2:064x}",
         "activation_receipt_file_sha256": f"{ordinal + 3:064x}",
@@ -78,8 +83,10 @@ def _authentication_receipt(candidate: dict[str, Any], ordinal: int) -> dict[str
         "backup_directory": {"device": status.st_dev, "inode": status.st_ino, "path": candidate["backup_directory"]},
         "backup_manifest_sha256": f"{ordinal + 4:064x}",
         "candidate_sha256": hashlib.sha256(_canonical(candidate)).hexdigest(),
+        "database_schema": candidate["database_schema"],
         "restore_operator_sha256": f"{ordinal + 5:064x}",
         "schema": dr_index.AUTHENTICATION_RECEIPT_SCHEMA,
+        "source_transaction_id": candidate["source_transaction_id"],
         "status": "authenticated",
         "surface_receipts": {
             "database": candidate["database_receipt_sha256"],
@@ -111,7 +118,7 @@ def _rehearsal_receipt(
         "database_foreign_keys_clear": True,
         "database_integrity_clear": True,
         "database_reopen_count": 2,
-        "database_schema": 46,
+        "database_schema": candidate["database_schema"],
         "engineer_authority_present": True,
         "engineer_exact": True,
         "fault_boundary": "after_migration_before_provision_or_network",

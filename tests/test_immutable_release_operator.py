@@ -10007,7 +10007,10 @@ def _synthetic_build_spec(tmp_path: Path) -> operator.BuildSpec:
     )
 
 
-def test_build_uses_the_shared_release_operator_transaction_lock(tmp_path: Path) -> None:
+def test_build_uses_the_shared_release_operator_transaction_lock(
+    tmp_path: Path,
+    isolated_operator_transaction_domain: Path,
+) -> None:
     spec = _synthetic_build_spec(tmp_path)
 
     with (
@@ -10064,6 +10067,7 @@ def test_build_rejects_every_noncanonical_home_layout_path_before_lock_mutation(
 def test_two_homes_cannot_reuse_one_release_root_under_independent_build_locks(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
+    isolated_operator_transaction_domain: Path,
 ) -> None:
     canonical = _synthetic_build_spec(tmp_path)
     alternate_home = tmp_path / "alternate-home"
@@ -10430,6 +10434,7 @@ def test_build_smoke_failure_cleans_only_prepublication_staging_and_quarantines_
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     failure_phase: str,
+    isolated_operator_transaction_domain: Path,
 ) -> None:
     spec = _synthetic_build_spec(tmp_path)
     smoke_roots: list[Path] = []
@@ -10985,6 +10990,7 @@ def test_pip_bootstrap_pin_matches_the_frozen_build_tool_lock() -> None:
 def test_missing_venv_fails_before_release_staging_or_target(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
+    isolated_operator_transaction_domain: Path,
 ) -> None:
     friday_home = tmp_path / "friday-home"
     releases_root = friday_home / "wheel-only-releases"
@@ -11049,6 +11055,7 @@ def test_missing_venv_fails_before_release_staging_or_target(
 def test_post_seal_failure_removes_staging_and_preserves_original_failure(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
+    isolated_operator_transaction_domain: Path,
 ) -> None:
     friday_home = tmp_path / "friday-home"
     releases_root = friday_home / "wheel-only-releases"
@@ -12916,7 +12923,10 @@ def test_terminal_journal_env_digest_is_activate_only() -> None:
         )
 
 
-def test_operator_transaction_lock_is_process_wide_nonblocking(tmp_path: Path) -> None:
+def test_operator_transaction_lock_is_process_wide_nonblocking(
+    tmp_path: Path,
+    isolated_operator_transaction_domain: Path,
+) -> None:
     tmp_path.chmod(0o700)
     state = tmp_path / "state"
     state.mkdir(mode=0o700)
@@ -12931,7 +12941,10 @@ def test_operator_transaction_lock_is_process_wide_nonblocking(tmp_path: Path) -
         assert lock_path.stat().st_mode & 0o077 == 0
 
 
-def test_operator_transaction_lock_survives_state_directory_replacement(tmp_path: Path) -> None:
+def test_operator_transaction_lock_survives_state_directory_replacement(
+    tmp_path: Path,
+    isolated_operator_transaction_domain: Path,
+) -> None:
     tmp_path.chmod(0o700)
     state = tmp_path / "state"
     displaced = tmp_path / "displaced-state"
@@ -12950,6 +12963,7 @@ def test_operator_transaction_lock_survives_state_directory_replacement(tmp_path
 
 def test_operator_transaction_guard_pins_named_state_inode_through_mutation(
     tmp_path: Path,
+    isolated_operator_transaction_domain: Path,
 ) -> None:
     tmp_path.chmod(0o700)
     state = tmp_path / "state"
@@ -12967,6 +12981,7 @@ def test_operator_transaction_guard_pins_named_state_inode_through_mutation(
 def test_operator_transaction_unit_pair_uses_filesystem_not_abstract_socket_namespace(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
+    isolated_operator_transaction_domain: Path,
 ) -> None:
     tmp_path.chmod(0o700)
     state = tmp_path / "state"
@@ -12989,19 +13004,16 @@ def test_operator_transaction_unit_pair_uses_filesystem_not_abstract_socket_name
     ) as transaction:
         transaction.assert_held()
         assert transaction._runtime_descriptors  # noqa: SLF001
+        assert len(transaction._runtime_descriptors) == 1  # noqa: SLF001
         assert all(Path(name).name == name for name, _descriptor, _identity in transaction._runtime_descriptors)  # noqa: SLF001
 
 
 def test_operator_transaction_lock_serializes_the_fixed_systemd_unit_pair_across_homes(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
+    isolated_operator_transaction_domain: Path,
 ) -> None:
     tmp_path.chmod(0o700)
-    monkeypatch.setattr(
-        operator,
-        "OPERATOR_TRANSACTION_UNIT_PAIR_SCOPE_SCHEMA",
-        f"friday.test-unit-pair-scope.{tmp_path.name}",
-    )
     first_state = tmp_path / "first-home/data/state"
     second_state = tmp_path / "second-home/data/state"
     first_state.mkdir(parents=True, mode=0o700)
@@ -13027,10 +13039,192 @@ def test_operator_transaction_lock_serializes_the_fixed_systemd_unit_pair_across
             ):
                 pytest.fail("a second home acquired the shared systemd unit pair")
 
-            # Failure on the second abstract resource must release the first
-            # state-scoped socket immediately.
-            with operator.OperatorTransactionLock(second_lock):
-                pass
+    with operator.OperatorTransactionLock(second_lock):
+        pass
+
+
+def test_operator_transaction_uses_one_portable_bounded_global_lock_domain(
+    tmp_path: Path,
+) -> None:
+    runtime_parent = operator.OperatorTransactionLock._RUNTIME_PARENT  # noqa: SLF001
+    assert runtime_parent.as_posix() == "/var/tmp"
+    tmp_path.chmod(0o700)
+    shared_tmp = tmp_path / "shared-tmp"
+    shared_tmp.mkdir(mode=0o1777)
+    shared_tmp.chmod(0o1777)
+
+    def transaction(ordinal: int) -> operator.OperatorTransactionLock:
+        state = tmp_path / f"state-{ordinal}"
+        state.mkdir(mode=0o700)
+        lock = operator.OperatorTransactionLock(
+            state / "immutable-release-operator.v1.lock"
+        )
+        lock._runtime_parent = shared_tmp  # noqa: SLF001
+        return lock
+
+    first = transaction(0)
+    with first:
+        runtime_root = first._runtime_directory  # noqa: SLF001
+        assert runtime_root is not None
+        assert runtime_root.parent == shared_tmp
+        assert runtime_root.stat().st_uid == os.geteuid()
+        assert stat.S_IMODE(runtime_root.stat().st_mode) == 0o700
+        for ordinal in range(1, 33):
+            contender = transaction(ordinal)
+            with (
+                pytest.raises(
+                    operator.ReleaseFailure,
+                    match="^operator_transaction_in_progress$",
+                ),
+                contender,
+            ):
+                pytest.fail("an ephemeral state path escaped the global domain")
+
+    for ordinal in range(33, 65):
+        with transaction(ordinal):
+            pass
+
+    entries = list(runtime_root.iterdir())
+    assert [entry.name for entry in entries] == [
+        operator.OperatorTransactionLock._GLOBAL_RUNTIME_LOCK_NAME  # noqa: SLF001
+    ]
+    assert entries[0].stat().st_nlink == 1
+    assert stat.S_IMODE(entries[0].stat().st_mode) == 0o600
+
+
+def test_operator_transaction_runtime_domain_cannot_split_when_run_user_appears(
+    tmp_path: Path,
+) -> None:
+    tmp_path.chmod(0o700)
+    shared_tmp = tmp_path / "shared-tmp"
+    shared_tmp.mkdir(mode=0o1777)
+    shared_tmp.chmod(0o1777)
+    first_state = tmp_path / "first-state"
+    second_state = tmp_path / "second-state"
+    first_state.mkdir(mode=0o700)
+    second_state.mkdir(mode=0o700)
+    first = operator.OperatorTransactionLock(
+        first_state / "immutable-release-operator.v1.lock"
+    )
+    second = operator.OperatorTransactionLock(
+        second_state / "immutable-release-operator.v1.lock"
+    )
+    first._runtime_parent = shared_tmp  # noqa: SLF001
+    second._runtime_parent = shared_tmp  # noqa: SLF001
+
+    with first:
+        fake_run_user = tmp_path / "run/user" / str(os.geteuid())
+        fake_run_user.mkdir(parents=True, mode=0o700)
+        second._primary_runtime_directory = fake_run_user  # type: ignore[attr-defined]  # noqa: SLF001
+        with (
+            pytest.raises(
+                operator.ReleaseFailure,
+                match="^operator_transaction_in_progress$",
+            ),
+            second,
+        ):
+            pytest.fail("appearance of a private /run root split the lock domain")
+
+
+def test_operator_transaction_guard_pins_portable_runtime_root_inode(
+    tmp_path: Path,
+) -> None:
+    tmp_path.chmod(0o700)
+    shared_tmp = tmp_path / "shared-tmp"
+    shared_tmp.mkdir(mode=0o1777)
+    shared_tmp.chmod(0o1777)
+    state = tmp_path / "state"
+    state.mkdir(mode=0o700)
+    transaction = operator.OperatorTransactionLock(
+        state / "immutable-release-operator.v1.lock"
+    )
+    transaction._runtime_parent = shared_tmp  # noqa: SLF001
+
+    with transaction:
+        runtime_root = transaction._runtime_directory  # noqa: SLF001
+        assert runtime_root is not None
+        displaced = shared_tmp / "displaced"
+        runtime_root.rename(displaced)
+        runtime_root.mkdir(mode=0o700)
+        with pytest.raises(
+            operator.ReleaseFailure,
+            match="^operator_transaction_lock_changed$",
+        ):
+            transaction.assert_held()
+
+
+def test_operator_transaction_rejects_preplanted_runtime_root_symlink(
+    tmp_path: Path,
+) -> None:
+    tmp_path.chmod(0o700)
+    shared_tmp = tmp_path / "shared-tmp"
+    shared_tmp.mkdir(mode=0o1777)
+    shared_tmp.chmod(0o1777)
+    outside = tmp_path / "outside"
+    outside.mkdir(mode=0o700)
+    runtime_name = (
+        f"{operator.OperatorTransactionLock._RUNTIME_DIRECTORY_PREFIX}-"  # noqa: SLF001
+        f"{os.geteuid()}"
+    )
+    (shared_tmp / runtime_name).symlink_to(outside, target_is_directory=True)
+    state = tmp_path / "state"
+    state.mkdir(mode=0o700)
+    transaction = operator.OperatorTransactionLock(
+        state / "immutable-release-operator.v1.lock"
+    )
+    transaction._runtime_parent = shared_tmp  # noqa: SLF001
+
+    with (
+        pytest.raises(
+            operator.ReleaseFailure,
+            match="^operator_transaction_runtime_lock_invalid$",
+        ),
+        transaction,
+    ):
+        pytest.fail("a preplanted symlink became the global lock root")
+
+
+def test_operator_transaction_creation_fsync_failure_releases_global_lock(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    tmp_path.chmod(0o700)
+    shared_tmp = tmp_path / "shared-tmp"
+    shared_tmp.mkdir(mode=0o1777)
+    shared_tmp.chmod(0o1777)
+    state = tmp_path / "state"
+    state.mkdir(mode=0o700)
+
+    def transaction() -> operator.OperatorTransactionLock:
+        result = operator.OperatorTransactionLock(
+            state / "immutable-release-operator.v1.lock"
+        )
+        result._runtime_parent = shared_tmp  # noqa: SLF001
+        return result
+
+    real_fsync = operator.os.fsync
+    calls = 0
+
+    def fail_global_name_fsync(descriptor: int) -> None:
+        nonlocal calls
+        calls += 1
+        if calls == 2:
+            raise OSError("simulated global-name fsync failure")
+        real_fsync(descriptor)
+
+    monkeypatch.setattr(operator.os, "fsync", fail_global_name_fsync)
+    with (
+        pytest.raises(
+            operator.ReleaseFailure,
+            match="^operator_transaction_lock_invalid$",
+        ),
+        transaction(),
+    ):
+        pytest.fail("runtime fsync failure admitted a transaction")
+
+    monkeypatch.setattr(operator.os, "fsync", real_fsync)
+    with transaction():
+        pass
 
 
 @pytest.mark.parametrize(
@@ -13106,6 +13300,7 @@ def test_recovery_journal_probe_never_creates_a_missing_backup_root(tmp_path: Pa
 def test_cli_never_constructs_a_mutating_activation_port_before_the_lock(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
+    isolated_operator_transaction_domain: Path,
 ) -> None:
     tmp_path.chmod(0o700)
     friday_home = tmp_path / "friday-home"

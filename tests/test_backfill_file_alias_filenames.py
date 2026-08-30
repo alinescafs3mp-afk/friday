@@ -691,7 +691,12 @@ def test_claim_is_cas_bound_and_backup_precedes_any_update(settings, storage, tm
     assert row["supplied_filename"] == "666.odt"
 
 
-def test_standalone_apply_cannot_race_immutable_release_controller(settings, storage, tmp_path) -> None:
+def test_standalone_apply_cannot_race_immutable_release_controller(
+    settings,
+    storage,
+    tmp_path,
+    isolated_operator_transaction_domain,
+) -> None:
     raw_id = _raw(storage)
     _notice_and_aliases(
         storage,

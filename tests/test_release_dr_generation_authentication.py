@@ -54,6 +54,7 @@ def _fixture(
     *,
     exact_surfaces: bool = True,
     change_on_recheck: bool = False,
+    release_change_on_recheck: bool = False,
 ) -> tuple[Path, Path, Path]:
     state_directory = _private_directory(tmp_path / "state")
     backup_root = _private_directory(tmp_path / "backups")
@@ -75,6 +76,13 @@ def _fixture(
         "c" * 40,
         "0.207.84",
         "e" * 64,
+        50,
+    )
+    changed_previous = release_operator.ReleaseIdentity(
+        release_root,
+        "c" * 40,
+        "0.207.84",
+        "f" * 64,
         50,
     )
     surface = SimpleNamespace(
@@ -160,6 +168,7 @@ def _fixture(
     class FakeJournal:
         def __init__(self, *_args: Any, **_kwargs: Any) -> None:
             self.backup_calls = 0
+            self.release_calls = 0
 
         def load(self) -> dict[str, Any]:
             return dict(state)
@@ -180,7 +189,13 @@ def _fixture(
             release_operator.ReleaseIdentity,
             release_operator.ReleaseIdentity,
         ]:
-            return fallback, fallback, fallback
+            self.release_calls += 1
+            previous = (
+                changed_previous
+                if release_change_on_recheck and self.release_calls > 1
+                else fallback
+            )
+            return fallback, previous, fallback
 
     monkeypatch.setattr(release_operator, "DurableActivationJournal", FakeJournal)
     return state_directory, activation_receipt, backup_root
@@ -204,7 +219,12 @@ def test_authenticates_only_exact_four_surface_terminal_backup(
 
     assert result.candidate["source_kind"] == "terminal_activation"
     assert result.candidate["source_transaction_id"] == "b" * 64
+    assert result.candidate["database_schema"] == 46
+    assert result.candidate["allowed_rollback_tree_sha256s"] == ["e" * 64]
     assert result.authentication_receipt["status"] == "authenticated"
+    assert result.authentication_receipt["source_transaction_id"] == "b" * 64
+    assert result.authentication_receipt["database_schema"] == 46
+    assert result.authentication_receipt["allowed_rollback_tree_sha256s"] == ["e" * 64]
     assert {path: path.read_bytes() for path in before} == before
 
 
@@ -242,8 +262,29 @@ def test_rechecks_authenticated_backup_before_return(
         )
 
 
+def test_rechecks_exact_rollback_set_before_return(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    state_directory, activation_receipt, backup_root = _fixture(
+        tmp_path,
+        monkeypatch,
+        release_change_on_recheck=True,
+    )
+    with pytest.raises(
+        dr_auth.DRGenerationAuthenticationError,
+        match="^dr_authentication_input_changed$",
+    ):
+        dr_auth._authenticate_locked(  # noqa: SLF001
+            activation_journal=state_directory / "immutable-release-activation.v1.json",
+            activation_receipt=activation_receipt,
+            backup_root=backup_root,
+        )
+
+
 def test_public_authentication_uses_shared_nonblocking_operator_lock(
     tmp_path: Path,
+    isolated_operator_transaction_domain: Path,
 ) -> None:
     state_directory = _private_directory(tmp_path / "state")
     backup_root = _private_directory(tmp_path / "backups")

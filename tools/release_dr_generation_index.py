@@ -33,6 +33,7 @@ INDEX_SCHEMA = "friday.immutable-release-dr-generations.v1"
 HEAD_FENCE_SCHEMA = "friday.immutable-release-dr-generation-head-fence.v1"
 AUTHENTICATION_RECEIPT_SCHEMA = "friday.immutable-release-dr-authentication-receipt.v1"
 REHEARSAL_RECEIPT_SCHEMA = "friday.immutable-release-dr-rehearsal-receipt.v1"
+REHEARSAL_BINDING_SCHEMA = "friday.immutable-release-dr-rehearsal-binding.v1"
 GENERATION_CANDIDATE_SCHEMA = "friday.immutable-release-dr-generation-candidate.v1"
 GENERATION_SCHEMA = "friday.immutable-release-dr-generation.v1"
 GENERATION_RECEIPT_SCHEMA = "friday.immutable-release-dr-generation-receipt.v1"
@@ -101,6 +102,7 @@ class GenerationPin:
     authentication_receipt_sha256: str | None
     rehearsal_receipt_path: Path | None
     rehearsal_receipt_sha256: str | None
+    rehearsal_binding: dict[str, Any] | None
     restore_release_root: Path
     restore_release_commit: str
     restore_release_tree_manifest_sha256: str
@@ -565,6 +567,7 @@ def validate_authentication_receipt(
 
     normalized_candidate = normalize_generation_candidate(candidate)
     expected = {
+        "allowed_rollback_tree_sha256s",
         "activation_journal_file_sha256",
         "activation_journal_sha256",
         "activation_receipt_file_sha256",
@@ -572,9 +575,11 @@ def validate_authentication_receipt(
         "backup_directory",
         "backup_manifest_sha256",
         "candidate_sha256",
+        "database_schema",
         "receipt_sha256",
         "restore_operator_sha256",
         "schema",
+        "source_transaction_id",
         "status",
         "surface_receipts",
     }
@@ -589,6 +594,12 @@ def validate_authentication_receipt(
         or payload.get("status") != "authenticated"
         or payload.get("candidate_sha256")
         != _sha256(_canonical_json(normalized_candidate))
+        or type(payload.get("database_schema")) is not int
+        or payload.get("database_schema") != normalized_candidate["database_schema"]
+        or payload.get("allowed_rollback_tree_sha256s")
+        != normalized_candidate["allowed_rollback_tree_sha256s"]
+        or payload.get("source_transaction_id")
+        != normalized_candidate["source_transaction_id"]
         or payload.get("activation_receipt_sha256")
         != normalized_candidate["source_receipt_sha256"]
         or not isinstance(directory, dict)
@@ -723,6 +734,7 @@ def validate_rehearsal_receipt(
         or payload.get("authentication_receipt_sha256") != auth_ref["sha256"]
         or payload.get("index_transaction_id")
         != _hex64(index_transaction_id, code="rehearsal_receipt_invalid")
+        or type(payload.get("index_revision")) is not int
         or payload.get("index_revision") != index_revision
         or payload.get("index_journal_sha256")
         != _hex64(index_journal_sha256, code="rehearsal_receipt_invalid")
@@ -731,7 +743,7 @@ def validate_rehearsal_receipt(
         or payload.get("database_reopen_count") != 2
         or payload.get("inbox_reopen_count") != 2
         or type(payload.get("database_schema")) is not int
-        or not 0 < int(payload["database_schema"]) <= int(restore["max_schema"])
+        or payload.get("database_schema") != normalized_candidate["database_schema"]
         or payload.get("fault_boundary") != "after_migration_before_provision_or_network"
         or payload.get("four_surface_sha256") != four_surface_sha256
         or payload.get("restore_release") != restore_projection
@@ -743,7 +755,10 @@ def validate_rehearsal_receipt(
         or any(payload.get(key) is not True for key in boolean_keys)
     ):
         raise DRGenerationIndexError("rehearsal_receipt_invalid")
-    _hex64(payload.get("rollback_tree_sha256"), code="rehearsal_receipt_invalid")
+    if payload.get("rollback_tree_sha256") not in normalized_candidate[
+        "allowed_rollback_tree_sha256s"
+    ]:
+        raise DRGenerationIndexError("rehearsal_receipt_invalid")
     return reference, raw, payload
 
 
@@ -801,8 +816,10 @@ def normalize_generation_candidate(value: object) -> dict[str, Any]:
     """Validate and detach one exact caller-supplied backup identity."""
 
     expected = {
+        "allowed_rollback_tree_sha256s",
         "backup_directory",
         "backup_record_sha256",
+        "database_schema",
         "database_receipt_sha256",
         "engineer_receipt_sha256",
         "inbox_receipt_sha256",
@@ -816,13 +833,28 @@ def normalize_generation_candidate(value: object) -> dict[str, Any]:
     if not isinstance(value, dict) or set(value) != expected:
         raise DRGenerationIndexError("generation_candidate_invalid")
     source_kind = value.get("source_kind")
+    allowed_rollbacks = value.get("allowed_rollback_tree_sha256s")
+    database_schema = value.get("database_schema")
     if source_kind not in _SOURCE_KINDS:
+        raise DRGenerationIndexError("generation_candidate_invalid")
+    if (
+        not isinstance(allowed_rollbacks, list)
+        or not 1 <= len(allowed_rollbacks) <= 2
+        or allowed_rollbacks != sorted(set(allowed_rollbacks))
+        or any(
+            not isinstance(item, str) or _HEX64_RE.fullmatch(item) is None
+            for item in allowed_rollbacks
+        )
+        or type(database_schema) is not int
+        or database_schema <= 0
+    ):
         raise DRGenerationIndexError("generation_candidate_invalid")
     backup_directory = _absolute_lexical(
         Path(str(value.get("backup_directory") or "")),
         code="generation_candidate_invalid",
     )
     normalized: dict[str, Any] = {
+        "allowed_rollback_tree_sha256s": list(allowed_rollbacks),
         "backup_directory": str(backup_directory),
         "backup_record_sha256": _hex64(
             value.get("backup_record_sha256"), code="generation_candidate_invalid"
@@ -830,6 +862,7 @@ def normalize_generation_candidate(value: object) -> dict[str, Any]:
         "database_receipt_sha256": _hex64(
             value.get("database_receipt_sha256"), code="generation_candidate_invalid"
         ),
+        "database_schema": database_schema,
         "engineer_receipt_sha256": _hex64(
             value.get("engineer_receipt_sha256"), code="generation_candidate_invalid"
         ),
@@ -851,24 +884,129 @@ def normalize_generation_candidate(value: object) -> dict[str, Any]:
     }
     if normalized["schema"] != GENERATION_CANDIDATE_SCHEMA:
         raise DRGenerationIndexError("generation_candidate_invalid")
+    if (
+        normalized["restore_release"]["tree_manifest_sha256"]
+        not in normalized["allowed_rollback_tree_sha256s"]
+        or normalized["database_schema"] > normalized["restore_release"]["max_schema"]
+    ):
+        raise DRGenerationIndexError("generation_candidate_invalid")
     if len(_canonical_json(normalized)) > MAX_CANDIDATE_BYTES:
         raise DRGenerationIndexError("generation_candidate_invalid")
     return normalized
+
+
+def _normalize_rehearsal_binding(
+    value: object,
+    *,
+    candidate: Mapping[str, Any],
+    authentication_receipt: Mapping[str, str],
+) -> dict[str, Any]:
+    expected = {
+        "allowed_rollback_tree_sha256s",
+        "authentication_receipt_sha256",
+        "candidate_sha256",
+        "database_schema",
+        "index_journal_sha256",
+        "index_revision",
+        "index_transaction_id",
+        "schema",
+    }
+    if not isinstance(value, dict) or set(value) != expected:
+        raise DRGenerationIndexError("rehearsal_binding_invalid")
+    revision = value.get("index_revision")
+    normalized = {
+        "allowed_rollback_tree_sha256s": value.get("allowed_rollback_tree_sha256s"),
+        "authentication_receipt_sha256": _hex64(
+            value.get("authentication_receipt_sha256"),
+            code="rehearsal_binding_invalid",
+        ),
+        "candidate_sha256": _hex64(
+            value.get("candidate_sha256"), code="rehearsal_binding_invalid"
+        ),
+        "database_schema": value.get("database_schema"),
+        "index_journal_sha256": _hex64(
+            value.get("index_journal_sha256"), code="rehearsal_binding_invalid"
+        ),
+        "index_revision": revision,
+        "index_transaction_id": _hex64(
+            value.get("index_transaction_id"), code="rehearsal_binding_invalid"
+        ),
+        "schema": value.get("schema"),
+    }
+    if (
+        normalized["schema"] != REHEARSAL_BINDING_SCHEMA
+        or type(revision) is not int
+        or revision <= 0
+        or normalized["index_transaction_id"] == ZERO_SHA256
+        or normalized["index_journal_sha256"] == ZERO_SHA256
+        or type(normalized["database_schema"]) is not int
+        or not isinstance(normalized["allowed_rollback_tree_sha256s"], list)
+        or normalized["candidate_sha256"] != _sha256(_canonical_json(candidate))
+        or normalized["authentication_receipt_sha256"] != authentication_receipt["sha256"]
+        or normalized["database_schema"] != candidate["database_schema"]
+        or normalized["allowed_rollback_tree_sha256s"]
+        != candidate["allowed_rollback_tree_sha256s"]
+    ):
+        raise DRGenerationIndexError("rehearsal_binding_invalid")
+    return normalized
+
+
+def _rehearsal_binding(
+    *,
+    candidate: Mapping[str, Any],
+    authentication_receipt: Mapping[str, str],
+    index_transaction_id: str,
+    index_revision: int,
+    index_journal_sha256: str,
+) -> dict[str, Any]:
+    normalized_candidate = normalize_generation_candidate(candidate)
+    normalized_authentication = _normalize_external_receipt(
+        authentication_receipt,
+        code="authentication_receipt_invalid",
+    )
+    return _normalize_rehearsal_binding(
+        {
+            "allowed_rollback_tree_sha256s": normalized_candidate[
+                "allowed_rollback_tree_sha256s"
+            ],
+            "authentication_receipt_sha256": normalized_authentication["sha256"],
+            "candidate_sha256": _sha256(_canonical_json(normalized_candidate)),
+            "database_schema": normalized_candidate["database_schema"],
+            "index_journal_sha256": _hex64(
+                index_journal_sha256, code="rehearsal_binding_invalid"
+            ),
+            "index_revision": index_revision,
+            "index_transaction_id": _hex64(
+                index_transaction_id, code="rehearsal_binding_invalid"
+            ),
+            "schema": REHEARSAL_BINDING_SCHEMA,
+        },
+        candidate=normalized_candidate,
+        authentication_receipt=normalized_authentication,
+    )
 
 
 def _normalize_generation(value: object) -> dict[str, Any]:
     if not isinstance(value, dict) or set(value) != {
         "authentication_receipt",
         "candidate",
+        "rehearsal_binding",
         "rehearsal_receipt",
         "schema",
     }:
         raise DRGenerationIndexError("generation_receipt_invalid")
+    authentication = _normalize_external_receipt(
+        value.get("authentication_receipt"), code="generation_receipt_invalid"
+    )
+    candidate = normalize_generation_candidate(value.get("candidate"))
     generation = {
-        "authentication_receipt": _normalize_external_receipt(
-            value.get("authentication_receipt"), code="generation_receipt_invalid"
+        "authentication_receipt": authentication,
+        "candidate": candidate,
+        "rehearsal_binding": _normalize_rehearsal_binding(
+            value.get("rehearsal_binding"),
+            candidate=candidate,
+            authentication_receipt=authentication,
         ),
-        "candidate": normalize_generation_candidate(value.get("candidate")),
         "rehearsal_receipt": _normalize_external_receipt(
             value.get("rehearsal_receipt"), code="generation_receipt_invalid"
         ),
@@ -1493,13 +1631,14 @@ class DurableDRGenerationIndex:
             kind=REHEARSAL_RECEIPT_KIND,
             code="rehearsal_receipt_invalid",
         )
+        binding = generation["rehearsal_binding"]
         validate_rehearsal_receipt(
             rehearsal_body,
             candidate=generation["candidate"],
             authentication_receipt=authentication_body,
-            index_transaction_id=str(rehearsal_body.get("index_transaction_id") or ""),
-            index_revision=rehearsal_body.get("index_revision"),
-            index_journal_sha256=str(rehearsal_body.get("index_journal_sha256") or ""),
+            index_transaction_id=binding["index_transaction_id"],
+            index_revision=binding["index_revision"],
+            index_journal_sha256=binding["index_journal_sha256"],
         )
         return payload
 
@@ -1641,6 +1780,13 @@ class DurableDRGenerationIndex:
                         index_revision=int(revision) - 1,
                         index_journal_sha256=_sha256(_canonical_json(predecessor_core)),
                     )
+                    rehearsal_binding = _rehearsal_binding(
+                        candidate=candidate,
+                        authentication_receipt=authentication_ref,
+                        index_transaction_id=transaction_id,
+                        index_revision=int(revision) - 1,
+                        index_journal_sha256=_sha256(_canonical_json(predecessor_core)),
+                    )
                     normalized_generation_ref = _normalize_generation_ref(
                         generation_ref, code="generation_ref_invalid"
                     )
@@ -1648,6 +1794,7 @@ class DurableDRGenerationIndex:
                         {
                             "authentication_receipt": authentication_ref,
                             "candidate": candidate,
+                            "rehearsal_binding": rehearsal_binding,
                             "rehearsal_receipt": rehearsal_ref,
                             "schema": GENERATION_SCHEMA,
                         }
@@ -1966,6 +2113,13 @@ class DurableDRGenerationIndex:
             generation = {
                 "authentication_receipt": pending["authentication_receipt"],
                 "candidate": pending["candidate"],
+                "rehearsal_binding": _rehearsal_binding(
+                    candidate=pending["candidate"],
+                    authentication_receipt=pending["authentication_receipt"],
+                    index_transaction_id=str(state["transaction_id"]),
+                    index_revision=int(state["revision"]),
+                    index_journal_sha256=str(state["journal_sha256"]),
+                ),
                 "rehearsal_receipt": normalized_receipt,
                 "schema": GENERATION_SCHEMA,
             }
@@ -2005,6 +2159,13 @@ class DurableDRGenerationIndex:
         generation = {
             "authentication_receipt": pending["authentication_receipt"],
             "candidate": pending["candidate"],
+            "rehearsal_binding": _rehearsal_binding(
+                candidate=pending["candidate"],
+                authentication_receipt=pending["authentication_receipt"],
+                index_transaction_id=str(state["transaction_id"]),
+                index_revision=int(state["revision"]) - 1,
+                index_journal_sha256=self._authenticated_predecessor_journal(state),
+            ),
             "rehearsal_receipt": pending["rehearsal_receipt"],
             "schema": GENERATION_SCHEMA,
         }
@@ -2047,6 +2208,20 @@ class DurableDRGenerationIndex:
             "revision": int(state["revision"]) + 1,
         }
         return self._cas_replace_locked(state, following, pins)
+
+    def _authenticated_predecessor_journal(self, state: Mapping[str, Any]) -> str:
+        if state.get("phase") != "rehearsed" or not isinstance(state.get("pending"), dict):
+            raise DRGenerationIndexError("dr_generation_index_invalid")
+        predecessor_pending = dict(state["pending"])
+        predecessor_pending["generation"] = None
+        predecessor_pending["rehearsal_receipt"] = None
+        predecessor_core = {
+            **self._core_from_state(state),
+            "pending": predecessor_pending,
+            "phase": "authenticated",
+            "revision": int(state["revision"]) - 1,
+        }
+        return _sha256(_canonical_json(predecessor_core))
 
     def publish(self, *, expected_journal_sha256: str) -> dict[str, Any]:
         """Publish the immutable receipt first, then CAS the two-slot index."""
@@ -2094,6 +2269,7 @@ class DurableDRGenerationIndex:
             candidate = receipt["generation"]["candidate"]
             authentication_ref = receipt["generation"]["authentication_receipt"]
             rehearsal_ref = receipt["generation"]["rehearsal_receipt"]
+            rehearsal_binding = receipt["generation"]["rehearsal_binding"]
             pins.append(
                 GenerationPin(
                     role=role,
@@ -2112,6 +2288,7 @@ class DurableDRGenerationIndex:
                         str(rehearsal_ref["sha256"]),
                     ),
                     rehearsal_receipt_sha256=str(rehearsal_ref["sha256"]),
+                    rehearsal_binding=dict(rehearsal_binding),
                     **restore_release_fields(candidate),
                 )
             )
@@ -2120,6 +2297,15 @@ class DurableDRGenerationIndex:
             reference = pending["generation"]
             authentication_ref = pending["authentication_receipt"]
             rehearsal_ref = pending["rehearsal_receipt"]
+            pending_rehearsal_binding: dict[str, Any] | None = None
+            if reference is not None:
+                pending_rehearsal_binding = _rehearsal_binding(
+                    candidate=pending["candidate"],
+                    authentication_receipt=authentication_ref,
+                    index_transaction_id=str(state["transaction_id"]),
+                    index_revision=int(state["revision"]) - 1,
+                    index_journal_sha256=self._authenticated_predecessor_journal(state),
+                )
             pins.append(
                 GenerationPin(
                     role="pending",
@@ -2154,6 +2340,7 @@ class DurableDRGenerationIndex:
                     rehearsal_receipt_sha256=(
                         str(rehearsal_ref["sha256"]) if rehearsal_ref is not None else None
                     ),
+                    rehearsal_binding=pending_rehearsal_binding,
                     **restore_release_fields(pending["candidate"]),
                 )
             )
@@ -2204,6 +2391,7 @@ __all__ = [
     "RECEIPT_DIRECTORY_NAME",
     "REHEARSAL_RECEIPT_SCHEMA",
     "REHEARSAL_RECEIPT_KIND",
+    "REHEARSAL_BINDING_SCHEMA",
     "normalize_generation_candidate",
     "validate_authentication_receipt",
     "validate_rehearsal_receipt",

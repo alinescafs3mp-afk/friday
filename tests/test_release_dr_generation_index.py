@@ -39,8 +39,10 @@ def _candidate(
     release = _private_directory(root / f"release-{ordinal}")
     digest = lambda offset: f"{ordinal * 16 + offset:064x}"  # noqa: E731
     return {
+        "allowed_rollback_tree_sha256s": [digest(6)],
         "backup_directory": str(backup),
         "backup_record_sha256": digest(1),
+        "database_schema": 46,
         "database_receipt_sha256": digest(2),
         "engineer_receipt_sha256": digest(3),
         "inbox_receipt_sha256": digest(4),
@@ -63,6 +65,7 @@ def _candidate(
 def _authentication_receipt(candidate: dict[str, Any], ordinal: int) -> dict[str, Any]:
     status = Path(candidate["backup_directory"]).stat()
     core = {
+        "allowed_rollback_tree_sha256s": candidate["allowed_rollback_tree_sha256s"],
         "activation_journal_file_sha256": f"{ordinal + 1:064x}",
         "activation_journal_sha256": f"{ordinal + 2:064x}",
         "activation_receipt_file_sha256": f"{ordinal + 3:064x}",
@@ -74,8 +77,10 @@ def _authentication_receipt(candidate: dict[str, Any], ordinal: int) -> dict[str
         },
         "backup_manifest_sha256": f"{ordinal + 4:064x}",
         "candidate_sha256": hashlib.sha256(_canonical(candidate)).hexdigest(),
+        "database_schema": candidate["database_schema"],
         "restore_operator_sha256": f"{ordinal + 5:064x}",
         "schema": dr_index.AUTHENTICATION_RECEIPT_SCHEMA,
+        "source_transaction_id": candidate["source_transaction_id"],
         "status": "authenticated",
         "surface_receipts": {
             "database": candidate["database_receipt_sha256"],
@@ -111,7 +116,7 @@ def _rehearsal_receipt(
         "database_foreign_keys_clear": True,
         "database_integrity_clear": True,
         "database_reopen_count": 2,
-        "database_schema": 46,
+        "database_schema": candidate["database_schema"],
         "engineer_authority_present": True,
         "engineer_exact": True,
         "fault_boundary": "after_migration_before_provision_or_network",
@@ -400,6 +405,11 @@ def test_authority_snapshot_binds_exact_index_bytes_digest_and_pins(tmp_path: Pa
     assert snapshot.index_sha256 == hashlib.sha256(snapshot.index_raw).hexdigest()
     assert [pin.role for pin in snapshot.pins] == ["current"]
     assert snapshot.pins[0].backup_directory == Path(candidate["backup_directory"])
+    assert snapshot.pins[0].rehearsal_binding is not None
+    assert snapshot.pins[0].rehearsal_binding["database_schema"] == candidate["database_schema"]
+    assert snapshot.pins[0].rehearsal_binding["allowed_rollback_tree_sha256s"] == (
+        candidate["allowed_rollback_tree_sha256s"]
+    )
     _assert_restore_release_pin(snapshot.pins[0], candidate)
 
 
@@ -896,9 +906,13 @@ def test_rehearsal_contract_rejects_stale_index_epoch_and_noncanonical_checkset(
         expected_journal_sha256=state["journal_sha256"],
     )
     for field, value in (
+        ("index_transaction_id", "f" * 64),
         ("index_revision", authenticated["revision"] - 1),
+        ("index_journal_sha256", "f" * 64),
         ("checkset_sha256", "f" * 64),
         ("four_surface_sha256", "f" * 64),
+        ("database_schema", candidate["database_schema"] + 1),
+        ("rollback_tree_sha256", "f" * 64),
     ):
         receipt = _rehearsal_receipt(candidate, authentication, authenticated, 1421)
         receipt[field] = value
@@ -910,6 +924,96 @@ def test_rehearsal_contract_rejects_stale_index_epoch_and_noncanonical_checkset(
                 expected_journal_sha256=authenticated["journal_sha256"],
             )
     assert index.load() == authenticated
+
+
+def test_published_generation_revalidates_rehearsal_against_durable_exact_binding(
+    tmp_path: Path,
+) -> None:
+    index = _index(tmp_path)
+    candidate = _candidate(tmp_path, 225)
+    clear = _advance(
+        index,
+        candidate,
+        intent="bootstrap_current",
+        ordinal=2250,
+    )
+    assert dr_index.DurableDRGenerationIndex(index.state_directory).load() == clear
+    reference = clear["current"]
+    receipt_path = index.receipt_directory / f"{reference['generation_id']}.json"
+    generation = json.loads(receipt_path.read_bytes())["generation"]
+    binding = generation["rehearsal_binding"]
+    authentication_path = index.receipt_directory / (
+        f"authentication-{generation['authentication_receipt']['sha256']}.json"
+    )
+    rehearsal_path = index.receipt_directory / (
+        f"rehearsal-{generation['rehearsal_receipt']['sha256']}.json"
+    )
+    authentication = json.loads(authentication_path.read_bytes())
+    rehearsal = json.loads(rehearsal_path.read_bytes())
+
+    assert binding == {
+        "allowed_rollback_tree_sha256s": candidate["allowed_rollback_tree_sha256s"],
+        "authentication_receipt_sha256": authentication["receipt_sha256"],
+        "candidate_sha256": hashlib.sha256(_canonical(candidate)).hexdigest(),
+        "database_schema": candidate["database_schema"],
+        "index_journal_sha256": rehearsal["index_journal_sha256"],
+        "index_revision": rehearsal["index_revision"],
+        "index_transaction_id": rehearsal["index_transaction_id"],
+        "schema": dr_index.REHEARSAL_BINDING_SCHEMA,
+    }
+    for field, value in (
+        ("index_transaction_id", "f" * 64),
+        ("index_revision", rehearsal["index_revision"] + 1),
+        ("index_journal_sha256", "f" * 64),
+        ("database_schema", candidate["database_schema"] + 1),
+        ("rollback_tree_sha256", "f" * 64),
+    ):
+        forged = dict(rehearsal)
+        forged[field] = value
+        forged_core = {
+            key: item for key, item in forged.items() if key != "receipt_sha256"
+        }
+        forged["receipt_sha256"] = hashlib.sha256(
+            _canonical(forged_core)
+        ).hexdigest()
+        with pytest.raises(
+            dr_index.DRGenerationIndexError,
+            match="^rehearsal_receipt_invalid$",
+        ):
+            dr_index.validate_rehearsal_receipt(
+                forged,
+                candidate=candidate,
+                authentication_receipt=authentication,
+                index_transaction_id=binding["index_transaction_id"],
+                index_revision=binding["index_revision"],
+                index_journal_sha256=binding["index_journal_sha256"],
+            )
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    (
+        ("database_schema", 47),
+        ("allowed_rollback_tree_sha256s", ["f" * 64]),
+        ("source_transaction_id", "f" * 64),
+    ),
+)
+def test_authentication_contract_exactly_binds_schema_rollback_and_source(
+    tmp_path: Path,
+    field: str,
+    value: object,
+) -> None:
+    candidate = _candidate(tmp_path, 226)
+    receipt = _authentication_receipt(candidate, 2260)
+    receipt[field] = value
+    core = {key: item for key, item in receipt.items() if key != "receipt_sha256"}
+    receipt["receipt_sha256"] = hashlib.sha256(_canonical(core)).hexdigest()
+
+    with pytest.raises(
+        dr_index.DRGenerationIndexError,
+        match="^authentication_receipt_invalid$",
+    ):
+        dr_index.validate_authentication_receipt(receipt, candidate=candidate)
 
 
 def test_persistent_head_fence_blocks_a_b_a_and_explicitly_repairs_forward(
@@ -1105,6 +1209,13 @@ def test_authorized_partial_receipt_staging_is_recovered_without_scanning(tmp_pa
         {
             "authentication_receipt": pending["authentication_receipt"],
             "candidate": pending["candidate"],
+            "rehearsal_binding": dr_index._rehearsal_binding(  # noqa: SLF001
+                candidate=pending["candidate"],
+                authentication_receipt=pending["authentication_receipt"],
+                index_transaction_id=authenticated["transaction_id"],
+                index_revision=authenticated["revision"],
+                index_journal_sha256=authenticated["journal_sha256"],
+            ),
             "rehearsal_receipt": pending["rehearsal_receipt"],
             "schema": dr_index.GENERATION_SCHEMA,
         }
@@ -1430,6 +1541,13 @@ def test_receipt_staging_crash_boundaries_recover_after_ordered_fsyncs(
         {
             "authentication_receipt": pending["authentication_receipt"],
             "candidate": pending["candidate"],
+            "rehearsal_binding": dr_index._rehearsal_binding(  # noqa: SLF001
+                candidate=pending["candidate"],
+                authentication_receipt=pending["authentication_receipt"],
+                index_transaction_id=authenticated["transaction_id"],
+                index_revision=authenticated["revision"],
+                index_journal_sha256=authenticated["journal_sha256"],
+            ),
             "rehearsal_receipt": pending["rehearsal_receipt"],
             "schema": dr_index.GENERATION_SCHEMA,
         }

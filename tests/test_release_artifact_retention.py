@@ -276,8 +276,10 @@ def synthetic_inventory(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict
     ) -> dict[str, Any]:
         digest = lambda label: hashlib.sha256(f"{label}-{ordinal}".encode()).hexdigest()  # noqa: E731
         return {
+            "allowed_rollback_tree_sha256s": [release.record["tree_manifest_sha256"]],
             "backup_directory": str(backup["directory"]),
             "backup_record_sha256": hashlib.sha256(_canonical(backup)).hexdigest(),
+            "database_schema": backup["schema_version"],
             "database_receipt_sha256": str(backup["receipt_sha256"]),
             "engineer_receipt_sha256": str(backup["engineer_receipt_sha256"]),
             "inbox_receipt_sha256": str(backup["inbox_receipt_sha256"]),
@@ -297,6 +299,7 @@ def synthetic_inventory(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict
         directory = Path(candidate["backup_directory"])
         status = directory.stat()
         core = {
+            "allowed_rollback_tree_sha256s": candidate["allowed_rollback_tree_sha256s"],
             "activation_journal_file_sha256": digest("activation-journal-file", ordinal),
             "activation_journal_sha256": digest("activation-journal", ordinal),
             "activation_receipt_file_sha256": digest("activation-receipt-file", ordinal),
@@ -304,8 +307,10 @@ def synthetic_inventory(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict
             "backup_directory": {"device": status.st_dev, "inode": status.st_ino, "path": str(directory)},
             "backup_manifest_sha256": _sha256_file(directory / "manifest.json"),
             "candidate_sha256": hashlib.sha256(_canonical(candidate)).hexdigest(),
+            "database_schema": candidate["database_schema"],
             "restore_operator_sha256": _sha256_file(Path(candidate["restore_release"]["root"]) / "artifacts/immutable_release_operator.py"),
             "schema": retention.dr_index.AUTHENTICATION_RECEIPT_SCHEMA,
+            "source_transaction_id": candidate["source_transaction_id"],
             "status": "authenticated",
             "surface_receipts": {
                 "database": candidate["database_receipt_sha256"],
@@ -329,7 +334,7 @@ def synthetic_inventory(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict
             "check_count": len(retention.dr_index.DR_REHEARSAL_CHECKS),
             "checkset_sha256": retention.dr_index.DR_REHEARSAL_CHECKSET_SHA256,
             "database_foreign_keys_clear": True, "database_integrity_clear": True,
-            "database_reopen_count": 2, "database_schema": 50,
+            "database_reopen_count": 2, "database_schema": candidate["database_schema"],
             "engineer_authority_present": True, "engineer_exact": True,
             "fault_boundary": "after_migration_before_provision_or_network",
             "four_surface_exact": True,
@@ -745,13 +750,24 @@ def test_atomic_dr_snapshot_rejects_mixed_projection_across_index_a_b_a(
     assert not any(item["decision"] == "delete_candidate" for item in plan["targets"])
 
 
-@pytest.mark.parametrize("forgery", ("dr_body", "dr_index", "dr_receipt", "evidence"))
+@pytest.mark.parametrize(
+    "forgery",
+    ("dr_binding", "dr_body", "dr_index", "dr_receipt", "evidence"),
+)
 def test_forged_authority_digest_blocks_every_delete_candidate(
     synthetic_inventory: dict[str, Any],
     forgery: str,
 ) -> None:
     bindings = _bindings(synthetic_inventory)
-    if forgery == "dr_body":
+    if forgery == "dr_binding":
+        current, older = synthetic_inventory["dr_pins"]
+        assert current.rehearsal_binding is not None
+        forged_binding = dict(current.rehearsal_binding)
+        forged_binding["database_schema"] = int(forged_binding["database_schema"]) + 1
+        forged = replace(current, rehearsal_binding=forged_binding)
+        bindings = _bindings(synthetic_inventory, dr_pins=(forged, older))
+        expected = "dr_pins_invalid"
+    elif forgery == "dr_body":
         body = next(synthetic_inventory["dr_index_owner"].receipt_directory.glob("authentication-*.json"))
         body.chmod(0o600)
         body.write_bytes(body.read_bytes() + b" ")

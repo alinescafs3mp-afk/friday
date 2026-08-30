@@ -337,7 +337,7 @@ def _authenticate_locked(
     backup = journal.database_backup(verify_engineer_sqlite_integrity=False)
     if backup is None:
         raise DRGenerationAuthenticationError("dr_activation_backup_missing")
-    _candidate, _previous, fallback = journal.release_identities()
+    _candidate, previous, fallback = journal.release_identities()
     if fallback.max_schema < backup.schema_version:
         raise DRGenerationAuthenticationError("dr_restore_release_schema_incapable")
     restore_release = _release_record(fallback)
@@ -379,9 +379,16 @@ def _authenticate_locked(
         raise DRGenerationAuthenticationError("dr_backup_identity_invalid")
     candidate = dr_index.normalize_generation_candidate(
         {
+            "allowed_rollback_tree_sha256s": sorted(
+                {
+                    previous.tree_manifest_sha256,
+                    fallback.tree_manifest_sha256,
+                }
+            ),
             "backup_directory": str(directory),
             "backup_record_sha256": _sha256(_canonical(raw_backup)),
             "database_receipt_sha256": backup.receipt_sha256,
+            "database_schema": backup.schema_version,
             "engineer_receipt_sha256": backup.engineer_receipt_sha256,
             "inbox_receipt_sha256": backup.inbox_receipt_sha256,
             "obsidian_receipt_sha256": backup.obsidian_receipt_sha256,
@@ -406,6 +413,9 @@ def _authenticate_locked(
         code="dr_restore_operator_invalid",
     )
     receipt_core: dict[str, Any] = {
+        "allowed_rollback_tree_sha256s": list(
+            candidate["allowed_rollback_tree_sha256s"]
+        ),
         "activation_journal_file_sha256": _sha256(journal_raw_before),
         "activation_journal_sha256": activation_journal_sha256,
         "activation_receipt_file_sha256": _sha256(activation_raw),
@@ -417,8 +427,10 @@ def _authenticate_locked(
         },
         "backup_manifest_sha256": _sha256(backup_manifest_raw),
         "candidate_sha256": candidate_sha256,
+        "database_schema": candidate["database_schema"],
         "restore_operator_sha256": _sha256(operator_raw),
         "schema": AUTHENTICATION_RECEIPT_SCHEMA,
+        "source_transaction_id": candidate["source_transaction_id"],
         "status": "authenticated",
         "surface_receipts": {
             "database": backup.receipt_sha256,
@@ -439,7 +451,7 @@ def _authenticate_locked(
         private=False,
     )
     backup_after = journal.database_backup(verify_engineer_sqlite_integrity=False)
-    _candidate_after, _previous_after, fallback_after = journal.release_identities()
+    _candidate_after, previous_after, fallback_after = journal.release_identities()
     restore_release_after = _release_record(fallback_after)
     backup_manifest_after, manifest_status_after = _stable_private_file(
         backup_manifest,
@@ -461,6 +473,7 @@ def _authenticate_locked(
         or _directory_identity(backup_root) != backup_root_identity
         or _directory_identity(directory) != directory_identity_before
         or backup_after != backup
+        or previous_after != previous
         or fallback_after != fallback
         or restore_release_after != restore_release
         or backup_manifest_after != backup_manifest_raw
@@ -514,6 +527,8 @@ def reauthenticate_generation_candidate(
         files_raw = manifest.get("files")
         if type(schema_version) is not int or schema_version <= 0 or not isinstance(files_raw, list):
             raise DRGenerationAuthenticationError("dr_retained_backup_manifest_invalid")
+        if schema_version != normalized["database_schema"]:
+            raise DRGenerationAuthenticationError("dr_retained_backup_schema_mismatch")
         allowed = {
             "database.sqlite3",
             "database.sqlite3-wal",
@@ -651,6 +666,8 @@ def reauthenticate_generation_candidate(
         release_operator.verify_release_tree(fallback)
         if _release_record(fallback) != restore:
             raise DRGenerationAuthenticationError("dr_retained_restore_release_mismatch")
+        if fallback.tree_manifest_sha256 not in normalized["allowed_rollback_tree_sha256s"]:
+            raise DRGenerationAuthenticationError("dr_retained_rollback_identity_mismatch")
         operator_raw, operator_status = _stable_private_file(
             fallback.root / "artifacts/immutable_release_operator.py",
             maximum=4 << 20,

@@ -119,6 +119,7 @@ class DRGenerationPin:
     authentication_receipt_sha256: str | None
     rehearsal_receipt_path: Path | None
     rehearsal_receipt_sha256: str | None
+    rehearsal_binding: dict[str, Any] | None
     restore_release_root: Path
     restore_release_commit: str
     restore_release_tree_manifest_sha256: str
@@ -777,6 +778,11 @@ def _normalize_authority_bindings(
                 authentication_receipt_sha256=pin.authentication_receipt_sha256,
                 rehearsal_receipt_path=pin.rehearsal_receipt_path,
                 rehearsal_receipt_sha256=pin.rehearsal_receipt_sha256,
+                rehearsal_binding=(
+                    dict(pin.rehearsal_binding)
+                    if pin.rehearsal_binding is not None
+                    else None
+                ),
                 restore_release_root=pin.restore_release_root,
                 restore_release_commit=pin.restore_release_commit,
                 restore_release_tree_manifest_sha256=(pin.restore_release_tree_manifest_sha256),
@@ -859,6 +865,7 @@ def _normalize_authority_bindings(
         authentication_path: Path | None = None
         rehearsal_path: Path | None = None
         authentication_body: dict[str, Any] | None = None
+        authentication_reference: dict[str, str] | None = None
         if pin.authentication_receipt_path is not None:
             if (
                 not _is_hex64(pin.authentication_receipt_sha256)
@@ -937,22 +944,31 @@ def _normalize_authority_bindings(
                         raise RetentionPlanError("dr_pins_invalid")
                     if authentication_body is None:
                         raise RetentionPlanError("dr_pins_invalid")
+                    if authentication_reference is None or pin.rehearsal_binding is None:
+                        raise RetentionPlanError("dr_pins_invalid")
+                    rehearsal_binding = dr_index._normalize_rehearsal_binding(  # noqa: SLF001
+                        pin.rehearsal_binding,
+                        candidate=candidate,
+                        authentication_receipt=authentication_reference,
+                    )
                     rehearsal_reference, _raw, _payload = dr_index.validate_rehearsal_receipt(
                         rehearsal_body,
                         candidate=candidate,
                         authentication_receipt=authentication_body,
-                        index_transaction_id=str(rehearsal_body.get("index_transaction_id") or ""),
-                        index_revision=rehearsal_body.get("index_revision"),
-                        index_journal_sha256=str(rehearsal_body.get("index_journal_sha256") or ""),
+                        index_transaction_id=rehearsal_binding["index_transaction_id"],
+                        index_revision=rehearsal_binding["index_revision"],
+                        index_journal_sha256=rehearsal_binding["index_journal_sha256"],
                     )
                     if rehearsal_reference["sha256"] != pin.rehearsal_receipt_sha256:
                         raise RetentionPlanError("dr_pins_invalid")
                 except (RetentionPlanError, dr_index.DRGenerationIndexError):
                     error = error or "dr_pins_invalid"
-        elif pin.rehearsal_receipt_sha256 is not None:
+        elif pin.rehearsal_receipt_sha256 is not None or pin.rehearsal_binding is not None:
             error = error or "dr_pins_invalid"
         if pin.role in {"current", "older"} and (
-            authentication_path is None or rehearsal_path is None
+            authentication_path is None
+            or rehearsal_path is None
+            or pin.rehearsal_binding is None
         ):
             error = error or "dr_pins_invalid"
         if (
@@ -1008,6 +1024,7 @@ def _normalize_authority_bindings(
                 "authentication_receipt_sha256": pin.authentication_receipt_sha256,
                 "rehearsal_receipt_path": str(rehearsal_path) if rehearsal_path is not None else None,
                 "rehearsal_receipt_sha256": pin.rehearsal_receipt_sha256,
+                "rehearsal_binding": pin.rehearsal_binding,
                 "restore_release": {
                     **restore_record,
                     "wheel_sha256": pin.restore_release_wheel_sha256,
