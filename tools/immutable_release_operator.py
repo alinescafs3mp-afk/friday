@@ -48,7 +48,8 @@ BUILD_RECEIPT_SCHEMA = "friday.immutable-wheel-release.v1"
 ACTIVATION_RECEIPT_SCHEMA = "friday.immutable-release-activation.v1"
 DR_ENROLLMENT_RECEIPT_SCHEMA = "friday.immutable-release-dr-enrollment-receipt.v1"
 ACTIVATION_JOURNAL_SCHEMA = "friday.immutable-release-activation-journal.v1"
-UNIT_INSTALL_JOURNAL_SCHEMA = "friday.immutable-release-unit-install-journal.v1"
+UNIT_INSTALL_JOURNAL_SCHEMA = "friday.immutable-release-unit-install-journal.v2"
+_LEGACY_UNIT_INSTALL_JOURNAL_SCHEMA = "friday.immutable-release-unit-install-journal.v1"
 ALBUM_RECOVERY_SCHEMA = "friday.telegram-historical-album-recovery.v1"
 ALBUM_RECOVERY_PENDING_RECEIPT_SCHEMA = "friday.telegram-historical-album-recovery-pending-receipt.v1"
 ALBUM_RECOVERY_RECEIPT_SCHEMA = "friday.telegram-historical-album-recovery-receipt.v1"
@@ -192,14 +193,35 @@ _RELEASE_RETENTION_TOOLCHAIN_PACKAGE_FILES = (
     "__init__.py",
     *_RELEASE_RETENTION_TOOLCHAIN_MODULES,
 )
-_RETENTION_APPLY_JOURNAL_SCHEMA = "friday.release-artifact-retention-apply-journal.v3"
-_RETENTION_APPLY_RECEIPT_SCHEMA = "friday.release-artifact-retention-apply-receipt.v2"
+_RETENTION_APPLY_JOURNAL_SCHEMA = "friday.release-artifact-retention-apply-journal.v4"
+_RETENTION_APPLY_RECEIPT_SCHEMA = "friday.release-artifact-retention-apply-receipt.v3"
+_RETENTION_CONVERGENCE_RECEIPT_SCHEMA = "friday.release-artifact-retention-convergence-receipt.v1"
 _RETENTION_PLAN_SCHEMA = "friday.release-artifact-retention-plan.v3"
 _RETENTION_SCOPE_SCHEMA = "friday.release-artifact-retention-scope.v1"
 _RETENTION_APPLY_JOURNAL_NAME = "release-artifact-retention-apply.v1.json"
 _RETENTION_APPLY_PLAN_DIRECTORY = "release-artifact-retention-plans.v1"
 _RETENTION_APPLY_RECEIPT_DIRECTORY = "release-artifact-retention-receipts.v1"
 _RETENTION_OBJECT_AUTHORITY_DIRECTORY = "release-artifact-retention-object-authority.v1"
+_RETENTION_MAX_BATCH_CANDIDATES = 16
+_RETENTION_BOUNDED_EFFECT_CONTOUR = "sealed-localfs-proc-mount-kernel-lease-global-lock-v1"
+_RETENTION_THREAT_BOUNDARY = "non_hostile_same_euid_and_root_admin_no_concurrent_open_attempts"
+# The deployed 0.207.90 unit journal is the sole v1 bridge.  Every byte and
+# both embedded receipts are pinned; no generic legacy reader exists.
+_LEGACY_020790_UNIT_INSTALL_FILE_SHA256 = "8e2ede719cb02d5cac4c115d522f75092702c764812a2164a1593c4eea952996"
+_LEGACY_020790_UNIT_INSTALL_JOURNAL_SHA256 = (
+    "eb2271de881c947c148fc111e61cb9fbee38ff2a89166cb9ae9795eecf776d3f"
+)
+_LEGACY_020790_UNIT_INSTALL_RECEIPT_SHA256 = (
+    "ecd1a2208774031709421b07759431d0dbc14640f077e36cabe223930edeb4ca"
+)
+_LEGACY_020790_UNIT_INSTALL_CANDIDATE_COMMIT = "7abb3c5e3fb29bdc7c53bf923f8b218fa26f07e9"
+_LEGACY_020790_UNIT_INSTALL_CANDIDATE_TREE_SHA256 = (
+    "c1c29331db489ad1c56080d70a8c37d4051b4752f1309dba9c0a012099ebcae5"
+)
+_LEGACY_020790_UNIT_INSTALL_PREVIOUS_COMMIT = "ff8c62926e7c7ea9cfcd53c460f9a0608d83621c"
+_LEGACY_020790_UNIT_INSTALL_PREVIOUS_TREE_SHA256 = (
+    "e93ddd133ebefec5ec0f9f8525d96123c822f411494c04951724f0e73be388a1"
+)
 # One release predates code-owned activation-receipt persistence.  The bridge is
 # deliberately an exact, one-shot production identity rather than a generic
 # legacy reader or a pathname search.
@@ -14985,6 +15007,141 @@ _UNIT_SURFACE_KEYS = (
 _LEGACY_PRIVATE_TMP_SECURITY = b"[Service]\nLimitCORE=0\nPrivateTmp=true\n"
 _RECOVERY_PRIVATE_TMP_SECURITY = b"[Service]\nLimitCORE=0\nPrivateTmp=false\n"
 
+_RETENTION_ADMISSION_KEYS = frozenset(
+    {
+        "accepted_root_plan_sha256",
+        "activation_receipt_file_sha256",
+        "activation_receipt_sha256",
+        "batch_ordinal",
+        "current_candidate_sha256",
+        "current_generation_id",
+        "current_generation_receipt_sha256",
+        "cycle_sha256",
+        "index_journal_sha256",
+        "index_revision",
+        "older_candidate_sha256",
+        "older_generation_id",
+        "older_generation_receipt_sha256",
+        "receipt_sha256",
+        "retention_scope_schema",
+        "retention_scope_sha256",
+        "reviewed_full_candidate_set_sha256",
+        "schema",
+        "status",
+        "terminal_apply_receipt_sha256",
+    }
+)
+
+
+def _validated_retention_release_admission(
+    value: Mapping[str, Any],
+    *,
+    expected_activation_receipt_file_sha256: str | None = None,
+    expected_activation_receipt_sha256: str | None = None,
+    allow_first_v2_deferred: bool,
+) -> dict[str, Any]:
+    """Host-validate the body-free receipt returned by the sealed candidate."""
+
+    if not isinstance(value, dict):
+        raise ReleaseFailure("retention_release_admission_invalid")
+    receipt = dict(value)
+    core = {key: item for key, item in receipt.items() if key != "receipt_sha256"}
+    status = receipt.get("status")
+    batch_ordinal = receipt.get("batch_ordinal")
+    scope_schema = receipt.get("retention_scope_schema")
+    scope_sha256 = receipt.get("retention_scope_sha256")
+    if (
+        set(receipt) != _RETENTION_ADMISSION_KEYS
+        or receipt.get("schema") != _RETENTION_CONVERGENCE_RECEIPT_SCHEMA
+        or status not in {"converged", "first_v2_deferred"}
+        or (status == "first_v2_deferred" and not allow_first_v2_deferred)
+        or type(receipt.get("index_revision")) is not int
+        or int(receipt["index_revision"]) < 0
+        or any(
+            _HEX64.fullmatch(str(receipt.get(key) or "")) is None
+            for key in (
+                "activation_receipt_file_sha256",
+                "activation_receipt_sha256",
+                "current_candidate_sha256",
+                "current_generation_id",
+                "current_generation_receipt_sha256",
+                "index_journal_sha256",
+                "older_candidate_sha256",
+                "older_generation_id",
+                "older_generation_receipt_sha256",
+                "receipt_sha256",
+            )
+        )
+        or receipt["receipt_sha256"] != _sha256_bytes(_canonical_json(core))
+        or (
+            expected_activation_receipt_file_sha256 is not None
+            and receipt.get("activation_receipt_file_sha256")
+            != _closed_hash(
+                expected_activation_receipt_file_sha256,
+                "retention_release_admission_invalid",
+            )
+        )
+        or (
+            expected_activation_receipt_sha256 is not None
+            and receipt.get("activation_receipt_sha256")
+            != _closed_hash(
+                expected_activation_receipt_sha256,
+                "retention_release_admission_invalid",
+            )
+        )
+    ):
+        raise ReleaseFailure("retention_release_admission_invalid")
+    convergence_fields = (
+        "accepted_root_plan_sha256",
+        "cycle_sha256",
+        "reviewed_full_candidate_set_sha256",
+        "terminal_apply_receipt_sha256",
+    )
+    if status == "converged":
+        if (
+            type(batch_ordinal) is not int
+            or int(batch_ordinal) < 0
+            or any(_HEX64.fullmatch(str(receipt.get(key) or "")) is None for key in convergence_fields)
+            or scope_schema != _RETENTION_SCOPE_SCHEMA
+            or _HEX64.fullmatch(str(scope_sha256 or "")) is None
+        ):
+            raise ReleaseFailure("retention_release_admission_invalid")
+    elif (
+        batch_ordinal != -1
+        or any(receipt.get(key) != "" for key in convergence_fields)
+        or not (
+            (scope_schema == "" and scope_sha256 == "")
+            or (
+                scope_schema == _RETENTION_SCOPE_SCHEMA
+                and _HEX64.fullmatch(str(scope_sha256 or "")) is not None
+            )
+        )
+    ):
+        raise ReleaseFailure("retention_release_admission_invalid")
+    return receipt
+
+
+def _unit_install_transaction_id(value: Mapping[str, Any]) -> str:
+    """Derive the v2 crash transaction from its complete immutable authority."""
+
+    return _sha256_bytes(
+        _canonical_json(
+            {
+                "candidate": value["candidate"],
+                "candidate_unit_hashes": value["candidate_unit_hashes"],
+                "legacy_bootstrap_unit_install_file_sha256": value[
+                    "legacy_bootstrap_unit_install_file_sha256"
+                ],
+                "previous": value["previous"],
+                "retention_admission": value["retention_admission"],
+                "retention_admission_receipt_sha256": value["retention_admission_receipt_sha256"],
+                "schema": UNIT_INSTALL_JOURNAL_SCHEMA,
+                "transition_root": value["transition_root"],
+                "transition_unit_hashes": value["transition_unit_hashes"],
+            }
+        )
+    )
+
 
 def _unit_runtime_directory_name(unit: str) -> str:
     names = {
@@ -15069,13 +15226,20 @@ class DurableUnitInstallJournal:
             payload = _unique_json(raw.decode("ascii"))
         except (UnicodeError, ValueError, json.JSONDecodeError) as exc:
             raise ReleaseFailure("unit_install_journal_invalid") from exc
+        if raw != _canonical_json(payload) + b"\n":
+            raise ReleaseFailure("unit_install_journal_invalid")
+        if payload.get("schema") == _LEGACY_UNIT_INSTALL_JOURNAL_SCHEMA:
+            return self._read_exact_legacy(raw, payload)
         expected = {
             "candidate",
             "candidate_unit_hashes",
             "journal_sha256",
+            "legacy_bootstrap_unit_install_file_sha256",
             "phase",
             "previous",
             "receipt_sha256",
+            "retention_admission",
+            "retention_admission_receipt_sha256",
             "schema",
             "transaction_id",
             "transition_root",
@@ -15103,21 +15267,32 @@ class DurableUnitInstallJournal:
             )
         candidate_hashes = payload.get("candidate_unit_hashes")
         transition_hashes = payload.get("transition_unit_hashes")
-        if not isinstance(candidate_hashes, dict) or frozenset(candidate_hashes) not in {
-            frozenset(_RUNTIME_UNIT_NAMES),
-            frozenset(_UNIT_SURFACE_KEYS),
-        }:
+        if not isinstance(candidate_hashes, dict) or set(candidate_hashes) != set(_UNIT_SURFACE_KEYS):
             raise ReleaseFailure("unit_install_journal_invalid")
         if not isinstance(transition_hashes, dict) or set(transition_hashes) != set(_RUNTIME_UNIT_NAMES):
             raise ReleaseFailure("unit_install_journal_invalid")
         for hashes in (candidate_hashes, transition_hashes):
             for digest in hashes.values():
                 _closed_hash(str(digest or ""), "unit_install_journal_invalid")
-        if phase != "complete" and set(candidate_hashes) == set(_RUNTIME_UNIT_NAMES):
-            # Legacy two-file transactions may only be read at their durable
-            # terminal boundary.  An unfinished one must be resumed by the
-            # exact older sealed operator which created it.
-            raise ReleaseFailure("unit_install_journal_legacy_unfinished")
+        admission_digest = _closed_hash(
+            str(payload.get("retention_admission_receipt_sha256") or ""),
+            "unit_install_journal_invalid",
+        )
+        bootstrap_digest = str(payload.get("legacy_bootstrap_unit_install_file_sha256") or "")
+        allow_first_v2 = bootstrap_digest == _LEGACY_020790_UNIT_INSTALL_FILE_SHA256
+        if bootstrap_digest not in {"", _LEGACY_020790_UNIT_INSTALL_FILE_SHA256}:
+            raise ReleaseFailure("unit_install_journal_invalid")
+        admission = _validated_retention_release_admission(
+            payload.get("retention_admission"),
+            allow_first_v2_deferred=allow_first_v2,
+        )
+        if (
+            admission["receipt_sha256"] != admission_digest
+            or (admission["status"] == "first_v2_deferred") != allow_first_v2
+        ):
+            raise ReleaseFailure("unit_install_journal_invalid")
+        if payload["transaction_id"] != _unit_install_transaction_id(payload):
+            raise ReleaseFailure("unit_install_journal_invalid")
         if phase == "complete":
             candidate = payload["candidate"]
             previous = payload["previous"]
@@ -15126,6 +15301,8 @@ class DurableUnitInstallJournal:
                     {
                         "candidate_tree_sha256": candidate["tree_manifest_sha256"],
                         "previous_tree_sha256": previous["tree_manifest_sha256"],
+                        "retention_admission": admission,
+                        "retention_admission_receipt_sha256": admission_digest,
                         "unit_hashes": payload["candidate_unit_hashes"],
                     }
                 )
@@ -15135,6 +15312,104 @@ class DurableUnitInstallJournal:
         self._state = payload
         return dict(payload)
 
+    def _read_exact_legacy(self, raw: bytes, payload: dict[str, Any]) -> dict[str, Any]:
+        expected = {
+            "candidate",
+            "candidate_unit_hashes",
+            "journal_sha256",
+            "phase",
+            "previous",
+            "receipt_sha256",
+            "schema",
+            "transaction_id",
+            "transition_root",
+            "transition_unit_hashes",
+        }
+        supplied = str(payload.get("journal_sha256") or "")
+        core = {key: value for key, value in payload.items() if key != "journal_sha256"}
+        candidate = payload.get("candidate")
+        previous = payload.get("previous")
+        if (
+            set(payload) != expected
+            or _sha256_bytes(raw) != _LEGACY_020790_UNIT_INSTALL_FILE_SHA256
+            or supplied != _LEGACY_020790_UNIT_INSTALL_JOURNAL_SHA256
+            or supplied != _sha256_bytes(_canonical_json(core))
+            or payload.get("phase") != "complete"
+            or payload.get("receipt_sha256") != _LEGACY_020790_UNIT_INSTALL_RECEIPT_SHA256
+            or not isinstance(candidate, dict)
+            or not isinstance(previous, dict)
+            or candidate.get("commit") != _LEGACY_020790_UNIT_INSTALL_CANDIDATE_COMMIT
+            or candidate.get("tree_manifest_sha256") != _LEGACY_020790_UNIT_INSTALL_CANDIDATE_TREE_SHA256
+            or candidate.get("version") != "0.207.90"
+            or previous.get("commit") != _LEGACY_020790_UNIT_INSTALL_PREVIOUS_COMMIT
+            or previous.get("tree_manifest_sha256") != _LEGACY_020790_UNIT_INSTALL_PREVIOUS_TREE_SHA256
+            or previous.get("version") != "0.207.84"
+        ):
+            raise ReleaseFailure("unit_install_journal_legacy_invalid")
+        for key in ("candidate", "previous"):
+            _validate_journal_release_record(payload.get(key), code="unit_install_journal_legacy_invalid")
+        candidate_hashes = payload.get("candidate_unit_hashes")
+        transition_hashes = payload.get("transition_unit_hashes")
+        if (
+            not isinstance(candidate_hashes, dict)
+            or set(candidate_hashes) != set(_UNIT_SURFACE_KEYS)
+            or not isinstance(transition_hashes, dict)
+            or set(transition_hashes) != set(_RUNTIME_UNIT_NAMES)
+            or any(
+                _HEX64.fullmatch(str(digest or "")) is None
+                for hashes in (candidate_hashes, transition_hashes)
+                for digest in hashes.values()
+            )
+        ):
+            raise ReleaseFailure("unit_install_journal_legacy_invalid")
+        expected_receipt = _sha256_bytes(
+            _canonical_json(
+                {
+                    "candidate_tree_sha256": candidate["tree_manifest_sha256"],
+                    "previous_tree_sha256": previous["tree_manifest_sha256"],
+                    "unit_hashes": candidate_hashes,
+                }
+            )
+        )
+        if expected_receipt != payload["receipt_sha256"]:
+            raise ReleaseFailure("unit_install_journal_legacy_invalid")
+        self._state = payload
+        return dict(payload)
+
+    def retention_admission_for(
+        self,
+        *,
+        candidate: ReleaseIdentity,
+        previous: ReleaseIdentity,
+    ) -> tuple[dict[str, Any] | None, bool]:
+        """Return only a same-transaction durable admission, plus bootstrap authority."""
+
+        if not self.path.exists() and not self.path.is_symlink():
+            return None, False
+        current = self._read()
+        candidate_record = _journal_release(candidate)
+        previous_record = _journal_release(previous)
+        same_identity = (
+            current.get("candidate") == candidate_record and current.get("previous") == previous_record
+        )
+        if current.get("schema") == UNIT_INSTALL_JOURNAL_SCHEMA and same_identity:
+            bootstrap = (
+                current.get("legacy_bootstrap_unit_install_file_sha256")
+                == _LEGACY_020790_UNIT_INSTALL_FILE_SHA256
+            )
+            admission = _validated_retention_release_admission(
+                current.get("retention_admission"),
+                allow_first_v2_deferred=bootstrap,
+            )
+            return admission, bootstrap
+        if same_identity:
+            raise ReleaseFailure("completed_unit_install_identity_changed")
+        if current.get("phase") != "complete":
+            raise ReleaseFailure("unfinished_unit_install_identity_changed")
+        if current.get("candidate") != previous_record:
+            raise ReleaseFailure("unit_install_predecessor_chain_invalid")
+        return None, current.get("schema") == _LEGACY_UNIT_INSTALL_JOURNAL_SCHEMA
+
     def begin_or_resume(
         self,
         *,
@@ -15143,6 +15418,7 @@ class DurableUnitInstallJournal:
         transition_root: Path,
         candidate_unit_hashes: Mapping[str, str],
         transition_unit_hashes: Mapping[str, str],
+        retention_admission: Mapping[str, Any],
     ) -> Mapping[str, Any]:
         identity = {
             "candidate": _journal_release(candidate),
@@ -15151,24 +15427,42 @@ class DurableUnitInstallJournal:
             "candidate_unit_hashes": dict(candidate_unit_hashes),
             "transition_unit_hashes": dict(transition_unit_hashes),
         }
+        durable_admission, legacy_bootstrap = self.retention_admission_for(
+            candidate=candidate,
+            previous=previous,
+        )
+        admission = _validated_retention_release_admission(
+            dict(retention_admission),
+            allow_first_v2_deferred=legacy_bootstrap,
+        )
+        if durable_admission is not None:
+            if durable_admission != admission:
+                raise ReleaseFailure("unit_install_retention_admission_changed")
+            current = dict(self._state or self._read())
+            if any(current.get(key) != item for key, item in identity.items()):
+                code = (
+                    "completed_unit_install_identity_changed"
+                    if current.get("phase") == "complete"
+                    else "unfinished_unit_install_identity_changed"
+                )
+                raise ReleaseFailure(code)
+            return current
         if self.path.exists() or self.path.is_symlink():
             current = self._read()
-            current_identity = {key: current[key] for key in identity}
-            if current_identity == identity:
-                return current
-            if current["phase"] != "complete":
-                raise ReleaseFailure("unfinished_unit_install_identity_changed")
-            if current["candidate"] == identity["candidate"] and set(current["candidate_unit_hashes"]) == set(
-                _UNIT_SURFACE_KEYS
-            ):
-                raise ReleaseFailure("completed_unit_install_identity_changed")
+            if current["phase"] != "complete" or current["candidate"] != identity["previous"]:
+                raise ReleaseFailure("unit_install_predecessor_chain_invalid")
         core = {
             "schema": UNIT_INSTALL_JOURNAL_SCHEMA,
-            "transaction_id": os.urandom(32).hex(),
             "phase": "prepared",
             **identity,
+            "legacy_bootstrap_unit_install_file_sha256": (
+                _LEGACY_020790_UNIT_INSTALL_FILE_SHA256 if legacy_bootstrap else ""
+            ),
+            "retention_admission": admission,
+            "retention_admission_receipt_sha256": admission["receipt_sha256"],
             "receipt_sha256": "",
         }
+        core["transaction_id"] = _unit_install_transaction_id(core)
         self._write(core)
         return core
 
@@ -15194,9 +15488,17 @@ class DurableUnitInstallJournal:
         return self._read()
 
 
-def _require_completed_unit_install(state_dir: Path, candidate: ReleaseIdentity) -> None:
+def _require_completed_unit_install(
+    state_dir: Path,
+    candidate: ReleaseIdentity,
+    previous: ReleaseIdentity | None = None,
+) -> None:
     state = DurableUnitInstallJournal(state_dir / "immutable-release-unit-install.v1.json").load()
-    if state.get("phase") != "complete" or state.get("candidate") != _journal_release(candidate):
+    if (
+        state.get("phase") != "complete"
+        or state.get("candidate") != _journal_release(candidate)
+        or (previous is not None and state.get("previous") != _journal_release(previous))
+    ):
         raise ReleaseFailure("unit_install_not_complete_for_candidate")
 
 
@@ -15286,6 +15588,10 @@ def _require_retention_apply_quiesced(state_dir: Path) -> None:
     if journal is None:
         return
     expected = {
+        "accepted_root_plan_path",
+        "accepted_root_plan_sha256",
+        "batch_ordinal",
+        "cycle_sha256",
         "durable_plan",
         "entries",
         "filesystem_after",
@@ -15293,9 +15599,12 @@ def _require_retention_apply_quiesced(state_dir: Path) -> None:
         "journal_sha256",
         "phase",
         "plan_sha256",
+        "previous_receipt_sha256",
         "receipt_sha256",
+        "retention_epoch_sha256",
         "retention_scope_schema",
         "retention_scope_sha256",
+        "reviewed_full_candidate_set_sha256",
         "schema",
         "transaction_id",
     }
@@ -15304,12 +15613,18 @@ def _require_retention_apply_quiesced(state_dir: Path) -> None:
     transaction_id = str(journal.get("transaction_id") or "")
     plan_sha256 = str(journal.get("plan_sha256") or "")
     receipt_sha256 = str(journal.get("receipt_sha256") or "")
+    batch_ordinal = journal.get("batch_ordinal")
+    previous_receipt_sha256 = str(journal.get("previous_receipt_sha256") or "")
+    accepted_root_plan_path = str(journal.get("accepted_root_plan_path") or "")
     durable_plan = journal.get("durable_plan")
     expected_plan_path = state_dir / _RETENTION_APPLY_PLAN_DIRECTORY / f"plan-{plan_sha256}.json"
     expected_transaction_id = _sha256_bytes(
         _canonical_json(
             {
+                "batch_ordinal": batch_ordinal,
+                "cycle_sha256": journal.get("cycle_sha256"),
                 "plan_sha256": plan_sha256,
+                "previous_receipt_sha256": previous_receipt_sha256,
                 "schema": _RETENTION_APPLY_JOURNAL_SCHEMA,
             }
         )
@@ -15322,6 +15637,22 @@ def _require_retention_apply_quiesced(state_dir: Path) -> None:
         or _HEX64.fullmatch(transaction_id) is None
         or transaction_id != expected_transaction_id
         or _HEX64.fullmatch(plan_sha256) is None
+        or not Path(accepted_root_plan_path).is_absolute()
+        or Path(os.path.abspath(accepted_root_plan_path)) != Path(accepted_root_plan_path)
+        or any(character in accepted_root_plan_path for character in "\x00\r\n")
+        or type(batch_ordinal) is not int
+        or not 0 <= int(batch_ordinal) <= 1_000_000
+        or (batch_ordinal == 0 and previous_receipt_sha256 != "")
+        or (batch_ordinal > 0 and _HEX64.fullmatch(previous_receipt_sha256) is None)
+        or any(
+            _HEX64.fullmatch(str(journal.get(key) or "")) is None
+            for key in (
+                "accepted_root_plan_sha256",
+                "cycle_sha256",
+                "retention_epoch_sha256",
+                "reviewed_full_candidate_set_sha256",
+            )
+        )
         or journal.get("retention_scope_schema") != _RETENTION_SCOPE_SCHEMA
         or _HEX64.fullmatch(str(journal.get("retention_scope_sha256") or "")) is None
         or not isinstance(durable_plan, dict)
@@ -15338,7 +15669,7 @@ def _require_retention_apply_quiesced(state_dir: Path) -> None:
         raise ReleaseFailure("retention_apply_journal_invalid")
     if journal.get("phase") != "applied":
         raise ReleaseFailure("unfinished_retention_apply_requires_recovery")
-    if _HEX64.fullmatch(receipt_sha256) is None:
+    if _HEX64.fullmatch(receipt_sha256) is None or len(journal["entries"]) > _RETENTION_MAX_BATCH_CANDIDATES:
         raise ReleaseFailure("retention_apply_journal_invalid")
     entries = [
         _validate_retention_apply_entry(
@@ -15370,13 +15701,18 @@ def _require_retention_apply_quiesced(state_dir: Path) -> None:
     receipt = _read_retention_apply_record(receipt_path)
     assert receipt is not None
     receipt_expected = {
+        "accepted_root_plan_sha256",
         "actual_deleted_inodes",
         "actual_deleted_logical_bytes",
+        "admission_reason",
+        "admission_status",
         "allocated_bytes_are_not_exact_physical_attribution",
         "authority_bindings_sha256",
+        "batch_ordinal",
         "bounded_effect_contour",
         "candidate_set_sha256",
         "concurrent_open_attempts_excluded",
+        "cycle_sha256",
         "deleted_authenticated_allocated_bytes",
         "deleted_candidate_count",
         "filesystem_after",
@@ -15386,11 +15722,14 @@ def _require_retention_apply_quiesced(state_dir: Path) -> None:
         "pre_delete_authenticated_allocated_bytes",
         "pre_delete_authenticated_bytes",
         "pre_delete_authenticated_inodes",
+        "previous_receipt_sha256",
         "privileged_probe_role",
         "receipt_sha256",
         "residual_authority_set_sha256",
+        "retention_epoch_sha256",
         "retention_scope_schema",
         "retention_scope_sha256",
+        "reviewed_full_candidate_set_sha256",
         "schema",
         "status",
         "statvfs_available_delta_bytes",
@@ -15417,6 +15756,26 @@ def _require_retention_apply_quiesced(state_dir: Path) -> None:
     logical_bytes = sum(int(item["actual_bytes"]) for item in entries)
     allocated_bytes = sum(int(item["actual_allocated_bytes"]) for item in entries)
     inodes = sum(int(item["actual_inodes"]) for item in entries)
+    admission_status = receipt.get("admission_status")
+    admission_reason = receipt.get("admission_reason")
+    exact_terminal_zero = not entries and admission_status == "release_admissible"
+    open_inventory = plan.get("open_inventory")
+    terminal_plan_valid = bool(
+        exact_terminal_zero
+        and plan.get("apply_authority") is False
+        and isinstance(open_inventory, dict)
+        and open_inventory.get("source") == "code_owned_no_delete_candidates_v1"
+        and all(
+            isinstance(records, list)
+            and not any(
+                isinstance(item, dict) and item.get("reason") in {"deferred_batch_bound", "open_reference"}
+                for item in records
+            )
+            for records in (plan.get("targets"), plan.get("backup_targets"))
+        )
+        and journal.get("filesystem_before") == []
+        and journal.get("filesystem_after") == []
+    )
     if (
         set(receipt) != receipt_expected
         or receipt.get("schema") != _RETENTION_APPLY_RECEIPT_SCHEMA
@@ -15424,12 +15783,33 @@ def _require_retention_apply_quiesced(state_dir: Path) -> None:
         or receipt.get("receipt_sha256") != receipt_sha256
         or receipt_sha256 != _sha256_bytes(_canonical_json(receipt_core))
         or receipt.get("transaction_id") != transaction_id
+        or receipt.get("accepted_root_plan_sha256") != journal.get("accepted_root_plan_sha256")
+        or receipt.get("batch_ordinal") != batch_ordinal
+        or receipt.get("cycle_sha256") != journal.get("cycle_sha256")
+        or receipt.get("previous_receipt_sha256") != previous_receipt_sha256
+        or receipt.get("retention_epoch_sha256") != journal.get("retention_epoch_sha256")
+        or receipt.get("reviewed_full_candidate_set_sha256")
+        != journal.get("reviewed_full_candidate_set_sha256")
         or receipt.get("plan_sha256") != plan_sha256
         or receipt.get("retention_scope_schema") != journal.get("retention_scope_schema")
         or receipt.get("retention_scope_sha256") != journal.get("retention_scope_sha256")
         or receipt.get("candidate_set_sha256") != candidate_set_sha256
         or receipt.get("residual_authority_set_sha256") != residual_set_sha256
+        or type(receipt.get("deleted_candidate_count")) is not int
         or receipt.get("deleted_candidate_count") != len(entries)
+        or not 0 <= int(receipt["deleted_candidate_count"]) <= _RETENTION_MAX_BATCH_CANDIDATES
+        or any(
+            type(receipt.get(key)) is not int
+            for key in (
+                "actual_deleted_inodes",
+                "actual_deleted_logical_bytes",
+                "deleted_authenticated_allocated_bytes",
+                "pre_delete_authenticated_allocated_bytes",
+                "pre_delete_authenticated_bytes",
+                "pre_delete_authenticated_inodes",
+                "statvfs_available_delta_bytes",
+            )
+        )
         or receipt.get("pre_delete_authenticated_bytes") != logical_bytes
         or receipt.get("actual_deleted_logical_bytes") != logical_bytes
         or receipt.get("pre_delete_authenticated_allocated_bytes") != allocated_bytes
@@ -15441,6 +15821,23 @@ def _require_retention_apply_quiesced(state_dir: Path) -> None:
         or _HEX64.fullmatch(str(receipt.get("authority_bindings_sha256") or "")) is None
         or receipt.get("terminal_absence_observed") is not True
         or receipt.get("post_apply_reauthenticated") is not True
+        or receipt.get("bounded_effect_contour") != _RETENTION_BOUNDED_EFFECT_CONTOUR
+        or receipt.get("concurrent_open_attempts_excluded") is not True
+        or receipt.get("privileged_probe_role") != "diagnostic_prerequisite"
+        or receipt.get("threat_boundary") != _RETENTION_THREAT_BOUNDARY
+        or receipt.get("universal_absence_proof") is not False
+        or receipt.get("allocated_bytes_are_not_exact_physical_attribution") is not True
+        or receipt.get("statvfs_concurrent_activity_unexcluded") is not True
+        or (bool(entries) and plan.get("apply_authority") is not True)
+        or (bool(entries) and (admission_status != "nonterminal" or admission_reason != "effectful_applied"))
+        or (
+            not entries
+            and (
+                admission_status != "release_admissible"
+                or admission_reason != "fresh_eligible_zero"
+                or not terminal_plan_valid
+            )
+        )
     ):
         raise ReleaseFailure("retention_apply_journal_invalid")
 
@@ -15741,6 +16138,7 @@ def install_units(
     anchor: Path,
     transition_runtime_root: Path,
     transition_unit_hashes: Mapping[str, str],
+    retention_admission: Mapping[str, Any],
     journal: DurableUnitInstallJournal,
     namespace_guard: Callable[[], None] | None = None,
 ) -> dict[str, str]:
@@ -15751,6 +16149,8 @@ def install_units(
     if namespace_guard is not None:
         journal_port = _NamespaceGuardedProxy(journal, guard)
     guard()
+    if candidate.root == previous.root or candidate.commit == previous.commit:
+        raise ReleaseFailure("candidate_previous_identity_not_distinct")
     _require_venv_relocation_contract(
         candidate,
         code="unit_candidate_venv_relocation_contract_missing",
@@ -15783,6 +16183,7 @@ def install_units(
         transition_root=transition_root,
         candidate_unit_hashes=candidate_hashes,
         transition_unit_hashes=transition_unit_hashes,
+        retention_admission=retention_admission,
     )
     phase = str(state["phase"])
     if phase == "complete":
@@ -15878,6 +16279,8 @@ def install_units(
     receipt_core = {
         "candidate_tree_sha256": candidate.tree_manifest_sha256,
         "previous_tree_sha256": previous.tree_manifest_sha256,
+        "retention_admission": state["retention_admission"],
+        "retention_admission_receipt_sha256": state["retention_admission_receipt_sha256"],
         "unit_hashes": candidate_hashes,
     }
     receipt_sha256 = _sha256_bytes(_canonical_json(receipt_core))
@@ -19050,11 +19453,13 @@ class _SealedCandidateDRAdmission:
         *,
         index_module: Any,
         enrollment_module: Any,
+        retention_operator_module: Any,
         friday_home: Path,
         namespace_guard: Callable[[], None],
     ) -> None:
         self._index_module = index_module
         self._enrollment_module = enrollment_module
+        self._retention_operator_module = retention_operator_module
         self._friday_home = friday_home
         self._guard = namespace_guard
         self._index = index_module.DurableDRGenerationIndex(friday_home / "data/state")
@@ -19157,6 +19562,21 @@ class _SealedCandidateDRAdmission:
         except Exception as exc:
             raise self._translate(exc) from exc
 
+    def retention_release_admission(self, activation_receipt: Path) -> Mapping[str, Any]:
+        try:
+            self._guard()
+            receipt = self._retention_operator_module._retention_release_admission_locked(  # noqa: SLF001
+                activation_receipt=activation_receipt,
+                friday_home=self._friday_home,
+                namespace_guard=self._guard,
+            )
+            self._guard()
+            if not isinstance(receipt, dict):
+                raise ReleaseFailure("retention_release_admission_invalid")
+            return dict(receipt)
+        except Exception as exc:
+            raise self._translate(exc) from exc
+
 
 @contextmanager
 def _sealed_candidate_dr_admission(
@@ -19174,15 +19594,32 @@ def _sealed_candidate_dr_admission(
     module_files = (
         ("tools", package_root / "__init__.py", True),
         ("tools.immutable_release_operator", package_root / "immutable_release_operator.py", False),
+        ("tools.release_artifact_proc_probe", package_root / "release_artifact_proc_probe.py", False),
         ("tools.release_dr_generation_index", package_root / "release_dr_generation_index.py", False),
         (
             "tools.release_dr_generation_authentication",
             package_root / "release_dr_generation_authentication.py",
             False,
         ),
+        ("tools.release_artifact_retention", package_root / "release_artifact_retention.py", False),
+        (
+            "tools.release_artifact_retention_operator",
+            package_root / "release_artifact_retention_operator.py",
+            False,
+        ),
         (
             "tools.release_dr_generation_enrollment",
             package_root / "release_dr_generation_enrollment.py",
+            False,
+        ),
+        (
+            "tools.release_dr_generation_rehearsal",
+            package_root / "release_dr_generation_rehearsal.py",
+            False,
+        ),
+        (
+            "tools.release_dr_generation_lifecycle",
+            package_root / "release_dr_generation_lifecycle.py",
             False,
         ),
     )
@@ -19203,6 +19640,13 @@ def _sealed_candidate_dr_admission(
             module = importlib.util.module_from_spec(spec)
             sys.modules[name] = module
             spec.loader.exec_module(module)
+            # Standalone tool entrypoints add their exact toolchain root while
+            # importing.  All dependencies above are already exact-spec
+            # loaded, so remove only that one known insertion immediately.
+            if tuple(sys.path) == (str(package_root.parent), *before_path):
+                sys.path.pop(0)
+            elif tuple(sys.path) != before_path:
+                raise ReleaseFailure("candidate_dr_loader_path_changed")
             origin = Path(str(getattr(module, "__file__", ""))).resolve(strict=True)
             if origin != resolved:
                 raise ReleaseFailure("candidate_dr_loader_origin_invalid")
@@ -19214,6 +19658,7 @@ def _sealed_candidate_dr_admission(
         yield _SealedCandidateDRAdmission(
             index_module=loaded["tools.release_dr_generation_index"],
             enrollment_module=loaded["tools.release_dr_generation_enrollment"],
+            retention_operator_module=loaded["tools.release_artifact_retention_operator"],
             friday_home=friday_home,
             namespace_guard=namespace_guard,
         )
@@ -19414,6 +19859,10 @@ def _reconcile_terminal_activation_admission(
     )
     if state.get("phase") != "clear":
         return
+    if state.get("candidate") == _journal_release(candidate):
+        # Exact target terminal retry; the unit-v2 binding is checked by the
+        # caller before activate_release can begin or resume any mutation.
+        return
     if state.get("candidate") != _journal_release(previous):
         raise ReleaseFailure("activation_predecessor_journal_identity_mismatch")
     if "activation_receipt_file_sha256" not in state:
@@ -19436,6 +19885,98 @@ def _reconcile_terminal_activation_admission(
     receipt = _require_activation_admitted(admission.enroll(path))
     if receipt["published"] is not True:
         raise ReleaseFailure("activation_predecessor_dr_lifecycle_required")
+
+
+def _unit_install_retention_admission(
+    *,
+    activation_journal: DurableActivationJournal,
+    unit_journal: DurableUnitInstallJournal,
+    candidate: ReleaseIdentity,
+    previous: ReleaseIdentity,
+    admission: _SealedCandidateDRAdmission,
+) -> dict[str, Any]:
+    """Bind fresh predecessor truth once; recovery uses only the fsync'd binding."""
+
+    durable, legacy_bootstrap = unit_journal.retention_admission_for(
+        candidate=candidate,
+        previous=previous,
+    )
+    if durable is not None:
+        return _validated_retention_release_admission(
+            durable,
+            allow_first_v2_deferred=legacy_bootstrap,
+        )
+    state = dict(activation_journal.load())
+    if state.get("phase") != "clear" or state.get("candidate") != _journal_release(previous):
+        raise ReleaseFailure("unit_install_predecessor_activation_invalid")
+    _activation_candidate, _activation_previous, fallback = activation_journal.release_identities()
+    _reconcile_terminal_activation_admission(
+        journal=activation_journal,
+        candidate=candidate,
+        previous=previous,
+        fallback=fallback,
+        admission=admission,
+    )
+    state = dict(activation_journal.load())
+    bound = _bound_activation_receipt(admission=admission, state=state)
+    if bound is None:  # pragma: no cover - missing_ok is false
+        raise ReleaseFailure("activation_receipt_journal_binding_invalid")
+    payload, activation_receipt_path = bound
+    receipt = admission.retention_release_admission(activation_receipt_path)
+    return _validated_retention_release_admission(
+        receipt,
+        expected_activation_receipt_file_sha256=str(state["activation_receipt_file_sha256"]),
+        expected_activation_receipt_sha256=str(payload["receipt_sha256"]),
+        allow_first_v2_deferred=legacy_bootstrap,
+    )
+
+
+def _require_fresh_unit_retention_admission(
+    *,
+    activation_journal: DurableActivationJournal,
+    unit_journal: DurableUnitInstallJournal,
+    candidate: ReleaseIdentity,
+    previous: ReleaseIdentity,
+    admission: _SealedCandidateDRAdmission,
+) -> None:
+    """Reauthenticate the predecessor once, immediately before activation begin."""
+
+    unit_state = dict(unit_journal.load())
+    if (
+        unit_state.get("schema") != UNIT_INSTALL_JOURNAL_SCHEMA
+        or unit_state.get("phase") != "complete"
+        or unit_state.get("candidate") != _journal_release(candidate)
+        or unit_state.get("previous") != _journal_release(previous)
+    ):
+        raise ReleaseFailure("unit_install_not_complete_for_candidate")
+    bootstrap = (
+        unit_state.get("legacy_bootstrap_unit_install_file_sha256") == _LEGACY_020790_UNIT_INSTALL_FILE_SHA256
+    )
+    durable = _validated_retention_release_admission(
+        unit_state.get("retention_admission"),
+        allow_first_v2_deferred=bootstrap,
+    )
+    state = dict(activation_journal._state or activation_journal.load())  # noqa: SLF001
+    if state.get("candidate") == _journal_release(candidate) and state.get("previous") == _journal_release(
+        previous
+    ):
+        # The exact target transaction has already replaced predecessor truth.
+        # Its restart path is anchored by the immutable unit-v2 admission.
+        return
+    if state.get("phase") != "clear" or state.get("candidate") != _journal_release(previous):
+        raise ReleaseFailure("unit_install_predecessor_activation_invalid")
+    bound = _bound_activation_receipt(admission=admission, state=state)
+    if bound is None:  # pragma: no cover - missing_ok is false
+        raise ReleaseFailure("activation_receipt_journal_binding_invalid")
+    payload, activation_receipt_path = bound
+    fresh = _validated_retention_release_admission(
+        admission.retention_release_admission(activation_receipt_path),
+        expected_activation_receipt_file_sha256=str(state["activation_receipt_file_sha256"]),
+        expected_activation_receipt_sha256=str(payload["receipt_sha256"]),
+        allow_first_v2_deferred=bootstrap,
+    )
+    if fresh != durable or fresh["receipt_sha256"] != unit_state.get("retention_admission_receipt_sha256"):
+        raise ReleaseFailure("unit_install_retention_admission_changed")
 
 
 def _reject_terminal_activation_supersession_without_writer(
@@ -20070,6 +20611,7 @@ def _run_cli(args: argparse.Namespace) -> dict[str, Any]:
                 expected_tree_sha256=args.release_tree_sha256,
             )
             _require_candidate_bound_operator(release, state_dir=args.state_dir)
+            _require_release_retention_toolchain(release)
             _require_release_in_operator_layout(release, friday_home)
             previous = load_release_identity(
                 args.previous,
@@ -20086,25 +20628,43 @@ def _run_cli(args: argparse.Namespace) -> dict[str, Any]:
                 phase = str(journal.load().get("phase") or "")
                 if phase not in _TERMINAL_JOURNAL_PHASES:
                     raise ReleaseFailure("unfinished_activation_requires_recovery")
-            unit_hashes = install_units(
-                release,
-                previous,
-                unit_dir=args.unit_dir,
-                anchor=args.anchor,
-                transition_runtime_root=args.transition_runtime_root,
-                transition_unit_hashes={
-                    "friday-backend.service": args.transition_backend_unit_sha256,
-                    "friday-bridge.service": args.transition_bridge_unit_sha256,
-                },
-                journal=DurableUnitInstallJournal(args.state_dir / "immutable-release-unit-install.v1.json"),
-                namespace_guard=transaction_lock.assert_held,
+            unit_journal = DurableUnitInstallJournal(
+                args.state_dir / "immutable-release-unit-install.v1.json"
             )
+            with _sealed_candidate_dr_admission(
+                release,
+                friday_home=friday_home,
+                namespace_guard=transaction_lock.assert_held,
+            ) as admission:
+                retention_admission = _unit_install_retention_admission(
+                    activation_journal=journal,
+                    unit_journal=unit_journal,
+                    candidate=release,
+                    previous=previous,
+                    admission=admission,
+                )
+                unit_hashes = install_units(
+                    release,
+                    previous,
+                    unit_dir=args.unit_dir,
+                    anchor=args.anchor,
+                    transition_runtime_root=args.transition_runtime_root,
+                    transition_unit_hashes={
+                        "friday-backend.service": args.transition_backend_unit_sha256,
+                        "friday-bridge.service": args.transition_bridge_unit_sha256,
+                    },
+                    retention_admission=retention_admission,
+                    journal=unit_journal,
+                    namespace_guard=transaction_lock.assert_held,
+                )
         receipt = {
             "schema": OPERATOR_SCHEMA,
             "operation": "install-units",
             "status": "clear",
             "release_tree_sha256": release.tree_manifest_sha256,
             "previous_tree_sha256": previous.tree_manifest_sha256,
+            "retention_admission": retention_admission,
+            "retention_admission_receipt_sha256": retention_admission["receipt_sha256"],
             "unit_hashes": unit_hashes,
         }
     elif args.command == "activate":
@@ -20192,19 +20752,49 @@ def _run_cli(args: argparse.Namespace) -> dict[str, Any]:
                         fallback=schema_capable_fallback,
                         admission=admission,
                     )
-                    _require_completed_unit_install(config.state_dir, candidate)
-                    receipt = activate_release(
-                        port,
-                        journal,
+                    _require_fresh_unit_retention_admission(
+                        activation_journal=journal,
+                        unit_journal=DurableUnitInstallJournal(
+                            config.state_dir / "immutable-release-unit-install.v1.json"
+                        ),
                         candidate=candidate,
                         previous=previous,
-                        schema_capable_fallback=schema_capable_fallback,
-                        namespace_guard=transaction_lock.assert_held,
-                        activation_receipt_publisher=admission.publish,
-                        activation_receipt_enroller=admission.enroll,
+                        admission=admission,
                     )
+                    _require_completed_unit_install(config.state_dir, candidate, previous)
+                    activation_state = dict(journal.load())
+                    exact_target_transaction = activation_state.get("candidate") == _journal_release(
+                        candidate
+                    ) and activation_state.get("previous") == _journal_release(previous)
+                    activation_phase = str(activation_state.get("phase") or "")
+                    if exact_target_transaction and activation_phase in {
+                        "activation_receipt_prepared",
+                        "clear",
+                    }:
+                        receipt = _resume_terminal_activation_admission(
+                            journal=journal,
+                            admission=admission,
+                        )
+                        if receipt is None:
+                            raise ReleaseFailure("unfinished_activation_requires_recovery")
+                    elif exact_target_transaction and activation_phase not in {
+                        "rolled_back",
+                        "recovered",
+                    }:
+                        raise ReleaseFailure("unfinished_activation_requires_recovery")
+                    else:
+                        receipt = activate_release(
+                            port,
+                            journal,
+                            candidate=candidate,
+                            previous=previous,
+                            schema_capable_fallback=schema_capable_fallback,
+                            namespace_guard=transaction_lock.assert_held,
+                            activation_receipt_publisher=admission.publish,
+                            activation_receipt_enroller=admission.enroll,
+                        )
             else:
-                _require_completed_unit_install(config.state_dir, candidate)
+                _require_completed_unit_install(config.state_dir, candidate, previous)
                 _reject_terminal_activation_supersession_without_writer(
                     journal=journal,
                     candidate=candidate,
@@ -20255,7 +20845,7 @@ def _run_cli(args: argparse.Namespace) -> dict[str, Any]:
                 staged_config_transition=(config.staged_config_transition or None),
                 create_backup_root=False,
             )
-            candidate, _previous, fallback = journal.release_identities()
+            candidate, previous, fallback = journal.release_identities()
             _require_candidate_lock_scope(candidate, state_dir=config.state_dir)
             _require_release_in_operator_layout(candidate, config.friday_home)
             executor = load_release_identity(
@@ -20269,7 +20859,7 @@ def _run_cli(args: argparse.Namespace) -> dict[str, Any]:
                 state_dir=config.state_dir,
                 friday_home=config.friday_home,
             )
-            _require_completed_unit_install(config.state_dir, candidate)
+            _require_completed_unit_install(config.state_dir, candidate, previous)
             port = SystemdActivationPort(config)
             receipt = None
             if candidate.build_receipt_profile == BUILD_RECEIPT_PROFILE_P0H_RETENTION:

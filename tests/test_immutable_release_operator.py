@@ -103,6 +103,40 @@ def _admission_receipt(*, published: bool) -> dict[str, object]:
     }
 
 
+def _retention_admission_receipt(
+    *,
+    status: str = "converged",
+    activation_receipt_file_sha256: str = "1" * 64,
+    activation_receipt_sha256: str = "2" * 64,
+) -> dict[str, object]:
+    terminal = status == "converged"
+    core: dict[str, object] = {
+        "accepted_root_plan_sha256": "3" * 64 if terminal else "",
+        "activation_receipt_file_sha256": activation_receipt_file_sha256,
+        "activation_receipt_sha256": activation_receipt_sha256,
+        "batch_ordinal": 1 if terminal else -1,
+        "current_candidate_sha256": "4" * 64,
+        "current_generation_id": "5" * 64,
+        "current_generation_receipt_sha256": "6" * 64,
+        "cycle_sha256": "7" * 64 if terminal else "",
+        "index_journal_sha256": "8" * 64,
+        "index_revision": 4,
+        "older_candidate_sha256": "9" * 64,
+        "older_generation_id": "a" * 64,
+        "older_generation_receipt_sha256": "b" * 64,
+        "retention_scope_schema": retention.RETENTION_SCOPE_SCHEMA if terminal else "",
+        "retention_scope_sha256": "c" * 64 if terminal else "",
+        "reviewed_full_candidate_set_sha256": "d" * 64 if terminal else "",
+        "schema": operator._RETENTION_CONVERGENCE_RECEIPT_SCHEMA,  # noqa: SLF001
+        "status": status,
+        "terminal_apply_receipt_sha256": "e" * 64 if terminal else "",
+    }
+    return {
+        **core,
+        "receipt_sha256": hashlib.sha256(operator._canonical_json(core)).hexdigest(),  # noqa: SLF001
+    }
+
+
 class FakePort:
     def __init__(
         self,
@@ -805,6 +839,7 @@ def test_sealed_admission_binds_clean_bootstrap_to_same_pending_index_epoch(tmp_
         enrollment_module=SimpleNamespace(
             _enroll_terminal_activation_backup_locked=lambda **_kwargs: receipt
         ),
+        retention_operator_module=SimpleNamespace(),
         friday_home=tmp_path,
         namespace_guard=lambda: None,
     )
@@ -1142,7 +1177,7 @@ def test_pair_bearing_activate_reconciles_predecessor_before_unit_install_admiss
 
     class AdmissionContext:
         def __enter__(self) -> object:
-            return object()
+            return SimpleNamespace(publish=lambda _value: tmp_path, enroll=lambda _path: {})
 
         def __exit__(self, *_args: object) -> None:
             return None
@@ -1203,6 +1238,11 @@ def test_pair_bearing_activate_reconciles_predecessor_before_unit_install_admiss
         "_reconcile_terminal_activation_admission",
         lambda **_kwargs: events.append("reconcile"),
     )
+    monkeypatch.setattr(
+        operator,
+        "_require_fresh_unit_retention_admission",
+        lambda **_kwargs: events.append("fresh-retention"),
+    )
 
     def reject_units(*_args: object, **_kwargs: object) -> None:
         events.append("units")
@@ -1212,7 +1252,66 @@ def test_pair_bearing_activate_reconciles_predecessor_before_unit_install_admiss
     events.clear()
     with pytest.raises(operator.ReleaseFailure, match="^unit_install_candidate_mismatch$"):
         operator._run_cli(arguments)  # type: ignore[arg-type]  # noqa: SLF001
-    assert events == ["reconcile", "units"]
+    assert events == ["reconcile", "fresh-retention", "units"]
+
+    target_state = {"phase": "clear"}
+    terminal_journal = SimpleNamespace(
+        load=lambda: {
+            "candidate": operator._journal_release(candidate),  # noqa: SLF001
+            "phase": target_state["phase"],
+            "previous": operator._journal_release(releases.previous),  # noqa: SLF001
+        },
+    )
+    monkeypatch.setattr(
+        operator,
+        "DurableActivationJournal",
+        lambda *_args, **_kwargs: terminal_journal,
+    )
+
+    def require_exact_pair(
+        observed_state: Path,
+        observed_candidate: operator.ReleaseIdentity,
+        observed_previous: operator.ReleaseIdentity,
+    ) -> None:
+        assert observed_state == state_dir
+        assert observed_candidate == candidate
+        assert observed_previous == releases.previous
+        events.append("units")
+
+    existing = {
+        "schema": operator.ACTIVATION_RECEIPT_SCHEMA,
+        "status": "clear",
+        "receipt_sha256": "3" * 64,
+    }
+    monkeypatch.setattr(operator, "_require_completed_unit_install", require_exact_pair)
+
+    def resume_terminal(**_kwargs: object) -> dict[str, object]:
+        events.append("resume")
+        return existing
+
+    def activate_terminal(*_args: object, **_kwargs: object) -> dict[str, object]:
+        events.append("activate")
+        return existing
+
+    monkeypatch.setattr(operator, "_resume_terminal_activation_admission", resume_terminal)
+    monkeypatch.setattr(operator, "activate_release", activate_terminal)
+    for target_phase in ("activation_receipt_prepared", "clear"):
+        target_state["phase"] = target_phase
+        events.clear()
+        result = operator._run_cli(arguments)  # type: ignore[arg-type]  # noqa: SLF001
+        assert events == ["reconcile", "fresh-retention", "units", "resume"]
+        assert result == {**existing, "operator_schema": operator.OPERATOR_SCHEMA}
+    for target_phase in ("rolled_back", "recovered"):
+        target_state["phase"] = target_phase
+        events.clear()
+        result = operator._run_cli(arguments)  # type: ignore[arg-type]  # noqa: SLF001
+        assert events == ["reconcile", "fresh-retention", "units", "activate"]
+        assert result == {**existing, "operator_schema": operator.OPERATOR_SCHEMA}
+    target_state["phase"] = "migration_attempted"
+    events.clear()
+    with pytest.raises(operator.ReleaseFailure, match="^unfinished_activation_requires_recovery$"):
+        operator._run_cli(arguments)  # type: ignore[arg-type]  # noqa: SLF001
+    assert events == ["reconcile", "fresh-retention", "units"]
 
 
 def test_activation_allows_a_legacy_previous_but_requires_new_candidate_and_fallback(
@@ -10008,7 +10107,106 @@ def test_process_identity_requires_anchor_argv_and_exact_release_executable(tmp_
     assert not port._process_matches(1234, release, "backend", proc_root=proc_root)  # noqa: SLF001
 
 
-def test_completed_legacy_unit_journal_starts_a_full_surface_identity(tmp_path: Path) -> None:
+def _complete_unit_install_journal(
+    journal: operator.DurableUnitInstallJournal,
+    *,
+    candidate: operator.ReleaseIdentity,
+    previous: operator.ReleaseIdentity,
+    admission: Mapping[str, object],
+    transition_root: Path,
+) -> dict[str, str]:
+    candidate_hashes = {key: "1" * 64 for key in operator._UNIT_SURFACE_KEYS}  # noqa: SLF001
+    transition_hashes = {unit: "2" * 64 for unit in operator._RUNTIME_UNIT_NAMES}  # noqa: SLF001
+    journal.begin_or_resume(
+        candidate=candidate,
+        previous=previous,
+        transition_root=transition_root,
+        candidate_unit_hashes=candidate_hashes,
+        transition_unit_hashes=transition_hashes,
+        retention_admission=admission,
+    )
+    for phase in operator._UNIT_INSTALL_PHASES[1:-1]:  # noqa: SLF001
+        journal.record(phase)
+    receipt = hashlib.sha256(
+        operator._canonical_json(  # noqa: SLF001
+            {
+                "candidate_tree_sha256": candidate.tree_manifest_sha256,
+                "previous_tree_sha256": previous.tree_manifest_sha256,
+                "retention_admission": dict(admission),
+                "retention_admission_receipt_sha256": admission["receipt_sha256"],
+                "unit_hashes": candidate_hashes,
+            }
+        )
+    ).hexdigest()
+    journal.record("complete", receipt_sha256=receipt)
+    return candidate_hashes
+
+
+def _write_exact_legacy_unit_journal(
+    path: Path,
+    *,
+    monkeypatch: pytest.MonkeyPatch,
+    phase: str = "complete",
+) -> tuple[operator.ReleaseIdentity, operator.ReleaseIdentity]:
+    candidate = operator.ReleaseIdentity(
+        path.parent / "legacy-candidate",
+        operator._LEGACY_020790_UNIT_INSTALL_CANDIDATE_COMMIT,  # noqa: SLF001
+        "0.207.90",
+        operator._LEGACY_020790_UNIT_INSTALL_CANDIDATE_TREE_SHA256,  # noqa: SLF001
+        50,
+    )
+    previous = operator.ReleaseIdentity(
+        path.parent / "legacy-previous",
+        operator._LEGACY_020790_UNIT_INSTALL_PREVIOUS_COMMIT,  # noqa: SLF001
+        "0.207.84",
+        operator._LEGACY_020790_UNIT_INSTALL_PREVIOUS_TREE_SHA256,  # noqa: SLF001
+        50,
+    )
+    candidate_hashes = {key: "1" * 64 for key in operator._UNIT_SURFACE_KEYS}  # noqa: SLF001
+    receipt_sha256 = hashlib.sha256(
+        operator._canonical_json(  # noqa: SLF001
+            {
+                "candidate_tree_sha256": candidate.tree_manifest_sha256,
+                "previous_tree_sha256": previous.tree_manifest_sha256,
+                "unit_hashes": candidate_hashes,
+            }
+        )
+    ).hexdigest()
+    core = {
+        "candidate": operator._journal_release(candidate),  # noqa: SLF001
+        "candidate_unit_hashes": candidate_hashes,
+        "phase": phase,
+        "previous": operator._journal_release(previous),  # noqa: SLF001
+        "receipt_sha256": receipt_sha256 if phase == "complete" else "",
+        "schema": operator._LEGACY_UNIT_INSTALL_JOURNAL_SCHEMA,  # noqa: SLF001
+        "transaction_id": "f" * 64,
+        "transition_root": str(previous.root),
+        "transition_unit_hashes": {key: "2" * 64 for key in operator._RUNTIME_UNIT_NAMES},  # noqa: SLF001
+    }
+    journal_sha256 = hashlib.sha256(operator._canonical_json(core)).hexdigest()  # noqa: SLF001
+    payload = {**core, "journal_sha256": journal_sha256}
+    raw = operator._canonical_json(payload) + b"\n"  # noqa: SLF001
+    path.write_bytes(raw)
+    path.chmod(0o600)
+    monkeypatch.setattr(
+        operator,
+        "_LEGACY_020790_UNIT_INSTALL_FILE_SHA256",
+        hashlib.sha256(raw).hexdigest(),
+    )
+    monkeypatch.setattr(
+        operator,
+        "_LEGACY_020790_UNIT_INSTALL_JOURNAL_SHA256",
+        journal_sha256,
+    )
+    monkeypatch.setattr(
+        operator,
+        "_LEGACY_020790_UNIT_INSTALL_RECEIPT_SHA256",
+        receipt_sha256 if phase == "complete" else "",
+    )
+    return candidate, previous
+
+
+def test_completed_unit_journal_only_chains_candidate_to_next_previous(tmp_path: Path) -> None:
     tmp_path.chmod(0o700)
     state_dir = tmp_path / "state"
     state_dir.mkdir(mode=0o700)
@@ -10026,16 +10224,19 @@ def test_completed_legacy_unit_journal_starts_a_full_surface_identity(tmp_path: 
         "e" * 64,
         43,
     )
-    legacy_hashes = {unit: "1" * 64 for unit in operator._RUNTIME_UNIT_NAMES}  # noqa: SLF001
+    candidate_hashes = {key: "1" * 64 for key in operator._UNIT_SURFACE_KEYS}  # noqa: SLF001
     transition_hashes = {unit: "2" * 64 for unit in operator._RUNTIME_UNIT_NAMES}  # noqa: SLF001
+    admission = _retention_admission_receipt()
     journal = operator.DurableUnitInstallJournal(state_dir / "immutable-release-unit-install.v1.json")
     initial = journal.begin_or_resume(
         candidate=candidate,
         previous=previous,
         transition_root=tmp_path / "transition",
-        candidate_unit_hashes=legacy_hashes,
+        candidate_unit_hashes=candidate_hashes,
         transition_unit_hashes=transition_hashes,
+        retention_admission=admission,
     )
+    assert initial["transaction_id"] == operator._unit_install_transaction_id(initial)  # noqa: SLF001
     for phase in operator._UNIT_INSTALL_PHASES[1:-1]:  # noqa: SLF001
         journal.record(phase)
     receipt = hashlib.sha256(
@@ -10043,54 +10244,401 @@ def test_completed_legacy_unit_journal_starts_a_full_surface_identity(tmp_path: 
             {
                 "candidate_tree_sha256": candidate.tree_manifest_sha256,
                 "previous_tree_sha256": previous.tree_manifest_sha256,
-                "unit_hashes": legacy_hashes,
+                "retention_admission": admission,
+                "retention_admission_receipt_sha256": admission["receipt_sha256"],
+                "unit_hashes": candidate_hashes,
             }
         )
     ).hexdigest()
     journal.record("complete", receipt_sha256=receipt)
 
-    legacy_terminal = operator.DurableUnitInstallJournal(journal.path).load()
-    assert legacy_terminal["phase"] == "complete"
-    assert legacy_terminal["candidate_unit_hashes"] == legacy_hashes
-    full_hashes = {key: "3" * 64 for key in operator._UNIT_SURFACE_KEYS}  # noqa: SLF001
+    next_candidate = replace(
+        candidate,
+        root=tmp_path / "next",
+        commit="b" * 40,
+        tree_manifest_sha256="f" * 64,
+    )
+    next_hashes = {key: "3" * 64 for key in operator._UNIT_SURFACE_KEYS}  # noqa: SLF001
     migrated = operator.DurableUnitInstallJournal(journal.path).begin_or_resume(
-        candidate=candidate,
-        previous=previous,
+        candidate=next_candidate,
+        previous=candidate,
         transition_root=tmp_path / "transition",
-        candidate_unit_hashes=full_hashes,
+        candidate_unit_hashes=next_hashes,
         transition_unit_hashes=transition_hashes,
+        retention_admission=admission,
     )
 
     assert migrated["phase"] == "prepared"
-    assert migrated["candidate_unit_hashes"] == full_hashes
+    assert migrated["candidate_unit_hashes"] == next_hashes
     assert migrated["transaction_id"] != initial["transaction_id"]
-
-    terminal = operator.DurableUnitInstallJournal(journal.path)
-    for phase in operator._UNIT_INSTALL_PHASES[1:-1]:  # noqa: SLF001
-        terminal.record(phase)
-    full_receipt = hashlib.sha256(
-        operator._canonical_json(  # noqa: SLF001
-            {
-                "candidate_tree_sha256": candidate.tree_manifest_sha256,
-                "previous_tree_sha256": previous.tree_manifest_sha256,
-                "unit_hashes": full_hashes,
-            }
-        )
-    ).hexdigest()
-    terminal.record("complete", receipt_sha256=full_receipt)
-    drifted = dict(full_hashes)
-    drifted["friday-backend.service.d/security.conf"] = "4" * 64
+    unrelated = replace(candidate, root=tmp_path / "unrelated", commit="9" * 40)
     with pytest.raises(
         operator.ReleaseFailure,
-        match="^completed_unit_install_identity_changed$",
+        match="^unfinished_unit_install_identity_changed$",
     ):
+        operator.DurableUnitInstallJournal(journal.path).begin_or_resume(
+            candidate=unrelated,
+            previous=previous,
+            transition_root=tmp_path / "transition",
+            candidate_unit_hashes=next_hashes,
+            transition_unit_hashes=transition_hashes,
+            retention_admission=admission,
+        )
+
+
+def test_unit_journal_resume_rejects_full_identity_drift(tmp_path: Path) -> None:
+    tmp_path.chmod(0o700)
+    state = tmp_path / "state"
+    state.mkdir(mode=0o700)
+    candidate = operator.ReleaseIdentity(tmp_path / "candidate", "c" * 40, "0.207.91", "d" * 64, 50)
+    previous = operator.ReleaseIdentity(tmp_path / "previous", "a" * 40, "0.207.90", "e" * 64, 50)
+    admission = _retention_admission_receipt()
+    journal = operator.DurableUnitInstallJournal(state / "immutable-release-unit-install.v1.json")
+    hashes = {key: "1" * 64 for key in operator._UNIT_SURFACE_KEYS}  # noqa: SLF001
+    transitions = {key: "2" * 64 for key in operator._RUNTIME_UNIT_NAMES}  # noqa: SLF001
+    journal.begin_or_resume(
+        candidate=candidate,
+        previous=previous,
+        transition_root=tmp_path / "transition",
+        candidate_unit_hashes=hashes,
+        transition_unit_hashes=transitions,
+        retention_admission=admission,
+    )
+    drifted = dict(hashes)
+    drifted["friday-backend.service.d/security.conf"] = "3" * 64
+    with pytest.raises(operator.ReleaseFailure, match="^unfinished_unit_install_identity_changed$"):
         operator.DurableUnitInstallJournal(journal.path).begin_or_resume(
             candidate=candidate,
             previous=previous,
-            transition_root=tmp_path / "transition",
+            transition_root=tmp_path / "different-transition",
             candidate_unit_hashes=drifted,
-            transition_unit_hashes=transition_hashes,
+            transition_unit_hashes=transitions,
+            retention_admission=admission,
         )
+
+
+def test_unit_journal_v2_rejects_resigned_runtime_only_hash_surface(tmp_path: Path) -> None:
+    tmp_path.chmod(0o700)
+    state = tmp_path / "state"
+    state.mkdir(mode=0o700)
+    candidate = operator.ReleaseIdentity(tmp_path / "candidate", "c" * 40, "0.207.91", "d" * 64, 50)
+    previous = operator.ReleaseIdentity(tmp_path / "previous", "a" * 40, "0.207.90", "e" * 64, 50)
+    path = state / "immutable-release-unit-install.v1.json"
+    journal = operator.DurableUnitInstallJournal(path)
+    journal.begin_or_resume(
+        candidate=candidate,
+        previous=previous,
+        transition_root=tmp_path / "transition",
+        candidate_unit_hashes={key: "1" * 64 for key in operator._UNIT_SURFACE_KEYS},  # noqa: SLF001
+        transition_unit_hashes={key: "2" * 64 for key in operator._RUNTIME_UNIT_NAMES},  # noqa: SLF001
+        retention_admission=_retention_admission_receipt(),
+    )
+    payload = json.loads(path.read_text(encoding="ascii"))
+    payload["candidate_unit_hashes"] = {
+        key: payload["candidate_unit_hashes"][key]
+        for key in operator._RUNTIME_UNIT_NAMES  # noqa: SLF001
+    }
+    core = {key: value for key, value in payload.items() if key != "journal_sha256"}
+    payload["journal_sha256"] = hashlib.sha256(operator._canonical_json(core)).hexdigest()  # noqa: SLF001
+    path.write_bytes(operator._canonical_json(payload) + b"\n")  # noqa: SLF001
+    path.chmod(0o600)
+    with pytest.raises(operator.ReleaseFailure, match="^unit_install_journal_invalid$"):
+        operator.DurableUnitInstallJournal(path).load()
+
+
+def test_unit_journal_v2_rejects_resigned_transaction_identity_drift(tmp_path: Path) -> None:
+    tmp_path.chmod(0o700)
+    state = tmp_path / "state"
+    state.mkdir(mode=0o700)
+    candidate = operator.ReleaseIdentity(tmp_path / "candidate", "c" * 40, "0.207.91", "d" * 64, 50)
+    previous = operator.ReleaseIdentity(tmp_path / "previous", "a" * 40, "0.207.90", "e" * 64, 50)
+    path = state / "immutable-release-unit-install.v1.json"
+    operator.DurableUnitInstallJournal(path).begin_or_resume(
+        candidate=candidate,
+        previous=previous,
+        transition_root=tmp_path / "transition",
+        candidate_unit_hashes={key: "1" * 64 for key in operator._UNIT_SURFACE_KEYS},  # noqa: SLF001
+        transition_unit_hashes={key: "2" * 64 for key in operator._RUNTIME_UNIT_NAMES},  # noqa: SLF001
+        retention_admission=_retention_admission_receipt(),
+    )
+    payload = json.loads(path.read_text(encoding="ascii"))
+    payload["transaction_id"] = "0" * 64
+    core = {key: value for key, value in payload.items() if key != "journal_sha256"}
+    payload["journal_sha256"] = hashlib.sha256(operator._canonical_json(core)).hexdigest()  # noqa: SLF001
+    path.write_bytes(operator._canonical_json(payload) + b"\n")  # noqa: SLF001
+    path.chmod(0o600)
+    with pytest.raises(operator.ReleaseFailure, match="^unit_install_journal_invalid$"):
+        operator.DurableUnitInstallJournal(path).load()
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    ("status", "index_revision", "activation_receipt", "extra_field"),
+)
+def test_retention_admission_host_validation_rejects_resigned_forgery(
+    mutation: str,
+) -> None:
+    receipt = _retention_admission_receipt()
+    if mutation == "status":
+        receipt["status"] = "review_required"
+    elif mutation == "index_revision":
+        receipt["index_revision"] = -1
+    elif mutation == "activation_receipt":
+        receipt["activation_receipt_sha256"] = "f" * 64
+    else:
+        receipt["private_path"] = "/must/not/persist"
+    core = {key: value for key, value in receipt.items() if key != "receipt_sha256"}
+    receipt["receipt_sha256"] = hashlib.sha256(operator._canonical_json(core)).hexdigest()  # noqa: SLF001
+    with pytest.raises(operator.ReleaseFailure, match="^retention_release_admission_invalid$"):
+        operator._validated_retention_release_admission(  # noqa: SLF001
+            receipt,
+            expected_activation_receipt_sha256="2" * 64,
+            allow_first_v2_deferred=False,
+        )
+
+
+def test_first_v2_admission_requires_exact_legacy_unit_bridge(tmp_path: Path) -> None:
+    tmp_path.chmod(0o700)
+    state = tmp_path / "state"
+    state.mkdir(mode=0o700)
+    candidate = operator.ReleaseIdentity(tmp_path / "candidate", "c" * 40, "0.207.91", "d" * 64, 50)
+    previous = operator.ReleaseIdentity(tmp_path / "previous", "a" * 40, "0.207.90", "e" * 64, 50)
+    journal = operator.DurableUnitInstallJournal(state / "immutable-release-unit-install.v1.json")
+    with pytest.raises(operator.ReleaseFailure, match="^retention_release_admission_invalid$"):
+        journal.begin_or_resume(
+            candidate=candidate,
+            previous=previous,
+            transition_root=tmp_path / "transition",
+            candidate_unit_hashes={key: "1" * 64 for key in operator._UNIT_SURFACE_KEYS},  # noqa: SLF001
+            transition_unit_hashes={key: "2" * 64 for key in operator._RUNTIME_UNIT_NAMES},  # noqa: SLF001
+            retention_admission=_retention_admission_receipt(status="first_v2_deferred"),
+        )
+
+
+def test_exact_legacy_unit_bridge_allows_one_first_v2_successor(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    tmp_path.chmod(0o700)
+    state = tmp_path / "state"
+    state.mkdir(mode=0o700)
+    path = state / "immutable-release-unit-install.v1.json"
+    previous, _older = _write_exact_legacy_unit_journal(path, monkeypatch=monkeypatch)
+    candidate = operator.ReleaseIdentity(tmp_path / "candidate", "c" * 40, "0.207.91", "d" * 64, 50)
+    journal = operator.DurableUnitInstallJournal(path)
+    durable, bootstrap = journal.retention_admission_for(candidate=candidate, previous=previous)
+    assert durable is None
+    assert bootstrap is True
+    admission = _retention_admission_receipt(status="first_v2_deferred")
+    state_record = journal.begin_or_resume(
+        candidate=candidate,
+        previous=previous,
+        transition_root=tmp_path / "transition",
+        candidate_unit_hashes={key: "3" * 64 for key in operator._UNIT_SURFACE_KEYS},  # noqa: SLF001
+        transition_unit_hashes={key: "4" * 64 for key in operator._RUNTIME_UNIT_NAMES},  # noqa: SLF001
+        retention_admission=admission,
+    )
+    assert (
+        state_record["legacy_bootstrap_unit_install_file_sha256"]
+        == operator._LEGACY_020790_UNIT_INSTALL_FILE_SHA256  # noqa: SLF001
+    )
+    assert state_record["retention_admission"] == admission
+
+
+def test_unit_install_rejects_self_pair_without_replacing_exact_legacy_bridge(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    tmp_path.chmod(0o700)
+    state = tmp_path / "state"
+    state.mkdir(mode=0o700)
+    path = state / "immutable-release-unit-install.v1.json"
+    candidate, _previous = _write_exact_legacy_unit_journal(path, monkeypatch=monkeypatch)
+    before = path.read_bytes()
+    with pytest.raises(
+        operator.ReleaseFailure,
+        match="^candidate_previous_identity_not_distinct$",
+    ):
+        operator.install_units(
+            candidate,
+            candidate,
+            unit_dir=tmp_path / "units",
+            anchor=tmp_path / "anchor",
+            transition_runtime_root=tmp_path / "transition",
+            transition_unit_hashes={},
+            retention_admission=_retention_admission_receipt(status="first_v2_deferred"),
+            journal=operator.DurableUnitInstallJournal(path),
+        )
+    assert path.read_bytes() == before
+
+
+def test_even_exactly_signed_unfinished_legacy_unit_journal_is_rejected(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    tmp_path.chmod(0o700)
+    state = tmp_path / "state"
+    state.mkdir(mode=0o700)
+    path = state / "immutable-release-unit-install.v1.json"
+    _write_exact_legacy_unit_journal(path, monkeypatch=monkeypatch, phase="prepared")
+    with pytest.raises(operator.ReleaseFailure, match="^unit_install_journal_legacy_invalid$"):
+        operator.DurableUnitInstallJournal(path).load()
+
+
+def test_resigned_near_miss_legacy_unit_journal_is_rejected(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    tmp_path.chmod(0o700)
+    state = tmp_path / "state"
+    state.mkdir(mode=0o700)
+    path = state / "immutable-release-unit-install.v1.json"
+    _write_exact_legacy_unit_journal(path, monkeypatch=monkeypatch)
+    payload = json.loads(path.read_text(encoding="ascii"))
+    payload["transaction_id"] = "0" * 64
+    core = {key: value for key, value in payload.items() if key != "journal_sha256"}
+    payload["journal_sha256"] = hashlib.sha256(operator._canonical_json(core)).hexdigest()  # noqa: SLF001
+    path.write_bytes(operator._canonical_json(payload) + b"\n")  # noqa: SLF001
+    path.chmod(0o600)
+    with pytest.raises(operator.ReleaseFailure, match="^unit_install_journal_legacy_invalid$"):
+        operator.DurableUnitInstallJournal(path).load()
+
+
+def test_activation_freshly_rederives_and_rejects_unit_admission_drift_before_begin(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    tmp_path.chmod(0o700)
+    state = tmp_path / "state"
+    state.mkdir(mode=0o700)
+    candidate = operator.ReleaseIdentity(tmp_path / "candidate", "c" * 40, "0.207.91", "d" * 64, 50)
+    previous = operator.ReleaseIdentity(tmp_path / "previous", "a" * 40, "0.207.90", "e" * 64, 50)
+    durable = _retention_admission_receipt()
+    unit_journal = operator.DurableUnitInstallJournal(state / "immutable-release-unit-install.v1.json")
+    _complete_unit_install_journal(
+        unit_journal,
+        candidate=candidate,
+        previous=previous,
+        admission=durable,
+        transition_root=tmp_path / "transition",
+    )
+    activation_state = {
+        "activation_receipt_file_sha256": "1" * 64,
+        "candidate": operator._journal_release(previous),  # noqa: SLF001
+        "phase": "clear",
+    }
+    activation_journal = SimpleNamespace(
+        _state=activation_state,
+        load=lambda: (_ for _ in ()).throw(AssertionError("durable activation state was replaced")),
+    )
+    monkeypatch.setattr(
+        operator,
+        "_bound_activation_receipt",
+        lambda **_kwargs: ({"receipt_sha256": "2" * 64}, tmp_path / "activation.json"),
+    )
+    fresh = dict(durable)
+    fresh["index_revision"] = int(fresh["index_revision"]) + 1
+    fresh_core = {key: value for key, value in fresh.items() if key != "receipt_sha256"}
+    fresh["receipt_sha256"] = hashlib.sha256(operator._canonical_json(fresh_core)).hexdigest()  # noqa: SLF001
+    candidate_admission = SimpleNamespace(retention_release_admission=lambda _path: fresh)
+
+    with pytest.raises(
+        operator.ReleaseFailure,
+        match="^unit_install_retention_admission_changed$",
+    ):
+        operator._require_fresh_unit_retention_admission(  # noqa: SLF001
+            activation_journal=activation_journal,
+            unit_journal=unit_journal,
+            candidate=candidate,
+            previous=previous,
+            admission=candidate_admission,
+        )
+    assert unit_journal.load()["phase"] == "complete"
+
+
+@pytest.mark.parametrize("phase", ("prepared", "migration_attempted", "clear"))
+def test_activate_retry_trusts_exact_immutable_unit_admission_after_begin(
+    tmp_path: Path,
+    phase: str,
+) -> None:
+    tmp_path.chmod(0o700)
+    state = tmp_path / "state"
+    state.mkdir(mode=0o700)
+    candidate = operator.ReleaseIdentity(tmp_path / "candidate", "c" * 40, "0.207.91", "d" * 64, 50)
+    previous = operator.ReleaseIdentity(tmp_path / "previous", "a" * 40, "0.207.90", "e" * 64, 50)
+    unit_journal = operator.DurableUnitInstallJournal(state / "immutable-release-unit-install.v1.json")
+    _complete_unit_install_journal(
+        unit_journal,
+        candidate=candidate,
+        previous=previous,
+        admission=_retention_admission_receipt(),
+        transition_root=tmp_path / "transition",
+    )
+    activation_journal = SimpleNamespace(
+        _state={
+            "candidate": operator._journal_release(candidate),  # noqa: SLF001
+            "phase": phase,
+            "previous": operator._journal_release(previous),  # noqa: SLF001
+        },
+        load=lambda: (_ for _ in ()).throw(AssertionError("target transaction must stay bound")),
+    )
+    candidate_admission = SimpleNamespace(
+        retention_release_admission=lambda _path: (_ for _ in ()).throw(
+            AssertionError("mutable DR must not be rederived after begin")
+        )
+    )
+    operator._require_fresh_unit_retention_admission(  # noqa: SLF001
+        activation_journal=activation_journal,
+        unit_journal=unit_journal,
+        candidate=candidate,
+        previous=previous,
+        admission=candidate_admission,
+    )
+
+
+def test_terminal_activate_retry_skips_predecessor_reconciliation(tmp_path: Path) -> None:
+    path = tmp_path / "immutable-release-activation.v1.json"
+    path.write_text("present\n", encoding="ascii")
+    candidate = operator.ReleaseIdentity(tmp_path / "candidate", "c" * 40, "0.207.91", "d" * 64, 50)
+    previous = operator.ReleaseIdentity(tmp_path / "previous", "a" * 40, "0.207.90", "e" * 64, 50)
+    fallback = replace(previous, root=tmp_path / "fallback", commit="b" * 40)
+    journal = SimpleNamespace(
+        path=path,
+        _read=lambda **_kwargs: {
+            "candidate": operator._journal_release(candidate),  # noqa: SLF001
+            "phase": "clear",
+        },
+    )
+    admission = SimpleNamespace(
+        enroll=lambda _path: (_ for _ in ()).throw(AssertionError("target is not predecessor"))
+    )
+    operator._reconcile_terminal_activation_admission(  # noqa: SLF001
+        journal=journal,
+        candidate=candidate,
+        previous=previous,
+        fallback=fallback,
+        admission=admission,
+    )
+
+
+def test_activation_and_recovery_require_exact_completed_unit_pair(tmp_path: Path) -> None:
+    tmp_path.chmod(0o700)
+    state = tmp_path / "state"
+    state.mkdir(mode=0o700)
+    candidate = operator.ReleaseIdentity(tmp_path / "candidate", "c" * 40, "0.207.91", "d" * 64, 50)
+    previous = operator.ReleaseIdentity(tmp_path / "previous", "a" * 40, "0.207.90", "e" * 64, 50)
+    journal = operator.DurableUnitInstallJournal(state / "immutable-release-unit-install.v1.json")
+    _complete_unit_install_journal(
+        journal,
+        candidate=candidate,
+        previous=previous,
+        admission=_retention_admission_receipt(),
+        transition_root=tmp_path / "transition",
+    )
+    operator._require_completed_unit_install(state, candidate, previous)  # noqa: SLF001
+    wrong_previous = replace(previous, commit="b" * 40)
+    with pytest.raises(operator.ReleaseFailure, match="^unit_install_not_complete_for_candidate$"):
+        operator._require_completed_unit_install(state, candidate, wrong_previous)  # noqa: SLF001
 
 
 @pytest.mark.parametrize("crash_after", [1, 3, 7, "manager-reload"])
@@ -10238,6 +10786,7 @@ def test_unit_pair_crash_converges_without_exposing_mixed_runtime_roots(
             anchor=anchor,
             transition_runtime_root=transition_root,
             transition_unit_hashes=transition_hashes,
+            retention_admission=_retention_admission_receipt(),
             journal=journal,
         )
     expected_phase = "units_converged" if crash_after == "manager-reload" else "transition_anchor_active"
@@ -10263,6 +10812,7 @@ def test_unit_pair_crash_converges_without_exposing_mixed_runtime_roots(
         anchor=anchor,
         transition_runtime_root=transition_root,
         transition_unit_hashes=transition_hashes,
+        retention_admission=_retention_admission_receipt(),
         journal=operator.DurableUnitInstallJournal(journal.path),
     )
     assert journal.load()["phase"] == "complete"
@@ -10302,6 +10852,7 @@ def test_unit_install_rejects_a_legacy_candidate_before_systemd_or_journal(
             anchor=tmp_path / "anchor",
             transition_runtime_root=tmp_path / "transition",
             transition_unit_hashes={},
+            retention_admission=_retention_admission_receipt(),
             journal=object(),  # type: ignore[arg-type]
         )
 
@@ -10475,21 +11026,28 @@ def _write_unfinished_retention_apply(state_dir: Path, *, phase: str) -> None:
     )
 
 
-def _write_exact_zero_retention_apply(state_dir: Path) -> None:
+def _write_exact_zero_retention_apply(
+    state_dir: Path,
+    *,
+    terminal: bool = True,
+) -> None:
     plan_directory = state_dir / retention_apply.APPLY_PLAN_DIRECTORY
     receipt_directory = state_dir / retention_apply.APPLY_RECEIPT_DIRECTORY
     plan_directory.mkdir(mode=0o700)
     receipt_directory.mkdir(mode=0o700)
     plan_core = {
         "apply_authority": False,
+        "backup_targets": [],
         "block_reason": "",
         "classification_status": "eligible",
         "mode": "eligible_classification",
+        "open_inventory": {"source": "code_owned_no_delete_candidates_v1"},
         "retention_scope": {
             "file_sha256": "b" * 64,
             "schema": retention.RETENTION_SCOPE_SCHEMA,
         },
         "schema": retention.PLAN_SCHEMA,
+        "targets": [] if terminal else [{"reason": "open_reference"}],
     }
     plan_sha256 = hashlib.sha256(retention_apply._canonical(plan_core)).hexdigest()  # noqa: SLF001
     plan = {**plan_core, "plan_sha256": plan_sha256}
@@ -10497,49 +11055,6 @@ def _write_exact_zero_retention_apply(state_dir: Path) -> None:
     plan_path.write_bytes(retention_apply._canonical(plan) + b"\n")  # noqa: SLF001
     plan_path.chmod(0o600)
     plan_status = plan_path.stat()
-    transaction_id = hashlib.sha256(
-        retention_apply._canonical(  # noqa: SLF001
-            {
-                "plan_sha256": plan_sha256,
-                "schema": retention_apply.APPLY_JOURNAL_SCHEMA,
-            }
-        )
-    ).hexdigest()
-    candidate_set_sha256 = hashlib.sha256(retention_apply._canonical([])).hexdigest()  # noqa: SLF001
-    receipt_core = {
-        "actual_deleted_inodes": 0,
-        "actual_deleted_logical_bytes": 0,
-        "allocated_bytes_are_not_exact_physical_attribution": True,
-        "authority_bindings_sha256": "c" * 64,
-        "bounded_effect_contour": retention.BOUNDED_DELETE_CONTOUR,
-        "candidate_set_sha256": candidate_set_sha256,
-        "concurrent_open_attempts_excluded": True,
-        "deleted_authenticated_allocated_bytes": 0,
-        "deleted_candidate_count": 0,
-        "filesystem_after": [],
-        "filesystem_before": [],
-        "plan_sha256": plan_sha256,
-        "post_apply_reauthenticated": True,
-        "pre_delete_authenticated_allocated_bytes": 0,
-        "pre_delete_authenticated_bytes": 0,
-        "pre_delete_authenticated_inodes": 0,
-        "privileged_probe_role": "diagnostic_prerequisite",
-        "residual_authority_set_sha256": candidate_set_sha256,
-        "retention_scope_schema": retention.RETENTION_SCOPE_SCHEMA,
-        "retention_scope_sha256": "b" * 64,
-        "schema": retention_apply.APPLY_RECEIPT_SCHEMA,
-        "status": "applied",
-        "statvfs_available_delta_bytes": 0,
-        "statvfs_concurrent_activity_unexcluded": True,
-        "terminal_absence_observed": True,
-        "threat_boundary": retention.THREAT_BOUNDARY,
-        "transaction_id": transaction_id,
-        "universal_absence_proof": False,
-    }
-    receipt = retention_apply._receipt_with_digest(receipt_core)  # noqa: SLF001
-    receipt_path = receipt_directory / f"receipt-{transaction_id}.json"
-    receipt_path.write_bytes(retention_apply._canonical(receipt) + b"\n")  # noqa: SLF001
-    receipt_path.chmod(0o600)
     journal = retention_apply._new_journal(  # noqa: SLF001
         plan,
         (),
@@ -10547,6 +11062,104 @@ def _write_exact_zero_retention_apply(state_dir: Path) -> None:
         filesystem_before=(),
     )
     journal["phase"] = "applied"
+    receipt = retention_apply._result_receipt(  # noqa: SLF001
+        plan=plan,
+        journal=journal,
+        candidates=(),
+        authority_bindings_sha256="c" * 64,
+    )
+    receipt_path = receipt_directory / f"receipt-{receipt['transaction_id']}.json"
+    receipt_path.write_bytes(retention_apply._canonical(receipt) + b"\n")  # noqa: SLF001
+    receipt_path.chmod(0o600)
+    journal["receipt_sha256"] = receipt["receipt_sha256"]
+    retention_apply._write_journal(  # noqa: SLF001
+        state_dir / retention_apply.APPLY_JOURNAL_NAME,
+        journal,
+        guard=lambda: None,
+    )
+
+
+def _write_effectful_retention_apply(state_dir: Path) -> None:
+    plan_directory = state_dir / retention_apply.APPLY_PLAN_DIRECTORY
+    receipt_directory = state_dir / retention_apply.APPLY_RECEIPT_DIRECTORY
+    plan_directory.mkdir(mode=0o700)
+    receipt_directory.mkdir(mode=0o700)
+    candidate = {
+        "allocated_bytes": 4096,
+        "candidate_sha256": "d" * 64,
+        "device": 1,
+        "entry_count": 1,
+        "filesystem_magic": 0xEF53,
+        "identity": {},
+        "inode": 1,
+        "inventory_sha256": "3" * 64,
+        "mode": 0o700,
+        "mount_id": 1,
+        "nlink": 1,
+        "path": str(state_dir.parent / "retired"),
+        "recursive_bytes": 32,
+        "type": "directory",
+        "writable_authority_sha256": "4" * 64,
+    }
+    plan_core = {
+        "apply_authority": True,
+        "backup_targets": [],
+        "block_reason": "",
+        "classification_status": "eligible",
+        "mode": "eligible_classification",
+        "open_inventory": {"source": "code_owned_privileged_target_proc_v1"},
+        "retention_scope": {
+            "file_sha256": "b" * 64,
+            "schema": retention.RETENTION_SCOPE_SCHEMA,
+        },
+        "schema": retention.PLAN_SCHEMA,
+        "targets": [{**candidate, "decision": "delete_candidate"}],
+    }
+    plan_sha256 = hashlib.sha256(retention_apply._canonical(plan_core)).hexdigest()  # noqa: SLF001
+    plan = {**plan_core, "plan_sha256": plan_sha256}
+    plan_path = plan_directory / f"plan-{plan_sha256}.json"
+    plan_path.write_bytes(retention_apply._canonical(plan) + b"\n")  # noqa: SLF001
+    plan_path.chmod(0o600)
+    plan_status = plan_path.stat()
+    journal = retention_apply._new_journal(  # noqa: SLF001
+        plan,
+        (candidate,),
+        durable_plan=(plan_path, int(plan_status.st_dev), int(plan_status.st_ino)),
+        filesystem_before=(),
+    )
+    entry = journal["entries"][0]
+    entry.update(
+        {
+            "actual_allocated_bytes": 4096,
+            "actual_bytes": 32,
+            "actual_inodes": 1,
+            "objects_sha256": "e" * 64,
+            "residual_authority": {
+                "count": 1,
+                "device": 1,
+                "inode": 1,
+                "path": str(
+                    state_dir
+                    / retention_apply.OBJECT_AUTHORITY_DIRECTORY
+                    / f"objects-{journal['transaction_id']}-000000.bin"
+                ),
+                "sha256": "f" * 64,
+            },
+            "sealed_tree_sha256": "1" * 64,
+            "status": "deleted",
+            "tree_sha256": "2" * 64,
+        }
+    )
+    journal["phase"] = "applied"
+    receipt = retention_apply._result_receipt(  # noqa: SLF001
+        plan=plan,
+        journal=journal,
+        candidates=(candidate,),
+        authority_bindings_sha256="c" * 64,
+    )
+    receipt_path = receipt_directory / f"receipt-{receipt['transaction_id']}.json"
+    receipt_path.write_bytes(retention_apply._canonical(receipt) + b"\n")  # noqa: SLF001
+    receipt_path.chmod(0o600)
     journal["receipt_sha256"] = receipt["receipt_sha256"]
     retention_apply._write_journal(  # noqa: SLF001
         state_dir / retention_apply.APPLY_JOURNAL_NAME,
@@ -10560,6 +11173,8 @@ def _write_exact_zero_retention_apply(state_dir: Path) -> None:
     (
         ("absent", "clear"),
         ("applied", "clear"),
+        ("effectful", "clear"),
+        ("deferred-zero", "retention_apply_journal_invalid"),
         ("prepared", "unfinished_retention_apply_requires_recovery"),
         ("applying", "unfinished_retention_apply_requires_recovery"),
         ("malformed", "retention_apply_journal_invalid"),
@@ -10574,6 +11189,10 @@ def test_retention_apply_quiescence_is_standalone_under_isolated_python(
     state_dir.mkdir(mode=0o700)
     if scenario == "applied":
         _write_exact_zero_retention_apply(state_dir)
+    elif scenario == "effectful":
+        _write_effectful_retention_apply(state_dir)
+    elif scenario == "deferred-zero":
+        _write_exact_zero_retention_apply(state_dir, terminal=False)
     elif scenario in {"prepared", "applying"}:
         _write_unfinished_retention_apply(state_dir, phase=scenario)
     elif scenario == "malformed":
@@ -10930,9 +11549,14 @@ with module._sealed_candidate_dr_admission(
     assert {name for name in sys.modules if name == "tools" or name.startswith("tools.")} == {
         "tools",
         "tools.immutable_release_operator",
+        "tools.release_artifact_proc_probe",
+        "tools.release_artifact_retention",
+        "tools.release_artifact_retention_operator",
         "tools.release_dr_generation_authentication",
         "tools.release_dr_generation_enrollment",
         "tools.release_dr_generation_index",
+        "tools.release_dr_generation_lifecycle",
+        "tools.release_dr_generation_rehearsal",
     }
 assert tuple(sys.path) == before
 assert not any(name == "tools" or name.startswith("tools.") for name in sys.modules)
