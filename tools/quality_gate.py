@@ -1325,7 +1325,7 @@ def _junit_durations(report_path: Path) -> dict[str, int]:
         if len(values) != 1 or values[0] is None or not seconds.is_finite() or seconds < 0:
             raise ValueError("JUnit testcase has an invalid duration")
         durations[values[0]] = int(seconds * 1_000_000_000)
-    if Counter(durations) != Counter(summary.nodeids):
+    if Counter(tuple(durations)) != Counter(summary.nodeids):
         raise ValueError("JUnit durations do not cover the exact completed selection")
     return durations
 

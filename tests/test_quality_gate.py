@@ -740,6 +740,16 @@ def test_phase_fails_when_junit_reports_a_skip(phase: str, label: str, capsys) -
 
 
 def test_junit_report_rejects_suite_and_testcase_count_mismatch(tmp_path: Path) -> None:
+    valid = tmp_path / "valid.xml"
+    valid.write_text(
+        '<testsuite tests="1" failures="0" errors="0" skipped="0">'
+        '<testcase name="one" time="0.125"><properties>'
+        f'<property name="{quality_gate._NODEID_PROPERTY}" value="tests/test_a.py::test_one"/>'
+        "</properties></testcase></testsuite>",
+        encoding="utf-8",
+    )
+    assert quality_gate._junit_durations(valid) == {"tests/test_a.py::test_one": 125_000_000}
+
     report = tmp_path / "mismatch.xml"
     report.write_text(
         '<testsuite tests="2" failures="0" errors="0" skipped="0"><testcase name="only"/></testsuite>',
