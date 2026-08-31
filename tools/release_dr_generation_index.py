@@ -23,7 +23,7 @@ import os
 import re
 import secrets
 import stat
-from collections.abc import Iterator, Mapping, Sequence
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from contextlib import contextmanager, suppress
 from dataclasses import dataclass
 from pathlib import Path
@@ -1439,10 +1439,17 @@ class DurableDRGenerationIndex:
         if self._head_record_unlocked(pins)[2] != raw:
             raise DRGenerationIndexError("dr_generation_head_publication_failed")
 
-    def initialize(self) -> dict[str, Any]:
+    def initialize(
+        self,
+        *,
+        namespace_guard: Callable[[], None] | None = None,
+    ) -> dict[str, Any]:
         """Create the empty authority exactly once, or authenticate the existing one."""
 
+        guard = namespace_guard or (lambda: None)
+        guard()
         with self._guard(create_receipt_directory=True) as pins:
+            guard()
             if _entry_exists_at(pins.state_fd, INDEX_NAME):
                 current_raw = _stable_private_file_at(
                     pins.state_fd,
@@ -1463,15 +1470,18 @@ class DurableDRGenerationIndex:
                             else "dr_generation_head_rollback_detected"
                         )
                         raise DRGenerationIndexError(code)
+                    guard()
                     _replace_private_durable_at(
                         pins.state_fd,
                         INDEX_NAME,
                         authoritative_raw,
                         code="dr_generation_head_projection_recovery_failed",
                     )
+                    guard()
                 loaded = self._load_unlocked(pins)
                 if loaded != authoritative:
                     raise DRGenerationIndexError("dr_generation_head_projection_recovery_failed")
+                guard()
                 return loaded
             core = {
                 "base_clear_sha256": ZERO_SHA256,
@@ -1494,7 +1504,10 @@ class DurableDRGenerationIndex:
                 if head_record[0] != 0 or head_record[2] != raw:
                     raise DRGenerationIndexError("dr_generation_head_rollback_detected")
             else:
+                guard()
                 self._replace_head_unlocked(pins, raw)
+                guard()
+            guard()
             self._publish_no_replace(
                 directory_fd=pins.state_fd,
                 name=INDEX_NAME,
@@ -1503,9 +1516,11 @@ class DurableDRGenerationIndex:
                 maximum_bytes=MAX_INDEX_BYTES,
                 code="dr_generation_index_initialization_failed",
             )
+            guard()
             loaded = self._load_unlocked(pins)
             if loaded != payload:
                 raise DRGenerationIndexError("dr_generation_index_initialization_failed")
+            guard()
             return loaded
 
     def _receipt_path(self, generation_id: str) -> Path:
@@ -1544,8 +1559,11 @@ class DurableDRGenerationIndex:
         pins: _PinnedDirectories,
         kind: str,
         code: str,
+        namespace_guard: Callable[[], None] | None = None,
     ) -> None:
+        guard = namespace_guard or (lambda: None)
         normalized_ref = _normalize_external_receipt(reference, code=code)
+        guard()
         self._publish_no_replace(
             directory_fd=pins.receipt_fd,
             name=_external_receipt_name(kind, normalized_ref["sha256"]),
@@ -1554,6 +1572,7 @@ class DurableDRGenerationIndex:
             maximum_bytes=MAX_RECEIPT_BYTES,
             code=f"{kind}_receipt_publication_failed",
         )
+        guard()
         self._load_external_receipt(
             normalized_ref,
             pins.receipt_fd,
@@ -1561,6 +1580,7 @@ class DurableDRGenerationIndex:
             code=code,
         )
         self._require_pinned_namespace(pins)
+        guard()
 
     def _load_receipt(self, reference: Mapping[str, str], receipt_fd: int) -> dict[str, Any]:
         normalized_ref = _normalize_generation_ref(reference, code="generation_ref_invalid")
@@ -1959,23 +1979,30 @@ class DurableDRGenerationIndex:
         current: Mapping[str, Any],
         following_core: Mapping[str, Any],
         pins: _PinnedDirectories,
+        namespace_guard: Callable[[], None] | None = None,
     ) -> dict[str, Any]:
+        guard = namespace_guard or (lambda: None)
+        guard()
         self._require_pinned_namespace(pins)
         observed = self._load_unlocked(pins)
         if observed.get("journal_sha256") != current.get("journal_sha256"):
             raise DRGenerationIndexError("dr_generation_cas_mismatch")
         expected_payload, raw = _encode_state(following_core)
+        guard()
         self._replace_head_unlocked(pins, raw)
+        guard()
         _replace_private_durable_at(
             pins.state_fd,
             INDEX_NAME,
             raw,
             code="dr_generation_cas_publication_failed",
         )
+        guard()
         self._require_pinned_namespace(pins)
         durable = self._load_unlocked(pins)
         if durable != expected_payload:
             raise DRGenerationIndexError("dr_generation_cas_publication_failed")
+        guard()
         return durable
 
     def prepare(
@@ -1984,13 +2011,17 @@ class DurableDRGenerationIndex:
         intent: str,
         candidate: Mapping[str, Any],
         expected_journal_sha256: str,
+        namespace_guard: Callable[[], None] | None = None,
     ) -> dict[str, Any]:
         """Freeze an exact candidate; no backup discovery is performed."""
 
         if intent not in INDEX_INTENTS:
             raise DRGenerationIndexError("dr_generation_intent_invalid")
         normalized_candidate = normalize_generation_candidate(candidate)
+        guard = namespace_guard or (lambda: None)
+        guard()
         with self._guard() as pins:
+            guard()
             state = self._load_unlocked(pins)
             self._require_cas(state, expected_journal_sha256)
             if state["phase"] != "clear":
@@ -2029,17 +2060,23 @@ class DurableDRGenerationIndex:
                 "revision": int(state["revision"]) + 1,
                 "transaction_id": secrets.token_hex(32),
             }
-            return self._cas_replace_locked(state, following, pins)
+            if namespace_guard is None:
+                return self._cas_replace_locked(state, following, pins)
+            return self._cas_replace_locked(state, following, pins, namespace_guard=namespace_guard)
 
     def record_authenticated(
         self,
         *,
         receipt: Mapping[str, Any],
         expected_journal_sha256: str,
+        namespace_guard: Callable[[], None] | None = None,
     ) -> dict[str, Any]:
         """Retain a complete authentication body before binding its compact ref."""
 
+        guard = namespace_guard or (lambda: None)
+        guard()
         with self._guard() as pins:
+            guard()
             state = self._load_unlocked(pins)
             self._require_cas(state, expected_journal_sha256)
             if state["phase"] != "prepared":
@@ -2054,6 +2091,7 @@ class DurableDRGenerationIndex:
                 pins=pins,
                 kind=AUTHENTICATION_RECEIPT_KIND,
                 code="authentication_receipt_invalid",
+                namespace_guard=namespace_guard,
             )
             pending = dict(state["pending"])
             pending["authentication_receipt"] = normalized_receipt
@@ -2063,17 +2101,23 @@ class DurableDRGenerationIndex:
                 "phase": "authenticated",
                 "revision": int(state["revision"]) + 1,
             }
-            return self._cas_replace_locked(state, following, pins)
+            if namespace_guard is None:
+                return self._cas_replace_locked(state, following, pins)
+            return self._cas_replace_locked(state, following, pins, namespace_guard=namespace_guard)
 
     def record_rehearsed(
         self,
         *,
         receipt: Mapping[str, Any],
         expected_journal_sha256: str,
+        namespace_guard: Callable[[], None] | None = None,
     ) -> dict[str, Any]:
         """Retain a complete rehearsal body before binding its compact ref."""
 
+        guard = namespace_guard or (lambda: None)
+        guard()
         with self._guard() as pins:
+            guard()
             state = self._load_unlocked(pins)
             self._require_cas(state, expected_journal_sha256)
             if state["phase"] != "authenticated":
@@ -2122,6 +2166,7 @@ class DurableDRGenerationIndex:
                 pins=pins,
                 kind=REHEARSAL_RECEIPT_KIND,
                 code="rehearsal_receipt_invalid",
+                namespace_guard=namespace_guard,
             )
             pending["generation"] = generation_ref
             following = {
@@ -2130,13 +2175,18 @@ class DurableDRGenerationIndex:
                 "phase": "rehearsed",
                 "revision": int(state["revision"]) + 1,
             }
-            return self._cas_replace_locked(state, following, pins)
+            if namespace_guard is None:
+                return self._cas_replace_locked(state, following, pins)
+            return self._cas_replace_locked(state, following, pins, namespace_guard=namespace_guard)
 
     def _publish_locked(
         self,
         state: Mapping[str, Any],
         pins: _PinnedDirectories,
+        namespace_guard: Callable[[], None] | None = None,
     ) -> dict[str, Any]:
+        guard = namespace_guard or (lambda: None)
+        guard()
         if state["phase"] != "rehearsed":
             raise DRGenerationIndexError("dr_generation_transition_invalid")
         pending = dict(state["pending"])
@@ -2163,6 +2213,7 @@ class DurableDRGenerationIndex:
             raise DRGenerationIndexError("dr_generation_duplicate_slot")
         if intent == "rotate_current" and generation_ref == older:
             raise DRGenerationIndexError("dr_generation_duplicate_slot")
+        guard()
         self._publish_no_replace(
             directory_fd=pins.receipt_fd,
             name=f"{generation_ref['generation_id']}.json",
@@ -2171,8 +2222,10 @@ class DurableDRGenerationIndex:
             maximum_bytes=MAX_RECEIPT_BYTES,
             code="generation_receipt_publication_failed",
         )
+        guard()
         self._load_receipt(generation_ref, pins.receipt_fd)
         self._require_pinned_namespace(pins)
+        guard()
 
         if intent == "bootstrap_current":
             next_current, next_older = generation_ref, None
@@ -2191,7 +2244,9 @@ class DurableDRGenerationIndex:
             "phase": "clear",
             "revision": int(state["revision"]) + 1,
         }
-        return self._cas_replace_locked(state, following, pins)
+        if namespace_guard is None:
+            return self._cas_replace_locked(state, following, pins)
+        return self._cas_replace_locked(state, following, pins, namespace_guard=namespace_guard)
 
     def _authenticated_predecessor_journal(self, state: Mapping[str, Any]) -> str:
         if state.get("phase") != "rehearsed" or not isinstance(state.get("pending"), dict):
@@ -2207,25 +2262,49 @@ class DurableDRGenerationIndex:
         }
         return _sha256(_canonical_json(predecessor_core))
 
-    def publish(self, *, expected_journal_sha256: str) -> dict[str, Any]:
+    def publish(
+        self,
+        *,
+        expected_journal_sha256: str,
+        namespace_guard: Callable[[], None] | None = None,
+    ) -> dict[str, Any]:
         """Publish the immutable receipt first, then CAS the two-slot index."""
 
+        guard = namespace_guard or (lambda: None)
+        guard()
         with self._guard() as pins:
+            guard()
             state = self._load_unlocked(pins)
             self._require_cas(state, expected_journal_sha256)
-            return self._publish_locked(state, pins)
+            return self._publish_locked(
+                state,
+                pins,
+                namespace_guard=namespace_guard,
+            )
 
-    def recover(self, *, expected_journal_sha256: str) -> dict[str, Any]:
+    def recover(
+        self,
+        *,
+        expected_journal_sha256: str,
+        namespace_guard: Callable[[], None] | None = None,
+    ) -> dict[str, Any]:
         """Finish only a fully rehearsed publication; earlier phases stay pinned."""
 
+        guard = namespace_guard or (lambda: None)
+        guard()
         with self._guard() as pins:
+            guard()
             state = self._load_unlocked(pins)
             self._require_cas(state, expected_journal_sha256)
             if state["phase"] == "clear":
                 return state
             if state["phase"] != "rehearsed":
                 raise DRGenerationIndexError("dr_generation_recovery_receipt_required")
-            return self._publish_locked(state, pins)
+            return self._publish_locked(
+                state,
+                pins,
+                namespace_guard=namespace_guard,
+            )
 
     def _pins_from_state_unlocked(
         self,

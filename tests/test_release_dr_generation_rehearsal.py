@@ -1493,11 +1493,18 @@ def test_receipt_publication_before_cas_is_restart_safe(
         current: Any,
         following: Any,
         pins: Any,
+        namespace_guard: Any = None,
     ) -> dict[str, Any]:
         if following.get("phase") == "rehearsed" and fail_once[0]:
             fail_once[0] = False
             raise dr_index.DRGenerationIndexError("simulated_receipt_cas_crash")
-        return original(self, current, following, pins)
+        return original(
+            self,
+            current,
+            following,
+            pins,
+            namespace_guard=namespace_guard,
+        )
 
     monkeypatch.setattr(
         dr_index.DurableDRGenerationIndex,

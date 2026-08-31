@@ -10,6 +10,7 @@ from typing import Any
 
 import pytest
 
+from tools import immutable_release_operator as release_operator
 from tools import release_dr_generation_index as dr_index
 
 
@@ -121,9 +122,7 @@ def _rehearsal_receipt(
         "engineer_exact": True,
         "fault_boundary": "after_migration_before_provision_or_network",
         "four_surface_exact": True,
-        "four_surface_sha256": hashlib.sha256(
-            _canonical(authentication["surface_receipts"])
-        ).hexdigest(),
+        "four_surface_sha256": hashlib.sha256(_canonical(authentication["surface_receipts"])).hexdigest(),
         "index_journal_sha256": authenticated["journal_sha256"],
         "index_revision": authenticated["revision"],
         "index_transaction_id": authenticated["transaction_id"],
@@ -407,8 +406,9 @@ def test_authority_snapshot_binds_exact_index_bytes_digest_and_pins(tmp_path: Pa
     assert snapshot.pins[0].backup_directory == Path(candidate["backup_directory"])
     assert snapshot.pins[0].rehearsal_binding is not None
     assert snapshot.pins[0].rehearsal_binding["database_schema"] == candidate["database_schema"]
-    assert snapshot.pins[0].rehearsal_binding["allowed_rollback_tree_sha256s"] == (
-        candidate["allowed_rollback_tree_sha256s"]
+    assert (
+        snapshot.pins[0].rehearsal_binding["allowed_rollback_tree_sha256s"]
+        == (candidate["allowed_rollback_tree_sha256s"])
     )
     _assert_restore_release_pin(snapshot.pins[0], candidate)
 
@@ -531,6 +531,72 @@ def test_crash_after_no_replace_receipt_before_state_cas_recovers_idempotently(
     assert recovered["phase"] == "clear"
     assert recovered["current"] == reference
     assert index.recover(expected_journal_sha256=recovered["journal_sha256"]) == recovered
+
+
+def test_namespace_guard_failure_after_receipt_stops_before_index_cas(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    index = _index(tmp_path)
+    initial = index.load()
+    candidate = _candidate(tmp_path, 92)
+    prepared = index.prepare(
+        intent="bootstrap_current",
+        candidate=candidate,
+        expected_journal_sha256=initial["journal_sha256"],
+    )
+    authentication = _authentication_receipt(candidate, 920)
+    authenticated = index.record_authenticated(
+        receipt=authentication,
+        expected_journal_sha256=prepared["journal_sha256"],
+    )
+    rehearsed = index.record_rehearsed(
+        receipt=_rehearsal_receipt(candidate, authentication, authenticated, 921),
+        expected_journal_sha256=authenticated["journal_sha256"],
+    )
+    generation_name = f"{rehearsed['pending']['generation']['generation_id']}.json"
+    real_publish = index._publish_no_replace  # noqa: SLF001
+    receipt_published = False
+
+    def publish_then_arm(**kwargs: Any) -> None:
+        nonlocal receipt_published
+        real_publish(**kwargs)
+        if kwargs.get("name") == generation_name:
+            receipt_published = True
+
+    cas_called = False
+    real_cas = index._cas_replace_locked  # noqa: SLF001
+
+    def observed_cas(
+        current: dict[str, Any],
+        following: dict[str, Any],
+        pins: Any,
+        namespace_guard: Any = None,
+    ) -> dict[str, Any]:
+        nonlocal cas_called
+        cas_called = True
+        return real_cas(current, following, pins, namespace_guard=namespace_guard)
+
+    def namespace_guard() -> None:
+        if receipt_published:
+            raise release_operator.ReleaseFailure("operator_transaction_lock_changed")
+
+    monkeypatch.setattr(index, "_publish_no_replace", publish_then_arm)
+    monkeypatch.setattr(index, "_cas_replace_locked", observed_cas)
+
+    with pytest.raises(
+        release_operator.ReleaseFailure,
+        match="^operator_transaction_lock_changed$",
+    ):
+        index.recover(
+            expected_journal_sha256=rehearsed["journal_sha256"],
+            namespace_guard=namespace_guard,
+        )
+
+    assert receipt_published is True
+    assert cas_called is False
+    assert index.load() == rehearsed
+    assert (index.receipt_directory / generation_name).is_file()
 
 
 @pytest.mark.parametrize("kind", ("authentication", "rehearsal"))
@@ -945,9 +1011,7 @@ def test_published_generation_revalidates_rehearsal_against_durable_exact_bindin
     authentication_path = index.receipt_directory / (
         f"authentication-{generation['authentication_receipt']['sha256']}.json"
     )
-    rehearsal_path = index.receipt_directory / (
-        f"rehearsal-{generation['rehearsal_receipt']['sha256']}.json"
-    )
+    rehearsal_path = index.receipt_directory / (f"rehearsal-{generation['rehearsal_receipt']['sha256']}.json")
     authentication = json.loads(authentication_path.read_bytes())
     rehearsal = json.loads(rehearsal_path.read_bytes())
 
@@ -970,12 +1034,8 @@ def test_published_generation_revalidates_rehearsal_against_durable_exact_bindin
     ):
         forged = dict(rehearsal)
         forged[field] = value
-        forged_core = {
-            key: item for key, item in forged.items() if key != "receipt_sha256"
-        }
-        forged["receipt_sha256"] = hashlib.sha256(
-            _canonical(forged_core)
-        ).hexdigest()
+        forged_core = {key: item for key, item in forged.items() if key != "receipt_sha256"}
+        forged["receipt_sha256"] = hashlib.sha256(_canonical(forged_core)).hexdigest()
         with pytest.raises(
             dr_index.DRGenerationIndexError,
             match="^rehearsal_receipt_invalid$",

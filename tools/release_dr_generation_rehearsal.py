@@ -104,6 +104,13 @@ class _SealedReleaseCopy:
     identity: release_operator.ReleaseIdentity
 
 
+@dataclass(frozen=True)
+class _ValidatedRehearsedPending:
+    pending: dr_index.PendingDRGenerationIdentity
+    material: dr_auth.AuthenticatedDRMaterial
+    receipt: dict[str, Any]
+
+
 def _canonical(value: object) -> bytes:
     try:
         return json.dumps(
@@ -2178,6 +2185,63 @@ def _validate_existing_receipt(
     return payload
 
 
+def _validate_rehearsed_pending_locked(
+    *,
+    index: dr_index.DurableDRGenerationIndex,
+    activation_journal: Path,
+    activation_receipt: Path,
+    backup_root: Path,
+    expected_journal_sha256: str,
+    namespace_guard: Callable[[], None],
+) -> _ValidatedRehearsedPending:
+    """Reauthenticate one exact rehearsed pending CAS while the operator lock is held."""
+
+    namespace_guard()
+    state = index.load()
+    namespace_guard()
+    if state.get("journal_sha256") != expected_journal_sha256:
+        raise DRGenerationRehearsalError("dr_rehearsal_index_changed")
+    pending = index.pending_generation_identity(
+        expected_journal_sha256=expected_journal_sha256,
+    )
+    namespace_guard()
+    if pending.index_phase != "rehearsed" or pending.rehearsal_receipt is None:
+        raise DRGenerationRehearsalError("dr_rehearsal_existing_receipt_missing")
+    namespace_guard()
+    material = dr_auth._authenticate_material_locked(  # noqa: SLF001
+        activation_journal=activation_journal,
+        activation_receipt=activation_receipt,
+        backup_root=backup_root,
+    )
+    namespace_guard()
+    _bind_pending(pending, material)
+    receipt = _validate_existing_receipt(
+        pending.rehearsal_receipt,
+        pending=pending,
+        material=material,
+    )
+    namespace_guard()
+    material_after = dr_auth._authenticate_material_locked(  # noqa: SLF001
+        activation_journal=activation_journal,
+        activation_receipt=activation_receipt,
+        backup_root=backup_root,
+    )
+    namespace_guard()
+    if material_after != material:
+        raise DRGenerationRehearsalError("dr_rehearsal_source_changed")
+    pending_after = index.pending_generation_identity(
+        expected_journal_sha256=pending.index_journal_sha256,
+    )
+    namespace_guard()
+    if pending_after != pending:
+        raise DRGenerationRehearsalError("dr_rehearsal_index_changed")
+    return _ValidatedRehearsedPending(
+        pending=pending,
+        material=material_after,
+        receipt=receipt,
+    )
+
+
 def rehearse_authenticated_generation(*, activation_receipt: Path) -> dict[str, Any]:
     """Rehearse the exact authenticated pending generation and CAS only that state."""
 
@@ -2187,25 +2251,35 @@ def rehearse_authenticated_generation(*, activation_receipt: Path) -> dict[str, 
     activation_journal = state_directory / "immutable-release-activation.v1.json"
     index = dr_index.DurableDRGenerationIndex(state_directory)
     try:
-        with release_operator.OperatorTransactionLock(state_directory / "immutable-release-operator.v1.lock"):
+        with release_operator.OperatorTransactionLock(
+            state_directory / "immutable-release-operator.v1.lock"
+        ) as transaction_lock:
+            transaction_lock.assert_held()
             state = index.load()
+            transaction_lock.assert_held()
             pending = index.pending_generation_identity(
                 expected_journal_sha256=str(state["journal_sha256"]),
             )
+            transaction_lock.assert_held()
+            if pending.index_phase == "rehearsed":
+                validated = _validate_rehearsed_pending_locked(
+                    index=index,
+                    activation_journal=activation_journal,
+                    activation_receipt=activation_receipt,
+                    backup_root=backup_root,
+                    expected_journal_sha256=pending.index_journal_sha256,
+                    namespace_guard=transaction_lock.assert_held,
+                )
+                transaction_lock.assert_held()
+                return validated.receipt
+            transaction_lock.assert_held()
             material = dr_auth._authenticate_material_locked(  # noqa: SLF001
                 activation_journal=activation_journal,
                 activation_receipt=activation_receipt,
                 backup_root=backup_root,
             )
+            transaction_lock.assert_held()
             _bind_pending(pending, material)
-            if pending.index_phase == "rehearsed":
-                if pending.rehearsal_receipt is None:
-                    raise DRGenerationRehearsalError("dr_rehearsal_existing_receipt_missing")
-                return _validate_existing_receipt(
-                    pending.rehearsal_receipt,
-                    pending=pending,
-                    material=material,
-                )
 
             scratch = _new_scratch(
                 transaction_id=pending.index_transaction_id,
@@ -2225,23 +2299,28 @@ def rehearse_authenticated_generation(*, activation_receipt: Path) -> dict[str, 
                 raise DRGenerationRehearsalError("dr_rehearsal_isolated_run_failed") from run_error
             assert result is not None
 
+            transaction_lock.assert_held()
             material_after = dr_auth._authenticate_material_locked(  # noqa: SLF001
                 activation_journal=activation_journal,
                 activation_receipt=activation_receipt,
                 backup_root=backup_root,
             )
+            transaction_lock.assert_held()
             if material_after != material:
                 raise DRGenerationRehearsalError("dr_rehearsal_source_changed")
             pending_after = index.pending_generation_identity(
                 expected_journal_sha256=pending.index_journal_sha256,
             )
+            transaction_lock.assert_held()
             if pending_after != pending:
                 raise DRGenerationRehearsalError("dr_rehearsal_index_changed")
             body = _receipt(pending=pending, material=material_after, result=result)
             rehearsed = index.record_rehearsed(
                 receipt=body,
                 expected_journal_sha256=pending.index_journal_sha256,
+                namespace_guard=transaction_lock.assert_held,
             )
+            transaction_lock.assert_held()
             if rehearsed["phase"] != "rehearsed" or rehearsed["revision"] != pending.index_revision + 1:
                 raise DRGenerationRehearsalError("dr_rehearsal_index_publication_failed")
             return body

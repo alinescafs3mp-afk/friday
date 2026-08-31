@@ -4,6 +4,7 @@ import hashlib
 import inspect
 import json
 import stat
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -80,7 +81,11 @@ def _authentication_receipt(candidate: dict[str, Any], ordinal: int) -> dict[str
         "activation_journal_sha256": f"{ordinal + 2:064x}",
         "activation_receipt_file_sha256": f"{ordinal + 3:064x}",
         "activation_receipt_sha256": candidate["source_receipt_sha256"],
-        "backup_directory": {"device": status.st_dev, "inode": status.st_ino, "path": candidate["backup_directory"]},
+        "backup_directory": {
+            "device": status.st_dev,
+            "inode": status.st_ino,
+            "path": candidate["backup_directory"],
+        },
         "backup_manifest_sha256": f"{ordinal + 4:064x}",
         "candidate_sha256": hashlib.sha256(_canonical(candidate)).hexdigest(),
         "database_schema": candidate["database_schema"],
@@ -106,9 +111,13 @@ def _rehearsal_receipt(
 ) -> dict[str, Any]:
     restore = candidate["restore_release"]
     source_keys = (
-        "activation_journal_file_sha256", "activation_journal_sha256",
-        "activation_receipt_file_sha256", "activation_receipt_sha256",
-        "backup_manifest_sha256", "restore_operator_sha256", "surface_receipts",
+        "activation_journal_file_sha256",
+        "activation_journal_sha256",
+        "activation_receipt_file_sha256",
+        "activation_receipt_sha256",
+        "backup_manifest_sha256",
+        "restore_operator_sha256",
+        "surface_receipts",
     )
     core = {
         "authentication_receipt_sha256": authentication["receipt_sha256"],
@@ -123,9 +132,7 @@ def _rehearsal_receipt(
         "engineer_exact": True,
         "fault_boundary": "after_migration_before_provision_or_network",
         "four_surface_exact": True,
-        "four_surface_sha256": hashlib.sha256(
-            _canonical(authentication["surface_receipts"])
-        ).hexdigest(),
+        "four_surface_sha256": hashlib.sha256(_canonical(authentication["surface_receipts"])).hexdigest(),
         "index_journal_sha256": state["journal_sha256"],
         "index_revision": state["revision"],
         "index_transaction_id": state["transaction_id"],
@@ -135,7 +142,10 @@ def _rehearsal_receipt(
         "network_call_count": 0,
         "obsidian_exact": True,
         "production_surface_write_count": 0,
-        "restore_release": {key: restore[key] for key in ("commit", "max_schema", "tree_manifest_sha256", "version", "wheel_sha256")},
+        "restore_release": {
+            key: restore[key]
+            for key in ("commit", "max_schema", "tree_manifest_sha256", "version", "wheel_sha256")
+        },
         "rollback_restore_observed": True,
         "rollback_tree_sha256": restore["tree_manifest_sha256"],
         "rolled_back": True,
@@ -497,10 +507,12 @@ def test_state_namespace_swap_after_first_authentication_fails_before_admission(
 
     def swap_then_initialize(
         index: dr_index.DurableDRGenerationIndex,
+        *,
+        namespace_guard: Callable[[], None] | None = None,
     ) -> dict[str, Any]:
         state_directory.rename(displaced)
         _private_directory(state_directory)
-        return original_initialize(index)
+        return original_initialize(index, namespace_guard=namespace_guard)
 
     monkeypatch.setattr(
         dr_index.DurableDRGenerationIndex,
@@ -510,7 +522,7 @@ def test_state_namespace_swap_after_first_authentication_fails_before_admission(
 
     with pytest.raises(
         enrollment.DRGenerationEnrollmentError,
-        match="^dr_generation_state_directory_changed$",
+        match="^operator_transaction_lock_changed$",
     ):
         enrollment.enroll_terminal_activation_backup(activation_receipt=activation_receipt)
 
@@ -539,6 +551,9 @@ def test_state_namespace_is_pinned_before_outer_lock_entry(
             return self
 
         def __exit__(self, *_args: Any) -> None:
+            pass
+
+        def assert_held(self) -> None:
             pass
 
     monkeypatch.setattr(release_operator, "OperatorTransactionLock", SwappingLock)
@@ -601,6 +616,9 @@ def test_outer_operator_lock_covers_both_authentication_observations(
             nonlocal held
             assert held is True
             held = False
+
+        def assert_held(self) -> None:
+            assert held is True
 
     def authenticate(**_kwargs: Any) -> dr_auth.AuthenticatedDRCandidate:
         nonlocal calls

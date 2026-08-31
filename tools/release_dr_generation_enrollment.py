@@ -13,7 +13,7 @@ import hashlib
 import json
 import os
 import stat
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import Any
 
@@ -83,9 +83,7 @@ def _receipt_reference(
             candidate=candidate,
         )
     except dr_index.DRGenerationIndexError as exc:
-        raise DRGenerationEnrollmentError(
-            "dr_enrollment_authentication_receipt_invalid"
-        ) from exc
+        raise DRGenerationEnrollmentError("dr_enrollment_authentication_receipt_invalid") from exc
     return reference
 
 
@@ -99,7 +97,9 @@ def _prepare_or_resume(
     index: dr_index.DurableDRGenerationIndex,
     state: Mapping[str, Any],
     authenticated: dr_auth.AuthenticatedDRCandidate,
+    namespace_guard: Callable[[], None],
 ) -> tuple[dict[str, Any], str, str]:
+    namespace_guard()
     candidate = dr_index.normalize_generation_candidate(authenticated.candidate)
     expected_receipt = _receipt_reference(
         authenticated.authentication_receipt,
@@ -117,9 +117,11 @@ def _prepare_or_resume(
                 raise DRGenerationEnrollmentError("dr_enrollment_index_state_invalid")
             intent = "bootstrap_current"
         else:
+            namespace_guard()
             current_identity = index.current_generation_identity(
                 expected_journal_sha256=str(state.get("journal_sha256") or ""),
             )
+            namespace_guard()
             if current_identity is None:
                 raise DRGenerationEnrollmentError("dr_enrollment_index_state_invalid")
             current_backup = Path(current_identity.candidate["backup_directory"])
@@ -131,16 +133,19 @@ def _prepare_or_resume(
                     or current_identity.authentication_receipt != expected_receipt
                 ):
                     raise DRGenerationEnrollmentError("dr_enrollment_current_conflict")
+                namespace_guard()
                 return dict(state), "rotate_current", "already_current"
             intent = "rotate_current"
         prepared = index.prepare(
             intent=intent,
             candidate=candidate,
             expected_journal_sha256=str(state.get("journal_sha256") or ""),
+            namespace_guard=namespace_guard,
         )
         admitted = index.record_authenticated(
             receipt=authenticated.authentication_receipt,
             expected_journal_sha256=prepared["journal_sha256"],
+            namespace_guard=namespace_guard,
         )
         return admitted, intent, "prepared_and_authenticated"
 
@@ -156,6 +161,7 @@ def _prepare_or_resume(
         admitted = index.record_authenticated(
             receipt=authenticated.authentication_receipt,
             expected_journal_sha256=str(state.get("journal_sha256") or ""),
+            namespace_guard=namespace_guard,
         )
         return admitted, str(pending_intent), "resumed_and_authenticated"
     if pending.get("authentication_receipt") != expected_receipt:
@@ -208,34 +214,45 @@ def enroll_terminal_activation_backup(
         # The synchronization file is the sole permitted pre-authentication
         # filesystem side effect.  All DR authority mutation follows the first
         # successful exact authentication while this outer lock remains held.
-        with release_operator.OperatorTransactionLock(state_directory / "immutable-release-operator.v1.lock"):
+        with release_operator.OperatorTransactionLock(
+            state_directory / "immutable-release-operator.v1.lock"
+        ) as transaction_lock:
+            transaction_lock.assert_held()
             first = dr_auth._authenticate_locked(  # noqa: SLF001
                 activation_journal=activation_journal,
                 activation_receipt=activation_receipt,
                 backup_root=backup_root,
             )
-            state = index.initialize()
+            transaction_lock.assert_held()
+            state = index.initialize(namespace_guard=transaction_lock.assert_held)
+            transaction_lock.assert_held()
             admitted, intent, action = _prepare_or_resume(
                 index=index,
                 state=state,
                 authenticated=first,
+                namespace_guard=transaction_lock.assert_held,
             )
+            transaction_lock.assert_held()
             second = dr_auth._authenticate_locked(  # noqa: SLF001
                 activation_journal=activation_journal,
                 activation_receipt=activation_receipt,
                 backup_root=backup_root,
             )
+            transaction_lock.assert_held()
             if second != first:
                 raise DRGenerationEnrollmentError("dr_enrollment_reauthentication_mismatch")
             durable = index.load()
+            transaction_lock.assert_held()
             if durable != admitted:
                 raise DRGenerationEnrollmentError("dr_enrollment_index_changed")
-            return _enrollment_receipt(
+            receipt = _enrollment_receipt(
                 state=durable,
                 authenticated=second,
                 intent=intent,
                 action=action,
             )
+            transaction_lock.assert_held()
+            return receipt
     except DRGenerationEnrollmentError:
         raise
     except (
