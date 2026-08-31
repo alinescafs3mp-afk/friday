@@ -335,6 +335,26 @@ def test_eager_settings_import_derives_the_database_from_the_scratch_home(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
+    candidate_site = tmp_path / "candidate-site"
+    candidate_site.mkdir(mode=0o700)
+    candidate_site.chmod(0o700)
+    assert quality_gate._validated_installed_site({}) is None
+    assert (
+        quality_gate._validated_installed_site({quality_gate._INSTALLED_SITE_ENV: str(candidate_site)})
+        == candidate_site
+    )
+    linked_site = tmp_path / "linked-site"
+    linked_site.symlink_to(candidate_site, target_is_directory=True)
+    for invalid in (
+        "",
+        "relative/site",
+        f" {candidate_site}",
+        str(tmp_path / "missing"),
+        str(linked_site),
+    ):
+        with pytest.raises(RuntimeError, match="installed wheel runtime is not canonical"):
+            quality_gate._validated_installed_site({quality_gate._INSTALLED_SITE_ENV: invalid})
+
     monkeypatch.setenv("FRIDAY_HOME", "/sentinel/live-home")
     monkeypatch.setenv("FRIDAY_STATE_DIR", "/sentinel/live-state")
     monkeypatch.setenv("FRIDAY_DATABASE_PATH", "/sentinel/live.sqlite3")
@@ -350,6 +370,8 @@ def test_eager_settings_import_derives_the_database_from_the_scratch_home(
         monkeypatch.setenv(prefix + "SSL_KEYFILE", "/sentinel/live-server.key")
         monkeypatch.setenv(prefix + "BACKEND_CA_FILE", "/sentinel/live-backend-ca.crt")
 
+    installed_site = quality_gate._validated_installed_site(os.environ)
+    package_root = installed_site or quality_gate.ROOT
     with quality_gate._isolated_test_environment() as environment:
         assert {name: value for name, value in environment.items() if name.startswith("GIT_")} == {
             "GIT_ATTR_NOSYSTEM": "1",
@@ -357,13 +379,49 @@ def test_eager_settings_import_derives_the_database_from_the_scratch_home(
             "GIT_CONFIG_NOSYSTEM": "1",
         }
         assert Path(environment["XDG_CONFIG_HOME"]).is_relative_to(Path(environment["FRIDAY_HOME"]))
-        assert quality_gate._INSTALLED_SITE_ENV not in environment
+        if installed_site is None:
+            assert quality_gate._INSTALLED_SITE_ENV not in environment
+        else:
+            assert environment[quality_gate._INSTALLED_SITE_ENV] == str(installed_site)
+        bootstrap = (
+            "import pathlib,sys;"
+            "assert sys.flags.isolated and sys.flags.safe_path and sys.dont_write_bytecode;"
+            "assert not any(name=='friday' or name.startswith('friday.') for name in sys.modules);"
+            "root=pathlib.Path(sys.argv[1]).resolve(strict=True);"
+            "sys.path.insert(0,str(root));"
+            "exec(compile(sys.argv[2],'<eager-settings-probe>','exec'))"
+        )
         probe = (
-            "import os; "
+            "import os,sys; "
             "from pathlib import Path; "
-            "import friday.config as config; "
-            "site=os.environ.get('FRIDAY_QUALITY_GATE_INSTALLED_SITE'); "
-            "assert not site or Path(config.__file__).resolve().is_relative_to(Path(site)); "
+            "root=Path(sys.argv[1]).resolve(strict=True); "
+            "import friday,friday.config as config; "
+            "expected=(root/'friday'/'config'/'__init__.py').resolve(strict=True); "
+            "assert Path(config.__file__).resolve(strict=True) == expected; "
+            "entries=[(name,module,getattr(module,'__spec__',None)) "
+            "for name,module in tuple(sys.modules.items()) "
+            "if name=='friday' or name.startswith('friday.')]; "
+            "assert entries and all(isinstance(getattr(module,'__file__',None),str) "
+            "and isinstance(getattr(spec,'origin',None),str) for name,module,spec in entries); "
+            "origins=[Path(module.__file__).resolve(strict=True) "
+            "for name,module,spec in entries]; "
+            "spec_origins=[Path(spec.origin).resolve(strict=True) "
+            "for name,module,spec in entries]; "
+            "assert origins==spec_origins and all(origin.is_relative_to(root) "
+            "for origin in origins),origins; "
+            "packages=[(name,module,spec) for name,module,spec in entries "
+            "if getattr(module,'__path__',None) is not None "
+            "or getattr(spec,'submodule_search_locations',None) is not None]; "
+            "assert all(getattr(module,'__path__',None) is not None "
+            "and getattr(spec,'submodule_search_locations',None) is not None "
+            "for name,module,spec in packages); "
+            "assert all(tuple(Path(value).resolve(strict=True) for value in module.__path__) "
+            "==tuple(Path(value).resolve(strict=True) "
+            "for value in spec.submodule_search_locations) "
+            "==(root.joinpath(*name.split('.')).resolve(strict=True),) "
+            "for name,module,spec in packages); "
+            "site=os.environ.get('FRIDAY_QUALITY_GATE_INSTALLED_SITE','').strip(); "
+            "assert not site or Path(site) == root; "
             "load_settings=config.load_settings; "
             "settings = load_settings(); "
             "home = Path(os.environ['FRIDAY_HOME']).resolve(); "
@@ -375,10 +433,11 @@ def test_eager_settings_import_derives_the_database_from_the_scratch_home(
             "assert settings.backend_ca_file == ''"
         )
         subprocess.run(  # noqa: S603 - fixed local interpreter/import probe
-            [sys.executable, "-c", probe],
-            cwd=quality_gate.ROOT,
+            [sys.executable, "-I", "-B", "-c", bootstrap, str(package_root), probe],
+            cwd=tmp_path,
             env=environment,
             check=True,
+            timeout=10,
         )
 
     site = tmp_path / "wheel-site"

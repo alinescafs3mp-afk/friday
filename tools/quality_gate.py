@@ -196,12 +196,21 @@ def pytest_sessionstart(session: Any) -> None:
     selection_path = session.config.getoption(_SELECTION_OPTION)
     _TIER_SELECTION = frozenset(collection_nodeids(selection_path)) if selection_path else None
 
-    installed_site = os.environ.get(_INSTALLED_SITE_ENV, "").strip()
-    if installed_site:
-        site = Path(installed_site)
-        if not site.is_absolute() or not site.is_dir() or site.resolve(strict=True) != site:
-            raise RuntimeError("installed wheel runtime is not canonical")
+    site = _validated_installed_site(os.environ)
+    if site is not None:
         _require_installed_wheel_imports(site)
+
+
+def _validated_installed_site(environment: Mapping[str, str]) -> Path | None:
+    configured = environment.get(_INSTALLED_SITE_ENV)
+    if configured is None:
+        return None
+    if not isinstance(configured, str) or not configured or configured != configured.strip():
+        raise RuntimeError("installed wheel runtime is not canonical")
+    site = Path(configured)
+    if not site.is_absolute() or not site.is_dir() or site.resolve(strict=True) != site:
+        raise RuntimeError("installed wheel runtime is not canonical")
+    return site
 
 
 def _require_installed_wheel_imports(site: Path, modules: Mapping[str, object] | None = None) -> None:
@@ -521,6 +530,9 @@ def _isolated_test_environment(
         # replacement/config adversarial cases) but never inherit ambient
         # global/system configuration, attributes or hooks.
         environment = {name: value for name, value in os.environ.items() if not name.startswith("GIT_")}
+        installed_site = _validated_installed_site(environment)
+        if installed_site is not None:
+            _require_installed_wheel_imports(installed_site)
         test_assets = {
             alias: value
             for source, alias in _TEST_ASSET_ENV_ALIASES.items()
@@ -571,6 +583,8 @@ def _isolated_test_environment(
                 **test_assets,
             }
         )
+        if installed_site is not None:
+            environment[_INSTALLED_SITE_ENV] = str(installed_site)
         yield environment
 
 

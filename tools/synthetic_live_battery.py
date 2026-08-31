@@ -22,6 +22,8 @@ import ctypes
 import errno
 import hashlib
 import html
+import importlib
+import importlib.util
 import io
 import ipaddress
 import json
@@ -86,7 +88,11 @@ MAX_WORKER_OUTPUT_BYTES = 2 * 1024 * 1024
 MAX_WORKER_LOG_BYTES = 2 * 1024 * 1024
 BWRAP_PATH = Path("/usr/bin/bwrap")
 WORKER_WORKSPACE_ROOT = Path("/workspace")
+WORKER_PRODUCT_ROOT = Path("/candidate-site")
 WORKER_RELAY_ROOT = Path("/run/friday-relays")
+_QUALITY_GATE_INSTALLED_SITE_ENV = "FRIDAY_QUALITY_GATE_INSTALLED_SITE"
+_WORKER_PRODUCT_ROOT_ENV = "FRIDAY_LIVE_BATTERY_PRODUCT_ROOT"
+_WORKER_PRODUCT_NAMESPACES = ("friday", "friday_host_agent", "friday_package_broker")
 _FORBIDDEN_PROVENANCE_PATHS = frozenset({"sol/LIVE_TEST_2026-08-08.md", "start.txt"})
 _RELAY_ENDPOINT_ENV_KEYS = {
     "model": "FRIDAY_LLM_BASE_URL",
@@ -493,6 +499,7 @@ _PASSTHROUGH_ENV_KEYS = frozenset(
         "SSL_CERT_DIR",
         "SSL_CERT_FILE",
         "VIRTUAL_ENV",
+        _QUALITY_GATE_INSTALLED_SITE_ENV,
     }
 )
 _SCRATCH_PATHS = {
@@ -10705,6 +10712,134 @@ def _install_no_exec_seccomp() -> None:
         library.seccomp_release(context)
 
 
+def _validated_quality_gate_installed_site(environment: Mapping[str, str]) -> Path | None:
+    """Return the authenticated exact-gate site, with no invalid-marker fallback."""
+
+    raw = environment.get(_QUALITY_GATE_INSTALLED_SITE_ENV)
+    if raw is None:
+        return None
+    if not isinstance(raw, str) or raw != raw.strip() or not raw:
+        raise BatteryContractError("worker_installed_site_invalid")
+    try:
+        site = Path(raw)
+        site_metadata = site.lstat()
+        if (
+            not site.is_absolute()
+            or site.resolve(strict=True) != site
+            or not stat.S_ISDIR(site_metadata.st_mode)
+            or site_metadata.st_uid != os.geteuid()
+            or stat.S_IMODE(site_metadata.st_mode) != 0o700
+        ):
+            raise BatteryContractError("worker_installed_site_invalid")
+        for namespace in _WORKER_PRODUCT_NAMESPACES:
+            package = site / namespace
+            package_metadata = package.lstat()
+            package_init = package / "__init__.py"
+            init_metadata = package_init.lstat()
+            if (
+                package.resolve(strict=True) != package
+                or not stat.S_ISDIR(package_metadata.st_mode)
+                or package_metadata.st_uid != os.geteuid()
+                or stat.S_IMODE(package_metadata.st_mode) & 0o022
+                or package_init.resolve(strict=True) != package_init
+                or not stat.S_ISREG(init_metadata.st_mode)
+                or init_metadata.st_uid != os.geteuid()
+                or init_metadata.st_nlink != 1
+                or stat.S_IMODE(init_metadata.st_mode) & 0o022
+            ):
+                raise BatteryContractError("worker_installed_site_invalid")
+    except BatteryContractError:
+        raise
+    except (OSError, RuntimeError, ValueError):
+        raise BatteryContractError("worker_installed_site_invalid") from None
+    return site
+
+
+def _product_namespace(name: str) -> str | None:
+    return next(
+        (
+            namespace
+            for namespace in _WORKER_PRODUCT_NAMESPACES
+            if name == namespace or name.startswith(f"{namespace}.")
+        ),
+        None,
+    )
+
+
+def _reject_preloaded_product_modules() -> None:
+    if any(_product_namespace(name) is not None for name in sys.modules):
+        raise BatteryContractError("worker_product_authority_invalid")
+
+
+def _assert_worker_product_authority(product_root: str | Path) -> None:
+    """Fail closed unless every loaded Friday module belongs to one product root."""
+
+    try:
+        root = Path(product_root)
+        if not root.is_absolute() or root.resolve(strict=True) != root:
+            raise BatteryContractError("worker_product_authority_invalid")
+        package_directories: dict[str, Path] = {}
+        for namespace in _WORKER_PRODUCT_NAMESPACES:
+            package_directory = root / namespace
+            expected = package_directory / "__init__.py"
+            if (
+                package_directory.resolve(strict=True) != package_directory
+                or expected.resolve(strict=True) != expected
+            ):
+                raise BatteryContractError("worker_product_authority_invalid")
+            package_directories[namespace] = package_directory
+        expected_friday = package_directories["friday"] / "__init__.py"
+        spec = importlib.util.find_spec("friday")
+        if spec is None or spec.origin is None or Path(spec.origin).resolve(strict=True) != expected_friday:
+            raise BatteryContractError("worker_product_authority_invalid")
+        locations = tuple(spec.submodule_search_locations or ())
+        if not locations or any(
+            not Path(location).resolve(strict=True).is_relative_to(root) for location in locations
+        ):
+            raise BatteryContractError("worker_product_authority_invalid")
+        importlib.import_module("friday")
+        for name, module in tuple(sys.modules.items()):
+            namespace = _product_namespace(name)
+            if namespace is None:
+                continue
+            package_directory = package_directories[namespace]
+            expected = package_directory / "__init__.py"
+            module_file = getattr(module, "__file__", None)
+            module_spec = getattr(module, "__spec__", None)
+            spec_origin = getattr(module_spec, "origin", None)
+            if not isinstance(module_file, str) or not isinstance(spec_origin, str):
+                raise BatteryContractError("worker_product_authority_invalid")
+            origin = Path(module_file).resolve(strict=True)
+            resolved_spec_origin = Path(spec_origin).resolve(strict=True)
+            if (
+                origin != resolved_spec_origin
+                or not origin.is_relative_to(package_directory)
+                or (name == namespace and origin != expected)
+            ):
+                raise BatteryContractError("worker_product_authority_invalid")
+            raw_locations = getattr(module, "__path__", None)
+            raw_spec_locations = getattr(module_spec, "submodule_search_locations", None)
+            if raw_locations is None and raw_spec_locations is None:
+                continue
+            if raw_locations is None or raw_spec_locations is None:
+                raise BatteryContractError("worker_product_authority_invalid")
+            resolved_locations = tuple(Path(location).resolve(strict=True) for location in raw_locations)
+            resolved_spec_locations = tuple(
+                Path(location).resolve(strict=True) for location in raw_spec_locations
+            )
+            expected_directory = package_directory.joinpath(*name.split(".")[1:]).resolve(strict=True)
+            if (
+                not resolved_locations
+                or resolved_locations != resolved_spec_locations
+                or any(location != expected_directory for location in resolved_locations)
+            ):
+                raise BatteryContractError("worker_product_authority_invalid")
+    except BatteryContractError:
+        raise
+    except (ImportError, OSError, RuntimeError, TypeError, ValueError):
+        raise BatteryContractError("worker_product_authority_invalid") from None
+
+
 class SubprocessPassExecutor:
     """One child process per pass; environment is the only secret-bearing channel."""
 
@@ -10715,6 +10850,10 @@ class SubprocessPassExecutor:
         instrument_path: Path | None = None,
     ) -> None:
         self.base_environment = dict(base_environment)
+        self._installed_site = _validated_quality_gate_installed_site(self.base_environment)
+        self._worker_product_root = (
+            WORKER_PRODUCT_ROOT if self._installed_site is not None else WORKER_WORKSPACE_ROOT
+        )
         self._instrument_path = (instrument_path or Path(__file__)).resolve()
         self._snapshot = _CandidateSourceSnapshot(
             relative_paths=_candidate_source_paths(instrument_path=self._instrument_path)
@@ -10769,6 +10908,8 @@ class SubprocessPassExecutor:
         self._assert_candidate_unchanged()
         request_bytes = _canonical_json_bytes(request)
         environment = _worker_environment(self.base_environment, context)
+        environment.pop("PYTHONPATH", None)
+        environment[_WORKER_PRODUCT_ROOT_ENV] = str(self._worker_product_root)
         if not BWRAP_PATH.is_file() or not os.access(BWRAP_PATH, os.X_OK):
             raise BatteryContractError("worker_filesystem_sandbox_unavailable")
         worker_argv = (
@@ -10777,9 +10918,11 @@ class SubprocessPassExecutor:
             "-P",
             "-B",
             "-c",
-            f"import sys;sys.path[:0]=[{str(WORKER_WORKSPACE_ROOT)!r},"
+            f"import sys;sys.path[:0]=[{str(self._worker_product_root)!r},"
             f"{str(WORKER_WORKSPACE_ROOT / 'tools')!r}];"
             "import synthetic_live_battery as battery;"
+            "battery._reject_preloaded_product_modules();"
+            f"battery._assert_worker_product_authority({str(self._worker_product_root)!r});"
             "raise SystemExit(battery._worker_main())",
         )
         pass_root = context.home.parent.resolve()
@@ -10799,6 +10942,13 @@ class SubprocessPassExecutor:
                 and not candidate.is_relative_to(runtime_prefix)
             ):
                 runtime_mounts.extend(("--ro-bind", str(candidate), str(candidate)))
+        product_mounts: tuple[str, ...] = ()
+        if self._installed_site is not None:
+            product_mounts = (
+                "--ro-bind",
+                str(self._installed_site),
+                str(WORKER_PRODUCT_ROOT),
+            )
         endpoints = _configured_model_endpoint_urls(environment)
         with _HostEndpointRelays(endpoints) as host_relays:
             if host_relays.directory is None:
@@ -10845,6 +10995,7 @@ class SubprocessPassExecutor:
                 "0700",
                 "/run",
                 *runtime_mounts,
+                *product_mounts,
                 "--ro-bind",
                 str(self._snapshot.root),
                 str(WORKER_WORKSPACE_ROOT),
@@ -13493,6 +13644,7 @@ def _worker_main() -> int:
     try:
         with contextlib.redirect_stdout(captured), contextlib.redirect_stderr(captured):
             result = _execute_live_worker(request)
+            _assert_worker_product_authority(os.environ.get(_WORKER_PRODUCT_ROOT_ENV, ""))
     except Exception as exc:  # noqa: BLE001 - never serialize a possibly secret-bearing message
         sys.stdout.write(
             json.dumps(

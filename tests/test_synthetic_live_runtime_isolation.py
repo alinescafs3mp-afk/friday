@@ -154,6 +154,45 @@ def test_candidate_snapshot_is_closed_immutable_and_ignores_source_bytecode(
     finally:
         snapshot.close()
 
+    site = tmp_path / "site-packages"
+    for namespace in battery._WORKER_PRODUCT_NAMESPACES:
+        installed_package = site / namespace
+        installed_package.mkdir(parents=True, mode=0o700)
+        installed_package.chmod(0o755)
+        package_init = installed_package / "__init__.py"
+        package_init.write_text("# installed candidate\n", encoding="utf-8")
+        package_init.chmod(0o644)
+    site.chmod(0o700)
+    key = battery._QUALITY_GATE_INSTALLED_SITE_ENV
+    assert battery._validated_quality_gate_installed_site({}) is None
+    assert battery._validated_quality_gate_installed_site({key: str(site)}) == site
+    for invalid in ("", "relative/site-packages", f" {site}", f"{site} "):
+        with pytest.raises(battery.BatteryContractError, match="worker_installed_site_invalid"):
+            battery._validated_quality_gate_installed_site({key: invalid})
+    site.chmod(0o755)
+    with pytest.raises(battery.BatteryContractError, match="worker_installed_site_invalid"):
+        battery._validated_quality_gate_installed_site({key: str(site)})
+    site.chmod(0o700)
+    linked_site = tmp_path / "linked-site"
+    linked_site.symlink_to(site, target_is_directory=True)
+    with pytest.raises(battery.BatteryContractError, match="worker_installed_site_invalid"):
+        battery._validated_quality_gate_installed_site({key: str(linked_site)})
+    linked_package_site = tmp_path / "linked-package-site"
+    linked_package_site.mkdir(mode=0o700)
+    (linked_package_site / "friday").symlink_to(ROOT / "friday", target_is_directory=True)
+    with pytest.raises(battery.BatteryContractError, match="worker_installed_site_invalid"):
+        battery._validated_quality_gate_installed_site({key: str(linked_package_site)})
+
+    sys.modules["friday_package_broker.preloaded"] = SimpleNamespace()
+    try:
+        with pytest.raises(
+            battery.BatteryContractError,
+            match="worker_product_authority_invalid",
+        ):
+            battery._reject_preloaded_product_modules()
+    finally:
+        sys.modules.pop("friday_package_broker.preloaded", None)
+
 
 def test_candidate_digest_rejects_symlinked_files_and_ancestors(tmp_path: Path) -> None:
     source = tmp_path / "source"
@@ -291,6 +330,10 @@ def test_real_bwrap_sees_only_snapshot_scratch_and_fixed_relay(
     context = _pass_context(tmp_path)
     real_run = battery._run_worker_bounded
     observed: dict[str, Any] = {}
+    installed_site = battery._validated_quality_gate_installed_site(os.environ)
+    product_root = (
+        battery.WORKER_PRODUCT_ROOT if installed_site is not None else battery.WORKER_WORKSPACE_ROOT
+    )
 
     with _TcpEcho() as upstream:
         endpoint = f"http://127.0.0.1:{upstream.port}/v1"
@@ -301,13 +344,17 @@ import os
 import pathlib
 import socket
 import sys
-sys.path[:0] = ['/workspace', '/workspace/tools']
+product_root = pathlib.Path({str(product_root)!r})
+sys.path[:0] = [str(product_root), '/workspace/tools']
 import synthetic_live_battery as battery
+battery._reject_preloaded_product_modules()
+battery._assert_worker_product_authority(product_root)
 from friday.config import load_settings
 from friday.server import create_app
 request = json.loads(sys.stdin.buffer.read().decode('utf-8'))
 settings = load_settings()
 production_app = create_app(settings)
+battery._assert_worker_product_authority(product_root)
 direct = _socket.socket(_socket.AF_INET, _socket.SOCK_STREAM)
 direct.settimeout(1)
 try:
@@ -349,6 +396,8 @@ else:
 result = {{
     'valid_request': battery._valid_worker_request(request),
     'root': str(battery.ROOT),
+    'product_root': str(product_root),
+    'product_authority_bound': True,
     'production_imports': production_app is not None,
     'direct_blocked': direct_blocked,
     'relay_reply': relay_reply,
@@ -391,6 +440,8 @@ print(json.dumps(result, sort_keys=True))
             "FRIDAY_EMBEDDINGS_BASE_URL": endpoint,
             "FRIDAY_RERANK_BASE_URL": endpoint,
         }
+        if installed_site is not None:
+            environment[battery._QUALITY_GATE_INSTALLED_SITE_ENV] = str(installed_site)
         with battery.SubprocessPassExecutor(environment) as executor:
             monkeypatch.setattr(executor, "_assert_candidate_unchanged", lambda: None)
             assert executor(manifest, manifest["passes"][0], cases, context) == {}
@@ -398,6 +449,8 @@ print(json.dumps(result, sort_keys=True))
     assert observed == {
         "valid_request": True,
         "root": "/workspace",
+        "product_root": str(product_root),
+        "product_authority_bound": True,
         "production_imports": True,
         "direct_blocked": True,
         "relay_reply": "gnip-citehtnys",

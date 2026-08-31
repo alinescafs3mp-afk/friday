@@ -8501,6 +8501,7 @@ def test_worker_request_preserves_hash_seed_without_serializing_service_secret(
         "FRIDAY_LLM_BASE_URL": "http://127.0.0.1:18001/v1",
         "FRIDAY_EMBEDDINGS_BASE_URL": "http://127.0.0.1:18002/v1",
         "FRIDAY_RERANK_BASE_URL": "http://127.0.0.1:18003/v1",
+        "PYTHONPATH": "/hostile/source",
     }
     with battery.SubprocessPassExecutor(base_environment) as executor:
         assert executor(manifest, manifest["passes"][0], cases, context) == {}
@@ -8517,7 +8518,9 @@ def test_worker_request_preserves_hash_seed_without_serializing_service_secret(
     } <= set(captured["argv"])
     assert "--dev-bind" not in captured["argv"]
     assert captured["env"]["PYTHONHASHSEED"] == str(context.seed)
+    assert captured["env"]["FRIDAY_LIVE_BATTERY_PRODUCT_ROOT"] == str(battery.WORKER_WORKSPACE_ROOT)
     assert captured["env"]["FRIDAY_LLM_API_KEY"] == secret
+    assert "PYTHONPATH" not in captured["env"]
     assert secret.encode() not in captured["input_bytes"]
     assert all(secret not in str(value) for value in captured["argv"])
     assert "FRIDAY_WEB_DAILY_QUOTA" not in captured["env"]
@@ -8594,19 +8597,37 @@ def test_runtime_hash_uses_presealed_source_after_seccomp(tmp_path: Path) -> Non
 
 
 def test_fixed_clock_covers_late_friday_datetime_and_date_imports(tmp_path: Path) -> None:
+    installed_site = battery._validated_quality_gate_installed_site(os.environ)
+    package_root = installed_site or ROOT
+    tools_root = Path(battery.__file__).resolve(strict=True).parent
     script = (
-        "from synthetic_live_battery import _install_fixed_clock,FIXED_CLOCK,FIXED_TIMEZONE;"
-        "_install_fixed_clock(FIXED_CLOCK,FIXED_TIMEZONE);"
+        "import pathlib,sys;"
+        "package_root=pathlib.Path(sys.argv[1]).resolve(strict=True);"
+        "tools_root=pathlib.Path(sys.argv[2]).resolve(strict=True);"
+        "sys.path[:0]=[str(package_root),str(tools_root)];"
+        "import synthetic_live_battery as live_battery;"
+        "assert pathlib.Path(live_battery.__file__).resolve(strict=True).parent==tools_root;"
+        "live_battery._reject_preloaded_product_modules();"
+        "live_battery._install_fixed_clock(live_battery.FIXED_CLOCK,live_battery.FIXED_TIMEZONE);"
         "from datetime import UTC;"
         "import friday.storage._core as core;"
         "import friday.time_routing as routing;"
+        "live_battery._assert_worker_product_authority(package_root);"
         "print(core.datetime.now(UTC).isoformat());"
         "print(routing.date.today().isoformat())"
     )
     result = battery._run_worker_bounded(
-        [sys.executable, "-s", "-P", "-c", script],
+        [
+            sys.executable,
+            "-I",
+            "-B",
+            "-c",
+            script,
+            str(package_root),
+            str(tools_root),
+        ],
         cwd=tmp_path,
-        env={**os.environ, "PYTHONPATH": f"{ROOT / 'tools'}:{ROOT}"},
+        env={name: value for name, value in os.environ.items() if name != "PYTHONPATH"},
         input_bytes=b"",
         timeout=10,
     )
