@@ -21,6 +21,21 @@ from friday.retrieval_benchmark.document_synthetic import (
 from friday.retrieval_benchmark.harness import observations_jsonl
 
 
+@pytest.fixture(scope="module", autouse=True)
+def _forbid_network_for_both_runs():
+    def no_network(*_args: object, **_kwargs: object) -> None:
+        raise AssertionError("document benchmark attempted a network connection")
+
+    patch = pytest.MonkeyPatch()
+    patch.setattr(socket.socket, "connect", no_network)
+    patch.setattr(socket.socket, "connect_ex", no_network)
+    patch.setattr(socket, "create_connection", no_network)
+    try:
+        yield
+    finally:
+        patch.undo()
+
+
 @pytest.fixture(scope="module")
 def document_run() -> EphemeralDocumentRecallRunV1:
     return run_document_ephemeral()
@@ -52,8 +67,9 @@ def test_document_manifest_is_one_closed_five_class_corpus(
     assert tuple(item.case_id for item in document_run.measurements) == tuple(
         case.opaque_case_id for case in document_run.cases
     )
+    assert all(item.negative_control_exact for item in document_run.measurements)
     assert document_run.restart_performed is True
-    assert len(document_synthetic_plan().documents) == 10
+    assert len(document_synthetic_plan().documents) == 11
 
 
 def test_filename_class_is_closed_on_the_public_archive_path(
@@ -80,40 +96,32 @@ def test_alias_class_is_closed_on_the_public_archive_path(
     assert item.discovery_absence_decision is AbsenceDecision.EVIDENCE_FOUND
 
 
-def test_format_class_reproduces_the_current_catalog_gap(
+def test_format_class_is_closed_on_the_public_archive_path(
     document_run: EphemeralDocumentRecallRunV1,
 ) -> None:
     item = _measurement(document_run, DocumentRecallClassV1.FORMAT)
 
-    assert item.gap_codes == (
-        "channel_mismatch",
-        "discovery_false_absence",
-        "discovery_miss",
-    )
+    assert item.gap_codes == ()
     assert item.target_recalled and item.passage_exact and item.authorized_only
-    assert item.match_channels == (ArchiveMatchChannel.LEXICAL,)
-    assert item.discovery_target_visible is False
-    assert item.discovery_absence_decision is AbsenceDecision.NOT_ESTABLISHED
+    assert item.match_channels == (ArchiveMatchChannel.CATALOG, ArchiveMatchChannel.LEXICAL)
+    assert item.discovery_target_visible and item.discovery_navigation_only
+    assert item.discovery_absence_decision is AbsenceDecision.EVIDENCE_FOUND
+    assert item.safety_absence_decision is AbsenceDecision.NOT_ESTABLISHED
+    assert item.safety_exhaustive is False
 
 
-def test_date_class_reproduces_the_current_own_date_gap(
+def test_date_class_is_closed_on_the_public_archive_path(
     document_run: EphemeralDocumentRecallRunV1,
 ) -> None:
     item = _measurement(document_run, DocumentRecallClassV1.DATE)
 
-    assert item.gap_codes == (
-        "channel_mismatch",
-        "discovery_false_absence",
-        "discovery_miss",
-        "passage_mismatch",
-        "qrel_miss",
-        "replay_not_exact",
-        "target_not_recalled",
-        "temporal_role_mismatch",
-    )
-    assert item.target_recalled is False
-    assert item.discovery_absence_decision is AbsenceDecision.NOT_ESTABLISHED
-    assert item.replay_status is None
+    assert item.gap_codes == ()
+    assert item.target_recalled and item.passage_exact and item.temporal_role_exact
+    assert item.authorized_only and item.match_channels == (ArchiveMatchChannel.LEXICAL,)
+    assert item.discovery_target_visible and item.discovery_navigation_only is False
+    assert item.discovery_absence_decision is AbsenceDecision.EVIDENCE_FOUND
+    assert item.safety_absence_decision is AbsenceDecision.NOT_ESTABLISHED
+    assert item.safety_exhaustive is False
 
 
 def test_truncation_class_is_closed_without_false_complete_or_false_absence(
@@ -129,64 +137,80 @@ def test_truncation_class_is_closed_without_false_complete_or_false_absence(
     assert item.safety_exhaustive is False
 
 
-def test_four_current_positive_sources_replay_exactly_after_clean_restart(
+def test_all_five_positive_sources_replay_exactly_after_clean_restart(
     document_run: EphemeralDocumentRecallRunV1,
 ) -> None:
     exact = [
-        item
-        for item in document_run.measurements
-        if item.replay_status is ArchiveEvidenceReplayStatus.EXACT
+        item for item in document_run.measurements if item.replay_status is ArchiveEvidenceReplayStatus.EXACT
     ]
 
-    assert len(exact) == 4
+    assert len(exact) == 5
     assert all(item.replay_model_sha256 is not None for item in exact)
-    date = _measurement(document_run, DocumentRecallClassV1.DATE)
-    assert date.replay_status is None and "replay_not_exact" in date.gap_codes
-    assert {item.outcome for item in document_run.case_results} == {
-        RecallOutcomeV1.HIT,
-        RecallOutcomeV1.MISS,
-    }
+    assert {item.outcome for item in document_run.case_results} == {RecallOutcomeV1.HIT}
+    assert document_run.gap_count == 0
 
 
 def test_document_public_evidence_is_body_query_path_and_locator_free(
     document_run: EphemeralDocumentRecallRunV1,
 ) -> None:
+    plan = document_synthetic_plan()
     serialized = (
         observations_jsonl(document_run.observations)
         + document_run.report.to_json()
         + document_measurements_json(document_run.measurements)
         + repr(document_run.measurements)
     )
-    forbidden = (
-        "Frosted archive evidence",
-        "s4r7-filename-saffron",
-        "s4r7-historical-alias",
-        "text/plain",
-        "Saffron own-date evidence",
-        "Visible cobalt truncation",
-        "ultraviolettail9853",
-        "document-recall-foreign-principal",
-        "recall-benchmark-principal",
-        "raw_e000",
+    forbidden = {
+        "document-recall:",
+        "document.case.",
+        "telegram-file:",
+        "raw_e",
+        "inbox_e",
         '"query":',
         '"locator":',
         '"excerpt":',
         "/home/",
+        "/tmp/",
         "/var/tmp/",
-    )
+    }
+    for document in plan.documents:
+        forbidden.update(document.body.splitlines())
+        forbidden.update(
+            {
+                document.filename,
+                document.mime_type,
+                document.received_at,
+                document.tenant_id,
+                document.principal_id,
+                document.raw_id,
+                document.inbox_id,
+                f"document-recall:{document.ordinal:04d}",
+            }
+        )
+        if document.alias is not None:
+            forbidden.add(document.alias)
+        if document.document_date is not None:
+            forbidden.add(document.document_date)
+    for diagnostic in plan.diagnostics:
+        forbidden.update(
+            {
+                diagnostic.case.case_id,
+                diagnostic.case.privacy_key_hex,
+                diagnostic.case.request.query,
+                diagnostic.discovery_request.query,
+                diagnostic.discovery_filename,
+                diagnostic.expected_passage_ref.source_revision.value,
+            }
+        )
+        if diagnostic.safety_request is not None:
+            forbidden.add(diagnostic.safety_request.query)
+
     assert all(value not in serialized for value in forbidden)
 
 
 def test_second_offline_document_run_is_byte_identical_and_network_forbidden(
     document_run: EphemeralDocumentRecallRunV1,
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    def no_network(*_args: object, **_kwargs: object) -> None:
-        raise AssertionError("document benchmark attempted a network connection")
-
-    monkeypatch.setattr(socket.socket, "connect", no_network)
-    monkeypatch.setattr(socket.socket, "connect_ex", no_network)
-    monkeypatch.setattr(socket, "create_connection", no_network)
     second = run_document_ephemeral()
 
     assert second.report.to_json() == document_run.report.to_json()

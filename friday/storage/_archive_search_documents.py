@@ -17,7 +17,7 @@ import sqlite3
 import unicodedata
 from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from typing import Any, Final, NoReturn, SupportsIndex
 
 from friday.raw_metadata import RAW_FILE_METADATA_MAX_BYTES
@@ -109,7 +109,10 @@ _SUPPORTED_TEMPORAL_ROLES = {
         # ``raw_objects`` records receipt, not a separately attested upload
         # instant.  Treating the two roles as aliases would silently substitute
         # temporal meaning, so UPLOADED_AT remains explicitly unavailable.
-        {TemporalRole.RECEIVED_AT}
+        {
+            TemporalRole.LEGACY_UNCLASSIFIED_DOCUMENT_DATE,
+            TemporalRole.RECEIVED_AT,
+        }
     ),
     ArchiveSearchCorpus.KNOWLEDGE: frozenset(
         {
@@ -465,12 +468,21 @@ def _temporal_supported(
     corpus: ArchiveSearchCorpus,
 ) -> bool:
     supported = _SUPPORTED_TEMPORAL_ROLES[corpus]
-    return all(
-        item.role in supported
-        and item.value_kind is TemporalValueKind.INSTANT
-        and item.precision is TemporalPrecision.INSTANT
-        for item in _temporal_constraints(request, corpus)
-    )
+    for item in _temporal_constraints(request, corpus):
+        if item.role not in supported:
+            return False
+        if item.role is TemporalRole.LEGACY_UNCLASSIFIED_DOCUMENT_DATE:
+            if (
+                item.value_kind is not TemporalValueKind.DATE_INTERVAL
+                or item.precision is not TemporalPrecision.DAY
+            ):
+                return False
+        elif (
+            item.value_kind is not TemporalValueKind.INSTANT
+            or item.precision is not TemporalPrecision.INSTANT
+        ):
+            return False
+    return True
 
 
 def _canonical_utc_sql(expression: str) -> str:
@@ -510,6 +522,21 @@ def _canonical_utc_sql(expression: str) -> str:
                 AND substr({expression},27,6)='+00:00'
             )
         )
+    )"""
+
+
+def _canonical_date_sql(expression: str) -> str:
+    """Recognize one exact ISO calendar date without temporal substitution."""
+
+    return f"""(
+        typeof({expression})='text'
+        AND length({expression})=10
+        AND substr({expression},5,1)='-'
+        AND substr({expression},8,1)='-'
+        AND substr({expression},1,4) NOT GLOB '*[^0-9]*'
+        AND substr({expression},6,2) NOT GLOB '*[^0-9]*'
+        AND substr({expression},9,2) NOT GLOB '*[^0-9]*'
+        AND date({expression})={expression}
     )"""
 
 
@@ -555,10 +582,16 @@ def _scope_suffix(
         expression = temporal_expressions.get(constraint.role)
         if expression is None:
             raise _fail("archive document temporal role is unavailable")
-        ready = _canonical_utc_sql(expression)
+        ready = _temporal_ready_sql(constraint, expression)
         clauses.append(f"(NOT {ready} OR ({expression}>=? AND {expression}<?))")
         parameters.extend((constraint.start, constraint.end))
     return ("" if not clauses else " AND " + " AND ".join(clauses), tuple(parameters))
+
+
+def _temporal_ready_sql(constraint: ArchiveTemporalConstraint, expression: str) -> str:
+    if constraint.role is TemporalRole.LEGACY_UNCLASSIFIED_DOCUMENT_DATE:
+        return _canonical_date_sql(expression)
+    return _canonical_utc_sql(expression)
 
 
 def _temporal_ready_expression(
@@ -566,10 +599,10 @@ def _temporal_ready_expression(
     corpus: ArchiveSearchCorpus,
     temporal_expressions: dict[TemporalRole, str],
 ) -> str:
-    expressions = tuple(temporal_expressions[item.role] for item in _temporal_constraints(request, corpus))
-    if not expressions:
+    constraints = _temporal_constraints(request, corpus)
+    if not constraints:
         return "1"
-    return " AND ".join(_canonical_utc_sql(item) for item in expressions)
+    return " AND ".join(_temporal_ready_sql(item, temporal_expressions[item.role]) for item in constraints)
 
 
 def _actor_handle(tenant_id: str, owner_id: str) -> bytes:
@@ -991,7 +1024,49 @@ def _raw_metadata_shape(alias: str = "r") -> str:
     )"""
 
 
-def _catalog_metadata_valid(alias: str = "r") -> str:
+def _mime_value_valid(expression: str) -> str:
+    """Accept the same closed concrete media-type grammar as file delivery."""
+
+    return f"""(
+        length({expression}) BETWEEN 3 AND 200
+        AND {expression} NOT GLOB '*[^A-Za-z0-9!#$&^_.+/-]*'
+        AND instr({expression},'/') BETWEEN 2 AND length({expression})-1
+        AND instr(substr({expression},instr({expression},'/')+1),'/')=0
+    )"""
+
+
+def _format_metadata_valid(alias: str = "r") -> str:
+    """Attest optional MIME aliases without accepting ambiguous navigation."""
+
+    metadata = _safe_raw_metadata(alias)
+    mime_type = f"json_extract({metadata},'$.mime_type')"
+    legacy_mime = f"json_extract({metadata},'$.mime')"
+
+    def valid_if_present(path: str, expression: str) -> str:
+        kind = f"json_type({metadata},'{path}')"
+        return f"""(
+            {kind} IS NULL OR {kind}='null' OR (
+                {kind}='text'
+                AND {_mime_value_valid(expression)}
+            )
+        )"""
+
+    return f"""(
+        {valid_if_present("$.mime_type", mime_type)}
+        AND {valid_if_present("$.mime", legacy_mime)}
+        AND (
+            COALESCE(json_type({metadata},'$.mime_type'),'')<>'text'
+            OR COALESCE(json_type({metadata},'$.mime'),'')<>'text'
+            OR lower({mime_type})=lower({legacy_mime})
+        )
+    )"""
+
+
+def _catalog_metadata_valid(
+    alias: str = "r",
+    *,
+    require_format_ready: bool = False,
+) -> str:
     """Attest fields that decide document classification and navigation."""
 
     metadata = _safe_raw_metadata(alias)
@@ -1001,6 +1076,7 @@ def _catalog_metadata_valid(alias: str = "r") -> str:
         f"(json_type({metadata},'$.{key}') IS NULL OR json_type({metadata},'$.{key}') IN ('text','null'))"
         for key in keys
     )
+    format_ready = _format_metadata_valid(alias) if require_format_ready else "1"
     return f"""(
         NOT EXISTS (
             SELECT 1 FROM json_each({metadata}) catalog_member
@@ -1009,7 +1085,25 @@ def _catalog_metadata_valid(alias: str = "r") -> str:
             HAVING COUNT(*)>1
         )
         AND {shape}
+        AND {format_ready}
     )"""
+
+
+def _document_date_expression(alias: str = "r") -> str:
+    """Return one parser-owned legacy date, or SQL NULL for ambiguous input."""
+
+    metadata = _safe_raw_metadata(alias)
+    value = f"json_extract({metadata},'$.document_date')"
+    return f"""CASE
+        WHEN NOT EXISTS (
+                 SELECT 1 FROM json_each({metadata}) document_date_member
+                  WHERE document_date_member.key='document_date'
+                  GROUP BY CAST(document_date_member.key AS TEXT)
+                 HAVING COUNT(*)>1
+             )
+         AND json_type({metadata},'$.document_date')='text'
+         AND jericho_iso_date({value}) IS NOT NULL
+        THEN jericho_iso_date({value}) ELSE NULL END"""
 
 
 def _principal_raw_authority(
@@ -1108,7 +1202,14 @@ def _raw_attribution_valid(
     *,
     alias: str = "r",
 ) -> str:
-    return f"({_raw_owner_attribution_valid(corpus, alias=alias)} AND {_catalog_metadata_valid(alias)})"
+    metadata_valid = _catalog_metadata_valid(
+        alias,
+        require_format_ready=corpus is ArchiveSearchCorpus.DOCUMENTS,
+    )
+    return f"""(
+        {_raw_owner_attribution_valid(corpus, alias=alias)}
+        AND {metadata_valid}
+    )"""
 
 
 def _common_raw_authority(
@@ -1258,7 +1359,16 @@ def _source_cte(
 ) -> tuple[str, tuple[object, ...]]:
     common = _common_raw_authority(corpus, include_body=include_body)
     if corpus is ArchiveSearchCorpus.DOCUMENTS:
+        document_date = (
+            _document_date_expression("ar")
+            if any(
+                item.role is TemporalRole.LEGACY_UNCLASSIFIED_DOCUMENT_DATE
+                for item in _temporal_constraints(request, corpus)
+            )
+            else "NULL"
+        )
         temporal_expressions = {
+            TemporalRole.LEGACY_UNCLASSIFIED_DOCUMENT_DATE: document_date,
             TemporalRole.RECEIVED_AT: "ar.received_at",
         }
         suffix, parameters = _scope_suffix(
@@ -1296,6 +1406,7 @@ def _source_cte(
                        {_DOCUMENT_REVIEW} AS review_state,
                        {_temporal_ready_expression(request, corpus, temporal_expressions)}
                            AS temporal_ready,
+                       {document_date} AS raw_document_date,
                        ar.received_at AS raw_received_at,
                        ar.received_at AS sort_time{body_projection}
                   FROM authorized_raw ar
@@ -1375,6 +1486,34 @@ def _filename_expression(alias: str = "s") -> str:
          AND instr(json_extract({alias}.metadata_json,'$.filename'),char(10))=0
          AND instr(json_extract({alias}.metadata_json,'$.filename'),char(13))=0
         THEN json_extract({alias}.metadata_json,'$.filename') ELSE '' END"""
+
+
+def _format_expression(alias: str = "s") -> str:
+    """Project one unambiguous bounded MIME value for navigation matching."""
+
+    metadata = _safe_raw_metadata(alias)
+    mime_type = f"json_extract({metadata},'$.mime_type')"
+    legacy_mime = f"json_extract({metadata},'$.mime')"
+
+    def valid(path: str, expression: str) -> str:
+        return f"""(
+            COALESCE(json_type({metadata},'{path}'),'')='text'
+            AND {_mime_value_valid(expression)}
+        )"""
+
+    mime_type_valid = valid("$.mime_type", mime_type)
+    legacy_mime_valid = valid("$.mime", legacy_mime)
+    return f"""CASE
+        WHEN {_catalog_metadata_valid(alias, require_format_ready=True)}
+         AND ({mime_type_valid} OR {legacy_mime_valid})
+         AND (NOT ({mime_type_valid}) OR NOT ({legacy_mime_valid})
+              OR lower({mime_type})=lower({legacy_mime}))
+        THEN COALESCE(
+                 CASE WHEN {mime_type_valid} THEN {mime_type} END,
+                 CASE WHEN {legacy_mime_valid} THEN {legacy_mime} END,
+                 ''
+             )
+        ELSE '' END"""
 
 
 def _title_expression(alias: str = "s") -> str:
@@ -2067,8 +2206,10 @@ def _catalog_sql(
     )
     source_id = "c.raw_id"
     filename = _filename_expression("s")
+    source_format = _format_expression("s") if corpus is ArchiveSearchCorpus.DOCUMENTS else "''"
     title = _title_expression("s")
     folded_filename = "friday_archive_fold(c.filename)"
+    folded_format = "friday_archive_fold(c.source_format)"
     folded_title = "friday_archive_fold(c.title)"
     folded_semantic_title = "friday_archive_fold(c.catalog_semantic_title)"
     folded_alias = "friday_archive_fold(a.supplied_filename)"
@@ -2077,6 +2218,7 @@ def _catalog_sql(
     exact_hit = f"""EXISTS (
         SELECT 1 FROM needles n
          WHERE {folded_filename}={folded_exact}
+            OR {folded_format}={folded_exact}
             OR {folded_title}={folded_exact}
             OR {folded_semantic_title}={folded_exact}
             OR EXISTS (SELECT 1 FROM authorized_aliases a
@@ -2085,6 +2227,7 @@ def _catalog_sql(
     prefix_hit = f"""EXISTS (
         SELECT 1 FROM needles n
          WHERE {folded_filename} LIKE {folded_like}||'%' ESCAPE '\\'
+            OR {folded_format} LIKE {folded_like}||'%' ESCAPE '\\'
             OR {folded_title} LIKE {folded_like}||'%' ESCAPE '\\'
             OR {folded_semantic_title} LIKE {folded_like}||'%' ESCAPE '\\'
             OR EXISTS (SELECT 1 FROM authorized_aliases a
@@ -2094,6 +2237,7 @@ def _catalog_sql(
     substring_hit = f"""EXISTS (
         SELECT 1 FROM needles n
          WHERE {folded_filename} LIKE '%'||{folded_like}||'%' ESCAPE '\\'
+            OR {folded_format} LIKE '%'||{folded_like}||'%' ESCAPE '\\'
             OR {folded_title} LIKE '%'||{folded_like}||'%' ESCAPE '\\'
             OR {folded_semantic_title} LIKE '%'||{folded_like}||'%' ESCAPE '\\'
             OR EXISTS (SELECT 1 FROM authorized_aliases a
@@ -2127,7 +2271,7 @@ def _catalog_sql(
                AND instr(a.supplied_filename,char(13))=0
         ),
         catalog_sources AS MATERIALIZED (
-            SELECT s.*, {filename} AS filename, {title} AS title,
+            SELECT s.*, {filename} AS filename, {source_format} AS source_format, {title} AS title,
                    (SELECT a.supplied_filename
                       FROM authorized_aliases a
                      WHERE a.raw_object_id=s.raw_id
@@ -2452,6 +2596,18 @@ def _utc_instant(value: object, *, label: str) -> datetime:
     return parsed.astimezone(UTC)
 
 
+def _calendar_date(value: object, *, label: str) -> date:
+    if type(value) is not str:
+        raise _fail(f"archive document {label} is invalid")
+    try:
+        parsed = date.fromisoformat(value)
+    except ValueError:
+        raise _fail(f"archive document {label} is invalid") from None
+    if parsed.isoformat() != value:
+        raise _fail(f"archive document {label} is invalid")
+    return parsed
+
+
 def _candidate_temporal_facts(
     row: dict[str, Any],
     *,
@@ -2462,10 +2618,19 @@ def _candidate_temporal_facts(
 ) -> tuple[TemporalFact, ...]:
     facts: dict[TemporalRole, TemporalFact] = {}
     for constraint in _temporal_constraints(request, corpus):
-        if constraint.role in {TemporalRole.RECEIVED_AT, TemporalRole.UPLOADED_AT}:
+        if constraint.role is TemporalRole.RECEIVED_AT:
             revision = raw_revision
             value = row.get("raw_received_at")
             origin = TemporalOrigin.STORAGE_COLUMN
+        elif constraint.role is TemporalRole.LEGACY_UNCLASSIFIED_DOCUMENT_DATE:
+            facts[constraint.role] = TemporalFact.for_date(
+                role=constraint.role,
+                value=_calendar_date(row.get("raw_document_date"), label="document date"),
+                precision=TemporalPrecision.DAY,
+                origin=TemporalOrigin.LEGACY_COLLAPSED,
+                source_revision=raw_revision,
+            )
+            continue
         elif constraint.role is TemporalRole.KNOWLEDGE_PROJECTION_CREATED_AT:
             if knowledge_revision is None:
                 raise _fail("archive document temporal revision is unavailable")

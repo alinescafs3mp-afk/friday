@@ -295,6 +295,97 @@ def test_document_lanes_are_federated_from_the_authoritative_store(storage: Any)
     assert _coverage(payload, SearchLane.DENSE)["states"] == ["unavailable"]
 
 
+def test_malformed_document_mime_forces_public_not_established(storage: Any) -> None:
+    authorization = _seed_authority(storage)
+    body = "Closed extraction-ready document without a format query token."
+    raw_id = "raw_00000000000000a2"
+    storage.store_raw_object(
+        RawObject(
+            id=raw_id,
+            user_id=TENANT,
+            source="upload",
+            source_ref="telegram-file:archive-malformed-mime",
+            raw_content=body,
+            content_type="file",
+            metadata_json={
+                "extraction_error": "",
+                "extraction_success": True,
+                "filename": "extensionless-document",
+                "media_kind": "document",
+                "mime": "application/pdf",
+                "mime_type": "text/plain",
+                "text_extraction_success": True,
+                "uploaded_by": PRINCIPAL,
+            },
+            content_hash=hashlib.sha256(body.encode()).hexdigest(),
+            received_at="2026-08-23T10:03:00+00:00",
+            created_at="2026-08-23T10:03:00+00:00",
+        )
+    )
+    storage.store_inbox_item(
+        InboxItem(
+            id="inbox_00000000000000a2",
+            user_id=TENANT,
+            raw_object_id=raw_id,
+            knowledge_object_id=None,
+            status=InboxStatus.CLASSIFIED,
+            created_at="2026-08-23T10:04:00+00:00",
+            reviewed_at="2026-08-23T10:05:00+00:00",
+            reviewed_by=PRINCIPAL,
+        )
+    )
+    backfill = storage.backfill_document_catalog(
+        TENANT,
+        after_raw_object_id=None,
+        limit=8,
+        include_document_passages=True,
+    )
+    catalog = storage.document_catalog_coverage(TENANT)
+    projection = storage.execute(
+        "SELECT projection_status FROM document_passage_projections WHERE raw_object_id=?",
+        (raw_id,),
+    ).fetchone()
+    assert backfill["has_more"] is False
+    assert catalog["coverage_complete"] is catalog["enrichment_complete"] is True
+    assert projection is not None and projection["projection_status"] == "current"
+
+    request = ArchiveSearchRequest.create(
+        query="application/pdf",
+        corpora=(ArchiveSearchCorpus.DOCUMENTS,),
+        limit=5,
+    )
+    with storage.transaction() as conn:
+        prepared = prepare_archive_search_in_transaction(
+            conn,
+            authorization=authorization,
+            actor=_actor(),
+            tenant_id=TENANT,
+            principal_id=PRINCIPAL,
+            request=request,
+            snapshot_discriminator=SNAPSHOT,
+            run_discriminator="malformed-document-mime",
+            turn_ledger=_ledger(),
+        )
+    payload = _payload(prepared)
+
+    assert payload["candidates"] == []
+    assert payload["continuation"] is None
+    assert payload["absence"] == "not_established"
+    assert payload["exhaustive"] is False
+    for lane in (SearchLane.CATALOG, SearchLane.LEXICAL):
+        public_coverage = _coverage(payload, lane)
+        assert public_coverage["states"] == [
+            CoverageState.BACKFILL_PENDING.value,
+            CoverageState.PARTIAL.value,
+        ]
+        assert public_coverage["eligible_authorized"] is None
+        assert public_coverage["examined"] == 1
+        assert public_coverage["matched_at_least"] == public_coverage["returned"] == 0
+        assert public_coverage["authority_rechecked"] is True
+        assert public_coverage["snapshot_current"] is True
+        assert public_coverage["next_cursor_available"] is False
+
+
 def test_message_history_uses_authorized_context_and_leaves_other_lanes_unavailable(
     storage: Any,
 ) -> None:

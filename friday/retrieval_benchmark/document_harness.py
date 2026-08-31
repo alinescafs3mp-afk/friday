@@ -40,7 +40,15 @@ from friday.retrieval.archive_search_service import (
     reauthorize_archive_search_coverage,
     refresh_archive_search_reauthorization_in_transaction,
 )
-from friday.retrieval.contracts import AbsenceDecision, SourceRef, TemporalRole
+from friday.retrieval.contracts import (
+    AbsenceDecision,
+    AuthorityScope,
+    SourceRef,
+    TemporalOrigin,
+    TemporalPrecision,
+    TemporalRole,
+    TemporalValueKind,
+)
 from friday.retrieval_benchmark._canonical import canonical_json
 from friday.retrieval_benchmark.contracts import (
     RecallCaseResultV1,
@@ -89,13 +97,14 @@ _GAP_CODES = frozenset(
         "discovery_authority_drift",
         "discovery_false_absence",
         "discovery_miss",
+        "negative_control_drift",
         "passage_mismatch",
         "qrel_miss",
         "replay_not_exact",
+        "safety_false_absence",
+        "safety_false_complete",
         "target_not_recalled",
         "temporal_role_mismatch",
-        "truncation_false_absence",
-        "truncation_false_complete",
     }
 )
 
@@ -119,6 +128,7 @@ class DocumentCaseMeasurementV1:
     discovery_navigation_only: bool
     discovery_absence_decision: AbsenceDecision
     discovery_exhaustive: bool
+    negative_control_exact: bool
     authorized_only: bool
     replay_status: ArchiveEvidenceReplayStatus | None
     replay_model_sha256: str | None
@@ -134,6 +144,7 @@ class DocumentCaseMeasurementV1:
             self.discovery_target_visible,
             self.discovery_navigation_only,
             self.discovery_exhaustive,
+            self.negative_control_exact,
             self.authorized_only,
         )
         if (
@@ -148,21 +159,16 @@ class DocumentCaseMeasurementV1:
             or self.target_recalled != (self.target_rank is not None)
             or type(self.match_channels) is not tuple
             or any(type(item) is not ArchiveMatchChannel for item in self.match_channels)
-            or self.match_channels
-            != tuple(sorted(set(self.match_channels), key=lambda item: item.value))
+            or self.match_channels != tuple(sorted(set(self.match_channels), key=lambda item: item.value))
             or type(self.discovery_absence_decision) is not AbsenceDecision
             or (
-                self.replay_status is not None
-                and type(self.replay_status) is not ArchiveEvidenceReplayStatus
+                self.replay_status is not None and type(self.replay_status) is not ArchiveEvidenceReplayStatus
             )
             or (
                 self.replay_model_sha256 is not None
                 and (
                     len(self.replay_model_sha256) != 64
-                    or any(
-                        character not in "0123456789abcdef"
-                        for character in self.replay_model_sha256
-                    )
+                    or any(character not in "0123456789abcdef" for character in self.replay_model_sha256)
                 )
             )
             or (self.replay_status is ArchiveEvidenceReplayStatus.EXACT)
@@ -189,6 +195,7 @@ class DocumentCaseMeasurementV1:
             "discovery_target_visible": self.discovery_target_visible,
             "gap_codes": list(self.gap_codes),
             "match_channels": [item.value for item in self.match_channels],
+            "negative_control_exact": self.negative_control_exact,
             "passage_exact": self.passage_exact,
             "recall_class": self.recall_class.value,
             "replay_model_sha256": self.replay_model_sha256,
@@ -233,9 +240,7 @@ class EphemeralDocumentRecallRunV1:
 
     @property
     def gap_count(self) -> int:
-        return sum(len(item.gap_codes) for item in self.measurements) + int(
-            not self.restart_performed
-        )
+        return sum(len(item.gap_codes) for item in self.measurements) + int(not self.restart_performed)
 
 
 @dataclass(frozen=True, slots=True, repr=False)
@@ -272,9 +277,11 @@ def _converge_document_writer(storage: FridayStorage) -> None:
             raise DocumentRecallHarnessError("document writer report is invalid")
         has_more = report.get("has_more")
         next_cursor = report.get("next_after_raw_object_id")
-        if type(has_more) is not bool or (
-            has_more and (not isinstance(next_cursor, str) or not next_cursor)
-        ) or (not has_more and next_cursor is not None):
+        if (
+            type(has_more) is not bool
+            or (has_more and (not isinstance(next_cursor, str) or not next_cursor))
+            or (not has_more and next_cursor is not None)
+        ):
             raise DocumentRecallHarnessError("document writer report is invalid")
         if not has_more:
             return
@@ -404,9 +411,7 @@ def _target_entry(
     source_ref: SourceRef,
 ) -> ArchiveSearchCandidateProjectionEntry | None:
     matches = tuple(
-        item
-        for item in attestation.candidate_projection.candidates
-        if item.source_ref == source_ref
+        item for item in attestation.candidate_projection.candidates if item.source_ref == source_ref
     )
     if len(matches) > 1:
         raise DocumentRecallHarnessError("target source was projected more than once")
@@ -473,12 +478,16 @@ def _temporal_role_exact(
     raw = candidate.get("temporal_facts")
     if type(raw) is not list:
         raise DocumentRecallHarnessError("target temporal facts are invalid")
-    roles: list[str] = []
-    for value in raw:
-        if type(value) is not dict or not isinstance(value.get("role"), str):
-            raise DocumentRecallHarnessError("target temporal facts are invalid")
-        roles.append(cast(str, value["role"]))
-    return roles == [TemporalRole.LEGACY_UNCLASSIFIED_DOCUMENT_DATE.value]
+    return raw == [
+        {
+            "end": "2024-05-11",
+            "origin": TemporalOrigin.LEGACY_COLLAPSED.value,
+            "precision": TemporalPrecision.DAY.value,
+            "role": TemporalRole.LEGACY_UNCLASSIFIED_DOCUMENT_DATE.value,
+            "start": "2024-05-10",
+            "value_kind": TemporalValueKind.DATE_INTERVAL.value,
+        }
+    ]
 
 
 def _measurement(
@@ -490,10 +499,19 @@ def _measurement(
 ) -> tuple[DocumentCaseMeasurementV1, _PrivateReplayRecord | None]:
     entry = _target_entry(evidence.attestation, diagnostic.target.source_ref)
     evidence_candidate = (
-        None
-        if entry is None
-        else _candidate_by_label(evidence.payloads, entry.public_citation_label)
+        None if entry is None else _candidate_by_label(evidence.payloads, entry.public_citation_label)
     )
+    negative_entry = _target_entry(
+        evidence.attestation,
+        diagnostic.negative_control.source_ref,
+    )
+    negative_candidate = (
+        None
+        if negative_entry is None
+        else _candidate_by_label(evidence.payloads, negative_entry.public_citation_label)
+    )
+    negative_channels = _channels(negative_candidate)
+    negative_control_exact = negative_channels == diagnostic.expected_negative_channels
     channels = _channels(evidence_candidate)
     match = None if entry is None else _CITATION.fullmatch(entry.public_citation_label)
     target_rank = None if match is None else int(match.group(1))
@@ -517,11 +535,15 @@ def _measurement(
     discovery_exhaustive = _public_exhaustive(discovery)
     searches = (evidence, discovery) if safety is None else (evidence, discovery, safety)
     foreign_filenames = {
-        item.filename for item in plan.documents if item.principal_id == plan.foreign_principal_id
+        item.filename
+        for item in plan.documents
+        if item.principal_id == plan.foreign_principal_id or item.tenant_id == plan.foreign_tenant_id
     }
     authorized_only = bool(
         all(
-            projected.source_ref.principal_id == SYNTHETIC_PRINCIPAL
+            projected.source_ref.authority_scope is AuthorityScope.TENANT_PRINCIPAL
+            and projected.source_ref.tenant_id == SYNTHETIC_TENANT
+            and projected.source_ref.principal_id == SYNTHETIC_PRINCIPAL
             for projected in evidence.attestation.candidate_projection.candidates
         )
         and not any(
@@ -541,6 +563,8 @@ def _measurement(
         gaps.add("replay_not_exact")
     if channels != diagnostic.expected_channels:
         gaps.add("channel_mismatch")
+    if not negative_control_exact:
+        gaps.add("negative_control_drift")
     if not passage_exact:
         gaps.add("passage_mismatch")
     if not temporal_exact:
@@ -555,9 +579,9 @@ def _measurement(
         gaps.add("authority_scope_drift")
     if safety is not None:
         if safety_absence is not AbsenceDecision.NOT_ESTABLISHED:
-            gaps.add("truncation_false_absence")
+            gaps.add("safety_false_absence")
         if safety_exhaustive is not False:
-            gaps.add("truncation_false_complete")
+            gaps.add("safety_false_complete")
 
     replay_record: _PrivateReplayRecord | None = None
     if entry is not None:
@@ -586,6 +610,7 @@ def _measurement(
             discovery_navigation_only=discovery_navigation_only,
             discovery_absence_decision=discovery_absence,
             discovery_exhaustive=discovery_exhaustive,
+            negative_control_exact=negative_control_exact,
             authorized_only=authorized_only,
             replay_status=None,
             replay_model_sha256=None,
@@ -754,9 +779,7 @@ def run_document_ephemeral() -> EphemeralDocumentRecallRunV1:
                 try:
                     current_release_sha256 = archive_search_release_sha256()
                 except RecallReleaseIdentityError as exc:
-                    raise DocumentRecallHarnessError(
-                        "archive release source set is unavailable"
-                    ) from exc
+                    raise DocumentRecallHarnessError("archive release source set is unavailable") from exc
                 if current_release_sha256 != release_sha256:
                     raise DocumentRecallHarnessError(
                         "archive release source set changed during the benchmark"

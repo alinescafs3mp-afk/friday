@@ -57,6 +57,7 @@ from friday.retrieval_benchmark.synthetic import (
 from friday.storage.models import InboxItem, InboxStatus, RawObject
 
 _FOREIGN_PRINCIPAL: Final = "document-recall-foreign-principal"
+_FOREIGN_TENANT: Final = "document-recall-foreign-tenant"
 _VISIBLE_TRUNCATION_MARKER: Final = "Visible cobalt truncation boundary 7441."
 _HIDDEN_TRUNCATION_MARKER: Final = "ultraviolettail9853"
 
@@ -86,6 +87,7 @@ class _DocumentSpec:
     filename: str
     mime_type: str
     received_at: str
+    tenant_id: str = SYNTHETIC_TENANT
     principal_id: str = SYNTHETIC_PRINCIPAL
     alias: str | None = None
     document_date: str | None = None
@@ -104,7 +106,7 @@ class _DocumentSpec:
         return SourceRef(
             SourceKind.DOCUMENT,
             AuthorityScope.TENANT_PRINCIPAL,
-            SYNTHETIC_TENANT,
+            self.tenant_id,
             self.principal_id,
             CanonicalObjectKind.RAW_OBJECT,
             self.raw_id,
@@ -121,6 +123,8 @@ class _DocumentCaseDiagnostic:
     discovery_request: ArchiveSearchRequest
     discovery_filename: str
     discovery_navigation_only: bool
+    negative_control: _DocumentSpec
+    expected_negative_channels: tuple[ArchiveMatchChannel, ...]
     safety_request: ArchiveSearchRequest | None = None
 
     @property
@@ -134,6 +138,7 @@ class _DocumentSyntheticPlan:
     diagnostics: tuple[_DocumentCaseDiagnostic, ...]
     documents: tuple[_DocumentSpec, ...]
     foreign_principal_id: str
+    foreign_tenant_id: str
 
     def diagnostic(self, case_id: str) -> _DocumentCaseDiagnostic:
         match = next((item for item in self.diagnostics if item.case_id == case_id), None)
@@ -146,10 +151,7 @@ _FILENAME_BODY: Final = "Frosted archive evidence marker 1103 selects one canoni
 _ALIAS_BODY: Final = "Amber alias evidence marker 2207 selects one canonical passage."
 _FORMAT_BODY: Final = "Indigo format evidence marker 3301 selects one canonical passage."
 _DATE_BODY: Final = "Saffron own-date evidence marker 4409 selects one canonical passage."
-_TRUNCATION_PREFIX: Final = (
-    "bounded extraction prefix row\n" * 430
-    + _VISIBLE_TRUNCATION_MARKER
-)
+_TRUNCATION_PREFIX: Final = "bounded extraction prefix row\n" * 430 + _VISIBLE_TRUNCATION_MARKER
 
 _FILENAME_TARGET = _DocumentSpec(
     1,
@@ -227,6 +229,15 @@ _FOREIGN_DECOY = _DocumentSpec(
     principal_id=_FOREIGN_PRINCIPAL,
     document_date="2024-05-10",
 )
+_FOREIGN_TENANT_DECOY = _DocumentSpec(
+    11,
+    " ".join((_FILENAME_BODY, _ALIAS_BODY, _FORMAT_BODY, _DATE_BODY, _VISIBLE_TRUNCATION_MARKER)),
+    "s4r7-private-foreign-tenant.txt",
+    "text/plain",
+    "2026-08-13T08:00:00+00:00",
+    tenant_id=_FOREIGN_TENANT,
+    document_date="2024-05-10",
+)
 
 _DOCUMENTS: Final = (
     _FILENAME_TARGET,
@@ -239,13 +250,12 @@ _DOCUMENTS: Final = (
     _DATE_DECOY,
     _TRUNCATION_TARGET,
     _FOREIGN_DECOY,
+    _FOREIGN_TENANT_DECOY,
 )
 
 
 def _case_privacy_key(ordinal: int) -> str:
-    return hashlib.sha256(
-        f"friday/document-recall-case-key/v1/{ordinal:04d}".encode("ascii")
-    ).hexdigest()
+    return hashlib.sha256(f"friday/document-recall-case-key/v1/{ordinal:04d}".encode("ascii")).hexdigest()
 
 
 def _passage_ref(spec: _DocumentSpec, *, query: str) -> PassageRef:
@@ -315,9 +325,7 @@ def _recall_case(
         alternatives=(
             RecallAlternativeV1(
                 source_identity=opaque_source_identity(target.source_ref, privacy_key),
-                passage_window_identities=(
-                    opaque_passage_window_identity(passage_ref, privacy_key),
-                ),
+                passage_window_identities=(opaque_passage_window_identity(passage_ref, privacy_key),),
                 locator_kind=PassageLocatorKind.TEXT_SPAN,
                 relevance_grade=3,
                 temporal_role=temporal_role,
@@ -380,6 +388,8 @@ def document_synthetic_plan() -> _DocumentSyntheticPlan:
             ),
             _FILENAME_TARGET.filename,
             True,
+            _FILENAME_DECOY,
+            (ArchiveMatchChannel.LEXICAL,),
         ),
         _DocumentCaseDiagnostic(
             alias_case,
@@ -394,6 +404,8 @@ def document_synthetic_plan() -> _DocumentSyntheticPlan:
             ),
             _ALIAS_TARGET.alias or "",
             True,
+            _ALIAS_DECOY,
+            (ArchiveMatchChannel.LEXICAL,),
         ),
         _DocumentCaseDiagnostic(
             format_case,
@@ -408,6 +420,13 @@ def document_synthetic_plan() -> _DocumentSyntheticPlan:
             ),
             _FORMAT_TARGET.filename,
             True,
+            _FORMAT_DECOY,
+            (ArchiveMatchChannel.LEXICAL,),
+            safety_request=ArchiveSearchRequest.create(
+                query="application/pdf",
+                corpora=(ArchiveSearchCorpus.DOCUMENTS,),
+                limit=20,
+            ),
         ),
         _DocumentCaseDiagnostic(
             date_case,
@@ -418,6 +437,23 @@ def document_synthetic_plan() -> _DocumentSyntheticPlan:
             date_case.request,
             _DATE_TARGET.filename,
             False,
+            _DATE_DECOY,
+            (),
+            safety_request=ArchiveSearchRequest.create(
+                query="Frosted archive evidence marker 1103",
+                corpora=(ArchiveSearchCorpus.DOCUMENTS,),
+                temporal_constraints=(
+                    ArchiveTemporalConstraint(
+                        corpus=ArchiveSearchCorpus.DOCUMENTS,
+                        role=TemporalRole.LEGACY_UNCLASSIFIED_DOCUMENT_DATE,
+                        value_kind=TemporalValueKind.DATE_INTERVAL,
+                        precision=TemporalPrecision.DAY,
+                        start="2024-02-28",
+                        end="2024-02-29",
+                    ),
+                ),
+                limit=20,
+            ),
         ),
         _DocumentCaseDiagnostic(
             truncation_case,
@@ -428,6 +464,8 @@ def document_synthetic_plan() -> _DocumentSyntheticPlan:
             truncation_case.request,
             _TRUNCATION_TARGET.filename,
             False,
+            _FOREIGN_DECOY,
+            (),
             safety_request=ArchiveSearchRequest.create(
                 query=_HIDDEN_TRUNCATION_MARKER,
                 corpora=(ArchiveSearchCorpus.DOCUMENTS,),
@@ -440,6 +478,7 @@ def document_synthetic_plan() -> _DocumentSyntheticPlan:
         diagnostics,
         _DOCUMENTS,
         _FOREIGN_PRINCIPAL,
+        _FOREIGN_TENANT,
     )
 
 
@@ -449,6 +488,7 @@ def seed_document_synthetic(storage: _DocumentSyntheticStorage) -> None:
     storage.ensure_user(SYNTHETIC_TENANT)
     storage.ensure_user(SYNTHETIC_PRINCIPAL)
     storage.ensure_user(_FOREIGN_PRINCIPAL)
+    storage.ensure_user(_FOREIGN_TENANT)
     for document in _DOCUMENTS:
         metadata: dict[str, object] = {
             "extraction_success": True,
@@ -466,7 +506,7 @@ def seed_document_synthetic(storage: _DocumentSyntheticStorage) -> None:
         storage.store_raw_object(
             RawObject(
                 id=document.raw_id,
-                user_id=SYNTHETIC_TENANT,
+                user_id=document.tenant_id,
                 source="upload",
                 source_ref=f"document-recall:{document.ordinal:04d}",
                 raw_content=document.body,
@@ -480,7 +520,7 @@ def seed_document_synthetic(storage: _DocumentSyntheticStorage) -> None:
         storage.store_inbox_item(
             InboxItem(
                 id=document.inbox_id,
-                user_id=SYNTHETIC_TENANT,
+                user_id=document.tenant_id,
                 raw_object_id=document.raw_id,
                 status=InboxStatus.CLASSIFIED,
                 created_at=document.received_at,
@@ -498,7 +538,7 @@ def seed_document_synthetic(storage: _DocumentSyntheticStorage) -> None:
                        user_id,uploaded_by,source_ref,raw_object_id,supplied_filename,created_at
                    ) VALUES(?,?,?,?,?,?)""",
                 (
-                    SYNTHETIC_TENANT,
+                    document.tenant_id,
                     document.principal_id,
                     f"telegram-file:S4R7-{document.ordinal:04d}",
                     document.raw_id,
