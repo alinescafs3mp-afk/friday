@@ -10462,7 +10462,9 @@ def test_actual_installed_source_smoke_ignores_a_poisoned_live_database(
     )
     purelib = Path(lookup.stdout.strip()).resolve(strict=True)
     runtime_site = next(
-        Path(entry).resolve(strict=True) for entry in sys.path if Path(entry).name == "site-packages"
+        parent
+        for parent in Path(pytest.__file__).resolve(strict=True).parents
+        if parent.name == "site-packages"
     )
     (purelib / "runtime-dependencies.pth").write_text(f"{runtime_site}\n", encoding="ascii")
     source_root = Path(__file__).parents[1]
