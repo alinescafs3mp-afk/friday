@@ -68,11 +68,26 @@ and synthetic case ID into one private ledger, independently classify every root
 then repair all roots as one batch. Raw questions, answers and worker logs never enter
 Git, documentation, chat or public stdout.
 
-After two independent read-only reviews are clear, run the canonical source gate:
+After two independent read-only reviews are clear, reserve the exclusive gate slot,
+set `QUALITY_GATE_BASE_SHA` to the full SHA of the previously accepted ancestor,
+and run the canonical exact-release tier:
 
 ```bash
-.venv/bin/python tools/quality_gate.py
+export FRIDAY_SYNCTHING_AMD64_TARBALL="${FRIDAY_SYNCTHING_AMD64_TARBALL:-$HOME/.cache/friday/test-assets/syncthing-linux-amd64-v2.1.3.tar.gz}"
+candidate_sha="$(git rev-parse --verify 'HEAD^{commit}')"
+base_sha="$(git rev-parse --verify "${QUALITY_GATE_BASE_SHA:?set accepted base}^{commit}")"
+evidence_dir="$(mktemp -d -p /var/tmp friday-exact-evidence.XXXXXXXX)"
+.venv/bin/python -I -B tools/quality_gate.py \
+  --tier exact-release --candidate-sha "$candidate_sha" --base-sha "$base_sha" \
+  --evidence-dir "$evidence_dir"
 ```
+
+This one invocation runs the closed `change + exact-release` partition with no
+imported receipt. It uses the default 20 non-UI/4 UI topology, rejects every skip,
+and must create `quality-gate-summary.json`. See
+[`QUALITY_GATE_TIERS.md`](QUALITY_GATE_TIERS.md) for private `/var/tmp` projection,
+cleanup, evidence and external same-wheel measurement rules. Do not overlap it with
+Mainline's gate or another battery.
 
 Select and privately validate the deployed model configuration without printing it:
 

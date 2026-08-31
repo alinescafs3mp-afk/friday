@@ -6,23 +6,41 @@
 
 ## 1. Source tree
 
-Подготовить dev-окружение и Chromium, затем запустить единый репозиторный гейт:
+Подготовить dev-окружение и Chromium, указать полный SHA ранее принятого предка
+в `QUALITY_GATE_BASE_SHA`, затем запустить единый exact-release tier:
 
 ```bash
 .venv/bin/python -m pip install --upgrade --constraint requirements-dev.lock pip setuptools wheel
 .venv/bin/python -m pip install --no-build-isolation --constraint requirements.lock --constraint requirements-dev.lock -e ".[dev,vectors]"
 .venv/bin/python -m playwright install chromium
-.venv/bin/python tools/quality_gate.py
+export FRIDAY_SYNCTHING_AMD64_TARBALL="${FRIDAY_SYNCTHING_AMD64_TARBALL:-$HOME/.cache/friday/test-assets/syncthing-linux-amd64-v2.1.3.tar.gz}"
+candidate_sha="$(git rev-parse --verify 'HEAD^{commit}')"
+base_sha="$(git rev-parse --verify "${QUALITY_GATE_BASE_SHA:?set accepted base}^{commit}")"
+evidence_dir="$(mktemp -d -p /var/tmp friday-exact-evidence.XXXXXXXX)"
+.venv/bin/python -I -B tools/quality_gate.py \
+  --tier exact-release --candidate-sha "$candidate_sha" --base-sha "$base_sha" \
+  --evidence-dir "$evidence_dir"
 ```
 
-Перед любой выбранной фазой гейт обязательно аттестует Python 3.14.4,
+Полный контракт tiers, inventory и evidence описан в
+[`QUALITY_GATE_TIERS.md`](QUALITY_GATE_TIERS.md). `exact-release` выполняет
+`change + exact-release` в одном invocation без импортированного receipt и только
+после единой полной collection/classification. Любой skip является ошибкой;
+успех требует `$evidence_dir/quality-gate-summary.json`. По умолчанию используются
+20 non-UI и 4 UI workers.
+
+Exact-release обязательно аттестует Python 3.14.4,
 Node 22.23.2, NumPy 2.5.1, Playwright 1.61.0, установленный Chromium revision
-1228 и официальный бинарник UnRAR 7.20. Затем полный запуск идёт тремя фазами:
+1228, официальный UnRAR 7.20, pinned Syncthing archive и фиксированный readable
+JDK 21, а также package-owned AppArmor parser, Bubblewrap, LibreOffice, nmap и
+`/usr/bin/{printf,yes,sleep,true,test}`. Host preflight выполняет реальный
+unprivileged bwrap user/network-namespace smoke и закрытый nmap prerequisite;
+controller требует не менее 24 effective CPU и 32 GiB свободного `/var/tmp`.
+Затем полный запуск идёт тремя фазами:
 `static` (Ruff, mypy, Bandit HIGH и `node --check`), `tests` (не-браузерный
 pytest) и `ui` (Playwright). UI-модули отделены от общего pytest, чтобы их
-process-wide серверы не пересекались; по умолчанию браузерная фаза идёт
-последовательно (`--ui-workers 1`, настоящий serial `-n 0`). Явный override
-может выделить до 12 workers — по одному на модуль. JUnit
+process-wide серверы не пересекались; UI-модуль остаётся целиком на одном worker.
+JUnit
 обеих pytest-фаз сверяется по точным nodeid с полной коллекцией, и любой
 failed/error/skipped-тест в любой фазе делает гейт красным. Параметры
 `--phase static`, `--phase tests` и `--phase ui` предназначены только для локальной
@@ -30,7 +48,7 @@ failed/error/skipped-тест в любой фазе делает гейт кр�
 
 Обязательные условия:
 
-- канонический гейт завершился с кодом 0;
+- канонический exact-release tier завершился с кодом 0 и создал summary;
 - нет failed/error/skipped-тестов ни в non-UI, ни в UI-фазе;
 - Ruff/mypy clean;
 - Bandit HIGH = 0; каждый MEDIUM/LOW отдельно рассмотрен и объяснён в release evidence;

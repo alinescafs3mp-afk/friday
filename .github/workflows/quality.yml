@@ -5,30 +5,39 @@ on:
     branches: [main]
   pull_request:
   workflow_dispatch:
+    inputs:
+      base_sha:
+        description: Full accepted ancestor SHA
+        required: true
+        type: string
 
 permissions:
   contents: read
 
 concurrency:
   group: quality-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   quality:
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    env:
+      QUALITY_GATE_BASE_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event_name == 'push' && github.event.before || inputs.base_sha }}
 
     steps:
       - name: Check out repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
 
       - name: Set up Python 3.14
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
         with:
           python-version: "3.14.4"
 
       - name: Set up Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: "22.23.2"
 
@@ -41,15 +50,36 @@ jobs:
       - name: Install Playwright Chromium
         run: .venv/bin/python -m playwright install --with-deps chromium
 
-      - name: Install pinned UnRAR
+      - name: Authenticate hosted change capacity
         run: |
-          curl --fail --location --silent --show-error --proto '=https' --tlsv1.2 \
-            --output /tmp/rarlinux-x64-720.tar.gz \
-            https://www.rarlab.com/rar/rarlinux-x64-720.tar.gz
-          echo "d3e7fba3272385b1d0255ee332a1e8c1a6779bb5a5ff9d4d8ac2be846e49ca46  /tmp/rarlinux-x64-720.tar.gz" \
-            | sha256sum --check --strict
-          tar -xzf /tmp/rarlinux-x64-720.tar.gz -C /tmp rar/unrar
-          sudo install -o root -g root -m 0755 /tmp/rar/unrar /usr/local/bin/unrar
+          set -euo pipefail
+          (( $(nproc) >= 4 ))
+          (( $(df --output=avail -B1 /var/tmp | tail -n 1) >= 8 * 1024 * 1024 * 1024 ))
 
-      - name: Run canonical quality gate
-        run: .venv/bin/python tools/quality_gate.py
+      - name: Run closed synthetic change gate
+        run: |
+          set -euo pipefail
+          umask 077
+          candidate_sha="${{ github.sha }}"
+          base_sha="$QUALITY_GATE_BASE_SHA"
+          evidence_dir="$RUNNER_TEMP/quality-gate-evidence"
+          [[ "$candidate_sha" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$base_sha" =~ ^[0-9a-f]{40}$ && "$base_sha" != "$candidate_sha" ]]
+          git merge-base --is-ancestor "$base_sha" "$candidate_sha"
+          install -d -m 0700 "$evidence_dir"
+          .venv/bin/python -I -B tools/quality_gate.py \
+            --tier change \
+            --candidate-sha "$candidate_sha" \
+            --base-sha "$base_sha" \
+            --evidence-dir "$evidence_dir" \
+            --workers 4 \
+            --ui-workers 1
+
+      - name: Upload change-gate evidence
+        if: success()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: quality-change-${{ github.sha }}
+          path: ${{ runner.temp }}/quality-gate-evidence
+          if-no-files-found: error
+          retention-days: 14

@@ -591,20 +591,27 @@ Runtime-каталоги и секреты исключены из Git и из �
 .venv/bin/python -m pip install --upgrade --constraint requirements-dev.lock pip setuptools wheel
 .venv/bin/python -m pip install --no-build-isolation --constraint requirements.lock --constraint requirements-dev.lock -e ".[dev,vectors]"
 .venv/bin/python -m playwright install chromium
-.venv/bin/python tools/quality_gate.py
+export FRIDAY_SYNCTHING_AMD64_TARBALL="${FRIDAY_SYNCTHING_AMD64_TARBALL:-$HOME/.cache/friday/test-assets/syncthing-linux-amd64-v2.1.3.tar.gz}"
+umask 077
+candidate_sha="$(git rev-parse --verify HEAD^{commit})"
+base_sha="$(git rev-parse --verify "${QUALITY_GATE_BASE_SHA:?set accepted base}^{commit}")"
+evidence_dir="$(mktemp -d /var/tmp/friday-gate.XXXXXXXX)"
+.venv/bin/python -I -B tools/quality_gate.py --tier exact-release \
+  --candidate-sha "$candidate_sha" --base-sha "$base_sha" \
+  --evidence-dir "$evidence_dir"
 jericho doctor
 ```
 
-`tools/quality_gate.py` — единая проверка репозитория: обязательный preflight
-Python 3.14.4, Node 22.23.2, NumPy 2.5.1, Playwright 1.61.0, установленного
-Chromium revision 1228 и официального UnRAR 7.20, затем static checks,
-не-браузерный pytest и отдельная UI-фаза. Любой skipped-тест в обеих pytest-фазах
-считается ошибкой; точные nodeid в JUnit должны совпасть с полной коллекцией.
-UI по умолчанию идёт последовательно (`--ui-workers 1`, настоящий `-n 0`),
-исключая host-level сбои параллельных Chromium workers. Явный override допускает
-до 12 workers — по одному на UI-модуль. Для локальной итерации есть
-`--phase static`, `--phase tests` и `--phase ui`; toolchain preflight обязателен
-и для частичной команды, а перед пушем выполняется полная команда без `--phase`.
+Канонический контракт имеет три закрытых tier: `change`, обязательный
+`exact-release` (union `change` + exact boundaries) и приватный operator-local
+`nightly` для семи внешних наблюдений. Public Actions запускает только
+не-сертифицирующий synthetic `change` на hosted-топологии 4/1; release и
+asset-bearing наблюдения никогда не уходят в публичные логи. Каноническая
+operator-local топология — 20 non-UI и 4 UI workers; skipped, незаявленный или
+неисполненный node завершает tier ошибкой.
+Команда без `--tier` и локальные `--phase static|tests|ui` сохранены только как
+legacy/diagnostic и запрещены как release evidence. Полный контракт, требования к
+host assets и формат evidence описаны в [docs/QUALITY_GATE_TIERS.md](docs/QUALITY_GATE_TIERS.md).
 
 Рекурсивная синтетическая live-приёмка имеет отдельный воспроизводимый контракт:
 tracked pre-release runner одним снимком проверяет P06 A+B **40/40** и focused
