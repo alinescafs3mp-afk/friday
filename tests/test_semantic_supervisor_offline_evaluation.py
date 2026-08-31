@@ -21,6 +21,9 @@ from friday.orchestration.supervisor_offline_evaluation import (
 ROOT = Path(__file__).resolve().parents[1]
 FIXTURES = ROOT / "tests" / "fixtures" / "semantic_supervisor_offline_v1.json"
 CLI = ROOT / "tools" / "evaluate_semantic_supervisor_offline.py"
+_INSTALLED_SITE_ENV = "FRIDAY_QUALITY_GATE_INSTALLED_SITE"
+_CLI_TIMEOUT_SECONDS = 30.0
+_UNAVAILABLE = "semantic supervisor offline evaluation unavailable\n"
 
 
 def _fixture_set() -> dict[str, Any]:
@@ -162,25 +165,128 @@ def test_fixture_contract_is_closed_and_rejects_raw_proposal_fields() -> None:
         evaluate_offline_fixture_set(invalid_bounds)
 
 
-def test_cli_emits_the_same_canonical_body_free_report_twice() -> None:
-    commands = [sys.executable, str(CLI), "--fixtures", str(FIXTURES)]
-    first = subprocess.run(commands, cwd=ROOT, check=True, capture_output=True, text=True)
-    second = subprocess.run(commands, cwd=ROOT, check=True, capture_output=True, text=True)
+def test_cli_emits_the_same_canonical_body_free_report_twice(tmp_path: Path) -> None:
+    commands = [sys.executable, "-I", "-B", str(CLI), "--fixtures", str(FIXTURES)]
+    first = subprocess.run(
+        commands,
+        cwd=ROOT,
+        check=True,
+        capture_output=True,
+        text=True,
+        timeout=_CLI_TIMEOUT_SECONDS,
+    )
+    second = subprocess.run(
+        commands,
+        cwd=ROOT,
+        check=True,
+        capture_output=True,
+        text=True,
+        timeout=_CLI_TIMEOUT_SECONDS,
+    )
 
     assert first.stderr == ""
+    assert first.args[:3] == [sys.executable, "-I", "-B"]
     assert first.stdout == second.stdout
     assert first.stdout == canonical_dumps(json.loads(first.stdout)) + "\n"
     report = json.loads(first.stdout)
-    assert report["evidence"]["acceptance_authority"] == "none"
-    assert report["non_owning_counts"]["execution_count"] == 0
+    assert report == evaluate_offline_fixture_set(_fixture_set())
 
-    rejected = subprocess.run(
-        commands,
+    for invalid_marker in (
+        "",
+        "relative/wheel-site",
+        str(tmp_path / "missing-marker-private-value"),
+    ):
+        rejected = subprocess.run(
+            commands,
+            cwd=ROOT,
+            env={**os.environ, _INSTALLED_SITE_ENV: invalid_marker},
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=_CLI_TIMEOUT_SECONDS,
+        )
+        assert rejected.returncode != 0
+        assert rejected.stdout == ""
+        assert rejected.stderr == _UNAVAILABLE
+        assert "marker-private-value" not in rejected.stdout + rejected.stderr
+
+    wrapper = (
+        "import runpy,sys,types;"
+        "sys.modules['friday.preloaded']=types.ModuleType('friday.preloaded');"
+        "tool=sys.argv.pop(1);"
+        "runpy.run_path(tool,run_name='__main__')"
+    )
+    preloaded = subprocess.run(
+        [
+            sys.executable,
+            "-I",
+            "-B",
+            "-c",
+            wrapper,
+            str(CLI),
+            "--fixtures",
+            str(FIXTURES),
+        ],
         cwd=ROOT,
-        env={**os.environ, "FRIDAY_QUALITY_GATE_INSTALLED_SITE": "relative/wheel-site"},
         check=False,
         capture_output=True,
         text=True,
+        timeout=_CLI_TIMEOUT_SECONDS,
     )
-    assert rejected.returncode != 0
-    assert rejected.stdout == ""
+
+    assert preloaded.returncode != 0
+    assert preloaded.stdout == ""
+    assert preloaded.stderr == _UNAVAILABLE
+
+    linked_site = tmp_path / "linked-package-site"
+    linked_site.mkdir(mode=0o700)
+    (linked_site / "friday").symlink_to(ROOT / "friday", target_is_directory=True)
+    linked_package = subprocess.run(
+        commands,
+        cwd=ROOT,
+        env={**os.environ, _INSTALLED_SITE_ENV: str(linked_site.resolve(strict=True))},
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=_CLI_TIMEOUT_SECONDS,
+    )
+    assert linked_package.returncode != 0
+    assert linked_package.stdout == ""
+    assert linked_package.stderr == _UNAVAILABLE
+
+    site = tmp_path / "wheel-site"
+    orchestration = site / "friday" / "orchestration"
+    orchestration.mkdir(parents=True, mode=0o700)
+    site.chmod(0o700)
+    (site / "friday").chmod(0o755)
+    package_init = site / "friday" / "__init__.py"
+    package_init.write_text("", encoding="utf-8")
+    package_init.chmod(0o644)
+    orchestration_init = orchestration / "__init__.py"
+    orchestration_init.write_text("", encoding="utf-8")
+    orchestration_init.chmod(0o644)
+    outside_contracts = tmp_path / "outside_supervisor_contracts.py"
+    outside_contracts.write_text(
+        "import json\n\ndef canonical_dumps(value):\n    return json.dumps(value, sort_keys=True)\n",
+        encoding="utf-8",
+    )
+    (orchestration / "supervisor_contracts.py").symlink_to(outside_contracts)
+    (orchestration / "supervisor_offline_evaluation.py").write_text(
+        "class OfflineEvaluationError(ValueError):\n    pass\n\n"
+        "def evaluate_offline_fixture_set(value):\n    return value\n",
+        encoding="utf-8",
+    )
+
+    split_origin = subprocess.run(
+        [sys.executable, "-I", "-B", str(CLI), "--fixtures", str(FIXTURES)],
+        cwd=ROOT,
+        env={**os.environ, _INSTALLED_SITE_ENV: str(site.resolve(strict=True))},
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=_CLI_TIMEOUT_SECONDS,
+    )
+
+    assert split_origin.returncode != 0
+    assert split_origin.stdout == ""
+    assert split_origin.stderr == _UNAVAILABLE

@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
+import shutil
 import sqlite3
 import subprocess
 import sys
@@ -11,6 +13,7 @@ from typing import Any
 
 import pytest
 
+import friday as friday_package
 from friday.orchestration.supervisor_actor_binding import (
     SUPERVISOR_CANARY_ACTOR_BINDING_SCHEMA,
     SupervisorCanaryActorBindingError,
@@ -22,6 +25,8 @@ from friday.permissions import ActorContext
 
 ROOT = Path(__file__).resolve().parents[1]
 TOOL = ROOT / "tools" / "semantic_supervisor_canary_actor_binding.py"
+_INSTALLED_SITE_ENV = "FRIDAY_QUALITY_GATE_INSTALLED_SITE"
+_UNAVAILABLE = b"semantic supervisor canary actor binding unavailable\n"
 _KEY = bytes.fromhex("31" * 32)
 
 
@@ -63,15 +68,64 @@ def _database(tmp_path: Path, *, key: bytes = _KEY) -> Path:
     return path
 
 
-def _run_tool(database: Path, projection: bytes) -> subprocess.CompletedProcess[bytes]:
+def _run_tool(
+    database: Path,
+    projection: bytes,
+    *,
+    environment: dict[str, str] | None = None,
+    preload_friday: bool = False,
+) -> subprocess.CompletedProcess[bytes]:
+    command = [sys.executable, "-I", "-B", str(TOOL), "--database", str(database)]
+    if preload_friday:
+        wrapper = (
+            "import runpy,sys,types;"
+            "sys.modules['friday.preloaded']=types.ModuleType('friday.preloaded');"
+            "tool=sys.argv.pop(1);"
+            "runpy.run_path(tool,run_name='__main__')"
+        )
+        command = [
+            sys.executable,
+            "-I",
+            "-B",
+            "-c",
+            wrapper,
+            str(TOOL),
+            "--database",
+            str(database),
+        ]
     return subprocess.run(
-        [sys.executable, str(TOOL), "--database", str(database)],
+        command,
         input=projection,
         capture_output=True,
         cwd=ROOT,
+        env=environment,
         check=False,
         timeout=10.0,
     )
+
+
+def _minimal_installed_site(tmp_path: Path) -> Path:
+    source = Path(str(friday_package.__file__)).resolve(strict=True).parent
+    site = tmp_path / "wheel-site"
+    (site / "friday" / "orchestration").mkdir(parents=True, mode=0o700)
+    (site / "friday" / "permissions").mkdir(mode=0o700)
+    site.chmod(0o700)
+    (site / "friday").chmod(0o755)
+    for relative in (
+        Path("__init__.py"),
+        Path("audit_privacy.py"),
+        Path("id_provenance.py"),
+        Path("permissions/__init__.py"),
+        Path("user_ids.py"),
+        Path("orchestration/supervisor_actor_binding.py"),
+    ):
+        destination = site / "friday" / relative
+        shutil.copy2(source / relative, destination)
+        destination.chmod(0o644)
+    orchestration_init = site / "friday" / "orchestration" / "__init__.py"
+    orchestration_init.write_text("", encoding="utf-8")
+    orchestration_init.chmod(0o644)
+    return site.resolve(strict=True)
 
 
 def test_binding_is_restart_stable_keyed_and_contains_no_actor_material(tmp_path: Path) -> None:
@@ -93,6 +147,121 @@ def test_binding_is_restart_stable_keyed_and_contains_no_actor_material(tmp_path
         assert private not in combined
     assert str(TOOL).encode() not in raw
     assert b"tenant-7" not in " ".join(first.args).encode()
+
+    site = _minimal_installed_site(tmp_path)
+    environment = {
+        **os.environ,
+        _INSTALLED_SITE_ENV: str(site),
+        "PYTHONPATH": str(ROOT),
+    }
+    result = _run_tool(database, raw, environment=environment)
+    assert result.returncode == 0
+    assert result.stderr == b""
+    assert result.stdout.decode("ascii").strip() == expected
+    assert result.args[:3] == [sys.executable, "-I", "-B"]
+    assert not tuple(site.rglob("__pycache__"))
+
+    binding = site / "friday" / "orchestration" / "supervisor_actor_binding.py"
+    binding.unlink()
+    binding.symlink_to(ROOT / "friday" / "orchestration" / binding.name)
+    actor = replace(_actor(), identity_id="tok_hostile_origin_secret")
+    hostile_raw = json.dumps(_projection(actor), sort_keys=True).encode("utf-8")
+    result = _run_tool(
+        database,
+        hostile_raw,
+        environment={
+            **os.environ,
+            _INSTALLED_SITE_ENV: str(site),
+            "PYTHONPATH": str(ROOT),
+        },
+    )
+
+    assert result.returncode == 2
+    assert result.stdout == b""
+    assert result.stderr == _UNAVAILABLE
+    assert b"tok_hostile_origin_secret" not in result.stdout + result.stderr
+    assert _KEY.hex().encode("ascii") not in result.stdout + result.stderr
+
+    linked_package_site = tmp_path / "linked-package-site"
+    linked_package_site.mkdir(mode=0o700)
+    (linked_package_site / "friday").symlink_to(ROOT / "friday", target_is_directory=True)
+    result = _run_tool(
+        database,
+        hostile_raw,
+        environment={
+            **os.environ,
+            _INSTALLED_SITE_ENV: str(linked_package_site.resolve(strict=True)),
+        },
+    )
+    assert result.returncode == 2
+    assert result.stdout == b""
+    assert result.stderr == _UNAVAILABLE
+    assert b"linked-package-site" not in result.stdout + result.stderr
+
+    empty_site = tmp_path / "empty-wheel-site"
+    empty_site.mkdir(mode=0o700)
+    actor = replace(_actor(), identity_id="tok_pythonpath_secret")
+    hostile_raw = json.dumps(_projection(actor), sort_keys=True).encode("utf-8")
+    result = _run_tool(
+        database,
+        hostile_raw,
+        environment={
+            **os.environ,
+            _INSTALLED_SITE_ENV: str(empty_site.resolve(strict=True)),
+            "PYTHONPATH": str(ROOT),
+        },
+    )
+
+    assert result.returncode == 2
+    assert result.stdout == b""
+    assert result.stderr == _UNAVAILABLE
+    assert b"tok_pythonpath_secret" not in result.stdout + result.stderr
+    assert _KEY.hex().encode("ascii") not in result.stdout + result.stderr
+
+    preloaded = _run_tool(database, hostile_raw, preload_friday=True)
+    assert preloaded.returncode == 2
+    assert preloaded.stdout == b""
+    assert preloaded.stderr == _UNAVAILABLE
+    assert b"tok_pythonpath_secret" not in preloaded.stdout + preloaded.stderr
+
+    canonical = tmp_path / "canonical-marker-private-value"
+    canonical.mkdir(mode=0o700)
+    permissive = tmp_path / "permissive-marker-private-value"
+    permissive.mkdir(mode=0o755)
+    permissive.chmod(0o755)
+    marker_file = tmp_path / "file-marker-private-value"
+    marker_file.write_text("not a package root", encoding="utf-8")
+    marker_link = tmp_path / "link-marker-private-value"
+    marker_link.symlink_to(canonical, target_is_directory=True)
+    markers = (
+        "",
+        "relative-marker-private-value",
+        f" {canonical}",
+        str(tmp_path / "missing-marker-private-value"),
+        str(permissive),
+        str(marker_file),
+        str(marker_link),
+    )
+    actor = replace(_actor(), identity_id="tok_marker_body_secret")
+    hostile_raw = json.dumps(_projection(actor), sort_keys=True).encode("utf-8")
+    for marker in markers:
+        result = _run_tool(
+            database,
+            hostile_raw,
+            environment={
+                **os.environ,
+                _INSTALLED_SITE_ENV: marker,
+                "PYTHONPATH": str(ROOT),
+            },
+        )
+
+        assert result.returncode == 2
+        assert result.stdout == b""
+        assert result.stderr == _UNAVAILABLE
+        combined = result.stdout + result.stderr
+        assert b"tok_marker_body_secret" not in combined
+        assert b"marker-private-value" not in combined
+        assert _KEY.hex().encode("ascii") not in combined
 
 
 @pytest.mark.parametrize(
