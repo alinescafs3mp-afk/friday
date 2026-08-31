@@ -1633,6 +1633,67 @@ def test_bounded_partial_cleanup_is_restart_safe(
     rehearsal._remove_current_scratch(second)
 
 
+def test_scratch_cleanup_unlinks_contained_hardlinks_and_cleans_registry(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    tmp_path.chmod(0o700)
+    monkeypatch.setattr(rehearsal, "_SCRATCH_PARENT", tmp_path)
+    lease = rehearsal._new_scratch(transaction_id="a" * 64, candidate_sha256="b" * 64)
+    source = lease.root / "source"
+    source.write_bytes(b"exact")
+    source.chmod(0o600)
+    os.link(source, lease.root / "second-name")
+
+    rehearsal._remove_current_scratch(lease)
+
+    assert not lease.root.exists()
+    assert not lease.record.exists()
+    assert list(lease.registry.iterdir()) == []
+
+
+@pytest.mark.parametrize("hazard", ("unsafe_file_mode", "unsafe_directory_mode", "fifo"))
+def test_scratch_cleanup_hazard_retry_eventually_cleans_registry(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    hazard: str,
+) -> None:
+    tmp_path.chmod(0o700)
+    monkeypatch.setattr(rehearsal, "_SCRATCH_PARENT", tmp_path)
+    first = rehearsal._new_scratch(transaction_id="a" * 64, candidate_sha256="b" * 64)
+    entry = first.root / "hazard"
+    if hazard == "unsafe_directory_mode":
+        entry.mkdir(mode=0o770)
+        entry.chmod(0o770)
+    elif hazard == "unsafe_file_mode":
+        entry.write_bytes(b"unsafe")
+        entry.chmod(0o620)
+    else:
+        os.mkfifo(entry, mode=0o600)
+
+    with pytest.raises(
+        rehearsal.DRGenerationRehearsalError,
+        match="^dr_rehearsal_scratch_cleanup_refused$",
+    ):
+        rehearsal._remove_current_scratch(first)
+
+    quarantine = first.registry / f".{first.root.name}.cleanup"
+    assert quarantine.is_dir()
+    assert first.record.exists()
+    quarantined_entry = quarantine / entry.name
+    if hazard == "fifo":
+        quarantined_entry.unlink()
+    else:
+        quarantined_entry.chmod(0o700 if hazard == "unsafe_directory_mode" else 0o600)
+
+    second = rehearsal._new_scratch(transaction_id="a" * 64, candidate_sha256="b" * 64)
+    assert not quarantine.exists()
+    rehearsal._remove_current_scratch(second)
+
+    assert not second.record.exists()
+    assert list(second.registry.iterdir()) == []
+
+
 def test_prepared_record_binds_empty_inode_before_restart_cleanup(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -1950,3 +2011,77 @@ def test_retry_rejects_forged_alternate_four_surface_digest(
             pending=pending,
             material=material,
         )
+
+
+@pytest.mark.parametrize("launch", ("direct", "module"))
+def test_cli_failure_from_outside_repository_is_canonical_and_body_free(
+    tmp_path: Path,
+    launch: str,
+) -> None:
+    repository = Path(rehearsal.__file__).resolve().parents[1]
+    tool = repository / "tools/release_dr_generation_rehearsal.py"
+    activation_receipt = tmp_path / "private-activation-path.json"
+    private_home = tmp_path / "private-friday-home"
+    environment = dict(os.environ)
+    environment["FRIDAY_HOME"] = str(private_home)
+    environment.pop("PYTHONPATH", None)
+    if launch == "direct":
+        command = [sys.executable, str(tool)]
+    else:
+        environment["PYTHONPATH"] = str(repository)
+        command = [sys.executable, "-m", "tools.release_dr_generation_rehearsal"]
+
+    completed = subprocess.run(  # noqa: S603
+        [*command, "--activation-receipt", str(activation_receipt)],
+        cwd=tmp_path,
+        env=environment,
+        check=False,
+        capture_output=True,
+        timeout=10,
+    )
+    expected = {
+        "failure_code": "dr_rehearsal_friday_home_invalid",
+        "schema": rehearsal.REHEARSAL_RECEIPT_SCHEMA,
+        "status": "failed_closed",
+    }
+
+    assert completed.returncode == 2
+    assert completed.stdout == b""
+    assert completed.stderr == _canonical(expected) + b"\n"
+    assert b"Traceback" not in completed.stderr
+    assert os.fsencode(activation_receipt) not in completed.stderr
+    assert os.fsencode(private_home) not in completed.stderr
+
+
+def test_cli_success_is_canonical_and_unexpected_failure_is_body_free(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capfd: pytest.CaptureFixture[str],
+) -> None:
+    activation_receipt = tmp_path / "private-activation-path.json"
+    success = {"z": 2, "a": {"status": "rehearsed"}}
+    monkeypatch.setattr(
+        rehearsal,
+        "rehearse_authenticated_generation",
+        lambda **_kwargs: success,
+    )
+
+    assert rehearsal.main(["--activation-receipt", str(activation_receipt)]) == 0
+    captured = capfd.readouterr()
+    assert captured.out.encode("ascii") == _canonical(success) + b"\n"
+    assert captured.err == ""
+
+    def unexpected(**_kwargs: Any) -> dict[str, Any]:
+        raise RuntimeError(f"must-not-leak:{activation_receipt}")
+
+    monkeypatch.setattr(rehearsal, "rehearse_authenticated_generation", unexpected)
+    assert rehearsal.main(["--activation-receipt", str(activation_receipt)]) == 2
+    captured = capfd.readouterr()
+    expected = {
+        "failure_code": "dr_rehearsal_unexpected_failure",
+        "schema": rehearsal.REHEARSAL_RECEIPT_SCHEMA,
+        "status": "failed_closed",
+    }
+    assert captured.out == ""
+    assert captured.err.encode("ascii") == _canonical(expected) + b"\n"
+    assert str(activation_receipt) not in captured.err

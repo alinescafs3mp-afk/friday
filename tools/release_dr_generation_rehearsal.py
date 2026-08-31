@@ -20,6 +20,7 @@ import signal
 import sqlite3
 import stat
 import subprocess
+import sys
 import time
 from collections.abc import Callable, Mapping, Sequence
 from contextlib import suppress
@@ -28,9 +29,13 @@ from functools import partial
 from pathlib import Path
 from typing import Any
 
-from tools import immutable_release_operator as release_operator
-from tools import release_dr_generation_authentication as dr_auth
-from tools import release_dr_generation_index as dr_index
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+from tools import immutable_release_operator as release_operator  # noqa: E402
+from tools import release_dr_generation_authentication as dr_auth  # noqa: E402
+from tools import release_dr_generation_index as dr_index  # noqa: E402
 
 REHEARSAL_RECEIPT_SCHEMA = dr_index.REHEARSAL_RECEIPT_SCHEMA
 _SCRATCH_PARENT = Path("/var/tmp")
@@ -620,8 +625,8 @@ def _empty_pinned_scratch_directory_bounded(
                     file_fd = os.open(name, file_flags, dir_fd=directory_fd)
                     opened = os.fstat(file_fd)
                     if (
-                        (opened.st_dev, opened.st_ino) != (lexical.st_dev, lexical.st_ino)
-                        or opened.st_nlink != 1
+                        not stat.S_ISREG(opened.st_mode)
+                        or (opened.st_dev, opened.st_ino) != (lexical.st_dev, lexical.st_ino)
                         or stat.S_IMODE(opened.st_mode) & 0o022
                     ):
                         raise DRGenerationRehearsalError("dr_rehearsal_scratch_cleanup_refused")
@@ -2250,12 +2255,37 @@ def rehearse_authenticated_generation(*, activation_receipt: Path) -> dict[str, 
         raise DRGenerationRehearsalError(str(exc)) from exc
 
 
-def main() -> int:
+def _body_free_failure_code(value: object) -> str:
+    allowed = frozenset("abcdefghijklmnopqrstuvwxyz0123456789_")
+    if (
+        not isinstance(value, str)
+        or not 1 <= len(value) <= 128
+        or value[0] not in "abcdefghijklmnopqrstuvwxyz"
+        or not set(value) <= allowed
+    ):
+        return "dr_rehearsal_unexpected_failure"
+    return value
+
+
+def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--activation-receipt", type=Path, required=True)
-    args = parser.parse_args()
-    receipt = rehearse_authenticated_generation(activation_receipt=args.activation_receipt)
-    print(json.dumps(receipt, sort_keys=True, separators=(",", ":")))
+    args = parser.parse_args(argv)
+    try:
+        receipt = rehearse_authenticated_generation(activation_receipt=args.activation_receipt)
+        payload = _canonical(receipt) + b"\n"
+    except Exception as exc:  # Every operational failure is a body-free closed receipt.
+        code = exc.code if isinstance(exc, DRGenerationRehearsalError) else None
+        failure = {
+            "failure_code": _body_free_failure_code(code),
+            "schema": REHEARSAL_RECEIPT_SCHEMA,
+            "status": "failed_closed",
+        }
+        sys.stderr.buffer.write(_canonical(failure) + b"\n")
+        sys.stderr.buffer.flush()
+        return 2
+    sys.stdout.buffer.write(payload)
+    sys.stdout.buffer.flush()
     return 0
 
 
