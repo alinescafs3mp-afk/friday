@@ -741,6 +741,13 @@ immutable fallback.
 После активации `0.207.90` вторую v1-generation не публикуйте и оставьте
 `older` пустым до полного writer-контракта: v1 остаётся пригодным для защиты и
 read-only классификации, но кодово не может дать destructive apply authority.
+`0.207.91/schema50` DDL не меняет и использует exact `0.207.90/schema50`
+одновременно как previous и immutable fallback. Перед установкой единственный
+точный завершённый v1 journal `0.207.90` связывается с admission первого v2;
+после успешной активации lifecycle публикует pair-bearing v2 generation и
+сохраняет pre-activation `0.207.84` отдельным permanent retain-only anchor.
+Activation не удаляет релизные артефакты: scope, reviewed dry-run, bounded
+apply и свежий terminal-zero convergence выполняются отдельными шагами.
 
 0.206.4 использует SQLite schema 34; Obsidian-релиз 0.207.2 поднимает её до
 schema 35. Новое поле имени загрузки принадлежит
@@ -1010,7 +1017,7 @@ process-owned result. Acquire одноразовый: отказ, timeout, drift
 attestation не разрешают повторный acquire на меньшем или новом tier.
 
 Во время probe `/api/health` ещё недоступен. Ждите до 420 секунд и дополнительно
-требуйте `status=ok` и `version=0.207.90`.
+требуйте `status=ok` и `version=0.207.91`.
 
 HTTP `status=ok` при `installed_mode=legacy` означает безопасную деградацию, но
 не успешный canary. В `canary`/`v12` Sentinel не реже раза в минуту

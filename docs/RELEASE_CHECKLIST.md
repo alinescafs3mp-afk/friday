@@ -202,7 +202,7 @@ failed/error/skipped-тест в любой фазе делает гейт кр�
 Для optional GPT-OSS secondary brain начиная с 0.207.11 дополнительно:
 
 - release принимается и первый раз запускается без `FRIDAY_SECONDARY_LLM_*`:
-  health имеет `status=ok`, `version=0.207.90`, `secondary.mode=disabled`,
+  health имеет `status=ok`, `version=0.207.91`, `secondary.mode=disabled`,
   `secondary.state=disabled` и `secondary.available=false`;
 - `ACCEPTED_SECONDARY_RUNTIME_PROFILES` содержит ровно finalist
   `gptoss20b-2335df123cac7fc0e13e347cde1e1ffa8562daafcaf0fc76ade1a851d2b0ff1f`
@@ -491,7 +491,7 @@ failed/error/skipped-тест в любой фазе делает гейт кр�
 - post-context load допускает bounded convergence не более 20 секунд с шагом
   50 мс только для valid same-epoch busy; invalid/epoch/deadline fail-closed, а
   initial idle и post-cancellation quiet остаются строгими;
-- final startup health имеет `status=ok`, `version=0.207.90`, configured/installed
+- final startup health имеет `status=ok`, `version=0.207.91`, configured/installed
   `canary`, routes `[archive_read, file_read]`, точный `profile_id`,
   `verified_context_tokens=40960` и непустой public `attestation_sha256`;
 - q38 выбирает только минимально достаточный closed tier из
@@ -564,6 +564,16 @@ failed/error/skipped-тест в любой фазе делает гейт кр�
 - pre-activation bootstrap публикует только v1-generation `0.207.84`; после
   активации `0.207.90` не публикуется вторая v1-generation, а `older` остаётся
   пустым до полного writer-контракта; legacy v1 никогда не даёт delete authority;
+- `0.207.91/schema50` принимает только exact completed `0.207.90` v1 bridge,
+  связывает full unit surface с exact retention admission и публикует v2
+  activation body до очистки recovery state; произвольный или unfinished v1
+  journal не мигрирует;
+- post-activation lifecycle сохраняет `0.207.84` как immutable retain-only
+  preactivation anchor, публикует pair-bearing v2 generation и не допускает
+  следующую установку без fresh exact terminal-zero convergence;
+- activation не выполняет retention deletion: destructive apply требует exact
+  scope, reviewed plan path+digest, максимум 16 candidates на batch,
+  restart-first resume и финальную повторную проверку namespace/DR epoch;
 - schema 49 → 50 сохраняет body-free table/FTS layout, добавляет
   incremental one-anchor CAS guards и bounded owner/source indexes; stable
   runtime активирует bounded restart-safe writer и partial conversation-lexical
@@ -760,9 +770,10 @@ TLS `/api/health` gate до запуска bridge. Release anchor меняетс
 schema-transition contract. Начиная с `backend_start_attempted`, даже до health и
 запуска bridge, pre-migration snapshot не восстанавливается, а rollback идёт на
 заранее собранный exact sealed schema-capable fallback. Для same-schema release
-`0.207.90/schema50` один exact `0.207.84/schema50` является одновременно previous
+`0.207.91/schema50` использует exact `0.207.90/schema50` одновременно как previous
 и fallback; schema остаётся 50 и старый snapshot поверх начатого candidate не
-восстанавливается.
+восстанавливается. Исторический переход `0.207.90` напрямую от `0.207.84`
+сохраняется в legacy bridge и не переопределяется.
 Поштучная замена файлов внутри установленного venv запрещена.
 
 ## 6. Installed-package smoke

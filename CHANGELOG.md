@@ -1,3 +1,25 @@
+## 0.207.91 — 2026-09-01
+
+### Pair-bearing release retention writer
+
+- Upgrades the exact completed `0.207.90` unit-install journal through a
+  one-shot byte-authenticated bridge into an admission-bound v2 journal and
+  terminal receipt covering the complete installed unit surface.
+- Publishes the immutable activation body before clearing recovery state and
+  rotates full v2 DR generations with an independently authenticated permanent
+  pre-activation anchor; restart never blindly repeats a terminal activation.
+- Provisions retention scope only from exact release-gate evidence and binds
+  every reviewed plan, apply batch and convergence receipt to the same release,
+  scope, inventory, caller and DR epoch.
+- Applies at most 16 exact candidates per batch, resumes unfinished work before
+  admitting anything new, and requires a freshly re-derived terminal zero
+  before a later release can proceed. Open, oversized or referenced roots fail
+  closed before effects.
+- SQLite remains at schema 50. Exact `0.207.90` is predecessor and immutable
+  fallback; activation itself performs no retention deletion, and production
+  deletion remains blocked until the post-activation reviewed convergence path
+  is complete.
+
 ## 0.207.90 — 2026-08-31
 
 ### Legacy DR evidence deletion fence
