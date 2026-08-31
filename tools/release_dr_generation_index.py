@@ -270,11 +270,19 @@ def _stable_private_file_at(
     ):
         raise DRGenerationIndexError(code)
     flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0)
+    flags |= getattr(os, "O_NONBLOCK", 0)
     try:
         descriptor = os.open(name, flags, dir_fd=directory_fd)
         try:
             opened = os.fstat(descriptor)
-            if (opened.st_dev, opened.st_ino) != (before.st_dev, before.st_ino):
+            if (
+                not stat.S_ISREG(opened.st_mode)
+                or opened.st_uid != os.geteuid()
+                or opened.st_nlink != 1
+                or stat.S_IMODE(opened.st_mode) != mode
+                or not 0 < opened.st_size <= maximum_bytes
+                or (opened.st_dev, opened.st_ino) != (before.st_dev, before.st_ino)
+            ):
                 raise DRGenerationIndexError(code)
             chunks: list[bytes] = []
             remaining = maximum_bytes + 1
@@ -335,11 +343,19 @@ def _stable_staging_file_at(
     ):
         raise DRGenerationIndexError(code)
     flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0)
+    flags |= getattr(os, "O_NONBLOCK", 0)
     try:
         descriptor = os.open(name, flags, dir_fd=directory_fd)
         try:
             opened = os.fstat(descriptor)
-            if (opened.st_dev, opened.st_ino) != (before.st_dev, before.st_ino):
+            if (
+                not stat.S_ISREG(opened.st_mode)
+                or opened.st_uid != os.geteuid()
+                or opened.st_nlink != 1
+                or stat.S_IMODE(opened.st_mode) not in {0o400, 0o600}
+                or not 0 <= opened.st_size <= maximum_bytes
+                or (opened.st_dev, opened.st_ino) != (before.st_dev, before.st_ino)
+            ):
                 raise DRGenerationIndexError(code)
             chunks: list[bytes] = []
             remaining = maximum_bytes + 1

@@ -433,6 +433,7 @@ def _write_scratch_record(registry_fd: int, name: str, raw: bytes) -> None:
 
 def _read_scratch_record(registry_fd: int, name: str) -> dict[str, Any] | None:
     flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0)
+    flags |= getattr(os, "O_NONBLOCK", 0)
     try:
         descriptor = os.open(name, flags, dir_fd=registry_fd)
     except FileNotFoundError:
@@ -653,6 +654,7 @@ def _empty_pinned_scratch_directory_bounded(
             if stat.S_ISREG(lexical.st_mode):
                 file_flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0)
                 file_flags |= getattr(os, "O_NOFOLLOW", 0)
+                file_flags |= getattr(os, "O_NONBLOCK", 0)
                 file_fd = -1
                 try:
                     file_fd = os.open(name, file_flags, dir_fd=directory_fd)

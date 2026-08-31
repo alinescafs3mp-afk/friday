@@ -1997,6 +1997,90 @@ def test_scratch_cleanup_hazard_retry_eventually_cleans_registry(
     assert list(second.registry.iterdir()) == []
 
 
+@pytest.mark.parametrize("helper", ("scratch_record", "scratch_cleanup"))
+def test_rehearsal_scratch_fifo_substitution_is_bounded(
+    tmp_path: Path,
+    helper: str,
+) -> None:
+    directory = _private(tmp_path / "scratch")
+    target = directory / "mutable"
+    if helper == "scratch_record":
+        os.mkfifo(target, mode=0o600)
+    else:
+        target.write_bytes(b"exact")
+        target.chmod(0o600)
+    child = r"""
+import os
+import sys
+from pathlib import Path
+
+sys.path.insert(0, sys.argv[1])
+from tools import release_dr_generation_rehearsal as module
+
+directory = Path(sys.argv[2])
+helper = sys.argv[3]
+target = directory / "mutable"
+real_open = os.open
+real_close = os.close
+real_unlink = os.unlink
+real_mkfifo = os.mkfifo
+directory_fd = real_open(directory, os.O_RDONLY | os.O_DIRECTORY)
+swapped = [False]
+
+def swap_open(path, flags, *args, **kwargs):
+    if path == target.name and kwargs.get("dir_fd") == directory_fd and not swapped[0]:
+        swapped[0] = True
+        real_unlink(target)
+        real_mkfifo(target, 0o600)
+    return real_open(path, flags, *args, **kwargs)
+
+if helper == "scratch_cleanup":
+    module.os.open = swap_open
+try:
+    try:
+        if helper == "scratch_record":
+            module._read_scratch_record(directory_fd, target.name)
+        else:
+            module._empty_pinned_scratch_directory_bounded(
+                directory_fd,
+                depth=0,
+                counter=[0],
+            )
+    except module.DRGenerationRehearsalError as exc:
+        expected = {
+            "scratch_record": "dr_rehearsal_scratch_record_invalid",
+            "scratch_cleanup": "dr_rehearsal_scratch_cleanup_refused",
+        }[helper]
+        if str(exc) != expected:
+            raise
+    else:
+        raise AssertionError("FIFO substitution was accepted")
+finally:
+    real_close(directory_fd)
+if helper == "scratch_cleanup" and not swapped[0]:
+    raise AssertionError("FIFO substitution was not exercised")
+"""
+
+    completed = subprocess.run(
+        [
+            sys.executable,
+            "-I",
+            "-B",
+            "-c",
+            child,
+            str(Path(__file__).resolve().parents[1]),
+            str(directory),
+            helper,
+        ],
+        capture_output=True,
+        check=False,
+        text=True,
+        timeout=5,
+    )
+
+    assert completed.returncode == 0, completed.stderr
+
+
 def test_prepared_record_binds_empty_inode_before_restart_cleanup(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

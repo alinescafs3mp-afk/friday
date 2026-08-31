@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import hashlib
 import json
+import subprocess
+import sys
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -324,3 +326,67 @@ def test_large_sparse_backup_digest_is_streamed_with_bounded_reads(
     assert len(digest) == 64
     assert requested
     assert max(requested) <= 1 << 20
+
+
+@pytest.mark.parametrize("helper", ("bytes", "digest"))
+def test_authentication_private_file_fifo_swap_is_bounded(
+    tmp_path: Path,
+    helper: str,
+) -> None:
+    target = tmp_path / "mutable-private"
+    _write(target, b"exact", 0o600)
+    child = r"""
+import os
+import sys
+from pathlib import Path
+
+sys.path.insert(0, sys.argv[1])
+from tools import release_dr_generation_authentication as module
+
+target = Path(sys.argv[2])
+helper = sys.argv[3]
+real_open = os.open
+real_unlink = os.unlink
+real_mkfifo = os.mkfifo
+swapped = [False]
+
+def swap_open(path, flags, *args, **kwargs):
+    if Path(path) == target and not swapped[0]:
+        swapped[0] = True
+        real_unlink(target)
+        real_mkfifo(target, 0o600)
+    return real_open(path, flags, *args, **kwargs)
+
+module.os.open = swap_open
+try:
+    if helper == "bytes":
+        module._stable_private_file(target, maximum=16, code="test_fifo")
+    else:
+        module._stable_private_file_digest(target, maximum=16, code="test_fifo")
+except module.DRGenerationAuthenticationError as exc:
+    if str(exc) != "test_fifo":
+        raise
+else:
+    raise AssertionError("FIFO substitution was accepted")
+if not swapped[0]:
+    raise AssertionError("FIFO substitution was not exercised")
+"""
+
+    completed = subprocess.run(
+        [
+            sys.executable,
+            "-I",
+            "-B",
+            "-c",
+            child,
+            str(Path(__file__).resolve().parents[1]),
+            str(target),
+            helper,
+        ],
+        capture_output=True,
+        check=False,
+        text=True,
+        timeout=5,
+    )
+
+    assert completed.returncode == 0, completed.stderr

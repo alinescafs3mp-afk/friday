@@ -4,6 +4,8 @@ import hashlib
 import json
 import os
 import stat
+import subprocess
+import sys
 import threading
 from pathlib import Path
 from typing import Any
@@ -168,6 +170,86 @@ def _index(tmp_path: Path) -> dr_index.DurableDRGenerationIndex:
     index = dr_index.DurableDRGenerationIndex(state)
     index.initialize()
     return index
+
+
+@pytest.mark.parametrize("helper", ("private", "staging"))
+def test_dr_index_file_fifo_swap_is_bounded(tmp_path: Path, helper: str) -> None:
+    directory = _private_directory(tmp_path / "state")
+    target = directory / "mutable.json"
+    target.write_bytes(b"x")
+    target.chmod(0o600)
+    child = r"""
+import os
+import sys
+from pathlib import Path
+
+sys.path.insert(0, sys.argv[1])
+from tools import release_dr_generation_index as module
+
+directory = Path(sys.argv[2])
+helper = sys.argv[3]
+target = directory / "mutable.json"
+real_open = os.open
+real_close = os.close
+real_unlink = os.unlink
+real_mkfifo = os.mkfifo
+directory_fd = real_open(directory, os.O_RDONLY | os.O_DIRECTORY)
+swapped = [False]
+
+def swap_open(path, flags, *args, **kwargs):
+    if path == target.name and kwargs.get("dir_fd") == directory_fd and not swapped[0]:
+        swapped[0] = True
+        real_unlink(target)
+        real_mkfifo(target, 0o600)
+    return real_open(path, flags, *args, **kwargs)
+
+module.os.open = swap_open
+try:
+    try:
+        if helper == "private":
+            module._stable_private_file_at(
+                directory_fd,
+                target.name,
+                mode=0o600,
+                maximum_bytes=16,
+                code="test_fifo",
+            )
+        else:
+            module._stable_staging_file_at(
+                directory_fd,
+                target.name,
+                maximum_bytes=16,
+                code="test_fifo",
+            )
+    except module.DRGenerationIndexError as exc:
+        if str(exc) != "test_fifo":
+            raise
+    else:
+        raise AssertionError("FIFO substitution was accepted")
+finally:
+    real_close(directory_fd)
+if not swapped[0]:
+    raise AssertionError("FIFO substitution was not exercised")
+"""
+
+    completed = subprocess.run(
+        [
+            sys.executable,
+            "-I",
+            "-B",
+            "-c",
+            child,
+            str(Path(__file__).resolve().parents[1]),
+            str(directory),
+            helper,
+        ],
+        capture_output=True,
+        check=False,
+        text=True,
+        timeout=5,
+    )
+
+    assert completed.returncode == 0, completed.stderr
 
 
 def _advance(

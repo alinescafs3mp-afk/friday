@@ -99,8 +99,11 @@ def _stable_private_file(
     if not path.is_absolute() or lexical != path or any(char in str(path) for char in "\x00\r\n"):
         raise DRGenerationAuthenticationError(code)
     flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0)
+    flags |= getattr(os, "O_NONBLOCK", 0)
     try:
         before = os.stat(path, follow_symlinks=False)
+        if not stat.S_ISREG(before.st_mode):
+            raise DRGenerationAuthenticationError(code)
         descriptor = os.open(path, flags)
         try:
             opened = os.fstat(descriptor)
@@ -150,8 +153,11 @@ def _stable_private_file_digest(
     if not path.is_absolute() or lexical != path or any(char in str(path) for char in "\x00\r\n"):
         raise DRGenerationAuthenticationError(code)
     flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0)
+    flags |= getattr(os, "O_NONBLOCK", 0)
     try:
         before = os.stat(path, follow_symlinks=False)
+        if not stat.S_ISREG(before.st_mode):
+            raise DRGenerationAuthenticationError(code)
         descriptor = os.open(path, flags)
         try:
             opened = os.fstat(descriptor)
