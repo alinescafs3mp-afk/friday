@@ -605,7 +605,10 @@ def test_cli_is_directly_executable_outside_repository(tmp_path: Path) -> None:
     environment.pop("FRIDAY_HOME", None)
     environment.pop("PYTHONPATH", None)
 
-    assert stat.S_IMODE(script.stat().st_mode) == 0o755
+    # Git records the executable bit, while the checkout umask owns group-write.
+    # Direct execution must therefore depend only on the executable bits here;
+    # immutable release packaging validates its sealed modes separately.
+    assert stat.S_IMODE(script.stat().st_mode) & 0o111 == 0o111
 
     completed = subprocess.run(  # noqa: S603
         [str(script), "--activation-receipt", str(tmp_path / "missing.json")],
