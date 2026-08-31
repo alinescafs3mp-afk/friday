@@ -839,7 +839,10 @@ def test_local_collection_problem_is_terminal(
 
 @pytest.mark.parametrize("problem", ["deselected", "missing-attestation"])
 def test_xdist_worker_problem_is_terminal_in_the_controller(
-    tmp_path: Path, problem: str, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path,
+    problem: str,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
     monkeypatch.delenv(quality_gate._INSTALLED_SITE_ENV, raising=False)
     manifest = tmp_path / "collection.json"
@@ -847,14 +850,22 @@ def test_xdist_worker_problem_is_terminal_in_the_controller(
     node = SimpleNamespace(
         gateway=SimpleNamespace(id=worker_id),
         workeroutput=(
-            {"friday_collection_problems": {"skipped": 0, "deselected": 1}} if problem == "deselected" else {}
+            {
+                "friday_collection_problems": {
+                    "skipped": 0,
+                    "deselected": 1,
+                    "origin_error": "",
+                }
+            }
+            if problem == "deselected"
+            else {}
         ),
     )
     session = _collection_session(manifest, 1)
     previous_collection = quality_gate._COLLECTIONS_BY_WORKER.get(worker_id)
     previous_attestation = quality_gate._COLLECTION_PROBLEMS_BY_WORKER.get(worker_id)
-    if problem == "missing-attestation":
-        quality_gate._COLLECTIONS_BY_WORKER[worker_id] = ("tests/test_a.py::test_one",)
+    previously_invalid = worker_id in quality_gate._COLLECTION_INVALID_ATTESTATIONS
+    quality_gate._COLLECTIONS_BY_WORKER[worker_id] = ("tests/test_a.py::test_one",)
     try:
         quality_gate.pytest_testnodedown(node, None)
         quality_gate.pytest_sessionfinish(session, 0)
@@ -867,9 +878,17 @@ def test_xdist_worker_problem_is_terminal_in_the_controller(
             quality_gate._COLLECTION_PROBLEMS_BY_WORKER.pop(worker_id, None)
         else:
             quality_gate._COLLECTION_PROBLEMS_BY_WORKER[worker_id] = previous_attestation
+        if not previously_invalid:
+            quality_gate._COLLECTION_INVALID_ATTESTATIONS.discard(worker_id)
 
     assert session.exitstatus == 1
     assert not manifest.exists()
+    expected = (
+        "worker_collection_problem(skipped=0,deselected=1)"
+        if problem == "deselected"
+        else "worker_attestation_invalid(count=1)"
+    )
+    assert expected in capsys.readouterr().err
 
 
 @pytest.mark.parametrize(

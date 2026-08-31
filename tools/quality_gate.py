@@ -107,6 +107,8 @@ _COLLECTION_SKIPS: list[str] = []
 _COLLECTION_DESELECTED: list[str] = []
 _COLLECTION_PROBLEMS_BY_WORKER: dict[str, tuple[int, int]] = {}
 _COLLECTION_DOWN_WORKERS: set[str] = set()
+_COLLECTION_INVALID_ATTESTATIONS: set[str] = set()
+_COLLECTION_ORIGIN_ERRORS_BY_WORKER: dict[str, str] = {}
 _SERIAL_COLLECTION: tuple[str, ...] | None = None
 _TIER_SELECTION: frozenset[str] | None = None
 
@@ -187,6 +189,8 @@ def pytest_sessionstart(session: Any) -> None:
     _COLLECTION_DESELECTED.clear()
     _COLLECTION_PROBLEMS_BY_WORKER.clear()
     _COLLECTION_DOWN_WORKERS.clear()
+    _COLLECTION_INVALID_ATTESTATIONS.clear()
+    _COLLECTION_ORIGIN_ERRORS_BY_WORKER.clear()
     _SERIAL_COLLECTION = None
     selection_path = session.config.getoption(_SELECTION_OPTION)
     _TIER_SELECTION = frozenset(collection_nodeids(selection_path)) if selection_path else None
@@ -299,14 +303,18 @@ def pytest_testnodedown(node: Any, error: object) -> None:
     payload = node.workeroutput.get("friday_collection_problems")
     if (
         not isinstance(payload, dict)
-        or set(payload) != {"skipped", "deselected"}
-        or not all(type(value) is int and value >= 0 for value in payload.values())
+        or set(payload) != {"skipped", "deselected", "origin_error"}
+        or not all(type(payload[name]) is int and payload[name] >= 0 for name in ("skipped", "deselected"))
+        or not isinstance(payload["origin_error"], str)
+        or len(payload["origin_error"].encode("utf-8")) > 4096
     ):
-        _COLLECTION_PROBLEMS_BY_WORKER[worker_id] = (1, 1)
+        _COLLECTION_INVALID_ATTESTATIONS.add(worker_id)
         return
     skipped = payload["skipped"]
     deselected = payload["deselected"]
     _COLLECTION_PROBLEMS_BY_WORKER[worker_id] = (skipped, deselected)
+    if payload["origin_error"]:
+        _COLLECTION_ORIGIN_ERRORS_BY_WORKER[worker_id] = payload["origin_error"]
 
 
 def _fail_collection_session(session: Any, code: str) -> None:
@@ -317,18 +325,26 @@ def _fail_collection_session(session: Any, code: str) -> None:
 def pytest_sessionfinish(session: Any, exitstatus: int) -> None:
     """Emit an xdist collection manifest only when every worker agreed."""
 
-    installed_site = os.environ.get(_INSTALLED_SITE_ENV, "").strip()
-    if installed_site:
-        _require_installed_wheel_imports(Path(installed_site).resolve(strict=True))
     path = session.config.getoption(_COLLECTION_OPTION)
     if path and hasattr(session.config, "workerinput"):
+        origin_error = ""
+        installed_site = os.environ.get(_INSTALLED_SITE_ENV, "").strip()
+        if installed_site:
+            try:
+                _require_installed_wheel_imports(Path(installed_site).resolve(strict=True))
+            except (OSError, RuntimeError) as exc:
+                origin_error = str(exc)
         session.config.workeroutput["friday_collection_problems"] = {
             "skipped": len(_COLLECTION_SKIPS),
             "deselected": len(_COLLECTION_DESELECTED),
+            "origin_error": origin_error,
         }
-        if _COLLECTION_SKIPS or _COLLECTION_DESELECTED:
+        if _COLLECTION_SKIPS or _COLLECTION_DESELECTED or origin_error:
             _fail_collection_session(session, "worker_skip_or_deselect")
         return
+    installed_site = os.environ.get(_INSTALLED_SITE_ENV, "").strip()
+    if installed_site:
+        _require_installed_wheel_imports(Path(installed_site).resolve(strict=True))
     if path and (_COLLECTION_SKIPS or _COLLECTION_DESELECTED):
         _fail_collection_session(session, "controller_skip_or_deselect")
         return
@@ -344,11 +360,21 @@ def pytest_sessionfinish(session: Any, exitstatus: int) -> None:
     if len(_COLLECTIONS_BY_WORKER) != requested:
         _fail_collection_session(session, "worker_collection_count_mismatch")
         return
+    if _COLLECTION_INVALID_ATTESTATIONS:
+        _fail_collection_session(
+            session,
+            f"worker_attestation_invalid(count={len(_COLLECTION_INVALID_ATTESTATIONS)})",
+        )
+        return
     if set(_COLLECTION_PROBLEMS_BY_WORKER) != set(_COLLECTIONS_BY_WORKER):
         _fail_collection_session(session, "worker_attestation_missing")
         return
     if _COLLECTION_DOWN_WORKERS:
         _fail_collection_session(session, "worker_shutdown_error")
+        return
+    if _COLLECTION_ORIGIN_ERRORS_BY_WORKER:
+        errors = " | ".join(sorted(set(_COLLECTION_ORIGIN_ERRORS_BY_WORKER.values())))
+        _fail_collection_session(session, f"worker_runtime_origin_problem: {errors}")
         return
     if any(skipped or deselected for skipped, deselected in _COLLECTION_PROBLEMS_BY_WORKER.values()):
         skipped = sum(value[0] for value in _COLLECTION_PROBLEMS_BY_WORKER.values())
