@@ -14,16 +14,19 @@ either merged here or discarded before that source is removed.
 ## Current production identity
 
 - Branch: `main`
-- Deployed implementation head: `ff8c62926e7c7ea9cfcd53c460f9a0608d83621c`.
-- Live: Friday `0.207.84` / `ff8c62926e7c7ea9cfcd53c460f9a0608d83621c`;
-  tree `e93ddd133ebefec5ec0f9f8525d96123c822f411494c04951724f0e73be388a1`;
-  wheel `954641e37fc8958a8b459f65f78e61225709be8d20e1b3979fcb22e378018aca`.
-- Immediate runtime predecessor and schema-capable fallback: Friday `0.207.83` /
-  `23232ebae6ddef8fbb23af1a47619aecb5abbaeb`; tree
-  `e20d097beeb07a0af39ad2cf80969f9497f3b1ca41a0096c21e11516b2f307d1`.
+- Deployed implementation head: `7abb3c5e3fb29bdc7c53bf923f8b218fa26f07e9`.
+- Live: Friday `0.207.90` / `7abb3c5e3fb29bdc7c53bf923f8b218fa26f07e9`;
+  tree `c1c29331db489ad1c56080d70a8c37d4051b4752f1309dba9c0a012099ebcae5`;
+  wheel `75cd6e5d5d29edde061894948f316a8328ae82cf8767fb80bd1155ab78ba003f`.
+- Immediate runtime predecessor and schema-capable fallback: Friday `0.207.84` /
+  `ff8c62926e7c7ea9cfcd53c460f9a0608d83621c`; tree
+  `e93ddd133ebefec5ec0f9f8525d96123c822f411494c04951724f0e73be388a1`.
 - Database schema: 50 in deployed production and the fallback.
 - Production: immutable activation `clear`; backend and Telegram bridge active;
-  trusted-CA health `200`; signed private-owner chat returned exact `OK`; V12
+  trusted-CA health `200`; signed private-owner chat returned exact `OK`. The
+  pre-activation `0.207.84` DR generation is authenticated and rehearsed at
+  index revision 4; `current` is published, `older` and `pending` are empty.
+  V12
   `canary_ready` with verified, installation and effective context all exactly
   `40960`; complete S2 authenticated turn
   authority is active across scalar, file, attachment and V12 paths without
@@ -48,9 +51,9 @@ either merged here or discarded before that source is removed.
 ## Active package
 
 S4-R5 measured conversation recall and bounded matched-message excerpt retention
-are live. S6-R3 exact journey evidence is live; P0G Gate Diet is complete on
-`main` without a production activation. P0H bounded retention is now the active
-Mainline package before S4-R6.
+are live. S6-R3 exact journey evidence is live; P0G Gate Diet is included in the
+current release. P0H reader-first retention is live in `0.207.90`; its
+pair-bearing writer is now the active Mainline package before S4-R6.
 Keep the released S3 path in shadow
 until its genuine production witness exists; then promote only the
 current-file-plus-current-public-web journey through the already released
@@ -99,8 +102,8 @@ owner/device-bound.
 ### P0G — canonical Gate Diet
 
 Status: complete on `main` through implementation head
-`31c48d2541ccfce1c932f63ece28536c9fc346c3`; production remains `0.207.84` and
-was not activated for this tooling-only package.
+`31c48d2541ccfce1c932f63ece28536c9fc346c3`; it had no standalone activation
+and is now included in production `0.207.90`.
 
 Evidence: certifying head `60ce37191bce3fd311b617bf9b7ae3e885dda9ac`
 passed 24,313 exact nodes with zero skips/retries in 473.833 seconds; summary
@@ -143,10 +146,12 @@ invariant map proves equivalent coverage.
 
 ### P0H — bounded release-artifact retention
 
-Status: active after P0G and before further non-critical release work. The
-reader-first precursor and pair-bearing writer are staged separately; no
-retention apply or production mutation is authorized until durable fallback,
-scope, privileged probe and exact dry-run evidence are present.
+Status: reader-first precursor deployed in `0.207.90`; pair-bearing writer is
+active next. Exact-release gate passed 24,634 nodes with evidence SHA-256
+`14e96975577f00f1f1c3b8d818235b3a01a80e6be033f6bc6e092424c17381bb`.
+No retention apply or deletion is authorized until the writer has published two
+complete independently authenticated generations under its full schema and the
+durable fallback, scope, privileged probe and exact dry-run evidence are clear.
 
 Goal: replace the unbounded release polygon with a small recoverable set. The
 current inventory is roughly 54 GB of backup data, 29 GB of wheel-only releases
