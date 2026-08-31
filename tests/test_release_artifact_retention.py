@@ -264,7 +264,8 @@ def synthetic_inventory(
     monkeypatch: pytest.MonkeyPatch,
     request: pytest.FixtureRequest,
 ) -> dict[str, Any]:
-    receipt_version = getattr(request, "param", "v1")
+    fixture_profile = getattr(request, "param", "v1")
+    receipt_version = "v1" if fixture_profile == "mixed_anchor" else fixture_profile
     monkeypatch.setattr(
         retention,
         "_SUPPORTED_FILESYSTEM_MAGICS",
@@ -488,19 +489,27 @@ def synthetic_inventory(
 
     generation_index = retention.dr_index.DurableDRGenerationIndex(state)
     generation_index.initialize()
-    for intent, candidate, ordinal in (
-        ("bootstrap_current", generation_candidate(activation_backup, current, 1), 1),
-        (
-            "fill_older",
-            generation_candidate(
-                older_backup,
-                fallback,
+    if fixture_profile == "mixed_anchor":
+        legacy_anchor_backup = _exact_backup(backup_root / "preactivation-legacy", 10)
+        generation_steps = [
+            ("bootstrap_current", generation_candidate(legacy_anchor_backup, current, 10), 10)
+        ]
+    else:
+        legacy_anchor_backup = None
+        generation_steps = [
+            ("bootstrap_current", generation_candidate(activation_backup, current, 1), 1),
+            (
+                "fill_older",
+                generation_candidate(
+                    older_backup,
+                    fallback,
+                    2,
+                    source_kind="explicit_older_adoption",
+                ),
                 2,
-                source_kind="explicit_older_adoption",
             ),
-            2,
-        ),
-    ):
+        ]
+    for intent, candidate, ordinal in generation_steps:
         generation_state = generation_index.load()
         generation_state = generation_index.prepare(
             intent=intent,
@@ -519,6 +528,39 @@ def synthetic_inventory(
         generation_index.publish(
             expected_journal_sha256=str(generation_state["journal_sha256"]),
         )
+
+    first_v2_anchor_backup = None
+    if fixture_profile == "mixed_anchor":
+        receipt_version = "v2"
+        v2_steps: list[tuple[str, dict[str, Any], int]] = []
+        for name, release, ordinal in (
+            ("preactivation-first-v2", previous, 11),
+            ("postactivation-v2-a", fallback, 12),
+            ("postactivation-v2-b", old, 13),
+        ):
+            backup = _exact_backup(backup_root / name, ordinal)
+            if first_v2_anchor_backup is None:
+                first_v2_anchor_backup = backup
+            v2_steps.append(("rotate_current", generation_candidate(backup, release, ordinal), ordinal))
+        for intent, candidate, ordinal in v2_steps:
+            generation_state = generation_index.load()
+            generation_state = generation_index.prepare(
+                intent=intent,
+                candidate=candidate,
+                expected_journal_sha256=str(generation_state["journal_sha256"]),
+            )
+            authentication = authentication_receipt(candidate, ordinal)
+            generation_state = generation_index.record_authenticated(
+                receipt=authentication,
+                expected_journal_sha256=str(generation_state["journal_sha256"]),
+            )
+            generation_state = generation_index.record_rehearsed(
+                receipt=rehearsal_receipt(candidate, authentication, generation_state, ordinal),
+                expected_journal_sha256=str(generation_state["journal_sha256"]),
+            )
+            generation_index.publish(
+                expected_journal_sha256=str(generation_state["journal_sha256"]),
+            )
 
     pins = tuple(retention.DRGenerationPin(**vars(pin)) for pin in generation_index.authority_snapshot().pins)
     dr_index = generation_index.path
@@ -554,6 +596,8 @@ def synthetic_inventory(
         "evidence_authority": evidence_authority,
         "activation_backup": activation_backup,
         "older_backup": older_backup,
+        "legacy_anchor_backup": legacy_anchor_backup,
+        "first_v2_anchor_backup": first_v2_anchor_backup,
         "current": current,
         "previous": previous,
         "fallback": fallback,
@@ -700,6 +744,24 @@ def test_backup_inventory_binds_all_closed_retention_roles(
     assert backups["legacy-unpinned"]["reason"] == "legacy_or_unknown_backup"
     assert all(item["decision"] == "retain" for item in plan["backup_targets"])
     assert plan["apply_authority"] is False
+
+
+@pytest.mark.parametrize("synthetic_inventory", ["mixed_anchor"], indirect=True)
+def test_preactivation_anchor_roles_are_permanent_retain_only_without_poisoning_v2_authority(
+    synthetic_inventory: dict[str, Any],
+) -> None:
+    plan = _plan(synthetic_inventory)
+    backups = {Path(item["path"]).name: item for item in plan["backup_targets"]}
+    roles = {item["role"] for item in plan["authority_bindings"]["dr_pins"]}
+
+    assert plan["authority_bindings"]["status"] == "authenticated"
+    assert plan["block_reason"] != "dr_rollback_release_evidence_incomplete"
+    assert retention.dr_index.PREACTIVATION_LEGACY_ROLE in roles
+    assert retention.dr_index.PREACTIVATION_FIRST_V2_ROLE in roles
+    assert backups["preactivation-legacy"]["reason"] == "dr_preactivation_legacy_backup"
+    assert backups["preactivation-first-v2"]["reason"] == "dr_preactivation_first_v2_backup"
+    assert backups["preactivation-legacy"]["decision"] == "retain"
+    assert backups["preactivation-first-v2"]["decision"] == "retain"
 
 
 def test_retention_reauthenticates_exact_backup_bytes_before_any_delete_authority(

@@ -352,6 +352,33 @@ def _advance(
     return index.publish(expected_journal_sha256=state["journal_sha256"])
 
 
+def _advance_v2(
+    index: dr_index.DurableDRGenerationIndex,
+    root: Path,
+    ordinal: int,
+) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
+    candidate, authentication = _v2_candidate_and_authentication(root, ordinal)
+    state = index.load()
+    state = index.prepare(
+        intent="rotate_current",
+        candidate=candidate,
+        expected_journal_sha256=state["journal_sha256"],
+    )
+    state = index.record_authenticated(
+        receipt=authentication,
+        expected_journal_sha256=state["journal_sha256"],
+    )
+    state = index.record_rehearsed(
+        receipt=_v2_rehearsal_receipt(candidate, authentication, state),
+        expected_journal_sha256=state["journal_sha256"],
+    )
+    return (
+        index.publish(expected_journal_sha256=state["journal_sha256"]),
+        candidate,
+        authentication,
+    )
+
+
 def _assert_restore_release_pin(
     pin: dr_index.GenerationPin,
     candidate: dict[str, Any],
@@ -753,6 +780,161 @@ def test_authority_snapshot_binds_exact_index_bytes_digest_and_pins(tmp_path: Pa
         == (candidate["allowed_rollback_tree_sha256s"])
     )
     _assert_restore_release_pin(snapshot.pins[0], candidate)
+
+
+def test_first_v2_rotation_atomically_seals_permanent_preactivation_anchor(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    index = _index(tmp_path)
+    legacy = _advance(index, _candidate(tmp_path, 501), intent="bootstrap_current", ordinal=501)
+    legacy_ref = legacy["current"]
+    candidate, authentication = _v2_candidate_and_authentication(tmp_path, 502)
+    state = index.prepare(
+        intent="rotate_current",
+        candidate=candidate,
+        expected_journal_sha256=legacy["journal_sha256"],
+    )
+    state = index.record_authenticated(
+        receipt=authentication,
+        expected_journal_sha256=state["journal_sha256"],
+    )
+    rehearsed = index.record_rehearsed(
+        receipt=_v2_rehearsal_receipt(candidate, authentication, state),
+        expected_journal_sha256=state["journal_sha256"],
+    )
+    assert rehearsed["preactivation_anchor"] is None
+
+    real_cas = index._cas_replace_locked  # noqa: SLF001
+    failed = False
+
+    def fail_before_anchor_cas(*args: Any, **kwargs: Any) -> dict[str, Any]:
+        nonlocal failed
+        following = args[1]
+        if not failed and following.get("preactivation_anchor") is not None:
+            failed = True
+            raise dr_index.DRGenerationIndexError("synthetic_anchor_cas_crash")
+        return real_cas(*args, **kwargs)
+
+    monkeypatch.setattr(index, "_cas_replace_locked", fail_before_anchor_cas)
+    with pytest.raises(dr_index.DRGenerationIndexError, match="^synthetic_anchor_cas_crash$"):
+        index.publish(expected_journal_sha256=rehearsed["journal_sha256"])
+    assert index.load()["preactivation_anchor"] is None
+    with index._guard() as pins:  # noqa: SLF001
+        current = index._load_unlocked(pins)  # noqa: SLF001
+        expected_anchor = index._derive_preactivation_anchor(  # noqa: SLF001
+            legacy_reference=current["current"],
+            first_v2_reference=current["pending"]["generation"],
+            receipt_fd=pins.receipt_fd,
+        )
+        exact_following = {
+            **index._core_from_state(current),  # noqa: SLF001
+            "current": current["pending"]["generation"],
+            "older": current["current"],
+            "pending": None,
+            "phase": "clear",
+            "preactivation_anchor": expected_anchor,
+            "revision": current["revision"] + 1,
+        }
+        before_index = index.path.read_bytes()
+        before_head = (index.head_directory / dr_index.HEAD_FENCE_NAME).read_bytes()
+        for missing_anchor in (
+            {key: value for key, value in exact_following.items() if key != "preactivation_anchor"},
+            {**exact_following, "preactivation_anchor": None},
+        ):
+            with pytest.raises(
+                dr_index.DRGenerationIndexError,
+                match="^dr_generation_preactivation_anchor_invalid$",
+            ):
+                real_cas(current, missing_anchor, pins)
+            assert index.path.read_bytes() == before_index
+            assert (index.head_directory / dr_index.HEAD_FENCE_NAME).read_bytes() == before_head
+        forged_following = {
+            **index._core_from_state(current),  # noqa: SLF001
+            "current": current["pending"]["generation"],
+            "older": current["current"],
+            "pending": None,
+            "phase": "clear",
+            "preactivation_anchor": expected_anchor,
+            "revision": current["revision"] + 2,
+        }
+        with pytest.raises(
+            dr_index.DRGenerationIndexError,
+            match="^dr_generation_preactivation_anchor_invalid$",
+        ):
+            real_cas(current, forged_following, pins)
+    assert index.load()["preactivation_anchor"] is None
+    monkeypatch.setattr(index, "_cas_replace_locked", real_cas)
+
+    clear = index.publish(expected_journal_sha256=rehearsed["journal_sha256"])
+    activation_ref, _raw, _body = dr_index.activation_receipt_evidence(authentication)
+    assert clear["older"] == legacy_ref
+    assert clear["preactivation_anchor"] == {
+        "activation_receipt": activation_ref,
+        "first_v2_generation": clear["current"],
+        "legacy_generation": legacy_ref,
+    }
+    assert [pin.role for pin in index.pins()] == ["current", "older"]
+
+
+def test_missing_anchor_field_is_bounded_to_exact_legacy_index_bytes(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    index = _index(tmp_path)
+    state = index.load()
+    legacy_core = {
+        key: value for key, value in state.items() if key not in {"journal_sha256", "preactivation_anchor"}
+    }
+    legacy_journal = hashlib.sha256(_canonical(legacy_core)).hexdigest()
+    legacy_payload = {**legacy_core, "journal_sha256": legacy_journal}
+    legacy_raw = _canonical(legacy_payload) + b"\n"
+    monkeypatch.setattr(dr_index, "_LEGACY_020790_INDEX_JOURNAL_SHA256", legacy_journal)
+    monkeypatch.setattr(
+        dr_index,
+        "_LEGACY_020790_INDEX_FILE_SHA256",
+        hashlib.sha256(legacy_raw).hexdigest(),
+    )
+    with index._guard() as pins:  # noqa: SLF001
+        decoded = index._decode_state(legacy_raw, pins.receipt_fd)  # noqa: SLF001
+        assert decoded["preactivation_anchor"] is None
+        monkeypatch.setattr(dr_index, "_LEGACY_020790_INDEX_FILE_SHA256", "f" * 64)
+        with pytest.raises(dr_index.DRGenerationIndexError, match="^dr_generation_index_invalid$"):
+            index._decode_state(legacy_raw, pins.receipt_fd)  # noqa: SLF001
+
+
+def test_preactivation_anchor_is_immutable_and_projects_retain_only_roles(
+    tmp_path: Path,
+) -> None:
+    index = _index(tmp_path)
+    _advance(index, _candidate(tmp_path, 503), intent="bootstrap_current", ordinal=503)
+    first, _candidate_first, _authentication_first = _advance_v2(index, tmp_path, 504)
+    anchor = first["preactivation_anchor"]
+    second, _candidate_second, _authentication_second = _advance_v2(index, tmp_path, 505)
+    assert second["preactivation_anchor"] == anchor
+    assert [pin.role for pin in index.pins()] == [
+        "current",
+        "older",
+        dr_index.PREACTIVATION_LEGACY_ROLE,
+    ]
+    third, _candidate_third, _authentication_third = _advance_v2(index, tmp_path, 506)
+    assert third["preactivation_anchor"] == anchor
+    assert [pin.role for pin in index.pins()] == [
+        "current",
+        "older",
+        dr_index.PREACTIVATION_LEGACY_ROLE,
+        dr_index.PREACTIVATION_FIRST_V2_ROLE,
+    ]
+
+    with index._guard() as pins:  # noqa: SLF001
+        current = index._load_unlocked(pins)  # noqa: SLF001
+        following = {**index._core_from_state(current), "preactivation_anchor": None}  # noqa: SLF001
+        with pytest.raises(
+            dr_index.DRGenerationIndexError,
+            match="^dr_generation_preactivation_anchor_immutable$",
+        ):
+            index._cas_replace_locked(current, following, pins)  # noqa: SLF001
+    assert index.load() == third
 
 
 def test_unfinished_transaction_pins_current_older_and_pending(tmp_path: Path) -> None:

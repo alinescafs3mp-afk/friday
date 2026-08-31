@@ -83,6 +83,26 @@ def _rewrite_signed_journal(
     return core
 
 
+def _admission_receipt(*, published: bool) -> dict[str, object]:
+    core: dict[str, object] = {
+        "action": "already_current" if published else "prepared_and_authenticated",
+        "authentication_receipt_sha256": "a" * 64,
+        "candidate_sha256": "b" * 64,
+        "index_journal_sha256": "c" * 64,
+        "index_phase": "clear" if published else "authenticated",
+        "index_revision": 4,
+        "intent": "rotate_current",
+        "published": published,
+        "rehearsal_present": published,
+        "schema": operator.DR_ENROLLMENT_RECEIPT_SCHEMA,
+        "status": "admitted",
+    }
+    return {
+        **core,
+        "receipt_sha256": hashlib.sha256(operator._canonical_json(core)).hexdigest(),  # noqa: SLF001
+    }
+
+
 class FakePort:
     def __init__(
         self,
@@ -701,7 +721,7 @@ def test_activation_publishes_exact_receipt_before_clear_then_enrolls(
         observed.append("enroll")
         assert path.exists()
         assert journal.state["phase"] == "clear"
-        return {"status": "admitted", "published": False}
+        return _admission_receipt(published=False)
 
     receipt = operator.activate_release(
         port,
@@ -716,6 +736,88 @@ def test_activation_publishes_exact_receipt_before_clear_then_enrolls(
     assert receipt["status"] == "clear"
     assert observed == ["publish", "enroll"]
     assert journal.events[-3:] == ["bridge_accepted", "activation_receipt_prepared", "clear"]
+
+
+def test_activation_admission_rejects_canonical_forgery_and_epoch_drift() -> None:
+    receipt = _admission_receipt(published=False)
+    expected = {
+        key: receipt[key]
+        for key in (
+            "authentication_receipt_sha256",
+            "candidate_sha256",
+            "index_journal_sha256",
+            "index_phase",
+            "index_revision",
+            "intent",
+            "published",
+            "rehearsal_present",
+        )
+    }
+    assert operator._require_activation_admitted(receipt, expected=expected) == receipt  # noqa: SLF001
+
+    for key in (
+        "authentication_receipt_sha256",
+        "candidate_sha256",
+        "index_journal_sha256",
+    ):
+        forged = dict(receipt)
+        forged[key] = "d" * 64
+        core = {name: value for name, value in forged.items() if name != "receipt_sha256"}
+        forged["receipt_sha256"] = hashlib.sha256(operator._canonical_json(core)).hexdigest()  # noqa: SLF001
+        with pytest.raises(operator.ReleaseFailure, match="^activation_dr_admission_invalid$"):
+            operator._require_activation_admitted(forged, expected=expected)  # noqa: SLF001
+
+    extra = {**receipt, "ambient": True}
+    with pytest.raises(operator.ReleaseFailure, match="^activation_dr_admission_invalid$"):
+        operator._require_activation_admitted(extra, expected=expected)  # noqa: SLF001
+    forged_action = {**receipt, "action": "already_current"}
+    action_core = {key: value for key, value in forged_action.items() if key != "receipt_sha256"}
+    forged_action["receipt_sha256"] = hashlib.sha256(
+        operator._canonical_json(action_core)  # noqa: SLF001
+    ).hexdigest()
+    with pytest.raises(operator.ReleaseFailure, match="^activation_dr_admission_invalid$"):
+        operator._require_activation_admitted(forged_action, expected=expected)  # noqa: SLF001
+
+
+def test_sealed_admission_binds_clean_bootstrap_to_same_pending_index_epoch(tmp_path: Path) -> None:
+    receipt = _admission_receipt(published=False)
+
+    class Index:
+        @staticmethod
+        def load() -> dict[str, object]:
+            raise AssertionError("clean bootstrap must authenticate before initializing the index")
+
+        def pending_generation_identity(self, *, expected_journal_sha256: str) -> SimpleNamespace:
+            assert expected_journal_sha256 == "c" * 64
+            return SimpleNamespace(
+                authentication_receipt={"receipt_sha256": "a" * 64},
+                candidate_sha256="b" * 64,
+                index_journal_sha256="c" * 64,
+                index_phase="authenticated",
+                index_revision=4,
+                intent="rotate_current",
+                rehearsal_receipt=None,
+            )
+
+    index = Index()
+    adapter = operator._SealedCandidateDRAdmission(  # noqa: SLF001
+        index_module=SimpleNamespace(DurableDRGenerationIndex=lambda _path: index),
+        enrollment_module=SimpleNamespace(
+            _enroll_terminal_activation_backup_locked=lambda **_kwargs: receipt
+        ),
+        friday_home=tmp_path,
+        namespace_guard=lambda: None,
+    )
+    assert adapter.enroll(tmp_path / "activation.json") == receipt
+
+    forged = {**receipt, "candidate_sha256": "d" * 64}
+    core = {key: value for key, value in forged.items() if key != "receipt_sha256"}
+    forged["receipt_sha256"] = hashlib.sha256(operator._canonical_json(core)).hexdigest()  # noqa: SLF001
+    adapter._enrollment_module = SimpleNamespace(  # noqa: SLF001
+        _enroll_terminal_activation_backup_locked=lambda **_kwargs: forged
+    )
+    with pytest.raises(operator.ReleaseFailure, match="^activation_dr_admission_invalid$"):
+        adapter.enroll(tmp_path / "activation.json")
 
 
 def test_post_clear_namespace_guard_failure_never_attempts_rollback(
@@ -747,7 +849,7 @@ def test_post_clear_namespace_guard_failure_never_attempts_rollback(
             schema_capable_fallback=releases.fallback,
             namespace_guard=guard,
             activation_receipt_publisher=publish,
-            activation_receipt_enroller=lambda _path: {"status": "admitted", "published": False},
+            activation_receipt_enroller=lambda _path: _admission_receipt(published=False),
         )
 
     assert journal.state["phase"] == "clear"
@@ -948,7 +1050,7 @@ def test_exact_020790_reconciliation_binds_once_and_blocks_until_generation_is_c
 
         def enroll(self, _path: Path) -> Mapping[str, object]:
             self.events.append("enroll")
-            return {"status": "admitted", "published": self.generation_current}
+            return _admission_receipt(published=self.generation_current)
 
     pending = Admission(generation_current=False)
     with pytest.raises(
@@ -986,6 +1088,131 @@ def test_exact_020790_reconciliation_binds_once_and_blocks_until_generation_is_c
             fallback=releases.fallback,
         )
     assert journal.path.read_bytes() == before_bound_rejection
+
+
+def test_pair_bearing_activate_reconciles_predecessor_before_unit_install_admission(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    releases: Releases,
+) -> None:
+    state_dir = tmp_path / "state"
+    state_dir.mkdir(mode=0o700)
+    config = SimpleNamespace(
+        alias_claim_manifests=(),
+        backup_dir=tmp_path / "backups",
+        env_file_sha256="1" * 64,
+        friday_home=tmp_path,
+        memory_vault_mode="disabled",
+        next_env_file=None,
+        next_env_file_sha256="",
+        obsidian_mode="disabled",
+        state_dir=state_dir,
+        unit_dir=tmp_path / "units",
+    )
+    candidate = replace(
+        releases.candidate,
+        build_receipt_profile=operator.BUILD_RECEIPT_PROFILE_P0H_RETENTION,
+    )
+    identities = {
+        "candidate": candidate,
+        "previous": releases.previous,
+        "fallback": releases.fallback,
+    }
+    arguments = SimpleNamespace(
+        command="activate",
+        candidate="candidate",
+        candidate_tree_sha256=candidate.tree_manifest_sha256,
+        previous="previous",
+        previous_tree_sha256=releases.previous.tree_manifest_sha256,
+        schema_capable_fallback="fallback",
+        schema_capable_fallback_tree_sha256=releases.fallback.tree_manifest_sha256,
+        terminal_journal_env_sha256=None,
+    )
+
+    class Lock:
+        def __enter__(self) -> Lock:
+            return self
+
+        def __exit__(self, *_args: object) -> None:
+            return None
+
+        @staticmethod
+        def assert_held() -> None:
+            return None
+
+    class AdmissionContext:
+        def __enter__(self) -> object:
+            return object()
+
+        def __exit__(self, *_args: object) -> None:
+            return None
+
+    monkeypatch.setattr(operator, "_systemd_config", lambda _args: config)
+    monkeypatch.setattr(operator, "_require_runtime_operator_layout", lambda _config: None)
+    monkeypatch.setattr(operator, "_requested_staged_config_transition", lambda _config: "")
+    monkeypatch.setattr(operator, "_secondary_rollout_receipt_stage", lambda _config: None)
+    monkeypatch.setattr(operator, "_activation_target_config", lambda _config: config)
+    monkeypatch.setattr(operator, "OperatorTransactionLock", lambda *_args, **_kwargs: Lock())
+    monkeypatch.setattr(operator, "_require_retention_apply_quiesced", lambda _state: None)
+    monkeypatch.setattr(
+        operator,
+        "load_release_identity",
+        lambda path, **_kwargs: identities[str(path)],
+    )
+    monkeypatch.setattr(operator, "_require_candidate_bound_operator", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(operator, "_require_release_in_operator_layout", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(operator, "SystemdActivationPort", lambda _config: object())
+    monkeypatch.setattr(operator, "DurableActivationJournal", lambda *_args, **_kwargs: object())
+    for name in (
+        "_systemd_config_identity",
+        "_activation_legacy_config_identity",
+        "_activation_v2_config_identity",
+        "_activation_obsidian_predecessor_identity",
+        "_systemd_config_scope_identity",
+        "_systemd_config_retry_scope_identity",
+        "_obsidian_root_sha256",
+    ):
+        monkeypatch.setattr(operator, name, lambda *_args, **_kwargs: "2" * 64)
+    monkeypatch.setattr(
+        operator,
+        "_sealed_candidate_dr_admission",
+        lambda *_args, **_kwargs: AdmissionContext(),
+    )
+
+    events: list[str] = []
+
+    def reconcile(**_kwargs: object) -> None:
+        events.append("reconcile")
+        raise operator.ReleaseFailure("activation_predecessor_dr_lifecycle_required")
+
+    monkeypatch.setattr(operator, "_reconcile_terminal_activation_admission", reconcile)
+    monkeypatch.setattr(
+        operator,
+        "_require_completed_unit_install",
+        lambda *_args, **_kwargs: events.append("units"),
+    )
+    with pytest.raises(
+        operator.ReleaseFailure,
+        match="^activation_predecessor_dr_lifecycle_required$",
+    ):
+        operator._run_cli(arguments)  # type: ignore[arg-type]  # noqa: SLF001
+    assert events == ["reconcile"]
+
+    monkeypatch.setattr(
+        operator,
+        "_reconcile_terminal_activation_admission",
+        lambda **_kwargs: events.append("reconcile"),
+    )
+
+    def reject_units(*_args: object, **_kwargs: object) -> None:
+        events.append("units")
+        raise operator.ReleaseFailure("unit_install_candidate_mismatch")
+
+    monkeypatch.setattr(operator, "_require_completed_unit_install", reject_units)
+    events.clear()
+    with pytest.raises(operator.ReleaseFailure, match="^unit_install_candidate_mismatch$"):
+        operator._run_cli(arguments)  # type: ignore[arg-type]  # noqa: SLF001
+    assert events == ["reconcile", "units"]
 
 
 def test_activation_allows_a_legacy_previous_but_requires_new_candidate_and_fallback(

@@ -95,6 +95,13 @@ _DELETE_AUTHORITY_EVIDENCE_SCHEMA_PAIRS = frozenset(
         )
     }
 )
+_DR_ANCHOR_ROLES = frozenset(
+    {
+        dr_index.PREACTIVATION_FIRST_V2_ROLE,
+        dr_index.PREACTIVATION_LEGACY_ROLE,
+    }
+)
+_DR_COMMITTED_ROLES = frozenset({"current", "older", *_DR_ANCHOR_ROLES})
 _REASONS = frozenset(
     {
         "activation_journal_invalid",
@@ -110,6 +117,8 @@ _REASONS = frozenset(
         "dr_index_invalid",
         "dr_older_backup",
         "dr_pending_backup",
+        "dr_preactivation_first_v2_backup",
+        "dr_preactivation_legacy_backup",
         "dr_pins_invalid",
         "dr_pins_unavailable",
         "dr_rollback_release_evidence_incomplete",
@@ -1881,7 +1890,7 @@ def _normalize_authority_bindings(
     complete_delete_evidence_roles: set[str] = set()
     incomplete_delete_evidence = False
     for pin in actual_pins:
-        if pin.role not in {"current", "older", "pending"}:
+        if pin.role not in {"current", "older", "pending", *_DR_ANCHOR_ROLES}:
             raise RetentionPlanError("dr_pins_invalid")
         if pin.role in role_paths:
             raise RetentionPlanError("dr_pins_invalid")
@@ -1903,7 +1912,7 @@ def _normalize_authority_bindings(
             error = error or "dr_pins_invalid"
 
         identity_values = (pin.generation_id, pin.receipt_path, pin.receipt_sha256)
-        if pin.role in {"current", "older"} and any(value is None for value in identity_values):
+        if pin.role in _DR_COMMITTED_ROLES and any(value is None for value in identity_values):
             raise RetentionPlanError("dr_pins_invalid")
         if (
             pin.role == "pending"
@@ -2117,13 +2126,15 @@ def _normalize_authority_bindings(
                     authenticated_release = _authenticate_release(protected_record)
                     if authenticated_release["wheel_sha256"] != evidence_record.get("wheel_sha256"):
                         raise RetentionPlanError("dr_pins_invalid")
-                complete_delete_evidence_roles.add(pin.role)
+                if pin.role not in _DR_ANCHOR_ROLES:
+                    complete_delete_evidence_roles.add(pin.role)
             except (KeyError, RetentionPlanError):
                 error = error or "dr_pins_invalid"
-                incomplete_delete_evidence = True
-        else:
+                if pin.role not in _DR_ANCHOR_ROLES:
+                    incomplete_delete_evidence = True
+        elif pin.role not in _DR_ANCHOR_ROLES:
             incomplete_delete_evidence = True
-        if pin.role in {"current", "older"} and (
+        if pin.role in _DR_COMMITTED_ROLES and (
             authentication_path is None or rehearsal_path is None or pin.rehearsal_binding is None
         ):
             error = error or "dr_pins_invalid"
@@ -2252,7 +2263,13 @@ def _normalize_authority_bindings(
     if not evidence_paths:
         error = error or "canonical_evidence_unavailable"
 
-    ordered_roles = {"current": 0, "older": 1, "pending": 2}
+    ordered_roles = {
+        "current": 0,
+        "older": 1,
+        "pending": 2,
+        dr_index.PREACTIVATION_LEGACY_ROLE: 3,
+        dr_index.PREACTIVATION_FIRST_V2_ROLE: 4,
+    }
     pin_records.sort(key=lambda value: ordered_roles[str(value["role"])])
     evidence_records.sort(key=lambda value: str(value["path"]))
     core: dict[str, Any] = {
@@ -3564,6 +3581,12 @@ def plan_release_artifact_retention(
             backup_identity = dr_pin_identities.get(observation.path)
         elif observation.path == authority.dr_role_paths.get("pending"):
             reason = "dr_pending_backup"
+            backup_identity = dr_pin_identities.get(observation.path)
+        elif observation.path == authority.dr_role_paths.get(dr_index.PREACTIVATION_LEGACY_ROLE):
+            reason = "dr_preactivation_legacy_backup"
+            backup_identity = dr_pin_identities.get(observation.path)
+        elif observation.path == authority.dr_role_paths.get(dr_index.PREACTIVATION_FIRST_V2_ROLE):
+            reason = "dr_preactivation_first_v2_backup"
             backup_identity = dr_pin_identities.get(observation.path)
         elif _path_intersects(observation.path, authority.evidence_paths):
             reason = "canonical_evidence"

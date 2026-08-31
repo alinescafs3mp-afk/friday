@@ -46,6 +46,7 @@ from typing import Any, Protocol
 OPERATOR_SCHEMA = "friday.immutable-release-operator.v1"
 BUILD_RECEIPT_SCHEMA = "friday.immutable-wheel-release.v1"
 ACTIVATION_RECEIPT_SCHEMA = "friday.immutable-release-activation.v1"
+DR_ENROLLMENT_RECEIPT_SCHEMA = "friday.immutable-release-dr-enrollment-receipt.v1"
 ACTIVATION_JOURNAL_SCHEMA = "friday.immutable-release-activation-journal.v1"
 UNIT_INSTALL_JOURNAL_SCHEMA = "friday.immutable-release-unit-install-journal.v1"
 ALBUM_RECOVERY_SCHEMA = "friday.telegram-historical-album-recovery.v1"
@@ -19119,7 +19120,40 @@ class _SealedCandidateDRAdmission:
                 namespace_guard=self._guard,
             )
             self._guard()
-            return receipt
+            index_journal = str(receipt.get("index_journal_sha256") or "")
+            if receipt.get("published") is True:
+                identity = self._index.current_generation_identity(
+                    expected_journal_sha256=index_journal,
+                )
+                if identity is None:
+                    raise ReleaseFailure("activation_dr_admission_invalid")
+                expected = {
+                    "authentication_receipt_sha256": identity.authentication_receipt["sha256"],
+                    "candidate_sha256": identity.candidate_sha256,
+                    "index_journal_sha256": identity.index_journal_sha256,
+                    "index_phase": identity.index_phase,
+                    "index_revision": identity.index_revision,
+                    "intent": "rotate_current",
+                    "published": True,
+                    "rehearsal_present": True,
+                }
+            else:
+                identity = self._index.pending_generation_identity(
+                    expected_journal_sha256=index_journal,
+                )
+                expected = {
+                    "authentication_receipt_sha256": identity.authentication_receipt["receipt_sha256"],
+                    "candidate_sha256": identity.candidate_sha256,
+                    "index_journal_sha256": identity.index_journal_sha256,
+                    "index_phase": identity.index_phase,
+                    "index_revision": identity.index_revision,
+                    "intent": identity.intent,
+                    "published": False,
+                    "rehearsal_present": identity.rehearsal_receipt is not None,
+                }
+            validated = _require_activation_admitted(receipt, expected=expected)
+            self._guard()
+            return validated
         except Exception as exc:
             raise self._translate(exc) from exc
 
@@ -19270,9 +19304,92 @@ def _bound_activation_receipt(
     return payload, path
 
 
-def _require_activation_admitted(value: Mapping[str, Any]) -> dict[str, Any]:
+def _require_activation_admitted(
+    value: Mapping[str, Any],
+    *,
+    expected: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Validate the closed enrollment receipt and, when supplied, its index epoch."""
+
+    if not isinstance(value, dict):
+        raise ReleaseFailure("activation_dr_admission_invalid")
     receipt = dict(value)
-    if receipt.get("status") != "admitted" or type(receipt.get("published")) is not bool:
+    expected_keys = {
+        "action",
+        "authentication_receipt_sha256",
+        "candidate_sha256",
+        "index_journal_sha256",
+        "index_phase",
+        "index_revision",
+        "intent",
+        "published",
+        "rehearsal_present",
+        "receipt_sha256",
+        "schema",
+        "status",
+    }
+    core = {key: item for key, item in receipt.items() if key != "receipt_sha256"}
+    action = receipt.get("action")
+    phase = receipt.get("index_phase")
+    published = receipt.get("published")
+    rehearsal_present = receipt.get("rehearsal_present")
+    correlation_ok = (
+        (
+            action in {"prepared_and_authenticated", "resumed_and_authenticated"}
+            and phase == "authenticated"
+            and published is False
+            and rehearsal_present is False
+        )
+        or (
+            action == "already_authenticated"
+            and phase in {"authenticated", "rehearsed"}
+            and published is False
+            and rehearsal_present is (phase == "rehearsed")
+        )
+        or (
+            action == "already_current"
+            and phase == "clear"
+            and published is True
+            and rehearsal_present is True
+            and receipt.get("intent") == "rotate_current"
+        )
+    )
+    if (
+        set(receipt) != expected_keys
+        or receipt.get("schema") != DR_ENROLLMENT_RECEIPT_SCHEMA
+        or receipt.get("status") != "admitted"
+        or receipt.get("intent") not in {"bootstrap_current", "rotate_current"}
+        or type(receipt.get("index_revision")) is not int
+        or int(receipt["index_revision"]) < 0
+        or type(published) is not bool
+        or type(rehearsal_present) is not bool
+        or not correlation_ok
+        or any(
+            _HEX64.fullmatch(str(receipt.get(key) or "")) is None
+            for key in (
+                "authentication_receipt_sha256",
+                "candidate_sha256",
+                "index_journal_sha256",
+                "receipt_sha256",
+            )
+        )
+        or receipt["receipt_sha256"] != _sha256_bytes(_canonical_json(core))
+    ):
+        raise ReleaseFailure("activation_dr_admission_invalid")
+    if expected is not None and (
+        set(expected)
+        != {
+            "authentication_receipt_sha256",
+            "candidate_sha256",
+            "index_journal_sha256",
+            "index_phase",
+            "index_revision",
+            "intent",
+            "published",
+            "rehearsal_present",
+        }
+        or any(receipt.get(key) != item for key, item in expected.items())
+    ):
         raise ReleaseFailure("activation_dr_admission_invalid")
     return receipt
 
@@ -20018,7 +20135,6 @@ def _run_cli(args: argparse.Namespace) -> dict[str, Any]:
             )
             _require_candidate_bound_operator(candidate, state_dir=config.state_dir)
             _require_release_in_operator_layout(candidate, config.friday_home)
-            _require_completed_unit_install(config.state_dir, candidate)
             previous = load_release_identity(
                 args.previous,
                 expected_tree_sha256=args.previous_tree_sha256,
@@ -20076,6 +20192,7 @@ def _run_cli(args: argparse.Namespace) -> dict[str, Any]:
                         fallback=schema_capable_fallback,
                         admission=admission,
                     )
+                    _require_completed_unit_install(config.state_dir, candidate)
                     receipt = activate_release(
                         port,
                         journal,
@@ -20087,6 +20204,7 @@ def _run_cli(args: argparse.Namespace) -> dict[str, Any]:
                         activation_receipt_enroller=admission.enroll,
                     )
             else:
+                _require_completed_unit_install(config.state_dir, candidate)
                 _reject_terminal_activation_supersession_without_writer(
                     journal=journal,
                     candidate=candidate,
@@ -20241,6 +20359,7 @@ __all__ = [
     "BUILD_RECEIPT_PROFILE_HISTORICAL_V1_READER",
     "BUILD_RECEIPT_PROFILE_P0H_RETENTION",
     "BUILD_RECEIPT_SCHEMA",
+    "DR_ENROLLMENT_RECEIPT_SCHEMA",
     "ENGINEER_COMMAND_LIFECYCLE_CONTRACT",
     "ENGINEER_COMMAND_LIFECYCLE_MIN_SCHEMA",
     "FORBIDDEN_ROLLBACK_COMMITS",

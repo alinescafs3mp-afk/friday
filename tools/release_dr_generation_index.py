@@ -47,6 +47,8 @@ HEAD_FENCE_NAME = "current-head.json"
 HEAD_FENCE_STAGING_NAME = ".current-head.json.new"
 INDEX_PHASES = ("clear", "prepared", "authenticated", "rehearsed")
 INDEX_INTENTS = ("bootstrap_current", "fill_older", "rotate_current")
+PREACTIVATION_LEGACY_ROLE = "preactivation_legacy"
+PREACTIVATION_FIRST_V2_ROLE = "preactivation_first_v2"
 
 # The sole production v1 generation predates immutable 0400 receipt modes.
 # This exact tuple is a one-time bridge, not a generic 0600 compatibility rail.
@@ -1725,6 +1727,7 @@ class DurableDRGenerationIndex:
                 "older": None,
                 "pending": None,
                 "phase": "clear",
+                "preactivation_anchor": None,
                 "revision": 0,
                 "schema": INDEX_SCHEMA,
                 "transaction_id": ZERO_SHA256,
@@ -2099,9 +2102,66 @@ class DurableDRGenerationIndex:
         receipt = self._load_receipt(reference, receipt_fd)
         return str(receipt["generation"]["candidate"]["backup_directory"])
 
+    def _generation_authentication_schema(
+        self,
+        generation_receipt: Mapping[str, Any],
+        receipt_fd: int,
+    ) -> str:
+        generation = generation_receipt.get("generation")
+        if not isinstance(generation, dict):
+            raise DRGenerationIndexError("generation_receipt_invalid")
+        authentication = self._load_external_receipt(
+            generation.get("authentication_receipt"),
+            receipt_fd,
+            kind=AUTHENTICATION_RECEIPT_KIND,
+            code="authentication_receipt_invalid",
+        )
+        return str(authentication.get("schema") or "")
+
+    def _derive_preactivation_anchor(
+        self,
+        *,
+        legacy_reference: Mapping[str, str],
+        first_v2_reference: Mapping[str, str],
+        receipt_fd: int,
+    ) -> dict[str, Any] | None:
+        legacy_ref = _normalize_generation_ref(
+            legacy_reference,
+            code="dr_generation_preactivation_anchor_invalid",
+        )
+        first_v2_ref = _normalize_generation_ref(
+            first_v2_reference,
+            code="dr_generation_preactivation_anchor_invalid",
+        )
+        if legacy_ref == first_v2_ref:
+            return None
+        legacy_receipt = self._load_receipt(legacy_ref, receipt_fd)
+        first_v2_receipt = self._load_receipt(first_v2_ref, receipt_fd)
+        if (
+            self._generation_authentication_schema(legacy_receipt, receipt_fd)
+            != AUTHENTICATION_RECEIPT_SCHEMA
+        ):
+            return None
+        first_v2_authentication = self._load_external_receipt(
+            first_v2_receipt["generation"]["authentication_receipt"],
+            receipt_fd,
+            kind=AUTHENTICATION_RECEIPT_KIND,
+            code="dr_generation_preactivation_anchor_invalid",
+        )
+        if first_v2_authentication.get("schema") != AUTHENTICATION_RECEIPT_SCHEMA_V2:
+            return None
+        activation_ref, _activation_raw, _activation_body = activation_receipt_evidence(
+            first_v2_authentication
+        )
+        return {
+            "activation_receipt": activation_ref,
+            "first_v2_generation": first_v2_ref,
+            "legacy_generation": legacy_ref,
+        }
+
     def _decode_state(self, raw: bytes, receipt_fd: int) -> dict[str, Any]:
         payload = _unique_json(raw, code="dr_generation_index_invalid")
-        if raw != _canonical_json(payload) + b"\n" or set(payload) != {
+        legacy_keys = {
             "base_clear_sha256",
             "current",
             "journal_sha256",
@@ -2111,7 +2171,18 @@ class DurableDRGenerationIndex:
             "revision",
             "schema",
             "transaction_id",
+        }
+        current_keys = legacy_keys | {"preactivation_anchor"}
+        supplied_keys = frozenset(payload)
+        if raw != _canonical_json(payload) + b"\n" or supplied_keys not in {
+            frozenset(legacy_keys),
+            frozenset(current_keys),
         }:
+            raise DRGenerationIndexError("dr_generation_index_invalid")
+        if supplied_keys == legacy_keys and (
+            _sha256(raw) != _LEGACY_020790_INDEX_FILE_SHA256
+            or payload.get("journal_sha256") != _LEGACY_020790_INDEX_JOURNAL_SHA256
+        ):
             raise DRGenerationIndexError("dr_generation_index_invalid")
         supplied = _hex64(payload.get("journal_sha256"), code="dr_generation_index_invalid")
         core = {key: value for key, value in payload.items() if key != "journal_sha256"}
@@ -2157,6 +2228,68 @@ class DurableDRGenerationIndex:
         )
         if current_backup and current_backup == older_backup:
             raise DRGenerationIndexError("dr_generation_duplicate_slot")
+
+        anchor = payload.get("preactivation_anchor")
+        normalized_anchor: dict[str, Any] | None = None
+        if anchor is not None:
+            if not isinstance(anchor, dict) or set(anchor) != {
+                "activation_receipt",
+                "first_v2_generation",
+                "legacy_generation",
+            }:
+                raise DRGenerationIndexError("dr_generation_preactivation_anchor_invalid")
+            legacy_ref = _normalize_generation_ref(
+                anchor.get("legacy_generation"),
+                code="dr_generation_preactivation_anchor_invalid",
+            )
+            first_v2_ref = _normalize_generation_ref(
+                anchor.get("first_v2_generation"),
+                code="dr_generation_preactivation_anchor_invalid",
+            )
+            activation_ref = _normalize_external_receipt(
+                anchor.get("activation_receipt"),
+                code="dr_generation_preactivation_anchor_invalid",
+            )
+            if legacy_ref == first_v2_ref or activation_ref["schema"] != _ACTIVATION_RECEIPT_SCHEMA:
+                raise DRGenerationIndexError("dr_generation_preactivation_anchor_invalid")
+            legacy_generation = self._load_receipt(legacy_ref, receipt_fd)["generation"]
+            first_v2_generation = self._load_receipt(first_v2_ref, receipt_fd)["generation"]
+            legacy_authentication = self._load_external_receipt(
+                legacy_generation["authentication_receipt"],
+                receipt_fd,
+                kind=AUTHENTICATION_RECEIPT_KIND,
+                code="dr_generation_preactivation_anchor_invalid",
+            )
+            first_v2_authentication = self._load_external_receipt(
+                first_v2_generation["authentication_receipt"],
+                receipt_fd,
+                kind=AUTHENTICATION_RECEIPT_KIND,
+                code="dr_generation_preactivation_anchor_invalid",
+            )
+            try:
+                derived_activation_ref, _raw, _body = activation_receipt_evidence(first_v2_authentication)
+            except DRGenerationIndexError as exc:
+                raise DRGenerationIndexError("dr_generation_preactivation_anchor_invalid") from exc
+            if (
+                legacy_authentication.get("schema") != AUTHENTICATION_RECEIPT_SCHEMA
+                or first_v2_authentication.get("schema") != AUTHENTICATION_RECEIPT_SCHEMA_V2
+                or activation_ref != derived_activation_ref
+            ):
+                raise DRGenerationIndexError("dr_generation_preactivation_anchor_invalid")
+            normalized_anchor = {
+                "activation_receipt": activation_ref,
+                "first_v2_generation": first_v2_ref,
+                "legacy_generation": legacy_ref,
+            }
+        elif (
+            current_receipt is not None
+            and older_receipt is not None
+            and self._generation_authentication_schema(current_receipt, receipt_fd)
+            == AUTHENTICATION_RECEIPT_SCHEMA_V2
+            and self._generation_authentication_schema(older_receipt, receipt_fd)
+            == AUTHENTICATION_RECEIPT_SCHEMA
+        ):
+            raise DRGenerationIndexError("dr_generation_preactivation_anchor_missing")
 
         pending = payload.get("pending")
         if phase == "clear":
@@ -2283,6 +2416,10 @@ class DurableDRGenerationIndex:
                 and normalized_generation_ref != current_ref
             ):
                 raise DRGenerationIndexError("dr_generation_duplicate_slot")
+        if supplied_keys == legacy_keys:
+            return {**payload, "preactivation_anchor": None}
+        if normalized_anchor != anchor:
+            raise DRGenerationIndexError("dr_generation_preactivation_anchor_invalid")
         return payload
 
     def _load_raw_unlocked(self, pins: _PinnedDirectories) -> bytes:
@@ -2488,6 +2625,49 @@ class DurableDRGenerationIndex:
         observed = self._load_unlocked(pins)
         if observed.get("journal_sha256") != current.get("journal_sha256"):
             raise DRGenerationIndexError("dr_generation_cas_mismatch")
+        current_anchor = current.get("preactivation_anchor")
+        following_anchor = following_core.get("preactivation_anchor")
+        if current_anchor is not None and following_anchor != current_anchor:
+            raise DRGenerationIndexError("dr_generation_preactivation_anchor_immutable")
+        if "preactivation_anchor" not in following_core:
+            raise DRGenerationIndexError("dr_generation_preactivation_anchor_invalid")
+        if current_anchor is None:
+            pending = current.get("pending")
+            expected_anchor = (
+                self._derive_preactivation_anchor(
+                    legacy_reference=current["current"],
+                    first_v2_reference=pending["generation"],
+                    receipt_fd=pins.receipt_fd,
+                )
+                if current.get("phase") == "rehearsed"
+                and isinstance(pending, dict)
+                and pending.get("intent") == "rotate_current"
+                and current.get("current") is not None
+                and current.get("older") is None
+                and pending.get("generation") is not None
+                else None
+            )
+            expected_transition = (
+                {
+                    **self._core_from_state(current),
+                    "current": pending["generation"],
+                    "older": current["current"],
+                    "pending": None,
+                    "phase": "clear",
+                    "preactivation_anchor": expected_anchor,
+                    "revision": int(current["revision"]) + 1,
+                }
+                if expected_anchor is not None
+                else None
+            )
+            if (expected_transition is None) != (following_anchor is None) or (
+                expected_transition is not None
+                and (
+                    following_anchor != expected_anchor
+                    or dict(following_core) != expected_transition
+                )
+            ):
+                raise DRGenerationIndexError("dr_generation_preactivation_anchor_invalid")
         expected_payload, raw = _encode_state(following_core)
         guard()
         self._replace_head_unlocked(pins, raw)
@@ -2743,12 +2923,26 @@ class DurableDRGenerationIndex:
                 next_current, next_older = current, older
             else:
                 next_current, next_older = generation_ref, current
+        next_anchor = state.get("preactivation_anchor")
+        if (
+            next_anchor is None
+            and intent == "rotate_current"
+            and current is not None
+            and older is None
+            and generation_ref != current
+        ):
+            next_anchor = self._derive_preactivation_anchor(
+                legacy_reference=current,
+                first_v2_reference=generation_ref,
+                receipt_fd=pins.receipt_fd,
+            )
         following = {
             **self._core_from_state(state),
             "current": next_current,
             "older": next_older,
             "pending": None,
             "phase": "clear",
+            "preactivation_anchor": next_anchor,
             "revision": int(state["revision"]) + 1,
         }
         if namespace_guard is None:
@@ -2859,10 +3053,7 @@ class DurableDRGenerationIndex:
                 "activation_receipt_file_sha256": activation_reference["sha256"],
             }
 
-        for role in ("current", "older"):
-            reference = state[role]
-            if reference is None:
-                continue
+        def append_committed_pin(role: str, reference: Mapping[str, str]) -> None:
             receipt = self._load_receipt(reference, directories.receipt_fd)
             candidate = receipt["generation"]["candidate"]
             authentication_ref = receipt["generation"]["authentication_receipt"]
@@ -2891,6 +3082,21 @@ class DurableDRGenerationIndex:
                     **restore_release_fields(candidate),
                 )
             )
+
+        for role in ("current", "older"):
+            reference = state[role]
+            if reference is not None:
+                append_committed_pin(role, reference)
+        anchor = state.get("preactivation_anchor")
+        if isinstance(anchor, dict):
+            slotted_refs = (state["current"], state["older"])
+            for role, key in (
+                (PREACTIVATION_LEGACY_ROLE, "legacy_generation"),
+                (PREACTIVATION_FIRST_V2_ROLE, "first_v2_generation"),
+            ):
+                reference = anchor[key]
+                if reference not in slotted_refs:
+                    append_committed_pin(role, reference)
         if state["phase"] != "clear":
             pending = state["pending"]
             reference = pending["generation"]
@@ -2988,6 +3194,8 @@ __all__ = [
     "INDEX_SCHEMA",
     "MAX_HEAD_FENCE_BYTES",
     "PendingDRGenerationIdentity",
+    "PREACTIVATION_FIRST_V2_ROLE",
+    "PREACTIVATION_LEGACY_ROLE",
     "RECEIPT_DIRECTORY_NAME",
     "REHEARSAL_RECEIPT_SCHEMA",
     "REHEARSAL_RECEIPT_SCHEMA_V2",
