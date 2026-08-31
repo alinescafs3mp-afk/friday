@@ -306,6 +306,11 @@ def pytest_testnodedown(node: Any, error: object) -> None:
     _COLLECTION_PROBLEMS_BY_WORKER[worker_id] = (skipped, deselected)
 
 
+def _fail_collection_session(session: Any, code: str) -> None:
+    print(f"FAILED: canonical collection {code}", file=sys.stderr)
+    session.exitstatus = 1
+
+
 def pytest_sessionfinish(session: Any, exitstatus: int) -> None:
     """Emit an xdist collection manifest only when every worker agreed."""
 
@@ -319,10 +324,10 @@ def pytest_sessionfinish(session: Any, exitstatus: int) -> None:
             "deselected": len(_COLLECTION_DESELECTED),
         }
         if _COLLECTION_SKIPS or _COLLECTION_DESELECTED:
-            session.exitstatus = 1
+            _fail_collection_session(session, "worker_skip_or_deselect")
         return
     if path and (_COLLECTION_SKIPS or _COLLECTION_DESELECTED):
-        session.exitstatus = 1
+        _fail_collection_session(session, "controller_skip_or_deselect")
         return
     if not path:
         return
@@ -331,20 +336,20 @@ def pytest_sessionfinish(session: Any, exitstatus: int) -> None:
         if _SERIAL_COLLECTION and exitstatus in {0, 1}:
             _write_collection_manifest(path, _SERIAL_COLLECTION)
         elif exitstatus in {0, 1}:
-            session.exitstatus = 1
+            _fail_collection_session(session, "serial_collection_missing")
         return
     if len(_COLLECTIONS_BY_WORKER) != requested:
-        session.exitstatus = 1
+        _fail_collection_session(session, "worker_collection_count_mismatch")
         return
     if set(_COLLECTION_PROBLEMS_BY_WORKER) != set(_COLLECTIONS_BY_WORKER):
-        session.exitstatus = 1
+        _fail_collection_session(session, "worker_attestation_missing")
         return
     if any(skipped or deselected for skipped, deselected in _COLLECTION_PROBLEMS_BY_WORKER.values()):
-        session.exitstatus = 1
+        _fail_collection_session(session, "worker_collection_problem")
         return
     collections = tuple(_COLLECTIONS_BY_WORKER.values())
     if not collections or not collections[0] or any(nodeids != collections[0] for nodeids in collections[1:]):
-        session.exitstatus = 1
+        _fail_collection_session(session, "worker_collection_mismatch")
         return
     if exitstatus not in {0, 1}:
         return
