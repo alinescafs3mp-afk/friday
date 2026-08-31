@@ -3679,6 +3679,51 @@ def _write_atomic(path: Path, payload: bytes) -> None:
         os.close(directory_fd)
 
 
+def _validate_output_namespace(path: Path, plan: Mapping[str, Any]) -> None:
+    lexical = _absolute_lexical(path, code="output_path_invalid")
+    protected_roots: set[Path] = set()
+    try:
+        activation = plan["activation_journal"]
+        protected_roots.add(
+            _absolute_lexical(
+                Path(str(activation["path"])).parent,
+                code="output_path_invalid",
+            )
+        )
+        protected_roots.add(_absolute_lexical(Path(str(plan["backup_root"])), code="output_path_invalid"))
+        for key in ("inventory_roots", "backup_inventory_roots"):
+            values = plan.get(key)
+            if not isinstance(values, list):
+                raise RetentionPlanError("output_path_invalid")
+            for item in values:
+                if not isinstance(item, Mapping):
+                    raise RetentionPlanError("output_path_invalid")
+                protected_roots.add(
+                    _absolute_lexical(Path(str(item["path"])), code="output_path_invalid")
+                )
+        authority = plan.get("authority_bindings")
+        if isinstance(authority, Mapping):
+            evidence = authority.get("canonical_evidence_roots")
+            if evidence not in (None, []) and not isinstance(evidence, list):
+                raise RetentionPlanError("output_path_invalid")
+            for item in evidence or []:
+                if not isinstance(item, Mapping):
+                    raise RetentionPlanError("output_path_invalid")
+                protected_roots.add(
+                    _absolute_lexical(Path(str(item["path"])), code="output_path_invalid")
+                )
+                protected_roots.add(
+                    _absolute_lexical(
+                        Path(str(item["authority_path"])),
+                        code="output_path_invalid",
+                    )
+                )
+    except (KeyError, TypeError, ValueError) as exc:
+        raise RetentionPlanError("output_path_invalid") from exc
+    if any(lexical == protected or protected in lexical.parents for protected in protected_roots):
+        raise RetentionPlanError("output_path_protected")
+
+
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Plan bounded Friday wheel-release retention")
     parser.add_argument("--activation-journal", required=True, type=Path)
@@ -3745,6 +3790,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             sys.stdout.buffer.write(payload)
             sys.stdout.buffer.flush()
         else:
+            _validate_output_namespace(args.output, plan)
             _write_atomic(args.output, payload)
         return 0
     except Exception as exc:

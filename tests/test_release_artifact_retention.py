@@ -1232,6 +1232,52 @@ def test_cli_stdout_is_read_only_and_explicit_output_is_atomic(
     assert not list(output_parent.glob(".*.new"))
 
 
+@pytest.mark.parametrize(
+    "output",
+    (
+        lambda fixture: fixture["activation_journal"].parent / "state-plan.json",
+        lambda fixture: fixture["backup_root"] / "backup-plan.json",
+        lambda fixture: fixture["inventory"] / "inventory-plan.json",
+        lambda fixture: fixture["evidence_root"] / "evidence-plan.json",
+    ),
+)
+def test_eligible_output_rejects_authenticated_protected_namespaces(
+    synthetic_inventory: dict[str, Any],
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    output: Any,
+) -> None:
+    _eligible_plan(synthetic_inventory, monkeypatch)
+    target = output(synthetic_inventory)
+    argv = [
+        "--activation-journal",
+        str(synthetic_inventory["activation_journal"]),
+        "--unit-journal",
+        str(synthetic_inventory["unit_journal"]),
+        "--backup-root",
+        str(synthetic_inventory["backup_root"]),
+        "--inventory-root",
+        str(synthetic_inventory["inventory"]),
+        "--backup-inventory-root",
+        str(synthetic_inventory["backup_root"]),
+        "--eligible",
+        "--evidence-authority",
+        str(synthetic_inventory["evidence_root"]),
+        str(synthetic_inventory["evidence_authority"]),
+        _sha256_file(synthetic_inventory["evidence_authority"]),
+        "--output",
+        str(target),
+    ]
+
+    assert retention.main(argv) == 2
+    assert json.loads(capsys.readouterr().err) == {
+        "failure_code": "output_path_protected",
+        "schema": retention.PLAN_SCHEMA,
+        "status": "failed_closed",
+    }
+    assert not target.exists()
+
+
 def stat_mode(path: Path) -> int:
     return os.stat(path, follow_symlinks=False).st_mode & 0o777
 
