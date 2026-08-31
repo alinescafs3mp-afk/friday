@@ -76,6 +76,12 @@ _OPEN_SOURCES = frozenset(
         "synthetic_test",
     }
 )
+_APPLY_AUTHORITY_OPEN_SOURCES = frozenset(
+    {
+        "code_owned_privileged_target_proc_v1",
+        "code_owned_privileged_target_diagnostic_v1",
+    }
+)
 _SCRATCH_CONTOUR = "exact_owner_tree_without_git_v1"
 # Reader-first release: no currently accepted receipt schema binds the full
 # previous + fallback + exercised rollback release set needed for deletion.
@@ -2837,6 +2843,10 @@ def plan_release_artifact_retention(
     unit_path = _absolute_lexical(unit_journal, code="unit_install_journal_invalid")
     backup_path = _absolute_lexical(backup_root, code="activation_journal_invalid")
     open_receipt, open_paths, open_identities = _normalize_open_inventory(open_inventory)
+    apply_open_authority = open_inventory.source in _APPLY_AUTHORITY_OPEN_SOURCES or (
+        open_inventory.source == "code_owned_no_delete_candidates_v1"
+        and _candidate_scope_paths == frozenset()
+    )
 
     roots_with_status = [_strict_inventory_root(path) for path in inventory_roots]
     roots = tuple(sorted({path for path, _status in roots_with_status}, key=str))
@@ -3371,7 +3381,7 @@ def plan_release_artifact_retention(
         ),
         "scope": "release_and_backup_inventory",
         "retention_scope": dict(_retention_scope or {}),
-        "apply_authority": executable and blocker == "" and not _scope_seed,
+        "apply_authority": executable and blocker == "" and not _scope_seed and apply_open_authority,
         "effect_authority": {
             "bounded_contour": BOUNDED_DELETE_CONTOUR,
             "concurrent_open_attempts_excluded": True,
@@ -3563,7 +3573,15 @@ def build_eligible_retention_plan(
         _candidate_scope_paths=frozenset(target_paths),
         _retention_scope=scope.receipt,
     )
-    if plan["classification_status"] != "eligible" or plan["apply_authority"] is not True:
+    if plan["classification_status"] != "eligible":
+        raise RetentionPlanError(str(plan["block_reason"] or "retention_authority_unbound"))
+    if target_paths:
+        if plan["apply_authority"] is not True:
+            raise RetentionPlanError(str(plan["block_reason"] or "retention_authority_unbound"))
+    elif (
+        plan["apply_authority"] is not True
+        or inventory.source != "code_owned_no_delete_candidates_v1"
+    ):
         raise RetentionPlanError(str(plan["block_reason"] or "retention_authority_unbound"))
     if inventory.source == "code_owned_privileged_target_diagnostic_v1":
         after_index, _after = _target_probe_index(target_paths)

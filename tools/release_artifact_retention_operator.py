@@ -229,6 +229,7 @@ def _authority_projection(plan: Mapping[str, Any]) -> dict[str, Any]:
         "activation_journal",
         "unit_install_journal",
         "authority_bindings",
+        "open_inventory",
         "activation_backup",
         "backup_root",
         "inventory_roots",

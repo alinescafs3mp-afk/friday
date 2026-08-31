@@ -38,6 +38,27 @@ def _sha256_file(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
+def _privileged_open_inventory(
+    *,
+    target_paths: tuple[Path, ...] = (),
+    open_paths: tuple[Path, ...] = (),
+    open_identities: tuple[tuple[int, int], ...] = (),
+) -> retention.OpenInventorySnapshot:
+    target_index_sha256 = "2" * 64
+    if target_paths:
+        target_index, _seeds = retention._target_probe_index(target_paths)  # noqa: SLF001
+        target_index_sha256 = target_index.sha256
+    return retention.OpenInventorySnapshot(
+        source="code_owned_privileged_target_diagnostic_v1",
+        complete=True,
+        open_paths=open_paths,
+        open_identities=open_identities,
+        authority_sha256="1" * 64,
+        target_index_sha256=target_index_sha256,
+        process_epoch_sha256="3" * 64,
+    )
+
+
 def _exact_backup(root: Path, ordinal: int) -> dict[str, Any]:
     _private_directory(root)
     files: list[dict[str, Any]] = []
@@ -1340,10 +1361,7 @@ def _eligible_plan(
     monkeypatch.setattr(
         retention,
         "build_complete_open_inventory",
-        lambda **_kwargs: retention.OpenInventorySnapshot(
-            source="code_owned_fd_inventory_v1",
-            complete=True,
-        ),
+        lambda *, target_paths: _privileged_open_inventory(target_paths=tuple(target_paths)),
     )
     # Exercise the downstream apply contour as if a future fully validated
     # writer receipt pair were present.  The production v1 contract remains
@@ -1833,6 +1851,9 @@ def test_stale_v1_resume_does_not_repair_two_link_plan_before_rejection(
         path: retention._snapshot(path).records  # noqa: SLF001
         for path in target_snapshots
     } == target_snapshots
+def _with_plan_sha256(plan: dict[str, Any]) -> dict[str, Any]:
+    core = {key: value for key, value in plan.items() if key != "plan_sha256"}
+    return {**core, "plan_sha256": hashlib.sha256(_canonical(core)).hexdigest()}
 
 
 def _scope_body(fixture: dict[str, Any]) -> dict[str, Any]:
@@ -1977,6 +1998,111 @@ def test_eligible_cli_builds_code_owned_authority_and_classifies_exact_backup(
     assert json.loads(capsys.readouterr().out)["plan_sha256"] == plan["plan_sha256"]
 
 
+@pytest.mark.parametrize(
+    ("source", "snapshot"),
+    (
+        ("synthetic_test", retention.OpenInventorySnapshot(source="synthetic_test", complete=True)),
+        ("code_owned_fd_inventory_v1", retention.OpenInventorySnapshot(source="code_owned_fd_inventory_v1", complete=True)),
+        (
+            "code_owned_candidate_scope_seed_v1",
+            retention.OpenInventorySnapshot(source="code_owned_candidate_scope_seed_v1", complete=True),
+        ),
+        (
+            "code_owned_no_delete_candidates_v1",
+            retention.OpenInventorySnapshot(
+                source="code_owned_no_delete_candidates_v1",
+                complete=True,
+                authority_sha256="a" * 64,
+            ),
+        ),
+    ),
+)
+def test_non_privileged_or_seed_open_inventory_never_mints_apply_authority(
+    synthetic_inventory: dict[str, Any],
+    source: str,
+    snapshot: retention.OpenInventorySnapshot,
+    tmp_path: Path,
+) -> None:
+    plan = retention.plan_release_artifact_retention(
+        activation_journal=synthetic_inventory["activation_journal"],
+        unit_journal=synthetic_inventory["unit_journal"],
+        backup_root=synthetic_inventory["backup_root"],
+        inventory_roots=(synthetic_inventory["inventory"],),
+        backup_inventory_roots=(synthetic_inventory["backup_root"],),
+        open_inventory=snapshot,
+        authority_bindings=_bindings(synthetic_inventory),
+        executable=True,
+    )
+
+    assert plan["classification_status"] == "eligible", source
+    assert plan["block_reason"] == "", source
+    assert plan["apply_authority"] is False, source
+
+    plan_path = _plan_file(plan, tmp_path / f"{source}.json")
+    with pytest.raises(
+        retention_apply.RetentionApplyError,
+        match="^retention_apply_plan_digest_mismatch$",
+    ):
+        retention_apply.apply_retention_plan(
+            plan_path=plan_path,
+            expected_plan_sha256=str(plan["plan_sha256"]),
+        )
+    assert synthetic_inventory["old"].identity.root.exists()
+    assert not (
+        synthetic_inventory["activation_journal"].parent / retention_apply.APPLY_JOURNAL_NAME
+    ).exists()
+
+
+def test_apply_rejects_forged_open_inventory_authority_before_journal_write(
+    synthetic_inventory: dict[str, Any],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    plan = _eligible_plan(synthetic_inventory, monkeypatch)
+    forged = dict(plan)
+    open_core = {
+        "schema": retention.OPEN_INVENTORY_SCHEMA,
+        "source": "synthetic_test",
+        "complete": True,
+        "open_paths": (),
+        "open_identities": (),
+        "authority_sha256": "",
+        "target_index_sha256": "",
+        "process_epoch_sha256": "",
+        "observation_role": "diagnostic_prerequisite",
+        "universal_absence_proof": False,
+    }
+    forged["open_inventory"] = {
+        "schema": retention.OPEN_INVENTORY_SCHEMA,
+        "source": "synthetic_test",
+        "complete": True,
+        "open_path_count": 0,
+        "open_identity_count": 0,
+        "authority_sha256": "",
+        "target_index_sha256": "",
+        "process_epoch_sha256": "",
+        "observation_role": "diagnostic_prerequisite",
+        "universal_absence_proof": False,
+        "snapshot_sha256": hashlib.sha256(_canonical(open_core)).hexdigest(),
+    }
+    forged = _with_plan_sha256(forged)
+    plan_path = _plan_file(forged, tmp_path / "forged-open-inventory.json")
+
+    with pytest.raises(
+        retention_apply.RetentionApplyError,
+        match="^retention_apply_plan_drift$",
+    ):
+        retention_apply.apply_retention_plan(
+            plan_path=plan_path,
+            expected_plan_sha256=str(forged["plan_sha256"]),
+        )
+
+    assert synthetic_inventory["old"].identity.root.exists()
+    assert not (
+        synthetic_inventory["activation_journal"].parent / retention_apply.APPLY_JOURNAL_NAME
+    ).exists()
+
+
 def test_privileged_target_probe_marks_only_exact_referenced_target(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -2053,7 +2179,7 @@ def test_candidate_probe_scope_does_not_index_more_than_a_million_retained_unkno
     def inventory(*, target_paths: tuple[Path, ...]) -> retention.OpenInventorySnapshot:
         nonlocal observed_probe_paths
         observed_probe_paths = target_paths
-        return retention.OpenInventorySnapshot(source="code_owned_fd_inventory_v1", complete=True)
+        return _privileged_open_inventory(target_paths=target_paths)
 
     monkeypatch.setattr(retention, "plan_release_artifact_retention", plans)
     monkeypatch.setattr(retention, "build_complete_open_inventory", inventory)
@@ -2133,10 +2259,7 @@ def test_explicit_reviewed_scratch_requires_exact_symlink_free_non_git_tree(
     monkeypatch.setattr(
         retention,
         "build_complete_open_inventory",
-        lambda **_kwargs: retention.OpenInventorySnapshot(
-            source="code_owned_fd_inventory_v1",
-            complete=True,
-        ),
+        lambda *, target_paths: _privileged_open_inventory(target_paths=tuple(target_paths)),
     )
     _enable_complete_delete_evidence(monkeypatch)
     plan = retention.build_eligible_retention_plan(
@@ -2264,10 +2387,7 @@ def test_reviewed_scratch_apply_resumes_after_rename_crash(
     monkeypatch.setattr(
         retention,
         "build_complete_open_inventory",
-        lambda **_kwargs: retention.OpenInventorySnapshot(
-            source="code_owned_fd_inventory_v1",
-            complete=True,
-        ),
+        lambda *, target_paths: _privileged_open_inventory(target_paths=tuple(target_paths)),
     )
     _enable_complete_delete_evidence(monkeypatch)
     plan = retention.build_eligible_retention_plan(
@@ -2583,11 +2703,7 @@ def test_post_rename_open_reference_restores_exact_source(
     def referenced_quarantine(*, target_paths: tuple[Path, ...]) -> retention.OpenInventorySnapshot:
         if any(path.name.startswith(".friday-retention-q-v1-") for path in target_paths):
             quarantine_probes.append(target_paths)
-            return retention.OpenInventorySnapshot(
-                source="code_owned_fd_inventory_v1",
-                complete=True,
-                open_paths=target_paths,
-            )
+            return _privileged_open_inventory(target_paths=target_paths, open_paths=target_paths)
         return ordinary_inventory(target_paths=target_paths)
 
     monkeypatch.setattr(retention, "build_complete_open_inventory", referenced_quarantine)
