@@ -513,6 +513,34 @@ def test_pytest_bootstrap_preloads_runner_authority_before_candidate_root(tmp_pa
         )
         assert completed.returncode == 0, completed.stderr
 
+    source = tmp_path / "candidate"
+    site = tmp_path / "installed"
+    for root in quality_gate._WHEEL_NAMESPACES:
+        packaged = site / root / "__init__.py"
+        packaged.parent.mkdir(parents=True)
+        packaged.write_text("INSTALLED = True\n", encoding="ascii")
+        shadow = source / root / "__init__.py"
+        shadow.parent.mkdir(parents=True)
+        shadow.write_text("raise RuntimeError('candidate package shadow imported')\n", encoding="ascii")
+    completed = subprocess.run(
+        (
+            sys.executable,
+            "-I",
+            "-B",
+            "-c",
+            quality_gate._PYTEST_BOOTSTRAP,
+            str(source),
+            str(site),
+            sys.executable,
+            "--version",
+        ),
+        env={**os.environ, "PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1"},
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert completed.returncode == 0, completed.stderr
+
 
 def test_nightly_asset_identity_is_body_free_rename_stable_and_drift_closed(
     tmp_path: Path,

@@ -202,8 +202,12 @@ def _require_installed_wheel_imports(site: Path, modules: Mapping[str, object] |
     for root in _WHEEL_NAMESPACES:
         spec = importlib.util.find_spec(root)
         origin = Path(spec.origin).resolve(strict=True) if spec and spec.origin else None
-        if origin != (site / root / "__init__.py").resolve(strict=True):
-            raise RuntimeError(f"{root} is not imported from the clean-installed wheel")
+        expected = (site / root / "__init__.py").resolve(strict=True)
+        if origin != expected:
+            raise RuntimeError(
+                f"{root} is not imported from the clean-installed wheel: "
+                f"expected {expected}, observed {origin}"
+            )
     for name, module in tuple(loaded.items()):
         module_file = getattr(module, "__file__", None)
         if (
@@ -1175,11 +1179,13 @@ def _write_private_json(directory_fd: int, name: str, value: object) -> None:
 
 
 _PYTEST_BOOTSTRAP = (
-    "import anyio.pytest_plugin,pathlib,pytest,pytest_asyncio.plugin,sys,xdist.plugin;"
+    "import anyio.pytest_plugin,importlib,pathlib,pytest,pytest_asyncio.plugin,sys,xdist.plugin;"
     "plugins=(xdist.plugin,pytest_asyncio.plugin,anyio.pytest_plugin);"
     "root=str(pathlib.Path(sys.argv[1]).resolve(strict=True));"
     "site=sys.argv[2];sys.executable=sys.argv[3];"
     "sys.path[:0]=(([site] if site!='-' else [])+[root,str(pathlib.Path(root)/'tests')]);"
+    "[importlib.import_module(name) for name in "
+    "('friday','friday_host_agent','friday_package_broker')] if site!='-' else None;"
     "raise SystemExit(pytest.main(sys.argv[4:],plugins=plugins))"
 )
 _EXPLICIT_PYTEST_PLUGINS = (
