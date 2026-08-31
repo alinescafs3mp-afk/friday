@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ctypes
 import hashlib
 import json
 import os
@@ -2062,6 +2063,323 @@ def test_retention_scope_registry_requires_canonical_private_exact_file(
     scope_path.chmod(0o640)
     with pytest.raises(retention.RetentionPlanError, match="^retention_scope_invalid$"):
         retention.load_retention_scope_authority(activation_journal=synthetic_inventory["activation_journal"])
+
+
+@pytest.mark.usefixtures("isolated_operator_transaction_domain")
+def test_scope_provision_is_exact_no_replace_idempotent_and_accepts_gate_evidence(
+    synthetic_inventory: dict[str, Any],
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    scope_path = synthetic_inventory["retention_scope"]
+    scope_path.unlink()
+    evidence_root = _private_directory(tmp_path / "exact-release-evidence")
+    evidence_authority = evidence_root / "quality-gate-summary.json"
+    evidence_authority.write_bytes(b"{" + b"x" * (retention.MAX_JOURNAL_BYTES + 1) + b"}\n")
+    evidence_authority.chmod(0o600)
+    authority_sha256 = _sha256_file(evidence_authority)
+    argv = [
+        "--activation-journal",
+        str(synthetic_inventory["activation_journal"]),
+        "--unit-journal",
+        str(synthetic_inventory["unit_journal"]),
+        "--backup-root",
+        str(synthetic_inventory["backup_root"]),
+        "--inventory-root",
+        str(synthetic_inventory["inventory"]),
+        "--backup-inventory-root",
+        str(synthetic_inventory["backup_root"]),
+        "--evidence-authority",
+        str(evidence_root),
+        str(evidence_authority),
+        authority_sha256,
+        "--provision-scope",
+    ]
+
+    assert retention.main(argv) == 0
+    first_receipt = json.loads(capsys.readouterr().out)
+    first_status = os.lstat(scope_path)
+    assert first_receipt["schema"] == retention.RETENTION_SCOPE_SCHEMA
+    assert first_receipt["file_sha256"] == _sha256_file(scope_path)
+    assert stat_mode(scope_path) == 0o600
+    assert _scope_body(synthetic_inventory)["canonical_evidence_roots"] == [
+        {
+            "authority_path": str(evidence_authority),
+            "authority_sha256": authority_sha256,
+            "path": str(evidence_root),
+        }
+    ]
+
+    assert retention.main(argv) == 0
+    second_receipt = json.loads(capsys.readouterr().out)
+    second_status = os.lstat(scope_path)
+    assert second_receipt == first_receipt
+    assert (second_status.st_dev, second_status.st_ino) == (first_status.st_dev, first_status.st_ino)
+    assert not list(scope_path.parent.glob(f".{scope_path.name}*"))
+
+    assert retention.main([*argv, "--eligible"]) == 2
+    assert json.loads(capsys.readouterr().err) == {
+        "failure_code": "retention_scope_provision_invalid",
+        "schema": retention.RETENTION_SCOPE_SCHEMA,
+        "status": "failed_closed",
+    }
+
+
+@pytest.mark.usefixtures("isolated_operator_transaction_domain")
+def test_scope_provision_never_replaces_different_existing_authority(
+    synthetic_inventory: dict[str, Any],
+    tmp_path: Path,
+) -> None:
+    scope_path = synthetic_inventory["retention_scope"]
+    scope_path.unlink()
+
+    def evidence(name: str) -> retention.CanonicalEvidenceRoot:
+        root = _private_directory(tmp_path / name)
+        authority = root / "summary.json"
+        authority.write_bytes(_canonical({"name": name}) + b"\n")
+        authority.chmod(0o600)
+        return retention.CanonicalEvidenceRoot(
+            path=root,
+            authority_path=authority,
+            authority_sha256=_sha256_file(authority),
+        )
+
+    common = {
+        "activation_journal": synthetic_inventory["activation_journal"],
+        "unit_journal": synthetic_inventory["unit_journal"],
+        "backup_root": synthetic_inventory["backup_root"],
+        "inventory_roots": (synthetic_inventory["inventory"],),
+        "backup_inventory_roots": (synthetic_inventory["backup_root"],),
+    }
+    first = retention.provision_retention_scope_authority(
+        **common,
+        canonical_evidence_roots=(evidence("evidence-a"),),
+    )
+    original = scope_path.read_bytes()
+    original_identity = (os.lstat(scope_path).st_dev, os.lstat(scope_path).st_ino)
+
+    with pytest.raises(retention.RetentionPlanError, match="^retention_scope_conflict$"):
+        retention.provision_retention_scope_authority(
+            **common,
+            canonical_evidence_roots=(evidence("evidence-b"),),
+        )
+    assert scope_path.read_bytes() == original
+    assert (os.lstat(scope_path).st_dev, os.lstat(scope_path).st_ino) == original_identity
+    assert first.receipt["file_sha256"] == hashlib.sha256(original).hexdigest()
+
+
+def test_scope_provision_rolls_back_its_inode_when_post_link_guard_is_lost(
+    synthetic_inventory: dict[str, Any],
+    tmp_path: Path,
+) -> None:
+    scope_path = synthetic_inventory["retention_scope"]
+    scope_path.unlink()
+    evidence_root = _private_directory(tmp_path / "guard-evidence")
+    evidence_authority = evidence_root / "summary.json"
+    evidence_authority.write_bytes(_canonical({"exact": True}) + b"\n")
+    evidence_authority.chmod(0o600)
+
+    def guard() -> None:
+        if scope_path.exists():
+            raise operator.ReleaseFailure("operator_transaction_lock_lost")
+
+    with pytest.raises(operator.ReleaseFailure, match="^operator_transaction_lock_lost$"):
+        retention._provision_retention_scope_authority_locked(  # noqa: SLF001
+            activation_journal=synthetic_inventory["activation_journal"],
+            unit_journal=synthetic_inventory["unit_journal"],
+            backup_root=synthetic_inventory["backup_root"],
+            inventory_roots=(synthetic_inventory["inventory"],),
+            backup_inventory_roots=(synthetic_inventory["backup_root"],),
+            canonical_evidence_roots=(
+                retention.CanonicalEvidenceRoot(
+                    path=evidence_root,
+                    authority_path=evidence_authority,
+                    authority_sha256=_sha256_file(evidence_authority),
+                ),
+            ),
+            namespace_guard=guard,
+        )
+    assert not scope_path.exists()
+    assert not list(scope_path.parent.glob(f".{scope_path.name}*"))
+
+
+def test_scope_provision_rejects_evidence_larger_than_its_closed_bound(
+    synthetic_inventory: dict[str, Any],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    synthetic_inventory["retention_scope"].unlink()
+    evidence_root = _private_directory(tmp_path / "oversize-evidence")
+    evidence_authority = evidence_root / "summary.json"
+    evidence_authority.write_bytes(b"0123456789")
+    evidence_authority.chmod(0o600)
+    monkeypatch.setattr(retention, "MAX_CANONICAL_EVIDENCE_AUTHORITY_BYTES", 9)
+
+    with pytest.raises(retention.RetentionPlanError, match="^retention_scope_provision_invalid$"):
+        retention._provision_retention_scope_authority_locked(  # noqa: SLF001
+            activation_journal=synthetic_inventory["activation_journal"],
+            unit_journal=synthetic_inventory["unit_journal"],
+            backup_root=synthetic_inventory["backup_root"],
+            inventory_roots=(synthetic_inventory["inventory"],),
+            backup_inventory_roots=(synthetic_inventory["backup_root"],),
+            canonical_evidence_roots=(
+                retention.CanonicalEvidenceRoot(
+                    path=evidence_root,
+                    authority_path=evidence_authority,
+                    authority_sha256=_sha256_file(evidence_authority),
+                ),
+            ),
+            namespace_guard=lambda: None,
+        )
+    assert not synthetic_inventory["retention_scope"].exists()
+
+
+def test_scope_provision_accepts_evidence_at_its_closed_bound(
+    synthetic_inventory: dict[str, Any],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    scope_path = synthetic_inventory["retention_scope"]
+    scope_path.unlink()
+    evidence_root = _private_directory(tmp_path / "boundary-evidence")
+    evidence_authority = evidence_root / "summary.json"
+    evidence_authority.write_bytes(b"0123456789")
+    evidence_authority.chmod(0o600)
+    monkeypatch.setattr(retention, "MAX_CANONICAL_EVIDENCE_AUTHORITY_BYTES", 10)
+
+    result = retention._provision_retention_scope_authority_locked(  # noqa: SLF001
+        activation_journal=synthetic_inventory["activation_journal"],
+        unit_journal=synthetic_inventory["unit_journal"],
+        backup_root=synthetic_inventory["backup_root"],
+        inventory_roots=(synthetic_inventory["inventory"],),
+        backup_inventory_roots=(synthetic_inventory["backup_root"],),
+        canonical_evidence_roots=(
+            retention.CanonicalEvidenceRoot(
+                path=evidence_root,
+                authority_path=evidence_authority,
+                authority_sha256=_sha256_file(evidence_authority),
+            ),
+        ),
+        namespace_guard=lambda: None,
+    )
+
+    assert result.receipt["file_sha256"] == _sha256_file(scope_path)
+
+
+@pytest.mark.usefixtures("isolated_operator_transaction_domain")
+def test_scope_provision_cannot_split_the_global_release_lock(
+    synthetic_inventory: dict[str, Any],
+    tmp_path: Path,
+) -> None:
+    scope_path = synthetic_inventory["retention_scope"]
+    scope_path.unlink()
+    evidence_root = _private_directory(tmp_path / "locked-evidence")
+    evidence_authority = evidence_root / "summary.json"
+    evidence_authority.write_bytes(_canonical({"exact": True}) + b"\n")
+    evidence_authority.chmod(0o600)
+    kwargs = {
+        "activation_journal": synthetic_inventory["activation_journal"],
+        "unit_journal": synthetic_inventory["unit_journal"],
+        "backup_root": synthetic_inventory["backup_root"],
+        "inventory_roots": (synthetic_inventory["inventory"],),
+        "backup_inventory_roots": (synthetic_inventory["backup_root"],),
+        "canonical_evidence_roots": (
+            retention.CanonicalEvidenceRoot(
+                path=evidence_root,
+                authority_path=evidence_authority,
+                authority_sha256=_sha256_file(evidence_authority),
+            ),
+        ),
+    }
+
+    with (
+        operator.OperatorTransactionLock(
+            synthetic_inventory["activation_journal"].parent / "immutable-release-operator.v1.lock"
+        ),
+        pytest.raises(
+            retention.RetentionPlanError,
+            match="^retention_scope_provision_invalid$",
+        ),
+    ):
+        retention.provision_retention_scope_authority(**kwargs)
+    assert not scope_path.exists()
+
+
+@pytest.mark.parametrize("same_payload", (True, False))
+@pytest.mark.usefixtures("isolated_operator_transaction_domain")
+def test_scope_provision_authenticates_an_exact_link_racer_without_overwrite(
+    synthetic_inventory: dict[str, Any],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    same_payload: bool,
+) -> None:
+    scope_path = synthetic_inventory["retention_scope"]
+    scope_path.unlink()
+    evidence_root = _private_directory(tmp_path / f"race-evidence-{same_payload}")
+    evidence_authority = evidence_root / "summary.json"
+    evidence_authority.write_bytes(_canonical({"exact": True}) + b"\n")
+    evidence_authority.chmod(0o600)
+    real_libc = ctypes.CDLL(None, use_errno=True)
+    real_linkat = real_libc.linkat
+    real_linkat.argtypes = [ctypes.c_int, ctypes.c_char_p, ctypes.c_int, ctypes.c_char_p, ctypes.c_int]
+    real_linkat.restype = ctypes.c_int
+    raced_payload: list[bytes] = []
+
+    class RacingLinkat:
+        argtypes: list[Any] = []
+        restype: Any = None
+
+        def __call__(
+            self,
+            olddirfd: int,
+            oldpath: bytes,
+            newdirfd: int,
+            newname: bytes,
+            flags: int,
+        ) -> int:
+            source = Path(os.fsdecode(oldpath)).read_bytes()
+            competitor = source if same_payload else b"!" + source[1:]
+            descriptor = os.open(
+                os.fsdecode(newname),
+                os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_CLOEXEC", 0),
+                0o600,
+                dir_fd=newdirfd,
+            )
+            try:
+                assert os.write(descriptor, competitor) == len(competitor)
+                os.fsync(descriptor)
+            finally:
+                os.close(descriptor)
+            os.fsync(newdirfd)
+            raced_payload.append(competitor)
+            return int(real_linkat(olddirfd, oldpath, newdirfd, newname, flags))
+
+    class RacingLibc:
+        linkat = RacingLinkat()
+
+    monkeypatch.setattr(retention.ctypes, "CDLL", lambda *_args, **_kwargs: RacingLibc())
+    kwargs = {
+        "activation_journal": synthetic_inventory["activation_journal"],
+        "unit_journal": synthetic_inventory["unit_journal"],
+        "backup_root": synthetic_inventory["backup_root"],
+        "inventory_roots": (synthetic_inventory["inventory"],),
+        "backup_inventory_roots": (synthetic_inventory["backup_root"],),
+        "canonical_evidence_roots": (
+            retention.CanonicalEvidenceRoot(
+                path=evidence_root,
+                authority_path=evidence_authority,
+                authority_sha256=_sha256_file(evidence_authority),
+            ),
+        ),
+    }
+    if same_payload:
+        result = retention.provision_retention_scope_authority(**kwargs)
+        assert result.receipt["file_sha256"] == _sha256_file(scope_path)
+    else:
+        with pytest.raises(retention.RetentionPlanError, match="^retention_scope_conflict$"):
+            retention.provision_retention_scope_authority(**kwargs)
+    assert len(raced_payload) == 1
+    assert scope_path.read_bytes() == raced_payload[0]
 
 
 def test_apply_rejects_retention_scope_inode_or_body_drift_before_mutation(

@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import argparse
 import ctypes
+import errno
 import fcntl
 import grp
 import hashlib
@@ -22,7 +23,7 @@ import pwd
 import stat
 import subprocess
 import sys
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from contextlib import suppress
 from dataclasses import dataclass
 from pathlib import Path
@@ -49,6 +50,7 @@ PRIVILEGED_SCOPE_AUTHORITY = Path("/usr/libexec/friday/release_artifact_proc_sco
 MAX_JOURNAL_BYTES = 1 << 20
 MAX_RETENTION_SCOPE_BYTES = 1 << 20
 MAX_RELEASE_MANIFEST_BYTES = 64 << 20
+MAX_CANONICAL_EVIDENCE_AUTHORITY_BYTES = 64 << 20
 MAX_BACKUP_FILE_BYTES = 1 << 40
 MAX_INVENTORY_ENTRIES = 1_000_000
 MAX_INVENTORY_DEPTH = 256
@@ -56,6 +58,8 @@ MAX_DELETE_CANDIDATES_PER_PLAN = 16
 MAX_DIRECT_INVENTORY_TARGETS = 65_536
 MAX_AGGREGATE_INVENTORY_ENTRIES = 2_000_000
 _AT_EMPTY_PATH = 0x1000
+_AT_FDCWD = -100
+_AT_SYMLINK_FOLLOW = 0x400
 _AT_SYMLINK_NOFOLLOW = 0x100
 _STATX_MNT_ID_UNIQUE = 0x4000
 _FS_IOC_GETFLAGS = 0x80086601
@@ -765,6 +769,210 @@ def load_retention_scope_authority(*, activation_journal: Path) -> RetentionScop
         inventory_roots=inventory_roots,
         backup_inventory_roots=backup_inventory_roots,
         canonical_evidence_roots=tuple(evidence),
+    )
+
+
+def provision_retention_scope_authority(
+    *,
+    activation_journal: Path,
+    unit_journal: Path,
+    backup_root: Path,
+    inventory_roots: Sequence[Path],
+    backup_inventory_roots: Sequence[Path],
+    canonical_evidence_roots: Sequence[CanonicalEvidenceRoot],
+) -> RetentionScopeAuthority:
+    """Serialize exact one-time scope publication with every release mutation."""
+
+    code = "retention_scope_provision_invalid"
+    activation_path = _absolute_lexical(activation_journal, code=code)
+    state_directory = _strict_private_directory(activation_path.parent, code=code)
+    try:
+        with release_operator.OperatorTransactionLock(
+            state_directory / "immutable-release-operator.v1.lock"
+        ) as transaction_lock:
+            transaction_lock.assert_held()
+            result = _provision_retention_scope_authority_locked(
+                activation_journal=activation_path,
+                unit_journal=unit_journal,
+                backup_root=backup_root,
+                inventory_roots=inventory_roots,
+                backup_inventory_roots=backup_inventory_roots,
+                canonical_evidence_roots=canonical_evidence_roots,
+                namespace_guard=transaction_lock.assert_held,
+            )
+            transaction_lock.assert_held()
+            return result
+    except RetentionPlanError:
+        raise
+    except release_operator.ReleaseFailure as exc:
+        raise RetentionPlanError(code) from exc
+
+
+def _provision_retention_scope_authority_locked(
+    *,
+    activation_journal: Path,
+    unit_journal: Path,
+    backup_root: Path,
+    inventory_roots: Sequence[Path],
+    backup_inventory_roots: Sequence[Path],
+    canonical_evidence_roots: Sequence[CanonicalEvidenceRoot],
+    namespace_guard: Callable[[], None],
+) -> RetentionScopeAuthority:
+    """Publish the one exact production scope without replacing existing authority.
+
+    Every root and evidence file is supplied explicitly and authenticated before
+    publication.  A retry may reuse byte-identical authority, but a different
+    scope can never replace the first durable registry.
+    """
+
+    code = "retention_scope_provision_invalid"
+    activation_path = _absolute_lexical(activation_journal, code=code)
+    unit_path = _absolute_lexical(unit_journal, code=code)
+    if (
+        activation_path.name != "immutable-release-activation.v1.json"
+        or unit_path.name != "immutable-release-unit-install.v1.json"
+        or activation_path.parent != unit_path.parent
+    ):
+        raise RetentionPlanError(code)
+    state_directory = _strict_private_directory(activation_path.parent, code=code)
+    namespace_guard()
+
+    inventory_values = tuple(inventory_roots)
+    backup_inventory_values = tuple(backup_inventory_roots)
+    evidence_values = tuple(canonical_evidence_roots)
+    if (
+        not inventory_values
+        or not backup_inventory_values
+        or not evidence_values
+        or len(inventory_values) > 128
+        or len(backup_inventory_values) > 128
+        or len(evidence_values) > 128
+    ):
+        raise RetentionPlanError(code)
+    try:
+        inventory = tuple(_strict_inventory_root(path)[0] for path in inventory_values)
+        backup_inventory = tuple(_strict_inventory_root(path)[0] for path in backup_inventory_values)
+        strict_backup = _strict_inventory_root(backup_root)[0]
+    except (AttributeError, TypeError, RetentionPlanError) as exc:
+        raise RetentionPlanError(code) from exc
+    if (
+        inventory != tuple(sorted(set(inventory), key=str))
+        or backup_inventory != tuple(sorted(set(backup_inventory), key=str))
+        or strict_backup not in backup_inventory
+    ):
+        raise RetentionPlanError(code)
+
+    protected_roots = (state_directory, *inventory, *backup_inventory)
+    for index, root in enumerate(protected_roots):
+        for other in protected_roots[index + 1 :]:
+            if root == other:
+                raise RetentionPlanError(code)
+            if root in other.parents or other in root.parents:
+                raise RetentionPlanError(code)
+
+    evidence: list[CanonicalEvidenceRoot] = []
+    evidence_roots: list[Path] = []
+    evidence_authorities: set[Path] = set()
+    for value in evidence_values:
+        if not isinstance(value, CanonicalEvidenceRoot) or not _is_hex64(value.authority_sha256):
+            raise RetentionPlanError(code)
+        try:
+            root = _strict_inventory_root(value.path)[0]
+            authority = _absolute_lexical(value.authority_path, code=code)
+        except RetentionPlanError as exc:
+            raise RetentionPlanError(code) from exc
+        if (
+            root not in authority.parents
+            or authority in evidence_authorities
+            or any(
+                root == existing or root in existing.parents or existing in root.parents
+                for existing in evidence_roots
+            )
+            or any(
+                root == existing or root in existing.parents or existing in root.parents
+                for existing in protected_roots
+            )
+        ):
+            raise RetentionPlanError(code)
+        observed = _stable_file_sha256(
+            authority,
+            private=False,
+            code=code,
+            maximum_bytes=MAX_CANONICAL_EVIDENCE_AUTHORITY_BYTES,
+        )
+        if observed != value.authority_sha256:
+            raise RetentionPlanError(code)
+        evidence.append(
+            CanonicalEvidenceRoot(
+                path=root,
+                authority_path=authority,
+                authority_sha256=value.authority_sha256,
+            )
+        )
+        evidence_roots.append(root)
+        evidence_authorities.add(authority)
+        namespace_guard()
+    if tuple(evidence) != tuple(
+        sorted(evidence, key=lambda item: (str(item.path), str(item.authority_path), item.authority_sha256))
+    ):
+        raise RetentionPlanError(code)
+
+    activation = _read_activation_journal(activation_path, strict_backup)
+    namespace_guard()
+    unit = _read_unit_journal(unit_path)
+    namespace_guard()
+    if (
+        activation.error
+        or activation.state is None
+        or activation.state.get("phase") != "clear"
+        or unit.error
+        or unit.state is None
+        or unit.state.get("phase") != "complete"
+    ):
+        raise RetentionPlanError(code)
+
+    body = {
+        "backup_inventory_roots": [str(path) for path in backup_inventory],
+        "backup_root": str(strict_backup),
+        "canonical_evidence_roots": [
+            {
+                "authority_path": str(item.authority_path),
+                "authority_sha256": item.authority_sha256,
+                "path": str(item.path),
+            }
+            for item in evidence
+        ],
+        "inventory_roots": [str(path) for path in inventory],
+        "schema": RETENTION_SCOPE_SCHEMA,
+    }
+    raw = _canonical_json(body) + b"\n"
+    if len(raw) > MAX_RETENTION_SCOPE_BYTES:
+        raise RetentionPlanError(code)
+    scope_path = state_directory / RETENTION_SCOPE_NAME
+
+    def require_exact() -> RetentionScopeAuthority:
+        namespace_guard()
+        try:
+            loaded = load_retention_scope_authority(activation_journal=activation_path)
+        except RetentionPlanError as exc:
+            raise RetentionPlanError("retention_scope_conflict") from exc
+        if (
+            loaded.backup_root != strict_backup
+            or loaded.inventory_roots != inventory
+            or loaded.backup_inventory_roots != backup_inventory
+            or loaded.canonical_evidence_roots != tuple(evidence)
+            or loaded.receipt.get("file_sha256") != hashlib.sha256(raw).hexdigest()
+        ):
+            raise RetentionPlanError("retention_scope_conflict")
+        namespace_guard()
+        return loaded
+
+    namespace_guard()
+    return _publish_retention_scope_no_replace(
+        scope_path,
+        raw,
+        namespace_guard=namespace_guard,
+        validate=require_exact,
     )
 
 
@@ -2025,6 +2233,7 @@ def _normalize_authority_bindings(
                 authority_path,
                 private=False,
                 code="canonical_evidence_invalid",
+                maximum_bytes=MAX_CANONICAL_EVIDENCE_AUTHORITY_BYTES,
             )
             if observed_authority_sha256 != evidence.authority_sha256:
                 error = error or "canonical_evidence_invalid"
@@ -2691,6 +2900,7 @@ def build_retention_authority_bindings(
             item.authority_path,
             private=False,
             code="canonical_evidence_invalid",
+            maximum_bytes=MAX_CANONICAL_EVIDENCE_AUTHORITY_BYTES,
         )
         if observed != item.authority_sha256:
             raise RetentionPlanError("canonical_evidence_invalid")
@@ -3680,6 +3890,149 @@ def build_eligible_retention_plan(
     return plan
 
 
+def _publish_retention_scope_no_replace(
+    path: Path,
+    payload: bytes,
+    *,
+    namespace_guard: Callable[[], None],
+    validate: Callable[[], RetentionScopeAuthority],
+) -> RetentionScopeAuthority:
+    """Commit the singleton through an anonymous inode and one no-replace link.
+
+    There is no named staging interval: a crash before ``linkat`` leaves no
+    authority, and a crash after it leaves the complete fsynced authority.  If
+    the held release namespace is lost before validation, this call removes
+    only the inode it just linked and reports failure.
+    """
+
+    code = "retention_scope_provision_invalid"
+    lexical = _absolute_lexical(path, code=code)
+    if not lexical.name or lexical.name in {".", ".."}:
+        raise RetentionPlanError(code)
+    parent_fd, parent_parts, parent_identities = _open_absolute_directory_chain(
+        lexical.parent,
+        code=code,
+    )
+    descriptor = -1
+    linked_identity: tuple[int, int] | None = None
+    committed = False
+
+    def require_parent() -> None:
+        _require_pinned_directory(
+            parent_fd,
+            parent_parts,
+            parent_identities,
+            code=code,
+            private=True,
+        )
+        namespace_guard()
+
+    def existing() -> RetentionScopeAuthority:
+        require_parent()
+        result = validate()
+        require_parent()
+        return result
+
+    try:
+        require_parent()
+        try:
+            os.stat(lexical.name, dir_fd=parent_fd, follow_symlinks=False)
+        except FileNotFoundError:
+            pass
+        except OSError as exc:
+            raise RetentionPlanError(code) from exc
+        else:
+            return existing()
+
+        flags = os.O_RDWR | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_TMPFILE", 0)
+        if not getattr(os, "O_TMPFILE", 0):  # pragma: no cover - production is Linux.
+            raise RetentionPlanError("retention_scope_atomic_publish_unavailable")
+        try:
+            descriptor = os.open(".", flags, 0o600, dir_fd=parent_fd)
+        except OSError as exc:
+            raise RetentionPlanError("retention_scope_atomic_publish_unavailable") from exc
+        view = memoryview(payload)
+        written = 0
+        while written < len(view):
+            count = os.write(descriptor, view[written:])
+            if count <= 0:
+                raise OSError("short write")
+            written += count
+        os.fchmod(descriptor, 0o600)
+        os.fsync(descriptor)
+        os.lseek(descriptor, 0, os.SEEK_SET)
+        observed = bytearray()
+        remaining = len(payload) + 1
+        while remaining:
+            chunk = os.read(descriptor, min(1 << 20, remaining))
+            if not chunk:
+                break
+            observed.extend(chunk)
+            remaining -= len(chunk)
+        status = os.fstat(descriptor)
+        if (
+            bytes(observed) != payload
+            or not stat.S_ISREG(status.st_mode)
+            or status.st_uid != os.geteuid()
+            or status.st_nlink != 0
+            or stat.S_IMODE(status.st_mode) != 0o600
+            or status.st_size != len(payload)
+        ):
+            raise RetentionPlanError(code)
+        require_parent()
+        libc = ctypes.CDLL(None, use_errno=True)
+        try:
+            linkat = libc.linkat
+        except AttributeError as exc:  # pragma: no cover - production is Linux.
+            raise RetentionPlanError("retention_scope_atomic_publish_unavailable") from exc
+        linkat.argtypes = [ctypes.c_int, ctypes.c_char_p, ctypes.c_int, ctypes.c_char_p, ctypes.c_int]
+        linkat.restype = ctypes.c_int
+        ctypes.set_errno(0)
+        result = linkat(
+            _AT_FDCWD,
+            os.fsencode(f"/proc/self/fd/{descriptor}"),
+            parent_fd,
+            os.fsencode(lexical.name),
+            _AT_SYMLINK_FOLLOW,
+        )
+        if result != 0:
+            error = ctypes.get_errno()
+            if error == errno.EEXIST:
+                return existing()
+            raise RetentionPlanError("retention_scope_atomic_publish_failed") from OSError(
+                error,
+                os.strerror(error),
+            )
+        linked_identity = _inode_identity(status)
+        os.fsync(parent_fd)
+        final = os.stat(lexical.name, dir_fd=parent_fd, follow_symlinks=False)
+        if (
+            _inode_identity(final) != linked_identity
+            or _inode_identity(os.fstat(descriptor)) != linked_identity
+            or final.st_nlink != 1
+        ):
+            raise RetentionPlanError(code)
+        result_scope = existing()
+        committed = True
+        return result_scope
+    except RetentionPlanError:
+        raise
+    except (OSError, ValueError) as exc:
+        raise RetentionPlanError(code) from exc
+    finally:
+        if linked_identity is not None and not committed:
+            try:
+                final = os.stat(lexical.name, dir_fd=parent_fd, follow_symlinks=False)
+                if _inode_identity(final) == linked_identity:
+                    os.unlink(lexical.name, dir_fd=parent_fd)
+                    os.fsync(parent_fd)
+            except OSError:
+                pass
+        if descriptor >= 0:
+            os.close(descriptor)
+        os.close(parent_fd)
+
+
 def _write_atomic(path: Path, payload: bytes) -> None:
     lexical = _absolute_lexical(path, code="output_path_invalid")
     if not lexical.name:
@@ -3807,6 +4160,7 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--inventory-root", required=True, action="append", type=Path)
     parser.add_argument("--backup-inventory-root", action="append", default=[], type=Path)
     parser.add_argument("--eligible", action="store_true")
+    parser.add_argument("--provision-scope", action="store_true")
     parser.add_argument(
         "--evidence-authority",
         action="append",
@@ -3828,15 +4182,27 @@ def _parser() -> argparse.ArgumentParser:
 def main(argv: Sequence[str] | None = None) -> int:
     args = _parser().parse_args(argv)
     try:
-        if args.eligible:
-            evidence = tuple(
-                CanonicalEvidenceRoot(
-                    path=Path(values[0]),
-                    authority_path=Path(values[1]),
-                    authority_sha256=values[2],
-                )
-                for values in args.evidence_authority
+        evidence = tuple(
+            CanonicalEvidenceRoot(
+                path=Path(values[0]),
+                authority_path=Path(values[1]),
+                authority_sha256=values[2],
             )
+            for values in args.evidence_authority
+        )
+        if args.provision_scope:
+            if args.eligible or args.reviewed_scratch or args.output is not None:
+                raise RetentionPlanError("retention_scope_provision_invalid")
+            scope = provision_retention_scope_authority(
+                activation_journal=args.activation_journal,
+                unit_journal=args.unit_journal,
+                backup_root=args.backup_root,
+                inventory_roots=args.inventory_root,
+                backup_inventory_roots=args.backup_inventory_root,
+                canonical_evidence_roots=evidence,
+            )
+            payload = _canonical_json(scope.receipt) + b"\n"
+        elif args.eligible:
             reviewed_scratch = tuple(
                 ReviewedScratchTarget(path=Path(values[0]), inventory_sha256=values[1])
                 for values in args.reviewed_scratch
@@ -3850,6 +4216,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 canonical_evidence_roots=evidence,
                 reviewed_scratch_targets=reviewed_scratch,
             )
+            payload = _canonical_json(plan) + b"\n"
         else:
             if args.evidence_authority or args.reviewed_scratch:
                 raise RetentionPlanError("retention_authority_unbound")
@@ -3860,8 +4227,8 @@ def main(argv: Sequence[str] | None = None) -> int:
                 inventory_roots=args.inventory_root,
                 backup_inventory_roots=args.backup_inventory_root,
             )
-        payload = _canonical_json(plan) + b"\n"
-        if args.output is None:
+            payload = _canonical_json(plan) + b"\n"
+        if args.provision_scope or args.output is None:
             sys.stdout.buffer.write(payload)
             sys.stdout.buffer.flush()
         else:
@@ -3878,7 +4245,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         ):
             code = "retention_unexpected_failure"
         failure = {
-            "schema": PLAN_SCHEMA,
+            "schema": RETENTION_SCOPE_SCHEMA if args.provision_scope else PLAN_SCHEMA,
             "status": "failed_closed",
             "failure_code": code,
         }
@@ -3906,6 +4273,7 @@ __all__ = [
     "build_retention_authority_bindings",
     "load_retention_scope_authority",
     "plan_release_artifact_retention",
+    "provision_retention_scope_authority",
 ]
 
 
