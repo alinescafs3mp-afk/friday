@@ -48,8 +48,9 @@ either merged here or discarded before that source is removed.
 ## Active package
 
 S4-R5 measured conversation recall and bounded matched-message excerpt retention
-are live. S6-R3 exact journey evidence is live; P0G Gate Diet is now the active
-implementation package before S4-R6. After P0G, Mainline continues P0H retention.
+are live. S6-R3 exact journey evidence is live; P0G Gate Diet is complete on
+`main` without a production activation. P0H bounded retention is now the active
+Mainline package before S4-R6.
 Keep the released S3 path in shadow
 until its genuine production witness exists; then promote only the
 current-file-plus-current-public-web journey through the already released
@@ -85,6 +86,10 @@ owner/device-bound.
 - Never overlap our full native/UI gate with SolGoodman's full gate. Check the
   active gate processes first; while his gate owns the machine, continue useful
   implementation, review or focused tests and wait for the full-gate slot.
+- During implementation use focused tests plus static/change evidence. Run the
+  full exact-release gate only at a clean release boundary or after a shared
+  release/schema/runtime contract changes; reuse immutable commit-bound evidence
+  when the certified product artifact is unchanged.
 - Run every full gate from a short private `mktemp` directory under disk-backed
   `/var/tmp`, never quota-limited `/tmp`; remove that exact directory as soon as
   its evidence is captured. Keep the path short enough for Unix sockets.
@@ -93,9 +98,18 @@ owner/device-bound.
 
 ### P0G — canonical Gate Diet
 
-Status: active with SolGoodman after the `0.207.84` S6-R3 release and before
-S4-R6; Mainline retains the full-gate slot through the post-release evidence
-commit.
+Status: complete on `main` through implementation head
+`31c48d2541ccfce1c932f63ece28536c9fc346c3`; production remains `0.207.84` and
+was not activated for this tooling-only package.
+
+Evidence: certifying head `60ce37191bce3fd311b617bf9b7ae3e885dda9ac`
+passed 24,313 exact nodes with zero skips/retries in 473.833 seconds; summary
+SHA-256 `34351e090e1aeb3a7d1ee3d0544f07c2669a819e48c7842b32845de0ff884cc6`.
+The non-certifying same-wheel projection
+`3da073dc93dfdbf6d8e59a3294f7c830b4e96a5a` then ran 24,315 nodes against the
+exact `0.207.84` wheel `954641e3…` in 475.033 seconds at topology 20/4, versus
+744.736 seconds at 12/1: 36.2% lower wall time with zero retries. Measurement
+summary SHA-256 `043b473402d0f2970b2341f1af2f0d6910f4cb90a2a8a1447ba34a95fc6a94bb`.
 
 Goal: reduce mandatory gate time, disk churn and maintenance surface without
 removing any unique release-blocking invariant. Regression testing, exact
@@ -129,7 +143,10 @@ invariant map proves equivalent coverage.
 
 ### P0H — bounded release-artifact retention
 
-Status: queued after P0G and before further non-critical release work.
+Status: active after P0G and before further non-critical release work. The
+reader-first precursor and pair-bearing writer are staged separately; no
+retention apply or production mutation is authorized until durable fallback,
+scope, privileged probe and exact dry-run evidence are present.
 
 Goal: replace the unbounded release polygon with a small recoverable set. The
 current inventory is roughly 54 GB of backup data, 29 GB of wheel-only releases
