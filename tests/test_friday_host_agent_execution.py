@@ -170,6 +170,7 @@ def _plan(
     *,
     target: str = "192.168.1.7",
     policy: NetworkPolicy = _PRIVATE_NETWORK_POLICY,
+    now: int | None = None,
 ):  # noqa: ANN202
     adapter = NmapAdapter()
     snapshot = normalize_network_targets(
@@ -181,7 +182,7 @@ def _plan(
         {"target_snapshot_digest": snapshot.digest},
         target_snapshot=snapshot,
     )
-    now = int(time.time())
+    selected_now = int(time.time()) if now is None else now
     return create_action_plan(
         plan_id="plan:execution:test",
         actor_user_id="owner",
@@ -195,7 +196,7 @@ def _plan(
         normalized_arguments=arguments,
         executable_attestation=attestation,
         target_snapshot=snapshot.to_payload(),
-        now=now,
+        now=selected_now,
         ttl_sec=300,
     )
 
@@ -951,7 +952,12 @@ def test_public_network_proof_claim_survives_restart_and_never_reexecutes(
         network_policy=_PUBLIC_NETWORK_POLICY,
         clock=lambda: current,
     )
-    plan = _plan(_attestation(), target="8.8.8.8", policy=_PUBLIC_NETWORK_POLICY)
+    plan = _plan(
+        _attestation(),
+        target="8.8.8.8",
+        policy=_PUBLIC_NETWORK_POLICY,
+        now=current,
+    )
     proof = _network_proof(plan, issued_at=current, expires_at=current + 1)
     first = _call(
         daemon,
@@ -1037,7 +1043,12 @@ def test_public_network_proof_is_rechecked_after_admission_immediately_before_ru
         network_policy=_PUBLIC_NETWORK_POLICY,
         clock=lambda: next(clock_values),
     )
-    plan = _plan(_attestation(), target="8.8.8.8", policy=_PUBLIC_NETWORK_POLICY)
+    plan = _plan(
+        _attestation(),
+        target="8.8.8.8",
+        policy=_PUBLIC_NETWORK_POLICY,
+        now=current,
+    )
     proof = _network_proof(plan, issued_at=current, expires_at=current + 2)
 
     response = _call(
