@@ -49,9 +49,8 @@ either merged here or discarded before that source is removed.
 
 S4-R5 measured conversation recall and bounded matched-message excerpt retention
 are live. S6-R3 exact journey evidence is live; P0G Gate Diet is now the active
-implementation package before S4-R6. After P0G, SolGoodman takes the isolated
-Gemini-first web-search package while Mainline continues P0H retention; their write
-scopes must not overlap. Keep the released S3 path in shadow
+implementation package before S4-R6. After P0G, Mainline continues P0H retention.
+Keep the released S3 path in shadow
 until its genuine production witness exists; then promote only the
 current-file-plus-current-public-web journey through the already released
 fail-closed activation gate. The secondary runtime admission is now refreshed
@@ -127,35 +126,6 @@ the exact-candidate release result is unchanged; before/after measurements are
 published; no hidden skip or permissive fallback is introduced. Target at
 least 30% lower mandatory wall time, with larger cuts accepted only when the
 invariant map proves equivalent coverage.
-
-### P0W — Gemini-first grounded web search
-
-Status: queued for SolGoodman immediately after P0G, isolated from Mainline P0H.
-
-Goal: make Gemini 3.6 Flash with advanced reasoning and Google Search grounding
-the first provider behind Friday's existing canonical web-search seam. The current
-Yandex Search API remains the immediate same-invocation fallback. This covers both
-explicit search requests and the existing model-owned decision to call web search;
-it does not create a second tool owner or publication path.
-
-1. Send only the already-authorized public query projection to Gemini. Preserve
-   private-lineage outbound denial, inherited deadline, quota, locale/domain,
-   freshness, SSRF and source-class policy before either provider is called.
-2. Normalize grounded Gemini results and citations into the current web evidence
-   contract. Provider prose and reasoning remain untrusted and are never exposed as
-   authority, raw reasoning or diagnostics.
-3. Fall through to Yandex exactly once on bounded timeout, transport failure,
-   refusal, throttling, 5xx, malformed response or invalid grounding metadata.
-   Preserve honest-empty semantics and never retry after deadline exhaustion.
-4. Bind the model ID, thinking profile and operator-local secret through existing
-   code-owned configuration; never copy, log or commit the API key.
-
-Acceptance: successful Gemini grounding is cited through the existing evidence
-contract; forced Gemini failure completes through Yandex within the original
-deadline; denied private queries call neither provider; adversarial coverage closes
-timeout, 429/5xx, malformed/hostile citations, duplicates, filter drift and exhausted
-deadlines; live acceptance proves both success and failover without credential
-exposure or user-visible provider internals.
 
 ### P0H — bounded release-artifact retention
 
