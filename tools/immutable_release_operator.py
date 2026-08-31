@@ -71,7 +71,10 @@ RELEASE_RETENTION_TOOLCHAIN_MANIFEST_SCHEMA = (
 BUILD_RECEIPT_PROFILE_HISTORICAL_V1 = "historical-v1"
 BUILD_RECEIPT_PROFILE_HISTORICAL_V1_READER = "historical-v1-reader"
 BUILD_RECEIPT_PROFILE_P0H_RETENTION = "p0h-retention-v1"
-_BUILD_RECEIPT_BUILD_PROFILES = (BUILD_RECEIPT_PROFILE_HISTORICAL_V1_READER,)
+_BUILD_RECEIPT_BUILD_PROFILES = (
+    BUILD_RECEIPT_PROFILE_HISTORICAL_V1_READER,
+    BUILD_RECEIPT_PROFILE_P0H_RETENTION,
+)
 RUNTIME_CONFIG_SCHEMA_V1 = "friday.immutable-release-runtime-config.v1"
 RUNTIME_CONFIG_SCHEMA_V2 = "friday.immutable-release-runtime-config.v2"
 RUNTIME_CONFIG_SCHEMA_V3 = "friday.immutable-release-runtime-config.v3"
@@ -7645,13 +7648,14 @@ def _build_release_locked(
         anchor=spec.anchor,
         env_file=spec.env_file,
     )
-    _canonical_operator_state_dir(spec.friday_home, spec.state_dir)
+    state_dir = _canonical_operator_state_dir(spec.friday_home, spec.state_dir)
     commit = _closed_commit(spec.commit)
-    if (
-        spec.build_receipt_profile not in _BUILD_RECEIPT_BUILD_PROFILES
-        or spec.build_receipt_profile != BUILD_RECEIPT_PROFILE_HISTORICAL_V1_READER
-    ):
+    if spec.build_receipt_profile not in _BUILD_RECEIPT_BUILD_PROFILES:
         raise ReleaseFailure("release_build_receipt_profile_invalid")
+    pair_bearing_receipt = spec.build_receipt_profile == BUILD_RECEIPT_PROFILE_P0H_RETENTION
+    lock_scope_sha256 = (
+        _operator_transaction_lock_scope_sha256(state_dir) if pair_bearing_receipt else ""
+    )
     if _VERSION.fullmatch(spec.version) is None or type(spec.max_schema) is not int or spec.max_schema <= 0:
         raise ReleaseFailure("release_metadata_invalid")
     wheel = _regular_file(spec.wheel, maximum_bytes=MAX_WHEEL_BYTES, code="wheel_invalid")
@@ -7846,6 +7850,21 @@ def _build_release_locked(
             "venv_relocation_contract": VENV_RELOCATION_CONTRACT,
             "engineer_command_lifecycle_contract": ENGINEER_COMMAND_LIFECYCLE_CONTRACT,
         }
+        if pair_bearing_receipt:
+            metadata.update(
+                {
+                    "operator_transaction_lock_scope_contract": (
+                        OPERATOR_TRANSACTION_LOCK_SCOPE_CONTRACT
+                    ),
+                    "operator_transaction_lock_scope_sha256": lock_scope_sha256,
+                    "release_retention_toolchain_contract": (
+                        RELEASE_RETENTION_TOOLCHAIN_CONTRACT
+                    ),
+                    "release_retention_toolchain_manifest_sha256": (
+                        retention_toolchain_manifest_sha256
+                    ),
+                }
+            )
         (artifacts / "immutable-release.json").write_bytes(_canonical_json(metadata) + b"\n")
         provisional = ReleaseIdentity(
             root=staging,
@@ -7858,7 +7877,17 @@ def _build_release_locked(
             obsidian_cutover_contract=OBSIDIAN_CUTOVER_CONTRACT,
             secondary_product_runner_sha256=product_runner_sha256,
             engineer_command_lifecycle_contract=ENGINEER_COMMAND_LIFECYCLE_CONTRACT,
-            build_receipt_profile=BUILD_RECEIPT_PROFILE_HISTORICAL_V1_READER,
+            operator_transaction_lock_scope_contract=(
+                OPERATOR_TRANSACTION_LOCK_SCOPE_CONTRACT if pair_bearing_receipt else ""
+            ),
+            operator_transaction_lock_scope_sha256=lock_scope_sha256,
+            release_retention_toolchain_contract=(
+                RELEASE_RETENTION_TOOLCHAIN_CONTRACT if pair_bearing_receipt else ""
+            ),
+            release_retention_toolchain_manifest_sha256=(
+                retention_toolchain_manifest_sha256 if pair_bearing_receipt else ""
+            ),
+            build_receipt_profile=spec.build_receipt_profile,
             sealed_release_retention_toolchain_manifest_sha256=(
                 retention_toolchain_manifest_sha256
             ),
@@ -7913,7 +7942,17 @@ def _build_release_locked(
             obsidian_cutover_contract=OBSIDIAN_CUTOVER_CONTRACT,
             secondary_product_runner_sha256=product_runner_sha256,
             engineer_command_lifecycle_contract=ENGINEER_COMMAND_LIFECYCLE_CONTRACT,
-            build_receipt_profile=BUILD_RECEIPT_PROFILE_HISTORICAL_V1_READER,
+            operator_transaction_lock_scope_contract=(
+                OPERATOR_TRANSACTION_LOCK_SCOPE_CONTRACT if pair_bearing_receipt else ""
+            ),
+            operator_transaction_lock_scope_sha256=lock_scope_sha256,
+            release_retention_toolchain_contract=(
+                RELEASE_RETENTION_TOOLCHAIN_CONTRACT if pair_bearing_receipt else ""
+            ),
+            release_retention_toolchain_manifest_sha256=(
+                retention_toolchain_manifest_sha256 if pair_bearing_receipt else ""
+            ),
+            build_receipt_profile=spec.build_receipt_profile,
             sealed_release_retention_toolchain_manifest_sha256=(
                 retention_toolchain_manifest_sha256
             ),
@@ -18430,6 +18469,8 @@ def _require_candidate_bound_operator(
         release,
         code="operator_release_obsidian_cutover_contract_missing",
     )
+    if release.build_receipt_profile == BUILD_RECEIPT_PROFILE_P0H_RETENTION:
+        _require_release_retention_toolchain(release)
     if require_lock_scope:
         if state_dir is None:
             raise ReleaseFailure("operator_release_lock_scope_missing")
