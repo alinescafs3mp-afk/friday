@@ -11,6 +11,7 @@ from typing import Any
 import pytest
 
 from tools import immutable_release_operator as release_operator
+from tools import release_artifact_retention_operator as retention_apply
 from tools import release_dr_generation_authentication as dr_auth
 from tools import release_dr_generation_enrollment as enrollment
 from tools import release_dr_generation_index as dr_index
@@ -43,6 +44,30 @@ def _home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[Path, Path]:
     receipt.write_text("{}\n", encoding="ascii")
     monkeypatch.setenv("FRIDAY_HOME", str(home))
     return home, receipt
+
+
+def test_enrollment_blocks_on_unfinished_retention_apply(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    home, activation_receipt = _home(tmp_path, monkeypatch)
+    state_dir = home / "data/state"
+    monkeypatch.setattr(
+        retention_apply,
+        "_load_journal",
+        lambda path: {"phase": "prepared"} if path == state_dir / retention_apply.APPLY_JOURNAL_NAME else None,
+    )
+    monkeypatch.setattr(
+        dr_auth,
+        "_authenticate_locked",
+        lambda **_kwargs: (_ for _ in ()).throw(AssertionError("authentication must not start")),
+    )
+
+    with pytest.raises(
+        enrollment.DRGenerationEnrollmentError,
+        match="^unfinished_retention_apply_requires_recovery$",
+    ):
+        enrollment.enroll_terminal_activation_backup(activation_receipt=activation_receipt)
 
 
 def _candidate(home: Path, ordinal: int) -> dict[str, Any]:

@@ -218,6 +218,8 @@ def enroll_terminal_activation_backup(
             state_directory / "immutable-release-operator.v1.lock"
         ) as transaction_lock:
             transaction_lock.assert_held()
+            release_operator._require_retention_apply_quiesced(state_directory)  # noqa: SLF001
+            transaction_lock.assert_held()
             first = dr_auth._authenticate_locked(  # noqa: SLF001
                 activation_journal=activation_journal,
                 activation_receipt=activation_receipt,

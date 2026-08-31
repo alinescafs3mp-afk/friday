@@ -162,6 +162,8 @@ def publish_or_recover_authenticated_generation(
             state_directory / "immutable-release-operator.v1.lock"
         ) as transaction_lock:
             transaction_lock.assert_held()
+            release_operator._require_retention_apply_quiesced(state_directory)  # noqa: SLF001
+            transaction_lock.assert_held()
             state = index.load()
             transaction_lock.assert_held()
             phase = state.get("phase")

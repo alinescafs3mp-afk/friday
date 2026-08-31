@@ -8048,6 +8048,9 @@ def build_release(spec: BuildSpec) -> ReleaseIdentity:
     )
     state_dir = _canonical_operator_state_dir(spec.friday_home, spec.state_dir)
     with OperatorTransactionLock(state_dir / "immutable-release-operator.v1.lock") as transaction_lock:
+        transaction_lock.assert_held()
+        _require_retention_apply_quiesced(state_dir)
+        transaction_lock.assert_held()
         return _build_release_locked(spec, namespace_guard=transaction_lock.assert_held)
 
 
@@ -14962,6 +14965,21 @@ def _require_completed_unit_install(state_dir: Path, candidate: ReleaseIdentity)
         raise ReleaseFailure("unit_install_not_complete_for_candidate")
 
 
+def _require_retention_apply_quiesced(state_dir: Path) -> None:
+    try:
+        from tools import release_artifact_retention_operator as retention_apply
+    except ImportError as exc:
+        raise ReleaseFailure("retention_apply_journal_invalid") from exc
+    try:
+        journal = retention_apply._load_journal(  # noqa: SLF001
+            state_dir / retention_apply.APPLY_JOURNAL_NAME
+        )
+    except retention_apply.RetentionApplyError as exc:
+        raise ReleaseFailure("retention_apply_journal_invalid") from exc
+    if journal is not None and journal.get("phase") != "applied":
+        raise ReleaseFailure("unfinished_retention_apply_requires_recovery")
+
+
 def _unit_exec_argv(content: bytes, *, code: str) -> tuple[str, ...]:
     try:
         text = content.decode("utf-8")
@@ -19126,6 +19144,9 @@ def _run_cli(args: argparse.Namespace) -> dict[str, Any]:
             args.state_dir / "immutable-release-operator.v1.lock",
             unit_dir=args.unit_dir,
         ) as transaction_lock:
+            transaction_lock.assert_held()
+            _require_retention_apply_quiesced(args.state_dir)
+            transaction_lock.assert_held()
             release = load_release_identity(
                 args.release,
                 expected_tree_sha256=args.release_tree_sha256,
@@ -19187,6 +19208,9 @@ def _run_cli(args: argparse.Namespace) -> dict[str, Any]:
             config.state_dir / "immutable-release-operator.v1.lock",
             unit_dir=config.unit_dir,
         ) as transaction_lock:
+            transaction_lock.assert_held()
+            _require_retention_apply_quiesced(config.state_dir)
+            transaction_lock.assert_held()
             candidate = load_release_identity(
                 args.candidate,
                 expected_tree_sha256=args.candidate_tree_sha256,
@@ -19253,6 +19277,9 @@ def _run_cli(args: argparse.Namespace) -> dict[str, Any]:
             config.state_dir / "immutable-release-operator.v1.lock",
             unit_dir=config.unit_dir,
         ) as transaction_lock:
+            transaction_lock.assert_held()
+            _require_retention_apply_quiesced(config.state_dir)
+            transaction_lock.assert_held()
             journal_path = config.state_dir / "immutable-release-activation.v1.json"
             journal_probe = DurableActivationJournal(
                 journal_path,
@@ -19307,6 +19334,9 @@ def _run_cli(args: argparse.Namespace) -> dict[str, Any]:
             config.state_dir / "immutable-release-operator.v1.lock",
             unit_dir=config.unit_dir,
         ) as transaction_lock:
+            transaction_lock.assert_held()
+            _require_retention_apply_quiesced(config.state_dir)
+            transaction_lock.assert_held()
             release = load_release_identity(
                 args.release,
                 expected_tree_sha256=args.release_tree_sha256,

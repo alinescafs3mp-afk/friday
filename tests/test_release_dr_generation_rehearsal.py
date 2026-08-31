@@ -16,6 +16,7 @@ from typing import Any
 import pytest
 
 from tools import immutable_release_operator as release_operator
+from tools import release_artifact_retention_operator as retention_apply
 from tools import release_dr_generation_authentication as dr_auth
 from tools import release_dr_generation_index as dr_index
 from tools import release_dr_generation_rehearsal as rehearsal
@@ -1421,6 +1422,31 @@ def _authenticated_home(
         restore_fallback=_release(tmp_path / "fallback", "f"),
     )
     return home, index, material, activation_receipt
+
+
+def test_rehearsal_blocks_on_unfinished_retention_apply(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    isolated_operator_transaction_domain: Path,
+) -> None:
+    home, _index, _material, activation_receipt = _authenticated_home(tmp_path, monkeypatch)
+    state_dir = home / "data/state"
+    monkeypatch.setattr(
+        retention_apply,
+        "_load_journal",
+        lambda path: {"phase": "applying"} if path == state_dir / retention_apply.APPLY_JOURNAL_NAME else None,
+    )
+    monkeypatch.setattr(
+        dr_auth,
+        "_authenticate_material_locked",
+        lambda **_kwargs: (_ for _ in ()).throw(AssertionError("authentication must not start")),
+    )
+
+    with pytest.raises(
+        rehearsal.DRGenerationRehearsalError,
+        match="^unfinished_retention_apply_requires_recovery$",
+    ):
+        rehearsal.rehearse_authenticated_generation(activation_receipt=activation_receipt)
 
 
 def test_controller_records_only_rehearsal_and_retry_does_not_rerun(

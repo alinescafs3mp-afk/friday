@@ -20,6 +20,7 @@ import pytest
 
 import friday
 import tools.immutable_release_operator as operator
+from tools import release_artifact_retention_operator as retention_apply
 from friday import semantic_supervisor_policy
 from friday.orchestration.capability_binding import expected_effect_capability_snapshot
 from friday.orchestration.supervisor_assist_promotion import (
@@ -9900,6 +9901,128 @@ def test_build_parser_binds_all_manifest_digests_into_build_spec(
     )
     assert captured[0].release_retention_toolchain_manifest_sha256 == "7" * 64
     assert captured[0].build_receipt_profile == build_receipt_profile
+
+
+def test_build_release_blocks_on_unfinished_retention_apply(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    isolated_operator_transaction_domain: Path,
+) -> None:
+    friday_home = tmp_path / "friday-home"
+    state_dir = friday_home / "data/state"
+    releases_root = friday_home / "wheel-only-releases"
+    for path in (friday_home, friday_home / "data", state_dir, releases_root):
+        path.mkdir(mode=0o700, parents=True, exist_ok=True)
+    monkeypatch.setattr(
+        retention_apply,
+        "_load_journal",
+        lambda path: {"phase": "prepared"} if path == state_dir / retention_apply.APPLY_JOURNAL_NAME else None,
+    )
+    monkeypatch.setattr(
+        operator,
+        "_build_release_locked",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("build must not start")),
+    )
+    spec = operator.BuildSpec(
+        commit="a" * 40,
+        version="0.207.85",
+        wheel=tmp_path / "candidate.whl",
+        wheel_sha256="1" * 64,
+        runtime_lock=tmp_path / "runtime.lock",
+        runtime_lock_sha256="2" * 64,
+        wheelhouse=tmp_path / "wheelhouse",
+        wheelhouse_manifest=tmp_path / "wheelhouse.sha256",
+        wheelhouse_manifest_sha256="3" * 64,
+        releases_root=releases_root,
+        anchor=friday_home / "current-release",
+        env_file=friday_home / ".env.local",
+        friday_home=friday_home,
+        state_dir=state_dir,
+        base_python=tmp_path / "python",
+        base_python_sha256="4" * 64,
+        alias_tool=tmp_path / "backfill.py",
+        alias_tool_sha256="5" * 64,
+        alias_dependency=tmp_path / "dependency.py",
+        alias_dependency_sha256="6" * 64,
+        secondary_product_runner=tmp_path / "live_failure_battery.py",
+        secondary_product_runner_sha256="7" * 64,
+        release_retention_toolchain_manifest_sha256="8" * 64,
+        build_receipt_profile=operator.BUILD_RECEIPT_PROFILE_P0H_RETENTION,
+        max_schema=50,
+    )
+
+    with pytest.raises(
+        operator.ReleaseFailure,
+        match="^unfinished_retention_apply_requires_recovery$",
+    ):
+        operator.build_release(spec)
+
+
+def test_activate_cli_blocks_on_unfinished_retention_apply_before_release_loading(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    isolated_operator_transaction_domain: Path,
+) -> None:
+    friday_home = tmp_path / "friday-home"
+    state_dir = friday_home / "data/state"
+    unit_dir = tmp_path / "units"
+    for path in (friday_home, friday_home / "data", state_dir, unit_dir):
+        path.mkdir(mode=0o700, parents=True, exist_ok=True)
+    monkeypatch.setattr(
+        retention_apply,
+        "_load_journal",
+        lambda path: {"phase": "applying"} if path == state_dir / retention_apply.APPLY_JOURNAL_NAME else None,
+    )
+    monkeypatch.setattr(
+        operator,
+        "load_release_identity",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("release loading must not start")),
+    )
+    arguments = operator.build_parser().parse_args(
+        [
+            "activate",
+            "--candidate",
+            str(tmp_path / "candidate"),
+            "--candidate-tree-sha256",
+            "3" * 64,
+            "--previous",
+            str(tmp_path / "previous"),
+            "--previous-tree-sha256",
+            "4" * 64,
+            "--schema-capable-fallback",
+            str(tmp_path / "fallback"),
+            "--schema-capable-fallback-tree-sha256",
+            "5" * 64,
+            "--anchor",
+            str(friday_home / "current-release"),
+            "--env-file",
+            str(friday_home / ".env.local"),
+            "--env-file-sha256",
+            "1" * 64,
+            "--friday-home",
+            str(friday_home),
+            "--unit-dir",
+            str(unit_dir),
+            "--database",
+            str(state_dir / "friday.sqlite3"),
+            "--inbox-database",
+            str(state_dir / "telegram-inbox.sqlite3"),
+            "--backup-dir",
+            str(friday_home / "backups"),
+            "--state-dir",
+            str(state_dir),
+            "--health-ca",
+            str(tmp_path / "health-ca.pem"),
+            "--health-ca-sha256",
+            "2" * 64,
+        ]
+    )
+
+    with pytest.raises(
+        operator.ReleaseFailure,
+        match="^unfinished_retention_apply_requires_recovery$",
+    ):
+        operator._run_cli(arguments)  # noqa: SLF001
 
 
 def _write_synthetic_wheelhouse(tmp_path: Path) -> tuple[Path, Path]:

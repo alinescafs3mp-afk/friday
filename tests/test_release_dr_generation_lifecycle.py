@@ -12,6 +12,7 @@ from typing import Any
 import pytest
 
 from tools import immutable_release_operator as release_operator
+from tools import release_artifact_retention_operator as retention_apply
 from tools import release_dr_generation_authentication as dr_auth
 from tools import release_dr_generation_index as dr_index
 from tools import release_dr_generation_lifecycle as lifecycle
@@ -39,6 +40,32 @@ def _private(path: Path) -> Path:
     path.mkdir(parents=True, mode=0o700)
     path.chmod(0o700)
     return path
+
+
+def test_publish_blocks_on_unfinished_retention_apply(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    home, activation_receipt = _home(tmp_path, monkeypatch)
+    state_dir = home / "data/state"
+    monkeypatch.setattr(
+        retention_apply,
+        "_load_journal",
+        lambda path: {"phase": "prepared"} if path == state_dir / retention_apply.APPLY_JOURNAL_NAME else None,
+    )
+    monkeypatch.setattr(
+        dr_auth,
+        "_authenticate_material_locked",
+        lambda **_kwargs: (_ for _ in ()).throw(AssertionError("authentication must not start")),
+    )
+
+    with pytest.raises(
+        lifecycle.DRGenerationLifecycleError,
+        match="^unfinished_retention_apply_requires_recovery$",
+    ):
+        lifecycle.publish_or_recover_authenticated_generation(
+            activation_receipt=activation_receipt,
+        )
 
 
 def _home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[Path, Path]:
