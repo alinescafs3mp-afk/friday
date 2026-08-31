@@ -802,7 +802,10 @@ def test_privileged_helper_cli_is_import_safe_and_body_free_outside_repo(tmp_pat
     assert str(tmp_path).encode() not in result.stderr
 
 
-def test_repeated_mount_cache_hits_do_not_leak_task_root_descriptors(tmp_path: Path) -> None:
+def test_repeated_mount_cache_hits_do_not_leak_task_root_descriptors(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     index = _index(tmp_path, probe.ObjectKey.from_stat(tmp_path.stat()))
     scanner = probe._LinuxProcScanner(Path("/proc"), index)
     with scanner:
@@ -845,10 +848,36 @@ def test_repeated_mount_cache_hits_do_not_leak_task_root_descriptors(tmp_path: P
                 root_mount,
             )
             owned_before = set(scanner._owned_fds)  # noqa: SLF001
-            open_before = len(os.listdir("/proc/self/fd"))
+
+            class TrackedProbeOS:
+                def __init__(self) -> None:
+                    self.live: dict[int, tuple[object, object]] = {}
+                    self.open_count = 0
+                    self.close_count = 0
+
+                def __getattr__(self, name: str) -> Any:
+                    return getattr(os, name)
+
+                def open(self, path: object, *args: object, **kwargs: object) -> int:
+                    descriptor = os.open(path, *args, **kwargs)  # type: ignore[arg-type]
+                    assert descriptor not in self.live
+                    self.live[descriptor] = (path, kwargs.get("dir_fd"))
+                    self.open_count += 1
+                    return descriptor
+
+                def close(self, descriptor: int) -> None:
+                    if descriptor in self.live:
+                        self.live.pop(descriptor)
+                        self.close_count += 1
+                    os.close(descriptor)
+
+            tracked_os = TrackedProbeOS()
+            monkeypatch.setattr(probe, "os", tracked_os)
             for _ in range(2_048):
                 assert scanner._mount_references(pid_fd, pid) == ([], "6" * 64)  # noqa: SLF001
+                assert tracked_os.live == {}
             assert scanner._owned_fds == owned_before  # noqa: SLF001
-            assert len(os.listdir("/proc/self/fd")) == open_before
+            assert tracked_os.open_count > 0
+            assert tracked_os.close_count == tracked_os.open_count
         finally:
             scanner._close_owned(pid_fd)  # noqa: SLF001
