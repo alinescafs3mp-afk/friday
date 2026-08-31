@@ -10415,7 +10415,7 @@ def test_first_v2_admission_requires_exact_legacy_unit_bridge(tmp_path: Path) ->
         )
 
 
-def test_exact_legacy_unit_bridge_allows_one_first_v2_successor(
+def test_completed_legacy_unit_journal_starts_a_full_surface_identity(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
