@@ -10578,7 +10578,7 @@ def test_release_tree_copy_verifies_against_its_authenticated_bind_mount_path(
     release = operator.ReleaseIdentity(
         copied_root,
         target.name,
-        "0.207.89",
+        "0.207.90",
         hashlib.sha256(manifest.read_bytes()).hexdigest(),
         50,
         venv_relocation_contract=operator.VENV_RELOCATION_CONTRACT,

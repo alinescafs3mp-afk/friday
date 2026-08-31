@@ -734,11 +734,11 @@ fallback.
 `0.207.83/schema50` служит одновременно previous и immutable fallback.
 `0.207.85/schema50` также не меняет DDL: exact stable
 `0.207.84/schema50` служит одновременно previous и immutable fallback.
-`0.207.85`–`0.207.88` не активировались; исправляющий `0.207.89/schema50` идёт напрямую от
+`0.207.85`–`0.207.89` не активировались; исправляющий `0.207.90/schema50` идёт напрямую от
 exact stable `0.207.84/schema50`, который служит одновременно previous и
 immutable fallback.
 Перед активацией завершается только bootstrap v1-generation для `0.207.84`.
-После активации `0.207.89` вторую v1-generation не публикуйте и оставьте
+После активации `0.207.90` вторую v1-generation не публикуйте и оставьте
 `older` пустым до полного writer-контракта: v1 остаётся пригодным для защиты и
 read-only классификации, но кодово не может дать destructive apply authority.
 
@@ -1010,7 +1010,7 @@ process-owned result. Acquire одноразовый: отказ, timeout, drift
 attestation не разрешают повторный acquire на меньшем или новом tier.
 
 Во время probe `/api/health` ещё недоступен. Ждите до 420 секунд и дополнительно
-требуйте `status=ok` и `version=0.207.89`.
+требуйте `status=ok` и `version=0.207.90`.
 
 HTTP `status=ok` при `installed_mode=legacy` означает безопасную деградацию, но
 не успешный canary. В `canary`/`v12` Sentinel не реже раза в минуту

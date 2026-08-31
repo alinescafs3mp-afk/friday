@@ -1,4 +1,4 @@
-## 0.207.89 — 2026-08-31
+## 0.207.90 — 2026-08-31
 
 ### Legacy DR evidence deletion fence
 
@@ -11,7 +11,9 @@
 - Rollout completes only the pre-activation v1 generation and leaves `older`
   absent after activation; no post-activation v1 publication is allowed before
   the full writer contract displaces legacy evidence.
-- Supersedes unactivated `0.207.85`–`0.207.88`; SQLite remains at schema 50
+- Keeps metadata substitution reads bounded when a reviewed regular file is
+  raced into a FIFO, and makes exact-gate evidence-root propagation code-owned.
+- Supersedes unactivated `0.207.85`–`0.207.89`; SQLite remains at schema 50
   with exact `0.207.84` as predecessor and fallback. Retention deletion remains disabled.
 
 ## 0.207.88 — 2026-08-31
