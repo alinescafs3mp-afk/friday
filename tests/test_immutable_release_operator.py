@@ -340,6 +340,8 @@ class MemoryJournal:
         database_mutation_possible: bool = False,
         network_writer_uncertain: bool = False,
         writer_target: str = "",
+        activation_receipt_sha256: str = "",
+        activation_receipt_file_sha256: str = "",
         terminal_receipt_sha256: str = "",
         staged_transition_validation_sha256: str = "",
     ) -> None:
@@ -357,6 +359,9 @@ class MemoryJournal:
             self.state["engineer_provision_committed"] = True
         if writer_target:
             self.state["writer_target"] = writer_target
+        if activation_receipt_sha256:
+            self.state["activation_receipt_sha256"] = activation_receipt_sha256
+            self.state["activation_receipt_file_sha256"] = activation_receipt_file_sha256
         self.state["terminal_receipt_sha256"] = terminal_receipt_sha256
         if staged_transition_validation_sha256:
             self.state["staged_transition_validation_sha256"] = staged_transition_validation_sha256
@@ -668,6 +673,319 @@ def test_activation_is_backup_then_offline_migration_then_backend_first(
         "accept_bridge:candidate",
     ]
     assert port.events[-len(contour) :] == contour
+
+
+def test_activation_publishes_exact_receipt_before_clear_then_enrolls(
+    tmp_path: Path,
+    releases: Releases,
+) -> None:
+    journal = MemoryJournal()
+    port = FakePort(engineer_lifecycle_required=False)
+    port.backup = replace(port.backup, engineer_receipt_sha256="e" * 64)
+    observed: list[str] = []
+
+    def publish(value: Mapping[str, object]) -> Path:
+        observed.append("publish")
+        assert journal.state["phase"] == "activation_receipt_prepared"
+        raw = operator._canonical_json(value) + b"\n"  # noqa: SLF001
+        digest = hashlib.sha256(raw).hexdigest()
+        assert journal.state["activation_receipt_sha256"] == value["receipt_sha256"]
+        assert journal.state["activation_receipt_file_sha256"] == digest
+        assert value["engineer_backup_receipt_sha256"] == port.backup.engineer_receipt_sha256
+        path = (tmp_path / f"activation-{digest}.json").absolute()
+        path.write_bytes(raw)
+        path.chmod(0o400)
+        return path
+
+    def enroll(path: Path) -> Mapping[str, object]:
+        observed.append("enroll")
+        assert path.exists()
+        assert journal.state["phase"] == "clear"
+        return {"status": "admitted", "published": False}
+
+    receipt = operator.activate_release(
+        port,
+        journal,
+        candidate=releases.candidate,
+        previous=releases.previous,
+        schema_capable_fallback=releases.fallback,
+        activation_receipt_publisher=publish,
+        activation_receipt_enroller=enroll,
+    )
+
+    assert receipt["status"] == "clear"
+    assert observed == ["publish", "enroll"]
+    assert journal.events[-3:] == ["bridge_accepted", "activation_receipt_prepared", "clear"]
+
+
+def test_post_clear_namespace_guard_failure_never_attempts_rollback(
+    tmp_path: Path,
+    releases: Releases,
+) -> None:
+    journal = MemoryJournal()
+
+    def guard() -> None:
+        if journal.state.get("phase") == "clear":
+            raise operator.ReleaseFailure("synthetic_post_clear_guard_failure")
+
+    def publish(value: Mapping[str, object]) -> Path:
+        raw = operator._canonical_json(value) + b"\n"  # noqa: SLF001
+        path = (tmp_path / f"activation-{hashlib.sha256(raw).hexdigest()}.json").absolute()
+        path.write_bytes(raw)
+        path.chmod(0o400)
+        return path
+
+    with pytest.raises(
+        operator.ReleaseFailure,
+        match="^synthetic_post_clear_guard_failure$",
+    ):
+        operator.activate_release(
+            FakePort(),
+            journal,
+            candidate=releases.candidate,
+            previous=releases.previous,
+            schema_capable_fallback=releases.fallback,
+            namespace_guard=guard,
+            activation_receipt_publisher=publish,
+            activation_receipt_enroller=lambda _path: {"status": "admitted", "published": False},
+        )
+
+    assert journal.state["phase"] == "clear"
+    assert not any(phase.startswith("rollback_") for phase in journal.events)
+
+
+def test_activation_publication_failure_rolls_back_but_post_clear_admission_failure_does_not(
+    tmp_path: Path,
+    releases: Releases,
+) -> None:
+    publication_journal = MemoryJournal()
+
+    def fail_publish(_value: Mapping[str, object]) -> Path:
+        raise RuntimeError("synthetic publication failure")
+
+    with pytest.raises(operator.ReleaseFailure, match="^activation_failed_rolled_back$"):
+        operator.activate_release(
+            FakePort(),
+            publication_journal,
+            candidate=releases.candidate,
+            previous=releases.previous,
+            schema_capable_fallback=releases.fallback,
+            activation_receipt_publisher=fail_publish,
+            activation_receipt_enroller=lambda _path: {},
+        )
+    assert "activation_receipt_prepared" in publication_journal.events
+    assert "clear" not in publication_journal.events
+    assert publication_journal.state["phase"] == "rolled_back"
+
+    admission_journal = MemoryJournal()
+
+    def publish(value: Mapping[str, object]) -> Path:
+        raw = operator._canonical_json(value) + b"\n"  # noqa: SLF001
+        path = (tmp_path / f"activation-{hashlib.sha256(raw).hexdigest()}.json").absolute()
+        path.write_bytes(raw)
+        path.chmod(0o400)
+        return path
+
+    def fail_enroll(_path: Path) -> Mapping[str, object]:
+        raise operator.ReleaseFailure("synthetic_admission_failure")
+
+    with pytest.raises(operator.ReleaseFailure, match="^synthetic_admission_failure$"):
+        operator.activate_release(
+            FakePort(),
+            admission_journal,
+            candidate=releases.candidate,
+            previous=releases.previous,
+            schema_capable_fallback=releases.fallback,
+            activation_receipt_publisher=publish,
+            activation_receipt_enroller=fail_enroll,
+        )
+    assert admission_journal.state["phase"] == "clear"
+    assert not any(phase.startswith("rollback_") for phase in admission_journal.events)
+
+
+def test_exact_020790_reconciliation_binds_once_and_blocks_until_generation_is_current(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    releases: Releases,
+) -> None:
+    tmp_path.chmod(0o700)
+    state_dir = tmp_path / "state"
+    backup_root = tmp_path / "backups"
+    state_dir.mkdir(mode=0o700)
+    backup_root.mkdir(mode=0o700)
+    legacy = replace(releases.candidate, version="0.207.90")
+    upcoming = replace(
+        releases.fallback,
+        root=tmp_path / "upcoming",
+        commit="a" * 40,
+        version="0.207.91",
+        tree_manifest_sha256="1" * 64,
+    )
+    journal = operator.DurableActivationJournal(
+        state_dir / "immutable-release-activation.v1.json",
+        backup_root=backup_root,
+        config_identity_sha256="9" * 64,
+    )
+    journal.begin(candidate=legacy, previous=releases.previous, fallback=releases.fallback)
+    alias_core: dict[str, object] = {
+        "schema": operator.ALIAS_REPAIR_RECEIPT_SCHEMA,
+        "status": "not_requested",
+        "applied_count": 0,
+        "plan_sha256": "0" * 64,
+        "backup_manifest_sha256": "0" * 64,
+        "backup_database_sha256": "0" * 64,
+        "backup_inbox_sha256": "0" * 64,
+        "pre_apply_database_sha256": "0" * 64,
+        "writer_quiescence_sha256": "0" * 64,
+    }
+    alias_receipt = {
+        **alias_core,
+        "receipt_sha256": hashlib.sha256(operator._canonical_json(alias_core)).hexdigest(),  # noqa: SLF001
+    }
+    backup = {
+        "schema_version": 50,
+        "receipt_sha256": "2" * 64,
+        "inbox_receipt_sha256": "3" * 64,
+        "obsidian_receipt_sha256": "4" * 64,
+        "engineer_receipt_sha256": "5" * 64,
+    }
+    receipt_core = {
+        "schema": operator.ACTIVATION_RECEIPT_SCHEMA,
+        "status": "clear",
+        "candidate_tree_sha256": legacy.tree_manifest_sha256,
+        "backup_receipt_sha256": backup["receipt_sha256"],
+        "inbox_backup_receipt_sha256": backup["inbox_receipt_sha256"],
+        "obsidian_backup_receipt_sha256": backup["obsidian_receipt_sha256"],
+        "engineer_backup_receipt_sha256": backup["engineer_receipt_sha256"],
+        "database_schema_before": backup["schema_version"],
+        "alias_repair": alias_receipt,
+        "runtime_policy": {
+            "memory_vault_cutover_phase": "phase_b_body_free",
+            "memory_vault_mode": "disabled",
+        },
+        "backend_accepted": True,
+        "bridge_accepted": True,
+    }
+    receipt_sha256 = hashlib.sha256(operator._canonical_json(receipt_core)).hexdigest()  # noqa: SLF001
+    receipt = {
+        **receipt_core,
+        "operator_schema": operator.OPERATOR_SCHEMA,
+        "receipt_sha256": receipt_sha256,
+    }
+    receipt_raw = operator._canonical_json(receipt) + b"\n"  # noqa: SLF001
+
+    def make_legacy_clear(core: dict[str, object]) -> None:
+        core.update(
+            {
+                "phase": "clear",
+                "backup": backup,
+                "database_mutation_possible": True,
+                "network_writer_uncertain": True,
+                "writer_target": "candidate",
+                "terminal_receipt_sha256": receipt_sha256,
+            }
+        )
+
+    _rewrite_signed_journal(journal.path, make_legacy_clear)
+    raw = journal.path.read_bytes()
+    signed = json.loads(raw)
+    monkeypatch.setattr(operator, "_LEGACY_020790_JOURNAL_FILE_SHA256", hashlib.sha256(raw).hexdigest())
+    monkeypatch.setattr(operator, "_LEGACY_020790_JOURNAL_SHA256", signed["journal_sha256"])
+    monkeypatch.setattr(operator, "_LEGACY_020790_TRANSACTION_ID", signed["transaction_id"])
+    monkeypatch.setattr(operator, "_LEGACY_020790_CANDIDATE_COMMIT", legacy.commit)
+    monkeypatch.setattr(
+        operator,
+        "_LEGACY_020790_CANDIDATE_TREE_SHA256",
+        legacy.tree_manifest_sha256,
+    )
+    monkeypatch.setattr(operator, "_LEGACY_020790_RECEIPT_SHA256", receipt_sha256)
+    monkeypatch.setattr(
+        operator,
+        "_LEGACY_020790_RECEIPT_FILE_SHA256",
+        hashlib.sha256(receipt_raw).hexdigest(),
+    )
+    monkeypatch.setattr(operator, "_LEGACY_020790_ACTIVATION_RECEIPT_RAW", receipt_raw)
+    journal = operator.DurableActivationJournal(
+        journal.path,
+        backup_root=backup_root,
+        config_identity_sha256="9" * 64,
+    )
+    before_rejection = journal.path.read_bytes()
+    with pytest.raises(
+        operator.ReleaseFailure,
+        match="^activation_terminal_admission_requires_writer$",
+    ):
+        operator._reject_terminal_activation_supersession_without_writer(  # noqa: SLF001
+            journal=journal,
+            candidate=upcoming,
+            previous=legacy,
+            fallback=releases.fallback,
+        )
+    assert journal.path.read_bytes() == before_rejection
+
+    class Admission:
+        def __init__(self, *, generation_current: bool) -> None:
+            self.generation_current = generation_current
+            self.events: list[str] = []
+
+        def publish(self, value: Mapping[str, object]) -> Path:
+            self.events.append("publish")
+            assert value == receipt
+            return (tmp_path / f"activation-{hashlib.sha256(receipt_raw).hexdigest()}.json").absolute()
+
+        def upgrade_legacy_020790_receipt_modes(self) -> Mapping[str, object]:
+            self.events.append("upgrade")
+            return {}
+
+        def load(self, _digest: str, *, missing_ok: bool = False) -> Mapping[str, object]:
+            del missing_ok
+            self.events.append("load")
+            return receipt
+
+        def resolve(self, digest: str) -> Path:
+            self.events.append("resolve")
+            return (tmp_path / f"activation-{digest}.json").absolute()
+
+        def enroll(self, _path: Path) -> Mapping[str, object]:
+            self.events.append("enroll")
+            return {"status": "admitted", "published": self.generation_current}
+
+    pending = Admission(generation_current=False)
+    with pytest.raises(
+        operator.ReleaseFailure,
+        match="^activation_predecessor_dr_lifecycle_required$",
+    ):
+        operator._reconcile_terminal_activation_admission(  # noqa: SLF001
+            journal=journal,
+            candidate=upcoming,
+            previous=legacy,
+            fallback=releases.fallback,
+            admission=pending,  # type: ignore[arg-type]
+        )
+    assert pending.events == ["publish", "upgrade", "load", "resolve", "enroll"]
+    assert journal.load()["activation_receipt_sha256"] == receipt_sha256
+
+    current = Admission(generation_current=True)
+    operator._reconcile_terminal_activation_admission(  # noqa: SLF001
+        journal=journal,
+        candidate=upcoming,
+        previous=legacy,
+        fallback=releases.fallback,
+        admission=current,  # type: ignore[arg-type]
+    )
+    assert current.events == ["load", "resolve", "enroll"]
+    before_bound_rejection = journal.path.read_bytes()
+    with pytest.raises(
+        operator.ReleaseFailure,
+        match="^activation_terminal_admission_requires_writer$",
+    ):
+        operator._reject_terminal_activation_supersession_without_writer(  # noqa: SLF001
+            journal=journal,
+            candidate=upcoming,
+            previous=legacy,
+            fallback=releases.fallback,
+        )
+    assert journal.path.read_bytes() == before_bound_rejection
 
 
 def test_activation_allows_a_legacy_previous_but_requires_new_candidate_and_fallback(
@@ -10331,6 +10649,108 @@ def _synthetic_sealed_retention_toolchain(
     tools.chmod(0o500)
     tools.parent.chmod(0o500)
     return root, hashlib.sha256(manifest_raw).hexdigest()
+
+
+def test_sealed_dr_loader_uses_exact_specs_without_sys_path_or_module_substitution(
+    tmp_path: Path,
+) -> None:
+    sources = operator._read_release_retention_toolchain_sources(  # noqa: SLF001
+        Path(operator.__file__).resolve(strict=True)
+    )
+    root, manifest_sha256 = _synthetic_sealed_retention_toolchain(
+        tmp_path,
+        supplied_sources=sources,
+    )
+    friday_home = tmp_path / "friday-home"
+    state_directory = friday_home / "data/state"
+    state_directory.mkdir(parents=True, mode=0o700)
+    friday_home.chmod(0o700)
+    (friday_home / "data").chmod(0o700)
+    state_directory.chmod(0o700)
+    child = r"""
+import importlib.util
+import sys
+import types
+from pathlib import Path
+
+operator_path = Path(sys.argv[1])
+release_root = Path(sys.argv[2])
+friday_home = Path(sys.argv[3])
+manifest_sha256 = sys.argv[4]
+spec = importlib.util.spec_from_file_location("exact_operator_under_test", operator_path)
+assert spec is not None and spec.loader is not None
+module = importlib.util.module_from_spec(spec)
+sys.modules[spec.name] = module
+spec.loader.exec_module(module)
+release = module.ReleaseIdentity(
+    root=release_root,
+    commit="a" * 40,
+    version="0.207.91",
+    tree_manifest_sha256="b" * 64,
+    max_schema=50,
+    release_retention_toolchain_contract=module.RELEASE_RETENTION_TOOLCHAIN_CONTRACT,
+    release_retention_toolchain_manifest_sha256=manifest_sha256,
+    build_receipt_profile=module.BUILD_RECEIPT_PROFILE_P0H_RETENTION,
+    sealed_release_retention_toolchain_manifest_sha256=manifest_sha256,
+)
+before = tuple(sys.path)
+with module._sealed_candidate_dr_admission(
+    release,
+    friday_home=friday_home,
+    namespace_guard=lambda: None,
+):
+    assert tuple(sys.path) == before
+    assert {name for name in sys.modules if name == "tools" or name.startswith("tools.")} == {
+        "tools",
+        "tools.immutable_release_operator",
+        "tools.release_dr_generation_authentication",
+        "tools.release_dr_generation_enrollment",
+        "tools.release_dr_generation_index",
+    }
+assert tuple(sys.path) == before
+assert not any(name == "tools" or name.startswith("tools.") for name in sys.modules)
+sys.modules["tools"] = types.ModuleType("tools")
+try:
+    try:
+        with module._sealed_candidate_dr_admission(
+            release,
+            friday_home=friday_home,
+            namespace_guard=lambda: None,
+        ):
+            raise AssertionError("foreign tools package was accepted")
+    except module.ReleaseFailure as exc:
+        assert str(exc) == "candidate_dr_loader_foreign_tools_preloaded"
+finally:
+    sys.modules.pop("tools", None)
+"""
+    completed = subprocess.run(  # noqa: S603
+        [
+            sys.executable,
+            "-I",
+            "-B",
+            "-c",
+            child,
+            str(Path(operator.__file__).resolve(strict=True)),
+            str(root),
+            str(friday_home),
+            manifest_sha256,
+        ],
+        check=False,
+        capture_output=True,
+        cwd=tmp_path,
+        env={
+            "LANG": "C.UTF-8",
+            "LC_ALL": "C.UTF-8",
+            "PATH": os.defpath,
+            "PYTHONDONTWRITEBYTECODE": "1",
+            "PYTHONNOUSERSITE": "1",
+        },
+        text=True,
+        timeout=30,
+    )
+
+    assert completed.returncode == 0, completed.stderr
+    assert completed.stderr == ""
 
 
 def test_release_retention_toolchain_admission_revalidates_closed_bundle(tmp_path: Path) -> None:

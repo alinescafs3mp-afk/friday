@@ -481,6 +481,90 @@ def test_v2_publishes_and_resolves_exact_activation_body_after_source_disappears
     assert pin.activation_receipt_file_sha256 == hashlib.sha256(expected_raw).hexdigest()
 
 
+def test_activation_body_can_be_durably_published_before_index_initialization(
+    tmp_path: Path,
+) -> None:
+    state_directory = _private_directory(tmp_path / "state")
+    index = dr_index.DurableDRGenerationIndex(state_directory)
+    candidate, authentication = _v2_candidate_and_authentication(tmp_path, 303)
+    del candidate
+    body = authentication["activation_receipt"]
+    expected_raw = _canonical(body) + b"\n"
+    expected_sha256 = hashlib.sha256(expected_raw).hexdigest()
+
+    assert (
+        index.load_activation_receipt_body(
+            file_sha256=expected_sha256,
+            missing_ok=True,
+        )
+        is None
+    )
+    assert not index.path.exists()
+    path = index.publish_activation_receipt(receipt=body)
+
+    assert not index.path.exists()
+    assert path.name == f"activation-{expected_sha256}.json"
+    assert path.read_bytes() == expected_raw
+    assert stat.S_IMODE(path.stat().st_mode) == 0o400
+    assert index.load_activation_receipt_body(file_sha256=expected_sha256) == body
+    assert index.resolve_activation_receipt_path(file_sha256=expected_sha256) == path
+    assert index.publish_activation_receipt(receipt=body) == path
+
+
+def test_exact_legacy_receipt_mode_upgrade_is_restart_safe_and_bounded(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    index = _index(tmp_path)
+    clear = _advance(index, _candidate(tmp_path, 304), intent="bootstrap_current", ordinal=304)
+    generation_path = index.receipt_directory / f"{clear['current']['generation_id']}.json"
+    generation = json.loads(generation_path.read_text(encoding="ascii"))
+    authentication_path = index.receipt_directory / (
+        f"authentication-{generation['generation']['authentication_receipt']['sha256']}.json"
+    )
+    rehearsal_path = index.receipt_directory / (
+        f"rehearsal-{generation['generation']['rehearsal_receipt']['sha256']}.json"
+    )
+    expected_files = {
+        path.name: hashlib.sha256(path.read_bytes()).hexdigest()
+        for path in (generation_path, authentication_path, rehearsal_path)
+    }
+    for path in (generation_path, authentication_path, rehearsal_path):
+        path.chmod(0o600)
+    unrelated = index.receipt_directory / "unrelated-legacy.json"
+    unrelated.write_text("{}\n", encoding="ascii")
+    unrelated.chmod(0o600)
+    monkeypatch.setattr(
+        dr_index,
+        "_LEGACY_020790_INDEX_FILE_SHA256",
+        hashlib.sha256(index.path.read_bytes()).hexdigest(),
+    )
+    monkeypatch.setattr(
+        dr_index,
+        "_LEGACY_020790_INDEX_JOURNAL_SHA256",
+        clear["journal_sha256"],
+    )
+    monkeypatch.setattr(
+        dr_index,
+        "_LEGACY_020790_GENERATION_ID",
+        clear["current"]["generation_id"],
+    )
+    monkeypatch.setattr(
+        dr_index,
+        "_LEGACY_020790_GENERATION_RECEIPT_SHA256",
+        clear["current"]["receipt_sha256"],
+    )
+    monkeypatch.setattr(dr_index, "_LEGACY_020790_RECEIPT_FILES", expected_files)
+
+    assert index.upgrade_legacy_020790_receipt_modes() == clear
+    assert index.upgrade_legacy_020790_receipt_modes() == clear
+    assert all(
+        stat.S_IMODE(path.stat().st_mode) == 0o400
+        for path in (generation_path, authentication_path, rehearsal_path)
+    )
+    assert stat.S_IMODE(unrelated.stat().st_mode) == 0o600
+
+
 def test_v2_activation_body_collision_and_tamper_fail_closed(tmp_path: Path) -> None:
     index = _index(tmp_path)
     candidate, authentication = _v2_candidate_and_authentication(tmp_path, 302)

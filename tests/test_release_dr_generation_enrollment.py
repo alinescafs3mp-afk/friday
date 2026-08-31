@@ -308,6 +308,40 @@ def test_bootstrap_authenticates_before_admission_and_emits_body_free_receipt(
     assert stat.S_IMODE(persisted.stat().st_mode) == 0o400
 
 
+def test_locked_enrollment_hook_reuses_caller_lock_without_nested_acquisition(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    home, activation_receipt = _home(tmp_path, monkeypatch)
+    authenticated = _authenticated(_candidate(home, 101), ordinal=1011)
+    calls = _install_authenticator(monkeypatch, home, activation_receipt, [authenticated])
+    index = _index(home)
+    guard_calls = 0
+
+    def guard() -> None:
+        nonlocal guard_calls
+        guard_calls += 1
+
+    class ForbiddenNestedLock:
+        def __init__(self, *_args: object, **_kwargs: object) -> None:
+            raise AssertionError("locked hook attempted nested operator lock")
+
+    monkeypatch.setattr(release_operator, "OperatorTransactionLock", ForbiddenNestedLock)
+
+    receipt = enrollment._enroll_terminal_activation_backup_locked(  # noqa: SLF001
+        activation_receipt=activation_receipt,
+        friday_home=home,
+        index=index,
+        namespace_guard=guard,
+    )
+
+    assert receipt["status"] == "admitted"
+    assert receipt["published"] is False
+    assert len(calls) == 2
+    assert guard_calls >= 8
+    assert index.load()["phase"] == "authenticated"
+
+
 def test_authenticated_retry_is_idempotent_and_does_not_advance_revision(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

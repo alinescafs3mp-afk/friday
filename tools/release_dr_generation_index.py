@@ -48,6 +48,24 @@ HEAD_FENCE_STAGING_NAME = ".current-head.json.new"
 INDEX_PHASES = ("clear", "prepared", "authenticated", "rehearsed")
 INDEX_INTENTS = ("bootstrap_current", "fill_older", "rotate_current")
 
+# The sole production v1 generation predates immutable 0400 receipt modes.
+# This exact tuple is a one-time bridge, not a generic 0600 compatibility rail.
+_LEGACY_020790_INDEX_FILE_SHA256 = "d9543be572e38d711e3700df67659f4f1845ab61cad210b00fc4d671a7ecc098"
+_LEGACY_020790_INDEX_JOURNAL_SHA256 = "f656152e3b0f8ae8a2849163eb5cb3fa0721253555f5815852385faf84727b03"
+_LEGACY_020790_GENERATION_ID = "078d96e654ddfd39f24580eba2e46477991fb0a2d149477a93854c202977fd5f"
+_LEGACY_020790_GENERATION_RECEIPT_SHA256 = "c876f27c796f7721aba7c38c60db206bfcae0a4473f6fd63c344927caf16fb55"
+_LEGACY_020790_RECEIPT_FILES = {
+    f"{_LEGACY_020790_GENERATION_ID}.json": (
+        "42da7ab6f1626b93d57e5b0abde6670bcee82e1534f15249b8190735a78dec59"
+    ),
+    "authentication-fbd0f5d3419a91dfe856fa958a11ddd616720c1d6d443acc2eb04c37a7ec83c7.json": (
+        "7f1aaa8683a6434f2132b31dc0d0359450540f6359774b1db5a4aefb2b271a17"
+    ),
+    "rehearsal-521f6e81ae96e9ba9436f8eaf4b6c7aae8a7428ebb675aa764ceb8035971e700.json": (
+        "08bc8e3025389b15238412a6b4f8afbbcfde1358532999f3890d542a4270fcc7"
+    ),
+}
+
 MAX_INDEX_BYTES = 1 << 20
 MAX_HEAD_FENCE_BYTES = 2 << 20
 MAX_RECEIPT_BYTES = 1 << 20
@@ -643,15 +661,12 @@ def _normalize_release_records(
     return records
 
 
-def activation_receipt_evidence(
-    authentication_receipt: Mapping[str, Any],
+def validate_activation_receipt_body(
+    value: object,
 ) -> tuple[dict[str, str], bytes, dict[str, Any]]:
-    """Return the exact v2 activation body and its durable file identity."""
+    """Validate one exact public activation body independently of DR admission."""
 
     code = "activation_receipt_invalid"
-    if authentication_receipt.get("schema") != AUTHENTICATION_RECEIPT_SCHEMA_V2:
-        raise DRGenerationIndexError(code)
-    value = authentication_receipt.get("activation_receipt")
     expected = {
         "alias_repair",
         "backend_accepted",
@@ -692,11 +707,28 @@ def activation_receipt_evidence(
         or not isinstance(payload.get("alias_repair"), dict)
         or not isinstance(payload.get("runtime_policy"), dict)
         or receipt_sha256 != _sha256(_canonical_json(semantic_core))
-        or authentication_receipt.get("activation_receipt_sha256") != receipt_sha256
-        or authentication_receipt.get("activation_receipt_file_sha256") != file_sha256
     ):
         raise DRGenerationIndexError(code)
     return {"schema": _ACTIVATION_RECEIPT_SCHEMA, "sha256": file_sha256}, raw, payload
+
+
+def activation_receipt_evidence(
+    authentication_receipt: Mapping[str, Any],
+) -> tuple[dict[str, str], bytes, dict[str, Any]]:
+    """Return the exact v2 activation body and its durable file identity."""
+
+    code = "activation_receipt_invalid"
+    if authentication_receipt.get("schema") != AUTHENTICATION_RECEIPT_SCHEMA_V2:
+        raise DRGenerationIndexError(code)
+    reference, raw, payload = validate_activation_receipt_body(
+        authentication_receipt.get("activation_receipt")
+    )
+    if (
+        authentication_receipt.get("activation_receipt_sha256") != payload["receipt_sha256"]
+        or authentication_receipt.get("activation_receipt_file_sha256") != reference["sha256"]
+    ):
+        raise DRGenerationIndexError(code)
+    return reference, raw, payload
 
 
 def validate_authentication_receipt(
@@ -1417,6 +1449,7 @@ class DurableDRGenerationIndex:
             if create_receipt_directory:
                 try:
                     os.mkdir(RECEIPT_DIRECTORY_NAME, mode=0o700, dir_fd=state_fd)
+                    os.fsync(state_fd)
                 except FileExistsError:
                     pass
                 except OSError as exc:
@@ -1731,6 +1764,178 @@ class DurableDRGenerationIndex:
 
     def _external_receipt_path(self, kind: str, sha256: str) -> Path:
         return self.receipt_directory / _external_receipt_name(kind, sha256)
+
+    def upgrade_legacy_020790_receipt_modes(
+        self,
+        *,
+        namespace_guard: Callable[[], None] | None = None,
+    ) -> dict[str, Any]:
+        """One-time exact 0600->0400 bridge for the live pre-W4 v1 generation."""
+
+        guard = namespace_guard or (lambda: None)
+        guard()
+        with self._guard() as pins:
+            guard()
+            index_raw = _stable_private_file_at(
+                pins.state_fd,
+                INDEX_NAME,
+                mode=0o600,
+                maximum_bytes=MAX_INDEX_BYTES,
+                code="legacy_020790_index_invalid",
+            )
+            self._require_head_matches(pins, index_raw)
+            index_payload = _unique_json(index_raw, code="legacy_020790_index_invalid")
+            if (
+                _sha256(index_raw) != _LEGACY_020790_INDEX_FILE_SHA256
+                or index_payload.get("schema") != INDEX_SCHEMA
+                or index_payload.get("phase") != "clear"
+                or index_payload.get("revision") != 4
+                or index_payload.get("journal_sha256") != _LEGACY_020790_INDEX_JOURNAL_SHA256
+                or index_payload.get("pending") is not None
+                or index_payload.get("older") is not None
+                or index_payload.get("current")
+                != {
+                    "generation_id": _LEGACY_020790_GENERATION_ID,
+                    "receipt_sha256": _LEGACY_020790_GENERATION_RECEIPT_SHA256,
+                }
+            ):
+                raise DRGenerationIndexError("legacy_020790_index_invalid")
+
+            for name, expected_sha256 in _LEGACY_020790_RECEIPT_FILES.items():
+                guard()
+                flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0)
+                flags |= getattr(os, "O_NONBLOCK", 0)
+                descriptor = -1
+                try:
+                    descriptor = os.open(name, flags, dir_fd=pins.receipt_fd)
+                    opened = os.fstat(descriptor)
+                    if (
+                        not stat.S_ISREG(opened.st_mode)
+                        or opened.st_uid != os.geteuid()
+                        or opened.st_nlink != 1
+                        or stat.S_IMODE(opened.st_mode) not in {0o400, 0o600}
+                        or not 0 < opened.st_size <= MAX_RECEIPT_BYTES
+                    ):
+                        raise DRGenerationIndexError("legacy_020790_receipt_invalid")
+                    chunks: list[bytes] = []
+                    remaining = MAX_RECEIPT_BYTES + 1
+                    while remaining:
+                        chunk = os.read(descriptor, min(1 << 20, remaining))
+                        if not chunk:
+                            break
+                        chunks.append(chunk)
+                        remaining -= len(chunk)
+                    if remaining == 0 and os.read(descriptor, 1):
+                        raise DRGenerationIndexError("legacy_020790_receipt_invalid")
+                    if _sha256(b"".join(chunks)) != expected_sha256:
+                        raise DRGenerationIndexError("legacy_020790_receipt_invalid")
+                    if stat.S_IMODE(opened.st_mode) == 0o600:
+                        os.fchmod(descriptor, 0o400)
+                        os.fsync(descriptor)
+                    sealed = os.fstat(descriptor)
+                    if (
+                        (sealed.st_dev, sealed.st_ino) != (opened.st_dev, opened.st_ino)
+                        or sealed.st_uid != opened.st_uid
+                        or sealed.st_nlink != 1
+                        or sealed.st_size != opened.st_size
+                        or stat.S_IMODE(sealed.st_mode) != 0o400
+                    ):
+                        raise DRGenerationIndexError("legacy_020790_receipt_invalid")
+                except DRGenerationIndexError:
+                    raise
+                except OSError as exc:
+                    raise DRGenerationIndexError("legacy_020790_receipt_invalid") from exc
+                finally:
+                    if descriptor >= 0:
+                        os.close(descriptor)
+                guard()
+            os.fsync(pins.receipt_fd)
+            self._require_pinned_namespace(pins)
+            durable = self._load_unlocked(pins)
+            guard()
+            return durable
+
+    def publish_activation_receipt(
+        self,
+        *,
+        receipt: Mapping[str, Any],
+        namespace_guard: Callable[[], None] | None = None,
+    ) -> Path:
+        """Durably publish an exact activation body without advancing the index."""
+
+        guard = namespace_guard or (lambda: None)
+        reference, raw, expected = validate_activation_receipt_body(receipt)
+        guard()
+        with self._guard(create_receipt_directory=True) as pins:
+            guard()
+            self._publish_no_replace(
+                directory_fd=pins.receipt_fd,
+                name=_external_receipt_name(ACTIVATION_RECEIPT_KIND, reference["sha256"]),
+                raw=raw,
+                final_mode=0o400,
+                maximum_bytes=MAX_RECEIPT_BYTES,
+                code="activation_receipt_publication_failed",
+            )
+            guard()
+            durable = _stable_private_file_at(
+                pins.receipt_fd,
+                _external_receipt_name(ACTIVATION_RECEIPT_KIND, reference["sha256"]),
+                mode=0o400,
+                maximum_bytes=MAX_RECEIPT_BYTES,
+                code="activation_receipt_invalid",
+            )
+            if durable != raw or _unique_json(durable, code="activation_receipt_invalid") != expected:
+                raise DRGenerationIndexError("activation_receipt_invalid")
+            self._require_pinned_namespace(pins)
+            guard()
+        return self._external_receipt_path(ACTIVATION_RECEIPT_KIND, reference["sha256"])
+
+    def resolve_activation_receipt_path(
+        self,
+        *,
+        file_sha256: str,
+    ) -> Path:
+        """Resolve and reauthenticate one exact content-addressed activation body."""
+
+        payload = self.load_activation_receipt_body(file_sha256=file_sha256)
+        if payload is None:  # pragma: no cover - the default is fail closed
+            raise DRGenerationIndexError("activation_receipt_invalid")
+        return self._external_receipt_path(ACTIVATION_RECEIPT_KIND, file_sha256)
+
+    def load_activation_receipt_body(
+        self,
+        *,
+        file_sha256: str,
+        missing_ok: bool = False,
+    ) -> dict[str, Any] | None:
+        """Read one exact body under the pinned receipt namespace."""
+
+        digest = _hex64(file_sha256, code="activation_receipt_invalid")
+        create_empty_namespace = bool(missing_ok and not self.path.exists() and not self.path.is_symlink())
+        with self._guard(create_receipt_directory=create_empty_namespace) as pins:
+            name = _external_receipt_name(ACTIVATION_RECEIPT_KIND, digest)
+            if missing_ok:
+                try:
+                    os.stat(name, dir_fd=pins.receipt_fd, follow_symlinks=False)
+                except FileNotFoundError:
+                    self._require_pinned_namespace(pins)
+                    return None
+                except OSError as exc:
+                    raise DRGenerationIndexError("activation_receipt_invalid") from exc
+            raw = _stable_private_file_at(
+                pins.receipt_fd,
+                name,
+                mode=0o400,
+                maximum_bytes=MAX_RECEIPT_BYTES,
+                code="activation_receipt_invalid",
+            )
+            reference, expected_raw, payload = validate_activation_receipt_body(
+                _unique_json(raw, code="activation_receipt_invalid")
+            )
+            if reference["sha256"] != digest or raw != expected_raw:
+                raise DRGenerationIndexError("activation_receipt_invalid")
+            self._require_pinned_namespace(pins)
+        return payload
 
     def _load_activation_receipt(
         self,
@@ -2790,6 +2995,7 @@ __all__ = [
     "REHEARSAL_BINDING_SCHEMA",
     "activation_receipt_evidence",
     "normalize_generation_candidate",
+    "validate_activation_receipt_body",
     "validate_authentication_receipt",
     "validate_rehearsal_receipt",
 ]

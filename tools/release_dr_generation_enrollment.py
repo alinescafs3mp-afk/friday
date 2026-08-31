@@ -204,8 +204,6 @@ def enroll_terminal_activation_backup(
 
     friday_home = _canonical_friday_home()
     state_directory = friday_home / "data/state"
-    backup_root = friday_home / "data/backups"
-    activation_journal = state_directory / "immutable-release-activation.v1.json"
     try:
         # Capture the canonical state inode before even entering the path-based
         # lock.  This is read-only and closes a rename/replacement window between
@@ -217,44 +215,83 @@ def enroll_terminal_activation_backup(
         with release_operator.OperatorTransactionLock(
             state_directory / "immutable-release-operator.v1.lock"
         ) as transaction_lock:
-            transaction_lock.assert_held()
-            release_operator._require_retention_apply_quiesced(state_directory)  # noqa: SLF001
-            transaction_lock.assert_held()
-            first = dr_auth._authenticate_locked(  # noqa: SLF001
-                activation_journal=activation_journal,
+            return _enroll_terminal_activation_backup_locked(
                 activation_receipt=activation_receipt,
-                backup_root=backup_root,
-            )
-            transaction_lock.assert_held()
-            state = index.initialize(namespace_guard=transaction_lock.assert_held)
-            transaction_lock.assert_held()
-            admitted, intent, action = _prepare_or_resume(
+                friday_home=friday_home,
                 index=index,
-                state=state,
-                authenticated=first,
                 namespace_guard=transaction_lock.assert_held,
             )
-            transaction_lock.assert_held()
-            second = dr_auth._authenticate_locked(  # noqa: SLF001
-                activation_journal=activation_journal,
-                activation_receipt=activation_receipt,
-                backup_root=backup_root,
-            )
-            transaction_lock.assert_held()
-            if second != first:
-                raise DRGenerationEnrollmentError("dr_enrollment_reauthentication_mismatch")
-            durable = index.load()
-            transaction_lock.assert_held()
-            if durable != admitted:
-                raise DRGenerationEnrollmentError("dr_enrollment_index_changed")
-            receipt = _enrollment_receipt(
-                state=durable,
-                authenticated=second,
-                intent=intent,
-                action=action,
-            )
-            transaction_lock.assert_held()
-            return receipt
+    except DRGenerationEnrollmentError:
+        raise
+    except (
+        dr_auth.DRGenerationAuthenticationError,
+        dr_index.DRGenerationIndexError,
+        release_operator.ReleaseFailure,
+    ) as exc:
+        raise DRGenerationEnrollmentError(str(exc)) from exc
+
+
+def _enroll_terminal_activation_backup_locked(
+    *,
+    activation_receipt: Path,
+    friday_home: Path,
+    index: dr_index.DurableDRGenerationIndex,
+    namespace_guard: Callable[[], None],
+) -> dict[str, Any]:
+    """Admit one receipt while the caller owns the global operator lock.
+
+    This hook deliberately never creates or reacquires ``OperatorTransactionLock``.
+    The sealed activation controller passes its already-pinned guard, while the
+    public wrapper above keeps the historical one-argument API and lock scope.
+    """
+
+    try:
+        canonical_home = _canonical_friday_home()
+        if friday_home != canonical_home:
+            raise DRGenerationEnrollmentError("dr_enrollment_friday_home_changed")
+        state_directory = canonical_home / "data/state"
+        backup_root = canonical_home / "data/backups"
+        activation_journal = state_directory / "immutable-release-activation.v1.json"
+        if index.state_directory != state_directory:
+            raise DRGenerationEnrollmentError("dr_enrollment_index_scope_invalid")
+        namespace_guard()
+        release_operator._require_retention_apply_quiesced(state_directory)  # noqa: SLF001
+        namespace_guard()
+        first = dr_auth._authenticate_locked(  # noqa: SLF001
+            activation_journal=activation_journal,
+            activation_receipt=activation_receipt,
+            backup_root=backup_root,
+        )
+        namespace_guard()
+        state = index.initialize(namespace_guard=namespace_guard)
+        namespace_guard()
+        admitted, intent, action = _prepare_or_resume(
+            index=index,
+            state=state,
+            authenticated=first,
+            namespace_guard=namespace_guard,
+        )
+        namespace_guard()
+        second = dr_auth._authenticate_locked(  # noqa: SLF001
+            activation_journal=activation_journal,
+            activation_receipt=activation_receipt,
+            backup_root=backup_root,
+        )
+        namespace_guard()
+        if second != first:
+            raise DRGenerationEnrollmentError("dr_enrollment_reauthentication_mismatch")
+        durable = index.load()
+        namespace_guard()
+        if durable != admitted:
+            raise DRGenerationEnrollmentError("dr_enrollment_index_changed")
+        receipt = _enrollment_receipt(
+            state=durable,
+            authenticated=second,
+            intent=intent,
+            action=action,
+        )
+        namespace_guard()
+        return receipt
     except DRGenerationEnrollmentError:
         raise
     except (

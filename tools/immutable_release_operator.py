@@ -5,8 +5,8 @@ The builder creates a previously absent sibling directory, installs only from an
 offline wheelhouse, runs the installed interpreter with ``-I -B``, seals every
 byte, and publishes the sibling by one rename.  The activation state machine is
 deliberately injected: production systemd/HTTP glue and tests use the same
-ordering and rollback policy, while no import from the candidate is ever made
-inside this controller process.
+ordering and rollback policy. Candidate code is loaded only for the manifest-
+sealed retention/DR package, by exact isolated specs without ambient paths.
 
 Public receipts contain hashes, counts, schema numbers and closed status codes.
 They never contain environment values, Telegram payloads, filenames, chat ids,
@@ -21,6 +21,7 @@ import csv
 import fcntl
 import hashlib
 import importlib
+import importlib.util
 import io
 import json
 import math
@@ -198,6 +199,44 @@ _RETENTION_APPLY_JOURNAL_NAME = "release-artifact-retention-apply.v1.json"
 _RETENTION_APPLY_PLAN_DIRECTORY = "release-artifact-retention-plans.v1"
 _RETENTION_APPLY_RECEIPT_DIRECTORY = "release-artifact-retention-receipts.v1"
 _RETENTION_OBJECT_AUTHORITY_DIRECTORY = "release-artifact-retention-object-authority.v1"
+# One release predates code-owned activation-receipt persistence.  The bridge is
+# deliberately an exact, one-shot production identity rather than a generic
+# legacy reader or a pathname search.
+_LEGACY_020790_JOURNAL_FILE_SHA256 = "c97b24144daa948617f47ee2626116073d382a2589649ee1dde8c9f42ca4f4e6"
+_LEGACY_020790_JOURNAL_SHA256 = "dff1d811b78a3f68ca6db38fe0f95eb203b7a7eee3befac1d72feb1d91ce161a"
+_LEGACY_020790_TRANSACTION_ID = "f1a4bd46191e81188b5de4327f52254e4d43e042d4dedcc5fd60c44a38bfb6f9"
+_LEGACY_020790_CANDIDATE_COMMIT = "7abb3c5e3fb29bdc7c53bf923f8b218fa26f07e9"
+_LEGACY_020790_CANDIDATE_TREE_SHA256 = "c1c29331db489ad1c56080d70a8c37d4051b4752f1309dba9c0a012099ebcae5"
+_LEGACY_020790_RECEIPT_SHA256 = "df1c5bb06e59166ac9ca497e29845ed95ce325eec47ea472a530bd140c5ff859"
+_LEGACY_020790_RECEIPT_FILE_SHA256 = "f3ba76e8f07d537b2fe6a6ee5cf6acfc2f4ba671dc325537b835aa114a2949c0"
+_LEGACY_020790_ACTIVATION_RECEIPT_RAW = base64.b64decode(
+    (
+        "eyJhbGlhc19yZXBhaXIiOnsiYXBwbGllZF9jb3VudCI6MCwiYmFja3VwX2RhdGFiYXNlX3NoYTI1NiI6IjAwMDAwMDAwMDAw"
+        "MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAiLCJiYWNrdXBfaW5ib3hfc2hh"
+        "MjU2IjoiMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMCIs"
+        "ImJhY2t1cF9tYW5pZmVzdF9zaGEyNTYiOiIwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAw"
+        "MDAwMDAwMDAwMDAwMDAwMDAwIiwicGxhbl9zaGEyNTYiOiIwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAw"
+        "MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwIiwicHJlX2FwcGx5X2RhdGFiYXNlX3NoYTI1NiI6IjAwMDAwMDAwMDAwMDAw"
+        "MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAiLCJyZWNlaXB0X3NoYTI1NiI6IjFl"
+        "OTBhMTM4ZTk1YWQxOTE1NmFhNDc3YzA5MGUwOWI0MDRhYmE3ZmMzNTU3Yzg4ZWEwYWJiNGI5ZmZkYzc3MDAiLCJzY2hlbWEi"
+        "OiJmcmlkYXkuZmlsZS1hbGlhcy1yZWxlYXNlLXJlcGFpci1yZWNlaXB0LnYxIiwic3RhdHVzIjoibm90X3JlcXVlc3RlZCIs"
+        "IndyaXRlcl9xdWllc2NlbmNlX3NoYTI1NiI6IjAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAw"
+        "MDAwMDAwMDAwMDAwMDAwMDAwMDAifSwiYmFja2VuZF9hY2NlcHRlZCI6dHJ1ZSwiYmFja3VwX3JlY2VpcHRfc2hhMjU2Ijoi"
+        "N2JjMjgwNmJmNTc3YjI5NjI4ZTNlNWY2NDk1NjA1NzVkMzJkYjFjZWM0NjRjZmYxYjYyY2I3ZmM1YjFmNmI5MiIsImJyaWRn"
+        "ZV9hY2NlcHRlZCI6dHJ1ZSwiY2FuZGlkYXRlX3RyZWVfc2hhMjU2IjoiYzFjMjkzMzFkYjQ4OWFkMWM1NjA4MGQ3MGE4YzM3"
+        "ZDQwNTFiNDc1MmYxMzA5ZGJhOWMwYTAxMjA5OWViY2FlNSIsImRhdGFiYXNlX3NjaGVtYV9iZWZvcmUiOjUwLCJlbmdpbmVl"
+        "cl9iYWNrdXBfcmVjZWlwdF9zaGEyNTYiOiJlNDAzY2ZjYTcxMDQxZWNkMDZiNDlhYjU4Njg3MzZiZDFiYTBkMmVkNjE5OGMy"
+        "OWY5NWVkOWEyYTc5ZjUzMGExIiwiaW5ib3hfYmFja3VwX3JlY2VpcHRfc2hhMjU2IjoiNGE3YTIyMTk1NjEyMTI5OWM3Y2U0"
+        "MjBjMmY2YTAyZjQyNWFjYzRlZDBkZjBmOTIwNWYwMTlhNDZjZjE4ZDc1MiIsIm9ic2lkaWFuX2JhY2t1cF9yZWNlaXB0X3No"
+        "YTI1NiI6IjYxNWQ5ZWI1NmFmMTcwNjA0ZjZkY2ExMWI5ZWIzZjRiY2NkNTQzOTFkODM5MWQ0N2RmY2ExMWRkMDU5MTA2YmEi"
+        "LCJvcGVyYXRvcl9zY2hlbWEiOiJmcmlkYXkuaW1tdXRhYmxlLXJlbGVhc2Utb3BlcmF0b3IudjEiLCJyZWNlaXB0X3NoYTI1"
+        "NiI6ImRmMWM1YmIwNmU1OTE2NmFjOWNhNDk3ZTI5ODQ1ZWQ5NWNlMzI1ZWVjNDdlYTQ3MmE1MzBiZDE0MGM1ZmY4NTkiLCJy"
+        "dW50aW1lX3BvbGljeSI6eyJtZW1vcnlfdmF1bHRfY3V0b3Zlcl9waGFzZSI6InBoYXNlX2JfYm9keV9mcmVlIiwibWVtb3J5"
+        "X3ZhdWx0X21vZGUiOiJkaXNhYmxlZCJ9LCJzY2hlbWEiOiJmcmlkYXkuaW1tdXRhYmxlLXJlbGVhc2UtYWN0aXZhdGlvbi52"
+        "MSIsInN0YXR1cyI6ImNsZWFyIn0K"
+    ),
+    validate=True,
+)
 _SECONDARY_ROLLOUT_RECEIPT_STAGE = {
     _SECONDARY_SHADOW_TO_PRIVATE_SHADOW_TRANSITION: "public-shadow",
     _SECONDARY_SHADOW_TO_ASSIST_TRANSITION: "private-shadow",
@@ -6403,6 +6442,8 @@ class ActivationJournalPort(Protocol):
         database_mutation_possible: bool = False,
         network_writer_uncertain: bool = False,
         writer_target: str = "",
+        activation_receipt_sha256: str = "",
+        activation_receipt_file_sha256: str = "",
         terminal_receipt_sha256: str = "",
         staged_transition_validation_sha256: str = "",
     ) -> None: ...
@@ -6434,6 +6475,7 @@ _JOURNAL_PHASES = frozenset(
         "backend_accepted",
         "bridge_start_attempted",
         "bridge_accepted",
+        "activation_receipt_prepared",
         "rollback_stop_attempted",
         "rollback_restore_attempted",
         "rollback_anchor_attempted",
@@ -6471,7 +6513,8 @@ _ACTIVATION_FORWARD: dict[str, frozenset[str]] = {
     "backend_start_attempted": frozenset({"backend_accepted"}),
     "backend_accepted": frozenset({"bridge_start_attempted"}),
     "bridge_start_attempted": frozenset({"bridge_accepted"}),
-    "bridge_accepted": frozenset({"clear"}),
+    "bridge_accepted": frozenset({"clear", "activation_receipt_prepared"}),
+    "activation_receipt_prepared": frozenset({"clear"}),
     "rollback_stop_attempted": frozenset({"rollback_restore_attempted", "rollback_anchor_attempted"}),
     "rollback_restore_attempted": frozenset({"rollback_anchor_attempted"}),
     "rollback_anchor_attempted": frozenset({"rollback_backend_start_attempted"}),
@@ -8156,6 +8199,8 @@ def activate_release(
     previous: ReleaseIdentity,
     schema_capable_fallback: ReleaseIdentity,
     namespace_guard: Callable[[], None] | None = None,
+    activation_receipt_publisher: Callable[[Mapping[str, Any]], Path] | None = None,
+    activation_receipt_enroller: Callable[[Path], Mapping[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Backend-first activation with schema-aware exact rollback."""
 
@@ -8163,6 +8208,9 @@ def activate_release(
     backup: DatabaseBackup | None = None
     alias_repair: Mapping[str, Any] = {}
     provision_committed = False
+    terminal_clear_committed = False
+    if (activation_receipt_publisher is None) != (activation_receipt_enroller is None):
+        raise ReleaseFailure("activation_admission_hook_incomplete")
     if namespace_guard is not None:
         namespace_guard()
         port = _NamespaceGuardedProxy(port, namespace_guard)
@@ -8378,9 +8426,7 @@ def activate_release(
             "backup_receipt_sha256": backup.receipt_sha256,
             "inbox_backup_receipt_sha256": backup.inbox_receipt_sha256,
             "obsidian_backup_receipt_sha256": backup.obsidian_receipt_sha256,
-            "engineer_backup_receipt_sha256": (
-                backup.engineer_receipt_sha256 if engineer_lifecycle_required else ""
-            ),
+            "engineer_backup_receipt_sha256": backup.engineer_receipt_sha256,
             "database_schema_before": backup.schema_version,
             "alias_repair": dict(alias_repair),
             "runtime_policy": runtime_policy,
@@ -8388,15 +8434,60 @@ def activate_release(
             "bridge_accepted": True,
         }
         receipt_sha256 = _sha256_bytes(_canonical_json(receipt))
+        public_receipt = {
+            **receipt,
+            "operator_schema": OPERATOR_SCHEMA,
+            "receipt_sha256": receipt_sha256,
+        }
+        activation_receipt_path: Path | None = None
+        activation_receipt_file_sha256 = _sha256_bytes(_canonical_json(public_receipt) + b"\n")
+        if activation_receipt_publisher is not None:
+            journal.record(
+                "activation_receipt_prepared",
+                backup=backup,
+                database_mutation_possible=True,
+                network_writer_uncertain=True,
+                writer_target="candidate",
+                activation_receipt_sha256=receipt_sha256,
+                activation_receipt_file_sha256=activation_receipt_file_sha256,
+            )
+            activation_receipt_path = activation_receipt_publisher(public_receipt)
+            expected_name = f"activation-{activation_receipt_file_sha256}.json"
+            if (
+                not isinstance(activation_receipt_path, Path)
+                or not activation_receipt_path.is_absolute()
+                or activation_receipt_path.name != expected_name
+            ):
+                raise ReleaseFailure("activation_receipt_publication_identity_invalid")
+        if activation_receipt_path is not None:
+            # From the prepared receipt onward, recovery can prove and finish
+            # clear.  A post-write namespace-guard failure must never attempt
+            # the forbidden clear->rollback transition.
+            terminal_clear_committed = True
         journal.record(
             "clear",
             backup=backup,
             database_mutation_possible=True,
             network_writer_uncertain=True,
+            writer_target="candidate",
+            activation_receipt_sha256=(receipt_sha256 if activation_receipt_path is not None else ""),
+            activation_receipt_file_sha256=(
+                activation_receipt_file_sha256 if activation_receipt_path is not None else ""
+            ),
             terminal_receipt_sha256=receipt_sha256,
         )
+        terminal_clear_committed = True
+        if activation_receipt_enroller is not None:
+            if activation_receipt_path is None:  # pragma: no cover - hook pair invariant
+                raise ReleaseFailure("activation_admission_hook_incomplete")
+            _require_activation_admitted(activation_receipt_enroller(activation_receipt_path))
         return {**receipt, "receipt_sha256": receipt_sha256}
     except BaseException as original:
+        if terminal_clear_committed:
+            # The candidate and its exact terminal journal are already public
+            # truth.  Admission is restart-safe and may fail closed, but must
+            # never turn a successful cutover into an impossible clear->rollback.
+            raise
         try:
             durable_provision_committed = bool(
                 provision_committed or journal.load().get("engineer_provision_committed") is True
@@ -9281,6 +9372,72 @@ class DurableActivationJournal:
             temporary.unlink(missing_ok=True)
         self._state = dict(core)
 
+    def require_legacy_020790_activation_receipt(self) -> dict[str, Any]:
+        """Read-only proof of the sole pre-writer terminal receipt."""
+
+        raw = _read_private_regular_file(
+            self.path,
+            maximum_bytes=1 << 20,
+            code="activation_legacy_020790_journal_invalid",
+        )
+        state = dict(self._state or self._read())
+        if "activation_receipt_file_sha256" in state:
+            raise ReleaseFailure("activation_terminal_receipt_already_bound")
+        candidate = state.get("candidate")
+        try:
+            raw_payload = _unique_json(raw.decode("ascii"))
+        except (UnicodeError, ValueError, json.JSONDecodeError) as exc:
+            raise ReleaseFailure("activation_legacy_020790_journal_invalid") from exc
+        if (
+            _sha256_bytes(raw) != _LEGACY_020790_JOURNAL_FILE_SHA256
+            or raw_payload.get("journal_sha256") != _LEGACY_020790_JOURNAL_SHA256
+            or state.get("phase") != "clear"
+            or state.get("transaction_id") != _LEGACY_020790_TRANSACTION_ID
+            or state.get("terminal_receipt_sha256") != _LEGACY_020790_RECEIPT_SHA256
+            or not isinstance(candidate, dict)
+            or candidate.get("commit") != _LEGACY_020790_CANDIDATE_COMMIT
+            or candidate.get("tree_manifest_sha256") != _LEGACY_020790_CANDIDATE_TREE_SHA256
+            or candidate.get("version") != "0.207.90"
+        ):
+            raise ReleaseFailure("activation_unbound_legacy_terminal_rejected")
+        try:
+            payload = _unique_json(_LEGACY_020790_ACTIVATION_RECEIPT_RAW.decode("ascii"))
+        except (UnicodeError, ValueError, json.JSONDecodeError) as exc:  # pragma: no cover - constant
+            raise ReleaseFailure("activation_legacy_020790_receipt_invalid") from exc
+        if (
+            _sha256_bytes(_LEGACY_020790_ACTIVATION_RECEIPT_RAW) != _LEGACY_020790_RECEIPT_FILE_SHA256
+            or payload.get("receipt_sha256") != _LEGACY_020790_RECEIPT_SHA256
+            or payload.get("candidate_tree_sha256") != _LEGACY_020790_CANDIDATE_TREE_SHA256
+        ):
+            raise ReleaseFailure("activation_legacy_020790_receipt_invalid")
+        return state
+
+    def bind_legacy_020790_activation_receipt(self) -> None:
+        """Bind the sole pre-writer clear journal to its embedded exact body."""
+
+        state = dict(self._state or self._read())
+        if "activation_receipt_file_sha256" in state:
+            if (
+                state.get("activation_receipt_sha256") != _LEGACY_020790_RECEIPT_SHA256
+                or state.get("activation_receipt_file_sha256") != _LEGACY_020790_RECEIPT_FILE_SHA256
+            ):
+                raise ReleaseFailure("activation_terminal_receipt_binding_conflict")
+            return
+        state = self.require_legacy_020790_activation_receipt()
+        self._write(
+            {
+                **state,
+                "activation_receipt_sha256": _LEGACY_020790_RECEIPT_SHA256,
+                "activation_receipt_file_sha256": _LEGACY_020790_RECEIPT_FILE_SHA256,
+            }
+        )
+        rebound = dict(self._state or {})
+        if (
+            rebound.get("activation_receipt_sha256") != _LEGACY_020790_RECEIPT_SHA256
+            or rebound.get("activation_receipt_file_sha256") != _LEGACY_020790_RECEIPT_FILE_SHA256
+        ):
+            raise ReleaseFailure("activation_legacy_020790_binding_failed")
+
     def _read(
         self,
         *,
@@ -9343,7 +9500,15 @@ class DurableActivationJournal:
             v3_predecessor_expected,
             *current_transition_expected,
         )
-        payload_keys = set(payload)
+        receipt_binding_fields = {
+            "activation_receipt_file_sha256",
+            "activation_receipt_sha256",
+        }
+        raw_payload_keys = set(payload)
+        receipt_binding_present = tuple(field in raw_payload_keys for field in receipt_binding_fields)
+        if any(receipt_binding_present) and not all(receipt_binding_present):
+            raise ReleaseFailure("activation_journal_invalid")
+        payload_keys = raw_payload_keys.difference(receipt_binding_fields)
         if payload_keys not in (
             legacy_expected,
             schema_v2_expected,
@@ -9474,6 +9639,7 @@ class DurableActivationJournal:
                     "backend_accepted",
                     "bridge_start_attempted",
                     "bridge_accepted",
+                    "activation_receipt_prepared",
                     "rollback_stop_attempted",
                     "rollback_anchor_attempted",
                     "rollback_backend_start_attempted",
@@ -9502,6 +9668,34 @@ class DurableActivationJournal:
         terminal_hash = str(payload.get("terminal_receipt_sha256") or "")
         if (payload["phase"] in _TERMINAL_JOURNAL_PHASES) != (_HEX64.fullmatch(terminal_hash) is not None):
             raise ReleaseFailure("activation_journal_invalid")
+        if all(receipt_binding_present):
+            activation_receipt_sha256 = str(payload.get("activation_receipt_sha256") or "")
+            activation_receipt_file_sha256 = str(payload.get("activation_receipt_file_sha256") or "")
+            receipt_bound_phases = {
+                "activation_receipt_prepared",
+                "clear",
+                "rollback_stop_attempted",
+                "rollback_restore_attempted",
+                "rollback_anchor_attempted",
+                "rollback_backend_start_attempted",
+                "rollback_backend_accepted",
+                "rollback_bridge_start_attempted",
+                "rolled_back",
+                "recovery_stop_attempted",
+                "recovery_restore_attempted",
+                "recovery_anchor_attempted",
+                "recovery_backend_start_attempted",
+                "recovery_backend_accepted",
+                "recovery_bridge_start_attempted",
+                "recovered",
+            }
+            if (
+                _HEX64.fullmatch(activation_receipt_sha256) is None
+                or _HEX64.fullmatch(activation_receipt_file_sha256) is None
+                or payload.get("phase") not in receipt_bound_phases
+                or (payload.get("phase") == "clear" and activation_receipt_sha256 != terminal_hash)
+            ):
+                raise ReleaseFailure("activation_journal_invalid")
         for key in ("candidate", "previous", "fallback"):
             identity = payload.get(key)
             if not isinstance(identity, dict) or set(identity) != {
@@ -9856,6 +10050,8 @@ class DurableActivationJournal:
         database_mutation_possible: bool = False,
         network_writer_uncertain: bool = False,
         writer_target: str = "",
+        activation_receipt_sha256: str = "",
+        activation_receipt_file_sha256: str = "",
         terminal_receipt_sha256: str = "",
         staged_transition_validation_sha256: str = "",
     ) -> None:
@@ -9867,6 +10063,33 @@ class DurableActivationJournal:
         current_phase = str(state.get("phase") or "")
         if not _journal_transition_allowed(current_phase, phase):
             raise ReleaseFailure("activation_journal_transition_invalid")
+        supplied_receipt_binding = bool(activation_receipt_sha256 or activation_receipt_file_sha256)
+        if supplied_receipt_binding != bool(activation_receipt_sha256 and activation_receipt_file_sha256):
+            raise ReleaseFailure("activation_journal_receipt_binding_invalid")
+        if phase == "activation_receipt_prepared":
+            if (
+                not supplied_receipt_binding
+                or _HEX64.fullmatch(activation_receipt_sha256) is None
+                or _HEX64.fullmatch(activation_receipt_file_sha256) is None
+                or "activation_receipt_sha256" in state
+                or "activation_receipt_file_sha256" in state
+            ):
+                raise ReleaseFailure("activation_journal_receipt_binding_invalid")
+        elif supplied_receipt_binding and (
+            phase != "clear"
+            or state.get("activation_receipt_sha256") != activation_receipt_sha256
+            or state.get("activation_receipt_file_sha256") != activation_receipt_file_sha256
+        ):
+            raise ReleaseFailure("activation_journal_receipt_binding_invalid")
+        if (
+            phase == "clear"
+            and "activation_receipt_sha256" in state
+            and (
+                state.get("activation_receipt_sha256") != terminal_receipt_sha256
+                or not supplied_receipt_binding
+            )
+        ):
+            raise ReleaseFailure("activation_journal_receipt_binding_invalid")
         staged_transition = _staged_config_transition(state)
         special_transition = bool(
             staged_transition is not None
@@ -9914,6 +10137,9 @@ class DurableActivationJournal:
                 terminal_receipt_sha256,
                 "activation_journal_terminal_digest_invalid",
             )
+        if phase == "activation_receipt_prepared":
+            state["activation_receipt_sha256"] = activation_receipt_sha256
+            state["activation_receipt_file_sha256"] = activation_receipt_file_sha256
         if staged_transition_validation_sha256:
             state["staged_transition_validation_sha256"] = staged_transition_validation_sha256
         self._write(state)
@@ -18815,6 +19041,343 @@ def _require_release_retention_toolchain(release: ReleaseIdentity) -> None:
     _validate_release_retention_toolchain(release.root, manifest_sha256)
 
 
+class _SealedCandidateDRAdmission:
+    """Narrow adapter over the exact candidate-owned DR writer modules."""
+
+    def __init__(
+        self,
+        *,
+        index_module: Any,
+        enrollment_module: Any,
+        friday_home: Path,
+        namespace_guard: Callable[[], None],
+    ) -> None:
+        self._index_module = index_module
+        self._enrollment_module = enrollment_module
+        self._friday_home = friday_home
+        self._guard = namespace_guard
+        self._index = index_module.DurableDRGenerationIndex(friday_home / "data/state")
+
+    @staticmethod
+    def _translate(exc: Exception) -> ReleaseFailure:
+        code = str(exc)
+        if re.fullmatch(r"[a-z][a-z0-9_]{0,127}", code) is None:
+            code = "candidate_dr_admission_failed"
+        return ReleaseFailure(code)
+
+    def publish(self, receipt: Mapping[str, Any]) -> Path:
+        try:
+            self._guard()
+            path = self._index.publish_activation_receipt(
+                receipt=receipt,
+                namespace_guard=self._guard,
+            )
+            self._guard()
+            return path
+        except Exception as exc:
+            raise self._translate(exc) from exc
+
+    def resolve(self, file_sha256: str) -> Path:
+        try:
+            self._guard()
+            path = self._index.resolve_activation_receipt_path(file_sha256=file_sha256)
+            self._guard()
+            return path
+        except Exception as exc:
+            raise self._translate(exc) from exc
+
+    def load(self, file_sha256: str, *, missing_ok: bool = False) -> Mapping[str, Any] | None:
+        try:
+            self._guard()
+            payload = self._index.load_activation_receipt_body(
+                file_sha256=file_sha256,
+                missing_ok=missing_ok,
+            )
+            self._guard()
+            return payload
+        except Exception as exc:
+            raise self._translate(exc) from exc
+
+    def upgrade_legacy_020790_receipt_modes(self) -> Mapping[str, Any]:
+        try:
+            self._guard()
+            state = self._index.upgrade_legacy_020790_receipt_modes(
+                namespace_guard=self._guard,
+            )
+            self._guard()
+            return state
+        except Exception as exc:
+            raise self._translate(exc) from exc
+
+    def enroll(self, activation_receipt: Path) -> Mapping[str, Any]:
+        try:
+            self._guard()
+            receipt = self._enrollment_module._enroll_terminal_activation_backup_locked(  # noqa: SLF001
+                activation_receipt=activation_receipt,
+                friday_home=self._friday_home,
+                index=self._index,
+                namespace_guard=self._guard,
+            )
+            self._guard()
+            return receipt
+        except Exception as exc:
+            raise self._translate(exc) from exc
+
+
+@contextmanager
+def _sealed_candidate_dr_admission(
+    release: ReleaseIdentity,
+    *,
+    friday_home: Path,
+    namespace_guard: Callable[[], None],
+) -> Iterator[_SealedCandidateDRAdmission]:
+    """Load the sealed DR package by exact specs, never ambient import state."""
+
+    _require_release_retention_toolchain(release)
+    if not sys.flags.isolated or not sys.dont_write_bytecode:
+        raise ReleaseFailure("candidate_dr_loader_not_isolated")
+    package_root = release.root / _RELEASE_RETENTION_TOOLCHAIN_ROOT / "tools"
+    module_files = (
+        ("tools", package_root / "__init__.py", True),
+        ("tools.immutable_release_operator", package_root / "immutable_release_operator.py", False),
+        ("tools.release_dr_generation_index", package_root / "release_dr_generation_index.py", False),
+        (
+            "tools.release_dr_generation_authentication",
+            package_root / "release_dr_generation_authentication.py",
+            False,
+        ),
+        (
+            "tools.release_dr_generation_enrollment",
+            package_root / "release_dr_generation_enrollment.py",
+            False,
+        ),
+    )
+    if any(name == "tools" or name.startswith("tools.") for name in sys.modules):
+        raise ReleaseFailure("candidate_dr_loader_foreign_tools_preloaded")
+    before_path = tuple(sys.path)
+    loaded: dict[str, Any] = {}
+    try:
+        for name, path, package in module_files:
+            resolved = path.resolve(strict=True)
+            spec = importlib.util.spec_from_file_location(
+                name,
+                resolved,
+                submodule_search_locations=([str(package_root)] if package else None),
+            )
+            if spec is None or spec.loader is None:
+                raise ReleaseFailure("candidate_dr_loader_spec_invalid")
+            module = importlib.util.module_from_spec(spec)
+            sys.modules[name] = module
+            spec.loader.exec_module(module)
+            origin = Path(str(getattr(module, "__file__", ""))).resolve(strict=True)
+            if origin != resolved:
+                raise ReleaseFailure("candidate_dr_loader_origin_invalid")
+            loaded[name] = module
+        observed = {name for name in sys.modules if name == "tools" or name.startswith("tools.")}
+        expected = {name for name, _path, _package in module_files}
+        if observed != expected or tuple(sys.path) != before_path:
+            raise ReleaseFailure("candidate_dr_loader_module_set_invalid")
+        yield _SealedCandidateDRAdmission(
+            index_module=loaded["tools.release_dr_generation_index"],
+            enrollment_module=loaded["tools.release_dr_generation_enrollment"],
+            friday_home=friday_home,
+            namespace_guard=namespace_guard,
+        )
+        namespace_guard()
+        if tuple(sys.path) != before_path:
+            raise ReleaseFailure("candidate_dr_loader_path_changed")
+    except ReleaseFailure:
+        raise
+    except (ImportError, OSError, RuntimeError, TypeError, ValueError) as exc:
+        raise ReleaseFailure("candidate_dr_loader_failed") from exc
+    finally:
+        for name in tuple(sys.modules):
+            if name != "tools" and not name.startswith("tools."):
+                continue
+            sys.modules.pop(name, None)
+        importlib.invalidate_caches()
+        if tuple(sys.path) != before_path:
+            sys.path[:] = before_path
+
+
+def _validate_bound_activation_receipt(
+    value: Mapping[str, Any],
+    *,
+    state: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Bind one already shape-validated body to the exact journal truth."""
+
+    payload = dict(value)
+    backup = state.get("backup")
+    candidate = state.get("candidate")
+    memory_vault_mode = state.get("memory_vault_mode")
+    expected_policy = {
+        "memory_vault_cutover_phase": (
+            "phase_b_body_free" if memory_vault_mode == "disabled" else "phase_a_full_owner_bridge"
+        ),
+        "memory_vault_mode": memory_vault_mode,
+    }
+    receipt_sha256 = str(payload.get("receipt_sha256") or "")
+    semantic_core = {
+        key: item for key, item in payload.items() if key not in {"operator_schema", "receipt_sha256"}
+    }
+    if (
+        not isinstance(backup, dict)
+        or not isinstance(candidate, dict)
+        or memory_vault_mode not in MEMORY_VAULT_MODES
+        or payload.get("schema") != ACTIVATION_RECEIPT_SCHEMA
+        or payload.get("operator_schema") != OPERATOR_SCHEMA
+        or payload.get("status") != "clear"
+        or payload.get("backend_accepted") is not True
+        or payload.get("bridge_accepted") is not True
+        or payload.get("candidate_tree_sha256") != candidate.get("tree_manifest_sha256")
+        or payload.get("database_schema_before") != backup.get("schema_version")
+        or payload.get("backup_receipt_sha256") != backup.get("receipt_sha256")
+        or payload.get("inbox_backup_receipt_sha256") != backup.get("inbox_receipt_sha256")
+        or payload.get("obsidian_backup_receipt_sha256") != backup.get("obsidian_receipt_sha256")
+        or payload.get("engineer_backup_receipt_sha256") != backup.get("engineer_receipt_sha256")
+        or payload.get("runtime_policy") != expected_policy
+        or _HEX64.fullmatch(receipt_sha256) is None
+        or receipt_sha256 != _sha256_bytes(_canonical_json(semantic_core))
+        or receipt_sha256 != state.get("activation_receipt_sha256", receipt_sha256)
+        or (state.get("phase") == "clear" and receipt_sha256 != state.get("terminal_receipt_sha256"))
+    ):
+        raise ReleaseFailure("activation_receipt_journal_binding_invalid")
+    try:
+        _validated_alias_repair_receipt(payload["alias_repair"])
+    except (KeyError, TypeError, ReleaseFailure) as exc:
+        raise ReleaseFailure("activation_receipt_journal_binding_invalid") from exc
+    return payload
+
+
+def _bound_activation_receipt(
+    *,
+    admission: _SealedCandidateDRAdmission,
+    state: Mapping[str, Any],
+    missing_ok: bool = False,
+) -> tuple[dict[str, Any], Path] | None:
+    file_sha256 = _closed_hash(
+        str(state.get("activation_receipt_file_sha256") or ""),
+        "activation_receipt_journal_binding_invalid",
+    )
+    observed = admission.load(file_sha256, missing_ok=missing_ok)
+    if observed is None:
+        return None
+    payload = _validate_bound_activation_receipt(observed, state=state)
+    path = admission.resolve(file_sha256)
+    if path.name != f"activation-{file_sha256}.json":
+        raise ReleaseFailure("activation_receipt_publication_identity_invalid")
+    return payload, path
+
+
+def _require_activation_admitted(value: Mapping[str, Any]) -> dict[str, Any]:
+    receipt = dict(value)
+    if receipt.get("status") != "admitted" or type(receipt.get("published")) is not bool:
+        raise ReleaseFailure("activation_dr_admission_invalid")
+    return receipt
+
+
+def _reconcile_terminal_activation_admission(
+    *,
+    journal: DurableActivationJournal,
+    candidate: ReleaseIdentity,
+    previous: ReleaseIdentity,
+    fallback: ReleaseIdentity,
+    admission: _SealedCandidateDRAdmission,
+) -> None:
+    """Close the previous clear admission before allowing journal supersession."""
+
+    if not journal.path.exists() and not journal.path.is_symlink():
+        return
+    state = journal._read(  # noqa: SLF001 - same-module exact transition reader
+        allow_terminal_config_transition=True,
+        transition_previous=previous,
+        transition_fallback=fallback,
+        transition_candidate=candidate,
+    )
+    if state.get("phase") != "clear":
+        return
+    if state.get("candidate") != _journal_release(previous):
+        raise ReleaseFailure("activation_predecessor_journal_identity_mismatch")
+    if "activation_receipt_file_sha256" not in state:
+        journal.require_legacy_020790_activation_receipt()
+        try:
+            legacy_body = _unique_json(_LEGACY_020790_ACTIVATION_RECEIPT_RAW.decode("ascii"))
+        except (UnicodeError, ValueError, json.JSONDecodeError) as exc:  # pragma: no cover - constant
+            raise ReleaseFailure("activation_legacy_020790_receipt_invalid") from exc
+        _validate_bound_activation_receipt(legacy_body, state=state)
+        published = admission.publish(legacy_body)
+        if published.name != f"activation-{_LEGACY_020790_RECEIPT_FILE_SHA256}.json":
+            raise ReleaseFailure("activation_legacy_020790_receipt_invalid")
+        admission.upgrade_legacy_020790_receipt_modes()
+        journal.bind_legacy_020790_activation_receipt()
+        state = dict(journal._state or {})  # noqa: SLF001 - same durable write
+    bound = _bound_activation_receipt(admission=admission, state=state)
+    if bound is None:  # pragma: no cover - missing_ok is false
+        raise ReleaseFailure("activation_receipt_journal_binding_invalid")
+    _payload, path = bound
+    receipt = _require_activation_admitted(admission.enroll(path))
+    if receipt["published"] is not True:
+        raise ReleaseFailure("activation_predecessor_dr_lifecycle_required")
+
+
+def _reject_terminal_activation_supersession_without_writer(
+    *,
+    journal: DurableActivationJournal,
+    candidate: ReleaseIdentity,
+    previous: ReleaseIdentity,
+    fallback: ReleaseIdentity,
+) -> None:
+    """Keep a successful activation until a pair-bearing writer reconciles it."""
+
+    if not journal.path.exists() and not journal.path.is_symlink():
+        return
+    state = journal._read(  # noqa: SLF001 - same-module pre-begin fence
+        allow_terminal_config_transition=True,
+        transition_previous=previous,
+        transition_fallback=fallback,
+        transition_candidate=candidate,
+    )
+    if state.get("phase") == "clear":
+        raise ReleaseFailure("activation_terminal_admission_requires_writer")
+
+
+def _resume_terminal_activation_admission(
+    *,
+    journal: DurableActivationJournal,
+    admission: _SealedCandidateDRAdmission,
+) -> dict[str, Any] | None:
+    """Finish only a durable prepared/clear W4 receipt; otherwise defer recovery."""
+
+    state = dict(journal.load())
+    phase = state.get("phase")
+    if phase not in {"activation_receipt_prepared", "clear"}:
+        return None
+    if "activation_receipt_file_sha256" not in state:
+        return None
+    bound = _bound_activation_receipt(
+        admission=admission,
+        state=state,
+        missing_ok=phase == "activation_receipt_prepared",
+    )
+    if bound is None:
+        return None
+    payload, path = bound
+    if phase == "activation_receipt_prepared":
+        receipt_sha256 = str(state["activation_receipt_sha256"])
+        journal.record(
+            "clear",
+            database_mutation_possible=True,
+            network_writer_uncertain=True,
+            writer_target="candidate",
+            activation_receipt_sha256=receipt_sha256,
+            activation_receipt_file_sha256=str(state["activation_receipt_file_sha256"]),
+            terminal_receipt_sha256=receipt_sha256,
+        )
+    _require_activation_admitted(admission.enroll(path))
+    return payload
+
+
 def _require_reader_only_release_profile(release: ReleaseIdentity) -> None:
     manifest_sha256 = release.sealed_release_retention_toolchain_manifest_sha256
     if (
@@ -19500,14 +20063,44 @@ def _run_cli(args: argparse.Namespace) -> dict[str, Any]:
                 next_env_file_sha256=config.next_env_file_sha256 or None,
                 staged_config_transition=staged_config_transition or None,
             )
-            receipt = activate_release(
-                port,
-                journal,
-                candidate=candidate,
-                previous=previous,
-                schema_capable_fallback=schema_capable_fallback,
-                namespace_guard=transaction_lock.assert_held,
-            )
+            if candidate.build_receipt_profile == BUILD_RECEIPT_PROFILE_P0H_RETENTION:
+                with _sealed_candidate_dr_admission(
+                    candidate,
+                    friday_home=config.friday_home,
+                    namespace_guard=transaction_lock.assert_held,
+                ) as admission:
+                    _reconcile_terminal_activation_admission(
+                        journal=journal,
+                        candidate=candidate,
+                        previous=previous,
+                        fallback=schema_capable_fallback,
+                        admission=admission,
+                    )
+                    receipt = activate_release(
+                        port,
+                        journal,
+                        candidate=candidate,
+                        previous=previous,
+                        schema_capable_fallback=schema_capable_fallback,
+                        namespace_guard=transaction_lock.assert_held,
+                        activation_receipt_publisher=admission.publish,
+                        activation_receipt_enroller=admission.enroll,
+                    )
+            else:
+                _reject_terminal_activation_supersession_without_writer(
+                    journal=journal,
+                    candidate=candidate,
+                    previous=previous,
+                    fallback=schema_capable_fallback,
+                )
+                receipt = activate_release(
+                    port,
+                    journal,
+                    candidate=candidate,
+                    previous=previous,
+                    schema_capable_fallback=schema_capable_fallback,
+                    namespace_guard=transaction_lock.assert_held,
+                )
     elif args.command == "recover-activation":
         config = _systemd_config(args)
         _require_runtime_operator_layout(config)
@@ -19560,11 +20153,23 @@ def _run_cli(args: argparse.Namespace) -> dict[str, Any]:
             )
             _require_completed_unit_install(config.state_dir, candidate)
             port = SystemdActivationPort(config)
-            receipt = recover_interrupted_activation(
-                port,
-                journal,
-                namespace_guard=transaction_lock.assert_held,
-            )
+            receipt = None
+            if candidate.build_receipt_profile == BUILD_RECEIPT_PROFILE_P0H_RETENTION:
+                with _sealed_candidate_dr_admission(
+                    candidate,
+                    friday_home=config.friday_home,
+                    namespace_guard=transaction_lock.assert_held,
+                ) as admission:
+                    receipt = _resume_terminal_activation_admission(
+                        journal=journal,
+                        admission=admission,
+                    )
+            if receipt is None:
+                receipt = recover_interrupted_activation(
+                    port,
+                    journal,
+                    namespace_guard=transaction_lock.assert_held,
+                )
     elif args.command == "recover-historical-album":
         config = _systemd_config(args)
         _require_runtime_operator_layout(config)
