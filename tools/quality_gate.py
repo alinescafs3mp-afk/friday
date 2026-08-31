@@ -106,6 +106,7 @@ _COLLECTIONS_BY_WORKER: dict[str, tuple[str, ...]] = {}
 _COLLECTION_SKIPS: list[str] = []
 _COLLECTION_DESELECTED: list[str] = []
 _COLLECTION_PROBLEMS_BY_WORKER: dict[str, tuple[int, int]] = {}
+_COLLECTION_DOWN_WORKERS: set[str] = set()
 _SERIAL_COLLECTION: tuple[str, ...] | None = None
 _TIER_SELECTION: frozenset[str] | None = None
 
@@ -185,6 +186,7 @@ def pytest_sessionstart(session: Any) -> None:
     _COLLECTION_SKIPS.clear()
     _COLLECTION_DESELECTED.clear()
     _COLLECTION_PROBLEMS_BY_WORKER.clear()
+    _COLLECTION_DOWN_WORKERS.clear()
     _SERIAL_COLLECTION = None
     selection_path = session.config.getoption(_SELECTION_OPTION)
     _TIER_SELECTION = frozenset(collection_nodeids(selection_path)) if selection_path else None
@@ -291,6 +293,7 @@ def pytest_testnodedown(node: Any, error: object) -> None:
 
     worker_id = node.gateway.id
     if error is not None:
+        _COLLECTION_DOWN_WORKERS.add(worker_id)
         _COLLECTION_PROBLEMS_BY_WORKER[worker_id] = (1, 1)
         return
     payload = node.workeroutput.get("friday_collection_problems")
@@ -344,8 +347,16 @@ def pytest_sessionfinish(session: Any, exitstatus: int) -> None:
     if set(_COLLECTION_PROBLEMS_BY_WORKER) != set(_COLLECTIONS_BY_WORKER):
         _fail_collection_session(session, "worker_attestation_missing")
         return
+    if _COLLECTION_DOWN_WORKERS:
+        _fail_collection_session(session, "worker_shutdown_error")
+        return
     if any(skipped or deselected for skipped, deselected in _COLLECTION_PROBLEMS_BY_WORKER.values()):
-        _fail_collection_session(session, "worker_collection_problem")
+        skipped = sum(value[0] for value in _COLLECTION_PROBLEMS_BY_WORKER.values())
+        deselected = sum(value[1] for value in _COLLECTION_PROBLEMS_BY_WORKER.values())
+        _fail_collection_session(
+            session,
+            f"worker_collection_problem(skipped={skipped},deselected={deselected})",
+        )
         return
     collections = tuple(_COLLECTIONS_BY_WORKER.values())
     if not collections or not collections[0] or any(nodeids != collections[0] for nodeids in collections[1:]):
