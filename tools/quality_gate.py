@@ -12,23 +12,31 @@ from __future__ import annotations
 import argparse
 import gzip
 import hashlib
+import importlib.util
 import json
 import os
+import platform
 import re
 import shutil
+import signal
 import stat
 import subprocess
 import sys
 import tempfile
+import threading
+import time
 import xml.etree.ElementTree as ET
 from collections import Counter
 from collections.abc import Callable, Iterator, Mapping, Sequence
-from contextlib import contextmanager, nullcontext
+from contextlib import contextmanager, nullcontext, suppress
 from dataclasses import dataclass, field
+from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any
 
 ROOT = Path(__file__).resolve().parents[1]
+GIT = "/usr/bin/git" if Path("/usr/bin/git").is_file() else (shutil.which("git") or "git")
+_NO_GLOBAL_GIT_ATTRIBUTES = f"core.attributesFile={os.devnull}"
 PHASES = ("static", "tests", "ui")
 UI_TEST_MODULES = (
     "tests/test_admin_ui_activity.py",
@@ -43,69 +51,6 @@ UI_TEST_MODULES = (
     "tests/test_the_graph_shows_the_path_not_just_the_hit.py",
     "tests/test_the_graph_shows_two_time_axes_and_parallel_edges.py",
     "tests/test_the_graph_tab_can_be_navigated.py",
-)
-
-# These exact product journeys are a release contract, not merely examples
-# which happen to be collected today.  The canonical gate still runs the whole
-# suite once; this inventory only makes deleting or renaming a required journey
-# terminal after the authoritative collection has completed.
-RELEASE_BLOCKING_BATTERY_NODEIDS = (
-    "tests/test_host_control_config.py::test_host_control_defaults_are_inert",
-    "tests/test_host_control_deployment.py::test_compose_override_is_narrow_and_every_feature_defaults_off",
-    "tests/test_friday_host_agent_execution.py::"
-    "test_missing_nmap_install_approval_attestation_and_scan_resume_vertical",
-    "tests/test_friday_host_agent_execution.py::"
-    "test_preinstalled_jq_runs_on_an_exact_owned_copy_and_retries_idempotently",
-    "tests/test_friday_host_agent_execution.py::"
-    "test_jq_pending_upload_output_is_durable_downloadable_and_idempotent",
-    "tests/test_host_control_natural_language_acceptance.py::"
-    "test_literal_russian_nmap_request_reject_then_approve_resumes_exact_vertical",
-    "tests/test_host_control_agent_runtime.py::"
-    "test_current_json_model_call_gets_exact_code_owned_raw_and_runtime_context",
-    "tests/test_host_control_release_bundle.py::"
-    "test_build_is_byte_deterministic_and_manifest_covers_the_closed_bundle",
-    "tests/test_host_control_network_approval.py::"
-    "test_network_approval_ledger_is_full_sync_immutable_and_restart_safe",
-    "tests/test_package_broker_daemon.py::"
-    "test_crash_after_apt_effect_reconciles_exact_poststate_without_second_commit",
-    "tests/test_engineer_mode_production.py::test_untrusted_artifact_instruction_cannot_authorize_patch",
-    "tests/test_agent_obsidian_production_composition.py::"
-    "test_note_create_append_and_daily_exact_messages_mutate_the_real_vault",
-    "tests/test_archive_search_runtime_publication.py::"
-    "test_mixed_obsidian_and_archive_request_runs_neither_route",
-    "tests/test_archive_search_runtime_publication.py::"
-    "test_real_router_preserves_two_exact_archive_pages_through_final_answer",
-    "tests/test_archive_search_runtime_publication.py::"
-    "test_selected_archive_explain_lease_drift_falls_back_before_publication[1-1-2-unavailable]",
-    "tests/test_archive_search_runtime_publication.py::"
-    "test_selected_archive_explain_lease_drift_falls_back_before_publication[2-2-3-succeeded]",
-    "tests/test_archive_search_runtime_publication.py::"
-    "test_selected_archive_explain_preserves_two_passage_identities_and_nested_citations",
-    "tests/test_archive_search_runtime_publication.py::"
-    "test_selected_archive_explain_rechecks_source_after_model_before_publication",
-    "tests/test_archive_search_runtime_publication.py::"
-    "test_selected_archive_explain_uses_attested_two_pass_model_and_atomic_receipt",
-    "tests/test_archive_search_runtime_publication.py::"
-    "test_natural_selected_document_question_uses_bound_preingestion_v12_without_ordinary_paths",
-    "tests/test_archive_search_runtime_publication.py::"
-    "test_natural_selected_reference_with_current_attachment_stays_on_current_file_surface",
-    "tests/test_archive_search_runtime_publication.py::"
-    "test_natural_selected_reference_reply_keeps_reply_file_priority_and_work_item_unchanged",
-    "tests/test_archive_search_runtime_publication.py::"
-    "test_mixed_deictic_capability_phrases_never_claim_selected_archive_work",
-    "tests/test_archive_search_runtime_publication.py::"
-    "test_selected_archive_explain_verifier_failure_falls_back_to_exact_replay",
-    "tests/test_archive_search_runtime_publication.py::"
-    "test_selected_archive_explain_without_attested_model_falls_back_honestly",
-    "tests/test_archive_search_runtime_publication.py::"
-    "test_selected_archive_show_passages_never_invokes_explanation_model",
-    "tests/test_owner_web_and_file_live_regressions.py::"
-    "test_qnap_product_spec_uses_isolated_web_after_private_history",
-    "tests/test_owner_web_and_file_live_regressions.py::"
-    "test_three_complete_bare_docx_summaries_then_isolated_news_excludes_history",
-    "tests/test_small_talk_costs_nothing.py::test_a_radio_check_is_persisted_without_model_search_or_tools",
-    "tests/test_v12_archive_read_handler.py::"
-    "test_real_router_dispatches_immediate_source_search_ordinal_to_archive_read",
 )
 
 # A shell used to operate Friday commonly exports absolute runtime paths.  A
@@ -139,14 +84,30 @@ _TEST_ASSET_ENV_ALIASES = {
 _SCHEMA_FIXTURE_DIRECTORY = ROOT / "tests" / "fixtures" / "schemas"
 _SCHEMA_FIXTURE_MANIFEST = "manifest.json"
 _SCHEMA_FIXTURE_NAME = re.compile(r"schema-[0-9]+\.sqlite3\.gz").fullmatch
-_SAFE_SCHEMA_FIXTURE_MODES = frozenset({0o400, 0o440, 0o444, 0o600, 0o640, 0o644, 0o660, 0o664})
 _NODEID_PROPERTY = "friday_nodeid"
 _COLLECTION_OPTION = "--friday-collection-manifest"
+_SELECTION_OPTION = "--friday-tier-selection"
+_INSTALLED_SITE_ENV = "FRIDAY_QUALITY_GATE_INSTALLED_SITE"
+_WHEEL_NAMESPACES = ("friday", "friday_host_agent", "friday_package_broker")
+_EXACT_CPU_FLOOR = 24
+_EXACT_SCRATCH_FREE_FLOOR = 32 * 1024 * 1024 * 1024
+_SYNCTHING_AMD64_SHA256 = "e8a08fdd8b25340aae0c0a00ab131b293830e4ea47504d4b83a82f31b52b96c4"
+_MAX_COLLECTION_BYTES = 64 << 20
+_MAX_COLLECTION_NODES = 100_000
+_MAX_COLLECTION_NODE_BYTES = 256 << 10
+_OBSERVATION_TEST_ENV = (
+    "FRIDAY_TEST_BACKUPS_DIR",
+    "FRIDAY_REAL_SYNCTHING_BINARY",
+    "QUALITY_GATE_SYNCTHING_BINARY",
+    "QUALITY_GATE_POWERSHELL_BINARY",
+    "PATH",
+)
 _COLLECTIONS_BY_WORKER: dict[str, tuple[str, ...]] = {}
 _COLLECTION_SKIPS: list[str] = []
 _COLLECTION_DESELECTED: list[str] = []
 _COLLECTION_PROBLEMS_BY_WORKER: dict[str, tuple[int, int]] = {}
 _SERIAL_COLLECTION: tuple[str, ...] | None = None
+_TIER_SELECTION: frozenset[str] | None = None
 
 
 @dataclass(frozen=True)
@@ -154,6 +115,8 @@ class GateCommand:
     name: str
     argv: tuple[str, ...]
     environment: Mapping[str, str] | None = field(default=None, repr=False, compare=False)
+    cwd: Path = field(default=ROOT, repr=False, compare=False)
+    timeout_s: int = field(default=3600, repr=False, compare=False)
 
 
 @dataclass(frozen=True)
@@ -168,12 +131,6 @@ class JUnitSummary:
     nodeids: tuple[str, ...]
 
 
-@dataclass(frozen=True)
-class SchemaFixture:
-    name: str
-    sha256: str
-
-
 def _strict_json_object(pairs: Sequence[tuple[str, Any]]) -> dict[str, Any]:
     result: dict[str, Any] = {}
     for name, value in pairs:
@@ -183,11 +140,22 @@ def _strict_json_object(pairs: Sequence[tuple[str, Any]]) -> dict[str, Any]:
     return result
 
 
-def _command_with_environment(
-    command: GateCommand,
-    environment: Mapping[str, str],
-) -> GateCommand:
-    return GateCommand(command.name, command.argv, environment)
+def _bounded_collection_nodeids(value: object) -> tuple[str, ...]:
+    if isinstance(value, (str, bytes)) or not isinstance(value, Sequence):
+        raise ValueError("pytest collection contains invalid nodeids")
+    result = tuple(value)
+    try:
+        valid = 0 < len(result) <= _MAX_COLLECTION_NODES and all(
+            isinstance(nodeid, str) and bool(nodeid) and len(nodeid.encode()) <= _MAX_COLLECTION_NODE_BYTES
+            for nodeid in result
+        )
+    except UnicodeEncodeError as exc:
+        raise ValueError("pytest collection contains invalid nodeids") from exc
+    if not valid:
+        raise ValueError("pytest collection contains invalid nodeids")
+    if len(set(result)) != len(result):
+        raise ValueError("pytest collection contains duplicates")
+    return result
 
 
 def pytest_addoption(parser: Any) -> None:
@@ -199,12 +167,18 @@ def pytest_addoption(parser: Any) -> None:
         default="",
         help="private Friday quality-gate collection manifest",
     )
+    parser.addoption(
+        _SELECTION_OPTION,
+        action="store",
+        default="",
+        help="private exact node selection produced from the checked-in inventory",
+    )
 
 
 def pytest_sessionstart(session: Any) -> None:
     """Reset process-local plugin evidence before one pytest session."""
 
-    global _SERIAL_COLLECTION
+    global _SERIAL_COLLECTION, _TIER_SELECTION
     if not session.config.getoption(_COLLECTION_OPTION):
         return
     _COLLECTIONS_BY_WORKER.clear()
@@ -212,11 +186,39 @@ def pytest_sessionstart(session: Any) -> None:
     _COLLECTION_DESELECTED.clear()
     _COLLECTION_PROBLEMS_BY_WORKER.clear()
     _SERIAL_COLLECTION = None
+    selection_path = session.config.getoption(_SELECTION_OPTION)
+    _TIER_SELECTION = frozenset(collection_nodeids(selection_path)) if selection_path else None
+
+    installed_site = os.environ.get(_INSTALLED_SITE_ENV, "").strip()
+    if installed_site:
+        site = Path(installed_site)
+        if not site.is_absolute() or not site.is_dir() or site.resolve(strict=True) != site:
+            raise RuntimeError("installed wheel runtime is not canonical")
+        _require_installed_wheel_imports(site)
 
 
-def pytest_collection_modifyitems(items: Sequence[Any]) -> None:
+def _require_installed_wheel_imports(site: Path, modules: Mapping[str, object] | None = None) -> None:
+    loaded = sys.modules if modules is None else modules
+    for root in _WHEEL_NAMESPACES:
+        spec = importlib.util.find_spec(root)
+        origin = Path(spec.origin).resolve(strict=True) if spec and spec.origin else None
+        if origin != (site / root / "__init__.py").resolve(strict=True):
+            raise RuntimeError(f"{root} is not imported from the clean-installed wheel")
+    for name, module in tuple(loaded.items()):
+        module_file = getattr(module, "__file__", None)
+        if (
+            module_file
+            and any(name == root or name.startswith(f"{root}.") for root in _WHEEL_NAMESPACES)
+            and not Path(module_file).resolve(strict=True).is_relative_to(site)
+        ):
+            raise RuntimeError("a shipped module escaped the clean-installed wheel")
+
+
+def pytest_collection_modifyitems(items: list[Any]) -> None:
     """Put each exact pytest nodeid into the corresponding JUnit testcase."""
 
+    if _TIER_SELECTION is not None:
+        items[:] = [item for item in items if item.nodeid in _TIER_SELECTION]
     for item in items:
         properties = item.user_properties
         if any(name == _NODEID_PROPERTY for name, _value in properties):
@@ -225,12 +227,15 @@ def pytest_collection_modifyitems(items: Sequence[Any]) -> None:
 
 
 def _write_collection_manifest(path: str, nodeids: Sequence[str]) -> None:
+    exact = _bounded_collection_nodeids(nodeids)
     payload = json.dumps(
-        {"version": 1, "nodeids": list(nodeids)},
+        {"version": 1, "nodeids": list(exact)},
         ensure_ascii=False,
         sort_keys=True,
         separators=(",", ":"),
     ).encode("utf-8")
+    if len(payload) > _MAX_COLLECTION_BYTES:
+        raise ValueError("pytest collection manifest is oversized")
     descriptor = os.open(
         path,
         os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_CLOEXEC", 0),
@@ -300,6 +305,9 @@ def pytest_testnodedown(node: Any, error: object) -> None:
 def pytest_sessionfinish(session: Any, exitstatus: int) -> None:
     """Emit an xdist collection manifest only when every worker agreed."""
 
+    installed_site = os.environ.get(_INSTALLED_SITE_ENV, "").strip()
+    if installed_site:
+        _require_installed_wheel_imports(Path(installed_site).resolve(strict=True))
     path = session.config.getoption(_COLLECTION_OPTION)
     if path and hasattr(session.config, "workerinput"):
         session.config.workeroutput["friday_collection_problems"] = {
@@ -344,197 +352,132 @@ def _private_directory(path: Path) -> None:
     path.chmod(0o700)
 
 
+def _scratch_parent() -> str | None:
+    if os.name == "nt":
+        return None
+    parent = Path(os.environ.get("QUALITY_GATE_SCRATCH_PARENT", "/var/tmp"))
+    if not parent.is_absolute() or not parent.is_dir() or parent.is_symlink():
+        raise RuntimeError("QUALITY_GATE_SCRATCH_PARENT must be an absolute real directory")
+    return str(parent)
+
+
+def _exact_host_capacity() -> dict[str, int]:
+    cpu_count = (os.process_cpu_count() if hasattr(os, "process_cpu_count") else os.cpu_count()) or 0
+    scratch_free = shutil.disk_usage(_scratch_parent() or tempfile.gettempdir()).free
+    if cpu_count < _EXACT_CPU_FLOOR or scratch_free < _EXACT_SCRATCH_FREE_FLOOR:
+        raise RuntimeError("exact-release host lacks the required CPU or scratch capacity")
+    return {"effective_cpus": cpu_count, "initial_scratch_free_bytes": scratch_free}
+
+
 def _descriptor_identity(details: os.stat_result) -> tuple[int, int]:
     return details.st_dev, details.st_ino
 
 
-def _validate_repository_descriptor(
-    *,
-    name: str,
-    before: os.stat_result,
-    opened: os.stat_result,
-    current: os.stat_result,
-) -> None:
-    """Reject mutable aliases and unsafe metadata around one repository input."""
-
-    details = (before, opened, current)
-    if any(not stat.S_ISREG(item.st_mode) for item in details):
-        raise RuntimeError(f"repository input is not a regular file: {name}")
-    if _descriptor_identity(before) != _descriptor_identity(opened):
-        raise RuntimeError(f"repository input changed while opening: {name}")
-    if _descriptor_identity(opened) != _descriptor_identity(current):
-        raise RuntimeError(f"repository input identity changed after opening: {name}")
-    if any(item.st_nlink != 1 for item in details):
-        raise RuntimeError(f"repository input has multiple hard links: {name}")
-    if len({item.st_uid for item in details}) != 1:
-        raise RuntimeError(f"repository input owner changed while open: {name}")
-    if hasattr(os, "getuid") and any(item.st_uid != os.getuid() for item in details):
-        raise RuntimeError(f"repository input has an unexpected owner: {name}")
-    modes = {stat.S_IMODE(item.st_mode) for item in details}
-    if len(modes) != 1 or not modes.issubset(_SAFE_SCHEMA_FIXTURE_MODES):
-        raise RuntimeError(f"repository input has unsafe mode: {name}")
-
-
-@contextmanager
-def _verified_repository_descriptor(directory: Path, directory_fd: int, name: str) -> Iterator[int]:
-    """Open a same-owner repository file without following a final symlink."""
-
-    before = os.stat(name, dir_fd=directory_fd, follow_symlinks=False)
-    flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0)
-    nofollow = getattr(os, "O_NOFOLLOW", 0)
-    if os.name != "nt" and not nofollow:
-        raise RuntimeError("O_NOFOLLOW is required for schema fixture verification")
-    flags |= nofollow
-    descriptor = os.open(name, flags, dir_fd=directory_fd)
-    try:
-        opened = os.fstat(descriptor)
-        current = os.stat(name, dir_fd=directory_fd, follow_symlinks=False)
-        _validate_repository_descriptor(
-            name=str(directory / name),
-            before=before,
-            opened=opened,
-            current=current,
-        )
-        try:
-            yield descriptor
-        finally:
-            opened_after = os.fstat(descriptor)
-            current_after = os.stat(name, dir_fd=directory_fd, follow_symlinks=False)
-            _validate_repository_descriptor(
-                name=str(directory / name),
-                before=opened,
-                opened=opened_after,
-                current=current_after,
-            )
-    finally:
-        os.close(descriptor)
-
-
-def _descriptor_bytes(descriptor: int) -> bytes:
-    os.lseek(descriptor, 0, os.SEEK_SET)
-    chunks: list[bytes] = []
-    while chunk := os.read(descriptor, 1024 * 1024):
-        chunks.append(chunk)
-    os.lseek(descriptor, 0, os.SEEK_SET)
-    return b"".join(chunks)
-
-
-def _schema_fixture_manifest(directory: Path, directory_fd: int) -> tuple[SchemaFixture, ...]:
-    with _verified_repository_descriptor(directory, directory_fd, _SCHEMA_FIXTURE_MANIFEST) as source:
-        try:
-            payload = json.loads(_descriptor_bytes(source), object_pairs_hook=_strict_json_object)
-        except (UnicodeDecodeError, ValueError) as exc:
-            raise RuntimeError("schema fixture manifest is invalid") from exc
-    if not isinstance(payload, dict) or set(payload) != {"version", "fixtures"}:
-        raise RuntimeError("schema fixture manifest has an unsupported shape")
-    if payload["version"] != 1 or not isinstance(payload["fixtures"], list):
-        raise RuntimeError("schema fixture manifest has an unsupported version")
-
-    fixtures: list[SchemaFixture] = []
-    for raw in payload["fixtures"]:
-        if not isinstance(raw, dict) or set(raw) != {"name", "sha256"}:
-            raise RuntimeError("schema fixture manifest entry has an unsupported shape")
-        name = raw["name"]
-        digest = raw["sha256"]
-        if not isinstance(name, str) or _SCHEMA_FIXTURE_NAME(name) is None:
-            raise RuntimeError("schema fixture manifest contains an invalid filename")
-        if not isinstance(digest, str) or re.fullmatch(r"[0-9a-f]{64}", digest) is None:
-            raise RuntimeError("schema fixture manifest contains an invalid SHA-256")
-        fixtures.append(SchemaFixture(name=name, sha256=digest))
-
-    names = [fixture.name for fixture in fixtures]
-    if not fixtures or names != sorted(names) or len(names) != len(set(names)):
-        raise RuntimeError("schema fixture manifest names must be non-empty, unique, and sorted")
-    return tuple(fixtures)
-
-
-def _prepare_synthetic_backup_rehearsal(home: Path) -> Path:
+def _prepare_synthetic_backup_rehearsal(
+    home: Path,
+    fixture_directory: Path = _SCHEMA_FIXTURE_DIRECTORY,
+) -> Path:
     """Materialize tracked, non-personal schema fixtures as supplied backups."""
 
-    directory_fd = os.open(
-        _SCHEMA_FIXTURE_DIRECTORY,
-        os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_DIRECTORY", 0),
-    )
     try:
-        fixtures = _schema_fixture_manifest(_SCHEMA_FIXTURE_DIRECTORY, directory_fd)
-        expected_names = {fixture.name for fixture in fixtures}
-        observed_names = {
-            entry.name
-            for entry in os.scandir(_SCHEMA_FIXTURE_DIRECTORY)
-            if entry.name.startswith("schema-") and entry.name.endswith(".sqlite3.gz")
-        }
-        if observed_names != expected_names:
-            missing = sorted(expected_names - observed_names)
-            unexpected = sorted(observed_names - expected_names)
-            raise RuntimeError(
-                "schema fixture set differs from the checked manifest: "
-                f"missing={missing}, unexpected={unexpected}"
+        payload = json.loads(
+            (fixture_directory / _SCHEMA_FIXTURE_MANIFEST).read_text(encoding="utf-8"),
+            object_pairs_hook=_strict_json_object,
+        )
+        if (
+            not isinstance(payload, dict)
+            or set(payload) != {"version", "fixtures"}
+            or payload["version"] != 1
+            or not isinstance(payload["fixtures"], list)
+            or not payload["fixtures"]
+            or any(
+                not isinstance(item, dict) or set(item) != {"name", "sha256"} for item in payload["fixtures"]
             )
-
+        ):
+            raise RuntimeError("schema fixture manifest has an unsupported shape")
+        fixtures = payload["fixtures"]
+        pairs = {item["name"]: item["sha256"] for item in fixtures}
+        if (
+            len(pairs) != len(fixtures)
+            or tuple(pairs) != tuple(sorted(pairs))
+            or any(
+                not isinstance(name, str)
+                or _SCHEMA_FIXTURE_NAME(name) is None
+                or not isinstance(digest, str)
+                or re.fullmatch(r"[0-9a-f]{64}", digest) is None
+                for name, digest in pairs.items()
+            )
+        ):
+            raise RuntimeError("schema fixture manifest entries are invalid")
+        if {path.name for path in fixture_directory.glob("schema-*.sqlite3.gz")} != set(pairs):
+            raise RuntimeError("schema fixture set differs from the checked manifest")
         backup_directory = home / "synthetic-backups"
         _private_directory(backup_directory)
-        for fixture in fixtures:
-            destination = backup_directory / fixture.name.removesuffix(".gz")
-            target_descriptor = os.open(
-                destination,
-                os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_CLOEXEC", 0),
-                0o600,
-            )
-            try:
-                with _verified_repository_descriptor(
-                    _SCHEMA_FIXTURE_DIRECTORY,
-                    directory_fd,
-                    fixture.name,
-                ) as source_descriptor:
-                    digest = hashlib.sha256()
-                    os.lseek(source_descriptor, 0, os.SEEK_SET)
-                    with tempfile.TemporaryFile(prefix="friday-schema-compressed-") as verified_source:
-                        while chunk := os.read(source_descriptor, 1024 * 1024):
-                            digest.update(chunk)
-                            verified_source.write(chunk)
-                        if digest.hexdigest() != fixture.sha256:
-                            raise RuntimeError(f"schema fixture SHA-256 mismatch: {fixture.name}")
-                        verified_source.seek(0)
-                        with (
-                            gzip.GzipFile(fileobj=verified_source, mode="rb") as source,
-                            os.fdopen(target_descriptor, "wb") as target,
-                        ):
-                            target_descriptor = -1
-                            shutil.copyfileobj(source, target)
-            except (gzip.BadGzipFile, EOFError, OSError) as exc:
-                raise RuntimeError(f"schema fixture is not a valid gzip archive: {fixture.name}") from exc
-            finally:
-                if target_descriptor >= 0:
-                    os.close(target_descriptor)
+        for name, expected in pairs.items():
+            source = fixture_directory / name
+            if (
+                not source.is_file()
+                or source.is_symlink()
+                or hashlib.sha256(source.read_bytes()).hexdigest() != expected
+            ):
+                raise RuntimeError(f"schema fixture SHA-256 mismatch: {name}")
+            with gzip.open(source, "rb") as packed:
+                data = packed.read((256 << 20) + 1)
+            if len(data) > 256 << 20:
+                raise RuntimeError(f"schema fixture is oversized: {name}")
+            destination = backup_directory / name.removesuffix(".gz")
+            destination.write_bytes(data)
             destination.chmod(0o600)
         return backup_directory
-    finally:
-        os.close(directory_fd)
+    except (gzip.BadGzipFile, EOFError, OSError, TypeError, UnicodeDecodeError, ValueError) as exc:
+        raise RuntimeError("schema fixture rehearsal is invalid") from exc
 
 
 @contextmanager
-def _isolated_test_environment() -> Iterator[dict[str, str]]:
+def _isolated_test_environment(
+    scratch_parent: Path | None = None,
+    *,
+    prepare_schema_backups: bool = True,
+    source_root: Path = ROOT,
+) -> Iterator[dict[str, str]]:
     """Yield one private, non-live environment for pytest collection and runs."""
 
-    with tempfile.TemporaryDirectory(prefix="friday-quality-home-") as temporary:
+    with tempfile.TemporaryDirectory(
+        prefix="friday-quality-home-",
+        dir=str(scratch_parent) if scratch_parent is not None else _scratch_parent(),
+    ) as temporary:
         scratch = Path(temporary).resolve()
         scratch.chmod(0o700)
         home = scratch / "home"
         config = home / "config"
+        test_tmp = scratch / "tmp"
         _private_directory(home)
         _private_directory(config)
+        _private_directory(test_tmp)
         env_file = config / "empty.env"
         descriptor = os.open(env_file, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
         os.close(descriptor)
         env_file.chmod(0o600)
-        backup_directory = _prepare_synthetic_backup_rehearsal(home)
+        if prepare_schema_backups:
+            backup_directory = _prepare_synthetic_backup_rehearsal(
+                home, source_root / "tests" / "fixtures" / "schemas"
+            )
+        else:
+            backup_directory = home / "synthetic-backups"
+            _private_directory(backup_directory)
 
-        environment = dict(os.environ)
+        environment = _git_environment()
         test_assets = {
             alias: value
             for source, alias in _TEST_ASSET_ENV_ALIASES.items()
             if (value := environment.get(source, "").strip())
         }
+        installed_site = environment.get(_INSTALLED_SITE_ENV, "").strip()
+        if installed_site:
+            site = Path(installed_site)
+            if not site.is_absolute() or site.resolve(strict=True) != site or not site.is_dir():
+                raise RuntimeError("installed wheel runtime is not canonical")
+            test_assets[_INSTALLED_SITE_ENV] = installed_site
         for name in tuple(environment):
             if name.startswith(_RUNTIME_ENV_PREFIXES):
                 environment.pop(name, None)
@@ -564,6 +507,11 @@ def _isolated_test_environment() -> Iterator[dict[str, str]]:
                 "FRIDAY_CODE_EXECUTION_ENABLED": "0",
                 "PYTHONDONTWRITEBYTECODE": "1",
                 "PYTHONHASHSEED": "0",
+                "PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1",
+                "PYTEST_PLUGINS": "",
+                "PYTHONPYCACHEPREFIX": str(scratch / "python-cache"),
+                "PYTHONSAFEPATH": "1",
+                "TMPDIR": str(test_tmp),
                 # Exercise the complete directory-based restore rehearsal with
                 # tracked synthetic databases.  Never inherit or inspect an
                 # operator's real backup directory in an offline quality run.
@@ -571,219 +519,41 @@ def _isolated_test_environment() -> Iterator[dict[str, str]]:
                 **test_assets,
             }
         )
+        if installed_site:
+            environment["PYTHONPATH"] = installed_site
         yield environment
 
 
 def static_commands(python: str = sys.executable) -> tuple[GateCommand, ...]:
     """Return the static checks in their canonical order."""
 
-    pycache = str(Path(tempfile.gettempdir()) / "friday-quality-pycache")
-    return (
-        GateCommand(
-            "quality toolchain",
-            (python, "tools/quality_toolchain_preflight.py"),
-        ),
-        GateCommand("whitespace errors", ("git", "diff", "--check")),
-        GateCommand("ruff lint", (python, "-m", "ruff", "check", ".")),
-        GateCommand(
-            "ruff format",
-            (
-                python,
-                "-m",
-                "ruff",
-                "format",
-                "--check",
-                "friday",
-                "friday_host_agent",
-                "friday_package_broker",
-                "deploy/host-control",
-                "tests",
-                "tools",
-            ),
-        ),
-        GateCommand(
-            "mypy",
-            (
-                python,
-                "-m",
-                "mypy",
-                "friday",
-                "friday_host_agent",
-                "friday_package_broker",
-                "deploy/host-control",
-            ),
-        ),
-        GateCommand(
-            "compileall",
-            (
-                python,
-                "-X",
-                f"pycache_prefix={pycache}",
-                "-m",
-                "compileall",
-                "-q",
-                "-f",
-                "friday",
-                "friday_host_agent",
-                "friday_package_broker",
-                "deploy/host-control",
-                "tests",
-                "tools",
-            ),
-        ),
-        GateCommand(
+    package_roots = ("friday", "friday_host_agent", "friday_package_broker")
+    deployment = "deploy/host-control"
+    module = (python, "-I", "-B", "-m")
+    plans = (
+        ("quality toolchain", (python, "-I", "-B", "tools/quality_toolchain_preflight.py")),
+        ("whitespace errors", ("git", "diff", "--check")),
+        ("ruff lint", (*module, "ruff", "check", ".")),
+        ("ruff format", (*module, "ruff", "format", "--check", *package_roots, deployment, "tests", "tools")),
+        ("mypy", (*module, "mypy", *package_roots, deployment)),
+        (
             "bandit (HIGH only)",
-            (
-                python,
-                "-m",
-                "bandit",
-                "-r",
-                "friday",
-                "friday_host_agent",
-                "friday_package_broker",
-                "deploy/host-control",
-                "-q",
-                "--severity-level",
-                "high",
-            ),
+            (*module, "bandit", "-r", *package_roots, deployment, "-q", "--severity-level", "high"),
         ),
-        GateCommand("admin JavaScript syntax", ("node", "--check", "friday/admin_ui/static/app.js")),
-        GateCommand(
-            "host-control installer shell syntax",
-            ("/bin/sh", "-n", "deploy/host-control/install.sh"),
+        ("admin JavaScript syntax", ("node", "--check", "friday/admin_ui/static/app.js")),
+        *(
+            (name, ("/bin/sh", "-n", path))
+            for name, path in (
+                ("host-control installer shell syntax", f"{deployment}/install.sh"),
+                ("host-control uninstaller shell syntax", f"{deployment}/uninstall.sh"),
+                ("engineer AppArmor installer shell syntax", "deploy/engineer-mode/install-apparmor.sh"),
+                ("engineer AppArmor uninstaller shell syntax", "deploy/engineer-mode/uninstall-apparmor.sh"),
+                ("engineer runtime verifier shell syntax", "deploy/engineer-mode/verify-runtime.sh"),
+            )
         ),
-        GateCommand(
-            "host-control uninstaller shell syntax",
-            ("/bin/sh", "-n", "deploy/host-control/uninstall.sh"),
-        ),
-        GateCommand(
-            "engineer AppArmor installer shell syntax",
-            ("/bin/sh", "-n", "deploy/engineer-mode/install-apparmor.sh"),
-        ),
-        GateCommand(
-            "engineer AppArmor uninstaller shell syntax",
-            ("/bin/sh", "-n", "deploy/engineer-mode/uninstall-apparmor.sh"),
-        ),
-        GateCommand(
-            "engineer runtime verifier shell syntax",
-            ("/bin/sh", "-n", "deploy/engineer-mode/verify-runtime.sh"),
-        ),
-        # Раскладка графа — отдельный поставляемый файл. Без собственной строки
-        # здесь он поехал бы в браузер непроверенным: `app.js` его не импортирует,
-        # а подключает страница.
-        GateCommand(
-            "graph layout JavaScript syntax",
-            ("node", "--check", "friday/admin_ui/static/graph-layout.js"),
-        ),
+        ("graph layout JavaScript syntax", ("node", "--check", "friday/admin_ui/static/graph-layout.js")),
     )
-
-
-def collection_command(
-    *,
-    manifest_path: str | Path,
-    basetemp_path: str | Path | None = None,
-    python: str = sys.executable,
-) -> GateCommand:
-    """Collect the complete canonical test inventory without running a test."""
-
-    return GateCommand(
-        "all-tests collection",
-        (
-            python,
-            "-m",
-            "pytest",
-            "-q",
-            "--collect-only",
-            "-o",
-            "addopts=",
-            "-p",
-            "no:cacheprovider",
-            "-p",
-            "tools.quality_gate",
-            "tests",
-            "-n",
-            "0",
-            f"{_COLLECTION_OPTION}={manifest_path}",
-            *((f"--basetemp={basetemp_path}",) if basetemp_path is not None else ()),
-        ),
-    )
-
-
-def non_ui_command(
-    *,
-    report_path: str | Path,
-    collection_path: str | Path,
-    workers: int,
-    basetemp_path: str | Path | None = None,
-    python: str = sys.executable,
-) -> GateCommand:
-    """Build the parallel pytest command with all browser modules excluded."""
-
-    ignores = tuple(f"--ignore={module}" for module in UI_TEST_MODULES)
-    distribution = ("-n", "0") if workers == 1 else ("-n", str(workers), "--dist=load")
-    return GateCommand(
-        "non-UI tests",
-        (
-            python,
-            "-m",
-            "pytest",
-            "-q",
-            "-r",
-            "a",
-            "-o",
-            "addopts=",
-            "-p",
-            "no:cacheprovider",
-            "-p",
-            "tools.quality_gate",
-            "tests",
-            *distribution,
-            f"--junitxml={report_path}",
-            f"{_COLLECTION_OPTION}={collection_path}",
-            *((f"--basetemp={basetemp_path}",) if basetemp_path is not None else ()),
-            *ignores,
-        ),
-    )
-
-
-def ui_command(
-    *,
-    report_path: str | Path,
-    collection_path: str | Path,
-    workers: int,
-    basetemp_path: str | Path | None = None,
-    python: str = sys.executable,
-) -> GateCommand:
-    """Build the isolated UI command.
-
-    ``loadscope`` keeps every module, including its server fixture, on a single
-    worker.  One worker deliberately disables xdist and is the safe fallback for
-    machines on which even separate fixed ports are undesirable.
-    """
-
-    distribution = ("-n", "0") if workers == 1 else ("-n", str(workers), "--dist=loadscope")
-    return GateCommand(
-        "UI tests",
-        (
-            python,
-            "-m",
-            "pytest",
-            "-q",
-            "-r",
-            "s",
-            "-o",
-            "addopts=",
-            "-p",
-            "no:cacheprovider",
-            "-p",
-            "tools.quality_gate",
-            *distribution,
-            f"--junitxml={report_path}",
-            f"{_COLLECTION_OPTION}={collection_path}",
-            *((f"--basetemp={basetemp_path}",) if basetemp_path is not None else ()),
-            *UI_TEST_MODULES,
-        ),
-    )
+    return tuple(GateCommand(name, argv) for name, argv in plans)
 
 
 def _display_command(argv: Sequence[str]) -> str:
@@ -794,41 +564,65 @@ def _display_command(argv: Sequence[str]) -> str:
     return shlex.join(argv)
 
 
+def _kill_process_group(process: subprocess.Popen[bytes], name: str) -> bool:
+    if os.name == "nt":
+        try:
+            process.kill()
+            process.wait(timeout=5)
+        except (OSError, subprocess.TimeoutExpired):
+            print(f"FAILED: {name} process survived termination", file=sys.stderr)
+            return False
+        return True
+    try:
+        os.killpg(process.pid, signal.SIGKILL)
+    except ProcessLookupError:
+        return True
+    deadline = time.monotonic() + 5
+    while time.monotonic() < deadline:
+        try:
+            os.killpg(process.pid, 0)
+        except ProcessLookupError:
+            return True
+        time.sleep(0.05)
+    print(f"FAILED: {name} process group survived SIGKILL", file=sys.stderr)
+    return False
+
+
 def run_command(command: GateCommand) -> int:
     print(f"\n[{command.name}]\n$ {_display_command(command.argv)}", flush=True)
     try:
-        completed = subprocess.run(
+        process = subprocess.Popen(  # noqa: S603 - argv is the closed gate plan
             command.argv,
-            cwd=ROOT,
-            check=False,
+            cwd=command.cwd,
             env=dict(command.environment) if command.environment is not None else None,
+            start_new_session=os.name != "nt",
         )
     except OSError as exc:
         print(f"FAILED: cannot execute {command.argv[0]}: {exc}", file=sys.stderr)
         return 126
-    return completed.returncode
-
-
-def playwright_preflight() -> bool:
-    """Prove that both the Python package and the Chromium binary are usable."""
-
-    print("\n[Playwright preflight]", flush=True)
     try:
-        from playwright.sync_api import sync_playwright
-
-        with sync_playwright() as playwright:
-            browser = playwright.chromium.launch(headless=True)
-            browser.close()
-    except Exception as exc:
-        print(f"FAILED: Playwright Chromium is unavailable: {exc}", file=sys.stderr)
-        print(
-            "Install the development dependencies and then run "
-            f"'{_display_command((sys.executable, '-m', 'playwright', 'install', 'chromium'))}'.",
-            file=sys.stderr,
-        )
-        return False
-    print("Playwright Chromium: OK")
-    return True
+        returncode = process.wait(timeout=command.timeout_s)
+    except subprocess.TimeoutExpired:
+        print(f"FAILED: {command.name} exceeded {command.timeout_s}s", file=sys.stderr)
+        try:
+            if os.name != "nt":
+                os.killpg(process.pid, signal.SIGTERM)
+            else:
+                process.terminate()
+        except ProcessLookupError:
+            pass
+        with suppress(subprocess.TimeoutExpired):
+            process.wait(timeout=5)
+        return 124 if _kill_process_group(process, command.name) else 125
+    if os.name != "nt":
+        try:
+            os.killpg(process.pid, 0)
+        except ProcessLookupError:
+            pass
+        else:
+            print(f"FAILED: {command.name} left a child process behind", file=sys.stderr)
+            return 125 if _kill_process_group(process, command.name) else 126
+    return returncode
 
 
 def _xml_local_name(tag: str) -> str:
@@ -1011,12 +805,6 @@ def junit_summary(report_path: str | Path) -> JUnitSummary:
     )
 
 
-def junit_skip_count(report_path: str | Path) -> int:
-    """Return skipped tests while preserving the historical public helper."""
-
-    return junit_summary(report_path).skipped
-
-
 def _junit_phase_is_clean(
     report_path: str | Path,
     *,
@@ -1045,11 +833,13 @@ def collection_nodeids(manifest_path: str | Path) -> tuple[str, ...]:
     """Read one exact private pytest collection manifest."""
 
     path = Path(manifest_path)
-    if not path.is_file():
-        raise ValueError(f"pytest did not create collection manifest {path}")
     try:
+        with path.open("rb") as stream:
+            raw = stream.read(_MAX_COLLECTION_BYTES + 1)
+        if not raw or len(raw) > _MAX_COLLECTION_BYTES:
+            raise ValueError("pytest collection manifest is empty or oversized")
         payload = json.loads(
-            path.read_text(encoding="utf-8"),
+            raw,
             object_pairs_hook=_strict_json_object,
         )
     except (OSError, UnicodeDecodeError, ValueError) as exc:
@@ -1057,44 +847,823 @@ def collection_nodeids(manifest_path: str | Path) -> tuple[str, ...]:
     if not isinstance(payload, dict) or set(payload) != {"version", "nodeids"}:
         raise ValueError(f"pytest collection manifest at {path} has an unsupported shape")
     raw_nodeids = payload["nodeids"]
-    if payload["version"] != 1 or not isinstance(raw_nodeids, list) or not raw_nodeids:
+    if payload["version"] != 1 or not isinstance(raw_nodeids, list):
         raise ValueError(f"pytest collection manifest at {path} is empty or unsupported")
-    if not all(isinstance(nodeid, str) and nodeid for nodeid in raw_nodeids):
-        raise ValueError(f"pytest collection manifest at {path} contains an invalid nodeid")
-    duplicates = sorted(nodeid for nodeid, count in Counter(raw_nodeids).items() if count != 1)
-    if duplicates:
-        raise ValueError(f"pytest collection manifest at {path} contains duplicates: {duplicates}")
-    return tuple(raw_nodeids)
+    return _bounded_collection_nodeids(raw_nodeids)
 
 
-def partition_collection(nodeids: Sequence[str]) -> tuple[tuple[str, ...], tuple[str, ...]]:
-    """Partition the all-tests collection into the exact non-UI/UI selections."""
+def _git_environment() -> dict[str, str]:
+    environment = {name: value for name, value in os.environ.items() if not name.startswith("GIT_")}
+    environment.update(
+        {
+            "GIT_CONFIG_GLOBAL": os.devnull,
+            "GIT_CONFIG_NOSYSTEM": "1",
+            "GIT_NO_REPLACE_OBJECTS": "1",
+            "GIT_OPTIONAL_LOCKS": "0",
+            "GIT_TERMINAL_PROMPT": "0",
+        }
+    )
+    return environment
 
-    ui_modules = set(UI_TEST_MODULES)
-    non_ui = tuple(nodeid for nodeid in nodeids if nodeid.partition("::")[0] not in ui_modules)
-    ui = tuple(nodeid for nodeid in nodeids if nodeid.partition("::")[0] in ui_modules)
-    if not non_ui or not ui:
-        raise ValueError("canonical collection must contain both non-UI and UI tests")
-    if set(non_ui).intersection(ui) or Counter((*non_ui, *ui)) != Counter(nodeids):
-        raise ValueError("non-UI and UI collections are not a disjoint complete partition")
-    return non_ui, ui
 
-
-def require_release_blocking_battery(nodeids: Sequence[str]) -> None:
-    """Require every closed product-journey nodeid exactly once."""
-
-    required_counts = Counter(RELEASE_BLOCKING_BATTERY_NODEIDS)
-    duplicate_requirements = sorted(nodeid for nodeid, count in required_counts.items() if count != 1)
-    if duplicate_requirements:
-        raise ValueError(f"release-blocking battery inventory contains duplicates: {duplicate_requirements}")
-
-    observed = Counter(nodeids)
-    missing = sorted(nodeid for nodeid in required_counts if observed[nodeid] == 0)
-    duplicates = sorted(nodeid for nodeid in required_counts if observed[nodeid] > 1)
-    if missing or duplicates:
-        raise ValueError(
-            f"release-blocking battery collection is incomplete: missing={missing}, duplicates={duplicates}"
+def _git_output(root: Path, *arguments: str) -> str:
+    try:
+        completed = subprocess.run(  # noqa: S603 - fixed Git and code-owned arguments
+            (GIT, "-C", str(root), *arguments),
+            capture_output=True,
+            env=_git_environment(),
+            timeout=60,
+            check=False,
         )
+    except subprocess.TimeoutExpired as exc:
+        raise RuntimeError("Git command exceeded its bounded runtime") from exc
+    if completed.returncode != 0:
+        raise RuntimeError(f"Git command failed: {' '.join(arguments)}")
+    if len(completed.stdout) > 16 * 1024 * 1024:
+        raise RuntimeError("Git command output is oversized")
+    try:
+        return completed.stdout.decode("utf-8").strip()
+    except UnicodeDecodeError as exc:
+        raise RuntimeError("Git command output is not UTF-8") from exc
+
+
+def _require_candidate_launcher(candidate_sha: str) -> None:
+    paths = ("tools/quality_gate.py", "tools/quality_gate_inventory.py")
+    if (
+        Path(__file__).resolve(strict=True) != (ROOT / paths[0]).resolve(strict=True)
+        or _git_output(ROOT, "rev-parse", "HEAD") != candidate_sha
+        or _git_output(ROOT, "status", "--porcelain=v1", "--untracked-files=all", "--", *paths)
+    ):
+        raise RuntimeError("closed tier launcher is not the clean candidate")
+    for relative in paths:
+        row = _git_output(ROOT, "ls-tree", candidate_sha, "--", relative)
+        fields = row.partition("\t")[0].split()
+        path = ROOT / relative
+        details = path.lstat()
+        if (
+            len(fields) != 3
+            or fields[0] not in {"100644", "100755"}
+            or fields[1] != "blob"
+            or _git_output(ROOT, "hash-object", "--no-filters", "--", relative) != fields[2]
+            or _git_output(ROOT, "ls-files", "-v", "--", relative) != f"H {relative}"
+            or not stat.S_ISREG(details.st_mode)
+            or details.st_nlink != 1
+            or bool(details.st_mode & 0o111) != (fields[0] == "100755")
+        ):
+            raise RuntimeError("closed tier launcher bytes differ from the candidate")
+
+
+def _candidate_inventory_loader() -> Callable[[str | os.PathLike[str]], Any]:
+    path = (ROOT / "tools" / "quality_gate_inventory.py").resolve(strict=True)
+    name = "_friday_candidate_quality_gate_inventory"
+    spec = importlib.util.spec_from_file_location(name, path)
+    if spec is None or spec.loader is None:
+        raise RuntimeError("candidate inventory loader is unavailable")
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[name] = module
+    try:
+        spec.loader.exec_module(module)
+    except BaseException:
+        sys.modules.pop(name, None)
+        raise
+    if Path(module.__file__).resolve(strict=True) != path:
+        raise RuntimeError("closed tier imported a non-candidate inventory")
+    return module.load_inventory
+
+
+@contextmanager
+def _candidate_projection(
+    candidate_sha: str,
+    scratch: Path,
+    *,
+    origin: Path | None = None,
+    name: str = "source",
+) -> Iterator[Path]:
+    origin = ROOT if origin is None else origin
+    source = scratch / name
+    clone = GateCommand(
+        "private candidate clone",
+        (
+            GIT,
+            "clone",
+            "--quiet",
+            "--no-local",
+            "--no-hardlinks",
+            "--single-branch",
+            "--no-checkout",
+            "--no-tags",
+            str(origin),
+            str(source),
+        ),
+        _git_environment(),
+        cwd=origin,
+        timeout_s=60,
+    )
+    if run_command(clone) != 0:
+        raise RuntimeError("private candidate clone failed")
+    _git_output(source, "checkout", "--detach", candidate_sha)
+    _git_output(source, "remote", "remove", "origin")
+    candidate_tree = _git_output(source, "rev-parse", f"{candidate_sha}^{{tree}}")
+    _require_exact_projection(source, candidate_sha, candidate_tree)
+    worktree_digest = _projection_digest(source, exclude_git=True)
+    git_digest = _projection_digest(source / ".git")
+    yield source
+    if (
+        _projection_digest(source, exclude_git=True) != worktree_digest
+        or _projection_digest(source / ".git") != git_digest
+    ):
+        raise RuntimeError("private candidate projection changed during the gate")
+    _require_exact_projection(source, candidate_sha, candidate_tree)
+
+
+def _require_exact_projection(source: Path, candidate_sha: str, candidate_tree: str) -> None:
+    git_directory = source / ".git"
+    if (
+        not git_directory.is_dir()
+        or git_directory.is_symlink()
+        or (git_directory / "objects" / "info" / "alternates").exists()
+        or _git_output(source, "rev-parse", "--git-common-dir") != ".git"
+        or _git_output(source, "remote")
+    ):
+        raise RuntimeError("private candidate clone retained external Git authority")
+    if (
+        _git_output(source, "rev-parse", "HEAD") != candidate_sha
+        or _git_output(source, "rev-parse", "HEAD^{tree}") != candidate_tree
+        or _git_output(
+            source,
+            "status",
+            "--porcelain=v1",
+            "--untracked-files=all",
+            "--ignored=matching",
+        )
+    ):
+        raise RuntimeError("private candidate projection changed during the gate")
+
+
+def _projection_digest(root: Path, *, exclude_git: bool = False) -> str:
+    if not root.is_dir() or root.is_symlink():
+        raise RuntimeError("private projection root is not a real directory")
+    digest = hashlib.sha256(b"friday-private-projection-v1\0")
+    pending = [(root, "")]
+    while pending:
+        directory, prefix = pending.pop()
+        with os.scandir(directory) as iterator:
+            entries = sorted(iterator, key=lambda item: item.name)
+        for entry in entries:
+            if exclude_git and not prefix and entry.name == ".git":
+                continue
+            relative = f"{prefix}/{entry.name}" if prefix else entry.name
+            details = entry.stat(follow_symlinks=False)
+            mode = stat.S_IMODE(details.st_mode)
+            kind = stat.S_IFMT(details.st_mode)
+            encoded = relative.encode()
+            digest.update(len(encoded).to_bytes(4, "big") + encoded)
+            digest.update(kind.to_bytes(4, "big") + mode.to_bytes(4, "big"))
+            if stat.S_ISDIR(details.st_mode):
+                pending.append((Path(entry.path), relative))
+            elif stat.S_ISLNK(details.st_mode):
+                raise RuntimeError("private projection contains a symbolic link")
+            elif stat.S_ISREG(details.st_mode) and details.st_nlink == 1:
+                digest.update(details.st_size.to_bytes(8, "big"))
+                with open(entry.path, "rb") as stream:
+                    while chunk := stream.read(1024 * 1024):
+                        digest.update(chunk)
+            else:
+                raise RuntimeError("private projection contains an unsafe filesystem entry")
+    return digest.hexdigest()
+
+
+def _directory_bytes(root: Path) -> int:
+    total = 0
+    pending = [root]
+    while pending:
+        directory = pending.pop()
+        try:
+            with os.scandir(directory) as iterator:
+                entries = tuple(iterator)
+        except FileNotFoundError:
+            continue
+        for entry in entries:
+            try:
+                details = entry.stat(follow_symlinks=False)
+            except FileNotFoundError:
+                continue
+            if stat.S_ISDIR(details.st_mode):
+                pending.append(Path(entry.path))
+            elif stat.S_ISREG(details.st_mode):
+                total += details.st_size
+    return total
+
+
+@contextmanager
+def _scratch_peak_sampler(root: Path, interval_s: float) -> Iterator[list[int]]:
+    stop = threading.Event()
+    peak = [_directory_bytes(root)]
+    errors: list[OSError] = []
+
+    def sample() -> None:
+        try:
+            while not stop.wait(interval_s):
+                peak[0] = max(peak[0], _directory_bytes(root))
+        except OSError as exc:
+            errors.append(exc)
+
+    sampler = threading.Thread(target=sample, name="quality-gate-scratch", daemon=True)
+    sampler.start()
+    try:
+        yield peak
+    finally:
+        stop.set()
+        sampler.join(timeout=5)
+    if sampler.is_alive() or errors:
+        raise RuntimeError("scratch sampler failed")
+    peak[0] = max(peak[0], _directory_bytes(root))
+
+
+def _require_comparison_wheel(actual_sha256: str, expected_sha256: str | None) -> None:
+    if expected_sha256 is not None and actual_sha256 != expected_sha256:
+        raise RuntimeError("self-built wheel differs from comparison bytes")
+
+
+def _stat_identity(details: os.stat_result) -> tuple[int, ...]:
+    fields = "st_dev st_ino st_mode st_nlink st_uid st_gid st_size st_mtime_ns st_ctime_ns".split()  # noqa: SIM905 - compact fixed field set
+    return tuple(getattr(details, field) for field in fields)
+
+
+def _bounded_wheel_sha256(path: Path) -> str:
+    identity = _bounded_file_identity(
+        path,
+        maximum=64 << 20,
+        executable=False,
+        owner_uid=os.getuid() if hasattr(os, "getuid") else None,
+        single_link=True,
+        close_mode=0o600,
+    )
+    return str(identity["sha256"])
+
+
+def _partition_evidence(nodes: Sequence[Any]) -> list[dict[str, Any]]:
+    return [
+        {
+            "nodeid": node.nodeid,
+            "invariant_id": node.invariant_id,
+            "tier": node.tier,
+            "execution_kind": node.execution_kind,
+            "max_runtime_s": node.max_runtime_s,
+            "scratch_mb": node.scratch_mb,
+        }
+        for node in nodes
+    ]
+
+
+def _open_evidence_directory(path: Path) -> int:
+    before = path.lstat()
+    flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_DIRECTORY", 0)
+    if os.name != "nt":
+        flags |= os.O_NOFOLLOW
+    descriptor = os.open(path, flags)
+    try:
+        opened = os.fstat(descriptor)
+        current = path.lstat()
+        if (
+            not stat.S_ISDIR(opened.st_mode)
+            or _descriptor_identity(before) != _descriptor_identity(opened)
+            or _descriptor_identity(opened) != _descriptor_identity(current)
+            or stat.S_IMODE(opened.st_mode) != 0o700
+            or (hasattr(os, "getuid") and opened.st_uid != os.getuid())
+            or os.listdir(descriptor)
+        ):
+            raise RuntimeError("evidence directory is not empty owner-private authority")
+        return descriptor
+    except BaseException:
+        os.close(descriptor)
+        raise
+
+
+def _require_evidence_directory(path: Path, descriptor: int, names: tuple[str, ...]) -> None:
+    opened, current = os.fstat(descriptor), path.lstat()
+    if (
+        _descriptor_identity(opened) != _descriptor_identity(current)
+        or stat.S_IMODE(opened.st_mode) != 0o700
+        or tuple(sorted(os.listdir(descriptor))) != names
+    ):
+        raise RuntimeError("evidence directory identity or contents changed")
+
+
+def _write_private_json(directory_fd: int, name: str, value: object) -> None:
+    payload = json.dumps(
+        value, ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False
+    ).encode()
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_CLOEXEC", 0)
+    flags |= getattr(os, "O_NOFOLLOW", 0)
+    descriptor = os.open(
+        name,
+        flags,
+        0o600,
+        dir_fd=directory_fd,
+    )
+    try:
+        remaining = memoryview(payload)
+        while remaining:
+            written = os.write(descriptor, remaining)
+            if written < 1:
+                raise OSError("short write while creating gate evidence")
+            remaining = remaining[written:]
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
+
+
+_PYTEST_BOOTSTRAP = (
+    "import anyio.pytest_plugin,pathlib,pytest,pytest_asyncio.plugin,sys,xdist.plugin;"
+    "plugins=(xdist.plugin,pytest_asyncio.plugin,anyio.pytest_plugin);"
+    "root=str(pathlib.Path(sys.argv[1]).resolve(strict=True));"
+    "site=sys.argv[2];sys.executable=sys.argv[3];"
+    "sys.path[:0]=(([site] if site!='-' else [])+[root,str(pathlib.Path(root)/'tests')]);"
+    "raise SystemExit(pytest.main(sys.argv[4:],plugins=plugins))"
+)
+_EXPLICIT_PYTEST_PLUGINS = (
+    "-p",
+    "no:cacheprovider",
+    "-p",
+    "tools.quality_gate",
+)
+
+
+def _tier_pytest_command(
+    *,
+    name: str,
+    python: str = sys.executable,
+    source: Path = ROOT,
+    environment: Mapping[str, str] | None = None,
+    report: str | Path | None,
+    collection: str | Path,
+    selection: str | Path | None = None,
+    modules: Sequence[str],
+    workers: int,
+    distribution: str,
+    basetemp: str | Path,
+    collect_only: bool = False,
+) -> GateCommand:
+    parallel = ("-n", "0") if workers == 1 else ("-n", str(workers), f"--dist={distribution}")
+    pytest_arguments = (
+        "-q",
+        *(("-q", "-q") if collect_only else ()),
+        "-r",
+        "a",
+        "-o",
+        "addopts=",
+        "-o",
+        "pythonpath=",
+        "-o",
+        "tmp_path_retention_policy=failed",
+        "--import-mode=importlib",
+        *(("--collect-only",) if collect_only else ()),
+        *_EXPLICIT_PYTEST_PLUGINS,
+        *parallel,
+        f"--rootdir={source}",
+        f"{_COLLECTION_OPTION}={collection}",
+        *((f"{_SELECTION_OPTION}={selection}",) if selection is not None else ()),
+        *((f"--junitxml={report}",) if report is not None else ()),
+        f"--basetemp={basetemp}",
+        *modules,
+    )
+    command_environment = {} if environment is None else environment
+    installed_site = command_environment.get(_INSTALLED_SITE_ENV, "-")
+    return GateCommand(
+        name,
+        (
+            python,
+            "-I",
+            "-B",
+            "-c",
+            _PYTEST_BOOTSTRAP,
+            str(source),
+            installed_site,
+            python,
+            *pytest_arguments,
+        ),
+        command_environment,
+        cwd=source,
+        timeout_s=3600,
+    )
+
+
+def _junit_durations(report_path: Path) -> dict[str, int]:
+    summary = junit_summary(report_path)
+    root = ET.parse(report_path).getroot()
+    durations: dict[str, int] = {}
+    for testcase in (element for element in root.iter() if _xml_local_name(element.tag) == "testcase"):
+        values = [
+            prop.attrib.get("value")
+            for prop in testcase.iter()
+            if _xml_local_name(prop.tag) == "property" and prop.attrib.get("name") == _NODEID_PROPERTY
+        ]
+        try:
+            seconds = Decimal(testcase.attrib["time"])
+        except (KeyError, InvalidOperation) as exc:
+            raise ValueError("JUnit testcase has an invalid duration") from exc
+        if len(values) != 1 or values[0] is None or not seconds.is_finite() or seconds < 0:
+            raise ValueError("JUnit testcase has an invalid duration")
+        durations[values[0]] = int(seconds * 1_000_000_000)
+    if Counter(durations) != Counter(summary.nodeids):
+        raise ValueError("JUnit durations do not cover the exact completed selection")
+    return durations
+
+
+def _whitespace_argv(source: Path, base_sha: str, candidate_sha: str) -> tuple[str, ...]:
+    return GIT, "-c", _NO_GLOBAL_GIT_ATTRIBUTES, "-C", str(source), "diff", "--check", base_sha, candidate_sha
+
+
+def _tier_static_commands(
+    source: Path,
+    *,
+    python: str,
+    tier: str,
+    base_sha: str,
+    candidate_sha: str,
+    environment: Mapping[str, str],
+) -> tuple[GateCommand, ...]:
+    git_environment = _git_environment()
+    git_environment.update(
+        (name, value) for name, value in environment.items() if not name.startswith("GIT_")
+    )
+    result = [
+        GateCommand(
+            "committed whitespace errors",
+            _whitespace_argv(source, base_sha, candidate_sha),
+            git_environment,
+            cwd=source,
+            timeout_s=120,
+        )
+    ]
+    excluded = {"whitespace errors", *(("quality toolchain",) if tier == "change" else ())}
+    result.extend(
+        GateCommand(
+            command.name,
+            command.argv,
+            environment,
+            cwd=source,
+            timeout_s=1800,
+        )
+        for command in static_commands(python)
+        if command.name not in excluded
+    )
+    return tuple(result)
+
+
+def _bounded_file_identity(
+    path: Path,
+    *,
+    maximum: int,
+    executable: bool,
+    owner_uid: int | None = None,
+    single_link: bool = False,
+    close_mode: int | None = None,
+) -> dict[str, int | str]:
+    before = path.lstat()
+    mode = stat.S_IMODE(before.st_mode)
+    if (
+        not stat.S_ISREG(before.st_mode)
+        or not 0 < before.st_size <= maximum
+        or (close_mode is None and mode & 0o022)
+        or (executable and not mode & 0o111)
+        or (owner_uid is not None and before.st_uid != owner_uid)
+        or (single_link and before.st_nlink != 1)
+        or (close_mode is not None and (owner_uid is None or close_mode & 0o022))
+    ):
+        raise RuntimeError("quality-gate input has unsafe metadata")
+    flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0)
+    if os.name != "nt":
+        flags |= os.O_NOFOLLOW
+    descriptor = os.open(path, flags)
+    digest = hashlib.sha256()
+    try:
+        opened = os.fstat(descriptor)
+        if _stat_identity(opened) != _stat_identity(before):
+            raise RuntimeError("quality-gate input changed while opening")
+        if close_mode is not None:
+            os.fchmod(descriptor, close_mode)
+            opened = os.fstat(descriptor)
+            if stat.S_IMODE(opened.st_mode) != close_mode or _stat_identity(path.lstat()) != _stat_identity(
+                opened
+            ):
+                raise RuntimeError("quality-gate input changed while closing metadata")
+        while chunk := os.read(descriptor, 1024 * 1024):
+            digest.update(chunk)
+        if _stat_identity(os.fstat(descriptor)) != _stat_identity(opened) or _stat_identity(
+            path.lstat()
+        ) != _stat_identity(opened):
+            raise RuntimeError("quality-gate input changed while hashing")
+    finally:
+        os.close(descriptor)
+    if close_mode is not None:
+        mode = close_mode
+    return {"sha256": digest.hexdigest(), "size_bytes": before.st_size, "mode": f"{mode:04o}"}
+
+
+def _host_command(argv: Sequence[str], *, timeout: int = 10) -> str:
+    completed = subprocess.run(  # noqa: S603 - fixed exact-host executables and literal argv
+        argv,
+        executable=argv[0],
+        env={"LC_ALL": "C.UTF-8", "PATH": "/usr/bin:/bin"},
+        stdin=subprocess.DEVNULL,
+        capture_output=True,
+        check=False,
+        timeout=timeout,
+    )
+    if completed.returncode or len(completed.stdout) + len(completed.stderr) > 8192:
+        raise RuntimeError(f"exact-host prerequisite command failed: {Path(argv[0]).name}")
+    return completed.stdout.decode("utf-8", errors="strict")
+
+
+def _dpkg_file_identity(path: Path, package: str, *, executable: bool) -> dict[str, int | str]:
+    if path.resolve(strict=True) != path:
+        raise RuntimeError("exact-host package path is not canonical")
+    identity = _bounded_file_identity(path, maximum=64 << 20, executable=executable, owner_uid=0)
+    owners = {
+        line.split(": ", 1)[0].split(":", 1)[0]
+        for line in _host_command(("/usr/bin/dpkg-query", "-S", str(path))).splitlines()
+    }
+    fields = (
+        _host_command(
+            (
+                "/usr/bin/dpkg-query",
+                "-W",
+                "-f=${db:Status-Status}\t${binary:Package}\t${Version}\t${Architecture}\n",
+                package,
+            )
+        )
+        .strip()
+        .split("\t")
+    )
+    if (
+        owners != {package}
+        or len(fields) != 4
+        or fields[0] != "installed"
+        or fields[1].split(":")[0] != package
+    ):
+        raise RuntimeError("exact-host package ownership or installed status is invalid")
+    if _host_command(("/usr/bin/dpkg", "--verify", package)).strip():
+        raise RuntimeError("exact-host package verification reported drift")
+    return {**identity, "package": package, "version": fields[2], "architecture": fields[3]}
+
+
+def _exact_host_evidence() -> dict[str, Any]:
+    release = platform.freedesktop_os_release()
+    release_identity = release.get("ID"), release.get("VERSION_ID"), platform.machine()
+    if release_identity != ("ubuntu", "26.04", "x86_64"):
+        raise RuntimeError("exact-release requires the provisioned Ubuntu 26.04 x86_64 host")
+    if (
+        Path("/sys/module/apparmor/parameters/enabled").read_text().strip() != "Y"
+        or Path("/proc/sys/kernel/apparmor_restrict_unprivileged_userns").read_text().strip() != "1"
+    ):
+        raise RuntimeError("exact-release AppArmor userns hardening is absent")
+    dpkg_query = _dpkg_file_identity(Path("/usr/bin/dpkg-query"), "dpkg", executable=True)
+    dpkg = _dpkg_file_identity(Path("/usr/bin/dpkg"), "dpkg", executable=True)
+    parser = _dpkg_file_identity(Path("/usr/sbin/apparmor_parser"), "apparmor", executable=True)
+    policy = _dpkg_file_identity(Path("/etc/apparmor.d/bwrap-userns-restrict"), "apparmor", executable=False)
+    bwrap = _dpkg_file_identity(Path("/usr/bin/bwrap"), "bubblewrap", executable=True)
+    host_user, host_net = os.readlink("/proc/self/ns/user"), os.readlink("/proc/self/ns/net")
+    mounts = (
+        ("--ro-bind", "/usr", "/usr")
+        + ("--ro-bind-try", "/lib", "/lib", "--ro-bind-try", "/lib64", "/lib64")
+        + ("--dir", "/etc", "--ro-bind-try", "/etc/ld.so.cache", "/etc/ld.so.cache")
+        + ("--proc", "/proc", "--dev", "/dev")
+    )
+    probe = "readlink /proc/self/ns/user; readlink /proc/self/ns/net; cat /proc/self/attr/current"
+    command = (
+        ("/usr/bin/bwrap", "--unshare-all", "--unshare-user")
+        + ("--uid", str(os.getuid()), "--gid", str(os.getgid()))
+        + ("--cap-drop", "ALL", "--disable-userns", "--die-with-parent", "--new-session")
+        + mounts
+        + ("--", "/usr/bin/sh", "-c", probe)
+    )
+    output = _host_command(command).splitlines()
+    if (
+        len(output) != 3
+        or output[0] == host_user
+        or output[1] == host_net
+        or output[2] != "bwrap//&unpriv_bwrap (enforce)"
+    ):
+        raise RuntimeError("exact-host bwrap/AppArmor namespace smoke is not enforcing")
+    return {
+        "os": {"id": "ubuntu", "version": "26.04", "architecture": "x86_64"},
+        "dpkg_query": dpkg_query,
+        "dpkg": dpkg,
+        "apparmor_parser": parser,
+        "apparmor_policy": policy,
+        "bubblewrap": bwrap,
+        "userns_restriction": 1,
+        "smoke": {
+            "user_namespace_distinct": True,
+            "network_namespace_distinct": True,
+            "profile_stack": output[2],
+        },
+    }
+
+
+def _write_tier_summary(directory_fd: int, summary: Mapping[str, Any]) -> None:
+    host = summary.get("release_host_capacity")
+    contour = host.get("host_contour") if isinstance(host, Mapping) else None
+    if summary.get("tier") == "exact-release" and contour != _exact_host_evidence():
+        raise RuntimeError("exact-host contour drifted before evidence publication")
+    _write_private_json(directory_fd, "quality-gate-summary.json", summary)
+
+
+def _backup_observation(directory: Path) -> dict[str, int | str]:
+    files = tuple(directory.glob("*.sqlite3"))
+    if not 0 < len(files) <= 256:
+        raise RuntimeError("nightly backup observation count is outside its bound")
+    identities = [_bounded_file_identity(path, maximum=16 << 30, executable=False) for path in files]
+    total = sum(int(item["size_bytes"]) for item in identities)
+    if total > 64 << 30:
+        raise RuntimeError("nightly backup observation bytes exceed their bound")
+    members = sorted((item["sha256"], item["size_bytes"]) for item in identities)
+    payload = json.dumps(
+        {"domain": "friday.quality-gate-backups.v1", "count": len(files), "members": members},
+        sort_keys=True,
+        separators=(",", ":"),
+        allow_nan=False,
+    ).encode()
+    return {
+        "file_count": len(files),
+        "total_bytes": total,
+        "aggregate_sha256": hashlib.sha256(payload).hexdigest(),
+    }
+
+
+def _observation_assets(environment: Mapping[str, str], *, powershell_sha256: str) -> dict[str, Any]:
+    syncthing = _bounded_file_identity(
+        Path(environment["FRIDAY_REAL_SYNCTHING_BINARY"]), maximum=64 << 20, executable=True
+    )
+    powershell = _bounded_file_identity(
+        Path(environment["QUALITY_GATE_POWERSHELL_BINARY"]), maximum=256 << 20, executable=True
+    )
+    if syncthing["sha256"] != _SYNCTHING_AMD64_SHA256:
+        raise RuntimeError("nightly Syncthing binary differs from the reviewed release")
+    if powershell["sha256"] != powershell_sha256:
+        raise RuntimeError("nightly PowerShell binary differs from the operator-reviewed digest")
+    return {
+        "schema": "friday.quality-gate-observation-assets.v1",
+        "real_backups": _backup_observation(Path(environment["FRIDAY_TEST_BACKUPS_DIR"])),
+        "syncthing": syncthing,
+        "powershell": powershell,
+    }
+
+
+def _observation_environment(
+    environment: Mapping[str, str],
+) -> tuple[dict[str, str], dict[str, Any]]:
+    result = dict(environment)
+    kinds = {
+        "QUALITY_GATE_REAL_BACKUPS_DIR": "directory",
+        "QUALITY_GATE_SYNCTHING_BINARY": "file",
+        "QUALITY_GATE_POWERSHELL_BINARY": "file",
+    }
+    resolved: dict[str, Path] = {}
+    for name, kind in kinds.items():
+        raw = os.environ.get(name, "").strip()
+        if not raw:
+            raise RuntimeError(f"nightly observation asset is absent: {name}")
+        path = Path(raw)
+        if not path.is_absolute() or path.is_symlink():
+            raise RuntimeError(f"nightly observation asset is not canonical: {name}")
+        path = path.resolve(strict=True)
+        if path != Path(raw):
+            raise RuntimeError(f"nightly observation asset is not canonical: {name}")
+        if (kind == "directory" and not path.is_dir()) or (
+            kind == "file" and (not path.is_file() or not os.access(path, os.X_OK))
+        ):
+            raise RuntimeError(f"nightly observation asset is unusable: {name}")
+        resolved[name] = path
+    powershell = resolved["QUALITY_GATE_POWERSHELL_BINARY"]
+    path_value = f"{powershell.parent}{os.pathsep}{result.get('PATH', os.defpath)}"
+    selected = shutil.which("pwsh", path=path_value) or shutil.which("powershell", path=path_value)
+    if (
+        powershell.name not in {"pwsh", "powershell"}
+        or not selected
+        or Path(selected).resolve() != powershell
+    ):
+        raise RuntimeError("nightly PowerShell binary is not the authenticated PATH selection")
+    expected_powershell = os.environ.get("QUALITY_GATE_POWERSHELL_SHA256", "").strip()
+    if re.fullmatch(r"[0-9a-f]{64}", expected_powershell) is None:
+        raise RuntimeError("nightly PowerShell requires one operator-reviewed SHA-256")
+    result.update(
+        {
+            "FRIDAY_TEST_BACKUPS_DIR": str(resolved["QUALITY_GATE_REAL_BACKUPS_DIR"]),
+            "FRIDAY_REAL_SYNCTHING_BINARY": str(resolved["QUALITY_GATE_SYNCTHING_BINARY"]),
+            "QUALITY_GATE_SYNCTHING_BINARY": str(resolved["QUALITY_GATE_SYNCTHING_BINARY"]),
+            "QUALITY_GATE_POWERSHELL_BINARY": str(powershell),
+            "PATH": path_value,
+        }
+    )
+    return result, _observation_assets(result, powershell_sha256=expected_powershell)
+
+
+def _require_observation_assets_stable(environment: Mapping[str, str], expected: Mapping[str, Any]) -> None:
+    actual = _observation_assets(environment, powershell_sha256=str(expected["powershell"]["sha256"]))
+    if actual != expected:
+        raise RuntimeError("nightly observation assets drifted during execution")
+
+
+def _build_reusable_wheel(
+    source: Path,
+    scratch: Path,
+    *,
+    candidate_sha: str,
+    python: str,
+    environment: Mapping[str, str],
+    runner: Callable[[GateCommand], int],
+    comparison_epoch_sha: str | None = None,
+    comparison_sha256: str | None = None,
+) -> tuple[Path, str, str | None, Path, Path]:
+    def build_one(label: str, build_source: Path, epoch_sha: str) -> tuple[Path, str, dict[str, str]]:
+        project = scratch / f"{label}-project"
+        dist = scratch / f"{label}-dist"
+        shutil.copytree(build_source, project, ignore=shutil.ignore_patterns(".git"))
+        dist.mkdir(mode=0o700)
+        build_environment = dict(environment)
+        build_environment["SOURCE_DATE_EPOCH"] = _git_output(
+            build_source, "show", "-s", "--format=%ct", epoch_sha
+        )
+        build = GateCommand(
+            f"{label} wheel build",
+            (python, "-I", "-m", "build", "--wheel", "--no-isolation", "--outdir", str(dist)),
+            build_environment,
+            cwd=project,
+            timeout_s=1200,
+        )
+        if runner(build) != 0:
+            raise RuntimeError(f"{label} wheel build failed")
+        wheels = tuple(dist.glob("*.whl"))
+        if len(wheels) != 1 or not wheels[0].is_file():
+            raise RuntimeError(f"{label} wheel build did not produce exactly one wheel")
+        wheel = wheels[0]
+        digest = _bounded_wheel_sha256(wheel)
+        verify = GateCommand(
+            f"{label} wheel verifier",
+            (
+                python,
+                str(source / "deploy" / "host-control" / "verify_wheel.py"),
+                str(wheel),
+                digest,
+            ),
+            build_environment,
+            cwd=source,
+            timeout_s=300,
+        )
+        if runner(verify) != 0:
+            raise RuntimeError(f"{label} wheel verifier failed")
+        return wheel, digest, build_environment
+
+    def install_one(label: str, wheel: Path, build_environment: Mapping[str, str]) -> tuple[Path, Path]:
+        runtime = scratch / f"{label}-runtime"
+        installed_site = runtime / "site-packages"
+        installed_site.mkdir(parents=True, mode=0o700)
+        install = GateCommand(
+            f"clean-install {label} wheel",
+            (
+                python,
+                "-I",
+                "-m",
+                "pip",
+                "--isolated",
+                "install",
+                "--no-deps",
+                "--no-compile",
+                "--target",
+                str(installed_site),
+                str(wheel),
+            ),
+            build_environment,
+            cwd=scratch,
+            timeout_s=600,
+        )
+        if runner(install) != 0:
+            raise RuntimeError(f"{label} wheel clean install failed")
+        return installed_site, Path(python)
+
+    wheel, wheel_sha256, build_environment = build_one("candidate", source, candidate_sha)
+    installed_site, runtime_python = install_one("candidate", wheel, build_environment)
+    comparison_observed: str | None = None
+    if comparison_sha256 is not None:
+        if comparison_epoch_sha is None:
+            raise RuntimeError("comparison wheel requires an authenticated epoch commit")
+        with _candidate_projection(
+            comparison_epoch_sha,
+            scratch,
+            origin=source,
+            name="comparison-source",
+        ) as comparison_source:
+            comparison_wheel, comparison_observed, comparison_environment = build_one(
+                "comparison", comparison_source, comparison_epoch_sha
+            )
+            _require_comparison_wheel(comparison_observed, comparison_sha256)
+            installed_site, runtime_python = install_one(
+                "comparison", comparison_wheel, comparison_environment
+            )
+    return wheel, wheel_sha256, comparison_observed, installed_site, runtime_python
 
 
 def selected_phases(requested: Sequence[str] | None) -> tuple[str, ...]:
@@ -1114,194 +1683,566 @@ def _positive_workers(value: str) -> int:
     return workers
 
 
+def _tier_result_identity(tier: str, measurement_only: bool) -> tuple[str, str, bool]:
+    if measurement_only:
+        return "friday.quality-gate-measurement.v1", "measured", False
+    if tier == "exact-release":
+        return "friday.quality-gate-summary.v1", "passed", True
+    if tier == "nightly":
+        return "friday.quality-gate-observation.v1", "observed", False
+    return "friday.quality-gate-change.v1", "passed", False
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--tier", choices=("change", "exact-release", "nightly"))
+    parser.add_argument("--candidate-sha", help="exact candidate commit for a closed tier")
+    parser.add_argument("--base-sha", help="strict candidate ancestor for change coverage")
+    parser.add_argument("--evidence-dir", type=Path, help="empty private evidence directory")
+    parser.add_argument("--comparison-wheel-sha256", help="comparison wheel SHA-256")
+    parser.add_argument("--comparison-wheel-epoch-sha", help="comparison wheel commit")
+    parser.add_argument(
+        "--inventory-collection",
+        type=Path,
+        help="write one retained isolated serial collection for inventory maintenance",
+    )
     parser.add_argument(
         "--phase",
         action="append",
         choices=("all", *PHASES),
-        help="phase to run; repeat to select several (default: all)",
+        help="legacy diagnostic phase",
     )
-    parser.add_argument(
-        "--workers",
-        type=_positive_workers,
-        default=12,
-        help="workers for non-UI tests (default: 12)",
-    )
+    parser.add_argument("--workers", type=_positive_workers, default=20)
     parser.add_argument(
         "--ui-workers",
         type=_positive_workers,
-        default=1,
+        default=4,
         help=(
-            "UI workers (default: 1, a serial browser run); "
+            "UI workers (default: 4, one module remains on one worker); "
             f"explicit overrides may use at most {len(UI_TEST_MODULES)} (one per UI module)"
         ),
     )
-    parser.add_argument(
-        "--dry-run",
-        action="store_true",
-        help="print the selected checks without executing them",
-    )
+    parser.add_argument("--dry-run", action="store_true", help="print diagnostic commands")
     return parser
+
+
+def _inventory_interpreter_is_isolated() -> bool:
+    return bool(sys.flags.isolated and sys.flags.safe_path and sys.dont_write_bytecode)
+
+
+def execute_inventory_collection(
+    args: argparse.Namespace, *, command_runner: Callable[[GateCommand], int] = run_command
+) -> int:
+    target = args.inventory_collection
+    forbidden = (
+        args.tier,
+        args.candidate_sha,
+        args.base_sha,
+        args.evidence_dir,
+        args.comparison_wheel_sha256,
+        args.comparison_wheel_epoch_sha,
+        args.phase,
+        args.dry_run,
+    )
+    try:
+        if not _inventory_interpreter_is_isolated():
+            raise RuntimeError("inventory collection requires an isolated -I -B interpreter")
+        if any(value is not None and value is not False for value in forbidden) or (
+            args.workers,
+            args.ui_workers,
+        ) != (20, 4):
+            raise RuntimeError("inventory collection does not combine with gate modes")
+        if target is None or not target.is_absolute() or target.exists():
+            raise RuntimeError("inventory collection target must be an absent absolute path")
+        parent = target.parent.resolve(strict=True)
+        if not parent.is_dir() or parent == ROOT or parent.is_relative_to(ROOT):
+            raise RuntimeError("inventory collection target must be outside the checkout")
+        with tempfile.TemporaryDirectory(prefix="fq-inventory-", dir=_scratch_parent()) as raw:
+            scratch = Path(raw)
+            with _isolated_test_environment(
+                scratch, prepare_schema_backups=False, source_root=ROOT
+            ) as environment:
+                command = _tier_pytest_command(
+                    name="authoritative inventory collection",
+                    python=sys.executable,
+                    source=ROOT,
+                    environment=environment,
+                    report=None,
+                    collection=target,
+                    selection=None,
+                    modules=("tests",),
+                    workers=1,
+                    distribution="load",
+                    basetemp=scratch / "pytest",
+                    collect_only=True,
+                )
+                if command_runner(command) != 0:
+                    return 1
+        count = len(collection_nodeids(target))
+    except (OSError, RuntimeError, ValueError) as exc:
+        print(f"FAILED: {exc}", file=sys.stderr)
+        return 2
+    print(f"Inventory collection: {count} exact nodes")
+    return 0
+
+
+def execute_tier(
+    args: argparse.Namespace,
+    *,
+    command_runner: Callable[[GateCommand], int] | None = None,
+) -> int:
+    started_ns = time.monotonic_ns()
+    started_times = os.times()
+    if command_runner is not None:
+        print("FAILED: closed tiers do not accept an injected command runner", file=sys.stderr)
+        return 2
+    runner = run_command
+    commit_pattern = re.compile(r"(?:[0-9a-f]{40}|[0-9a-f]{64})").fullmatch
+    candidate_sha = args.candidate_sha
+    base_sha = args.base_sha
+    comparison_wheel_sha256 = args.comparison_wheel_sha256
+    comparison_wheel_epoch_sha = args.comparison_wheel_epoch_sha
+    measurement_only = comparison_wheel_sha256 is not None
+    host_capacity: dict[str, Any] | None = None
+    evidence_fd = -1
+    if args.phase or args.dry_run:
+        print("FAILED: closed tiers do not accept legacy phase or dry-run modes", file=sys.stderr)
+        return 2
+    if args.workers > 24 or args.ui_workers > len(UI_TEST_MODULES):
+        print("FAILED: closed tier worker topology is outside its bounded plan", file=sys.stderr)
+        return 2
+    if args.tier == "exact-release" and (args.workers, args.ui_workers) != (20, 4):
+        print("FAILED: exact-release requires the canonical 20/4 worker topology", file=sys.stderr)
+        return 2
+    if not isinstance(candidate_sha, str) or commit_pattern(candidate_sha) is None:
+        print("FAILED: --candidate-sha must be one full lowercase commit", file=sys.stderr)
+        return 2
+    if not (sys.flags.isolated and sys.flags.safe_path and sys.dont_write_bytecode):
+        print("FAILED: closed tiers require an isolated -I -B interpreter", file=sys.stderr)
+        return 2
+    try:
+        if _git_output(ROOT, "rev-parse", "--verify", f"{candidate_sha}^{{commit}}") != candidate_sha:
+            raise RuntimeError("candidate commit identity is not exact")
+        _require_candidate_launcher(candidate_sha)
+        load_inventory = _candidate_inventory_loader()
+        if args.tier == "exact-release":
+            host_capacity = {**_exact_host_capacity(), "host_contour": _exact_host_evidence()}
+        if args.tier != "nightly":
+            if not isinstance(base_sha, str) or commit_pattern(base_sha) is None or base_sha == candidate_sha:
+                raise RuntimeError("change tiers require a distinct full --base-sha")
+            if _git_output(ROOT, "rev-parse", "--verify", f"{base_sha}^{{commit}}") != base_sha:
+                raise RuntimeError("base commit identity is not exact")
+            _git_output(ROOT, "merge-base", "--is-ancestor", base_sha, candidate_sha)
+        elif base_sha is not None:
+            raise RuntimeError("nightly does not accept a change interval")
+        comparison_requested = comparison_wheel_sha256 is not None or comparison_wheel_epoch_sha is not None
+        if comparison_requested:
+            if (
+                args.tier != "exact-release"
+                or re.fullmatch(r"[0-9a-f]{64}", comparison_wheel_sha256 or "") is None
+                or commit_pattern(comparison_wheel_epoch_sha or "") is None
+            ):
+                raise RuntimeError(
+                    "comparison wheel requires exact-release, one SHA-256, and its epoch commit"
+                )
+            assert isinstance(comparison_wheel_epoch_sha, str)
+            if (
+                _git_output(
+                    ROOT,
+                    "rev-parse",
+                    "--verify",
+                    f"{comparison_wheel_epoch_sha}^{{commit}}",
+                )
+                != comparison_wheel_epoch_sha
+            ):
+                raise RuntimeError("comparison wheel epoch commit identity is not exact")
+            _git_output(
+                ROOT,
+                "merge-base",
+                "--is-ancestor",
+                comparison_wheel_epoch_sha,
+                candidate_sha,
+            )
+        evidence_dir = args.evidence_dir
+        if evidence_dir is None or not evidence_dir.is_absolute() or evidence_dir.is_symlink():
+            raise RuntimeError("a real absolute --evidence-dir is required")
+        evidence_dir = evidence_dir.resolve(strict=True)
+        if not evidence_dir.is_dir() or any(evidence_dir.iterdir()):
+            raise RuntimeError("--evidence-dir must be an existing empty directory")
+        if evidence_dir == ROOT or evidence_dir.is_relative_to(ROOT):
+            raise RuntimeError("--evidence-dir must be outside the candidate checkout")
+        evidence_fd = _open_evidence_directory(evidence_dir)
+    except (OSError, RuntimeError, subprocess.TimeoutExpired) as exc:
+        if evidence_fd >= 0:
+            os.close(evidence_fd)
+        print(f"FAILED: {exc}", file=sys.stderr)
+        return 2
+
+    peak_scratch_bytes = 0
+    completed_steps: list[str] = []
+    full_nodeids: tuple[str, ...] = ()
+    classified: tuple[Any, ...] = ()
+    durations: dict[str, int] = {}
+    wheel_sha256: str | None = None
+    comparison_observed_sha256: str | None = None
+    candidate_tree = ""
+    scratch_groups: list[dict[str, int | str]] = []
+    observed_by_step: dict[str, int] = {}
+    effective_workers = {"non_ui": 0, "ui": 0}
+    observation_assets: dict[str, Any] | None = None
+
+    try:
+        with tempfile.TemporaryDirectory(prefix="fq-", dir=_scratch_parent()) as raw_scratch:
+            scratch = Path(raw_scratch)
+            scratch.chmod(0o700)
+
+            def measured(
+                command: GateCommand,
+                *,
+                observation_root: Path | None = None,
+            ) -> int:
+                nonlocal peak_scratch_bytes
+                if observation_root is None:
+                    returncode = runner(command)
+                    observed_bytes = _directory_bytes(scratch)
+                else:
+                    root = observation_root
+                    outside_bytes = (
+                        0 if root == scratch else max(0, _directory_bytes(scratch) - _directory_bytes(root))
+                    )
+                    with _scratch_peak_sampler(root, 0.5) as observed_peak:
+                        returncode = runner(command)
+                    observed_bytes = observed_peak[0]
+                    peak_scratch_bytes = max(peak_scratch_bytes, outside_bytes + observed_bytes)
+                observed_by_step[command.name] = observed_bytes
+                completed_steps.append(command.name)
+                peak_scratch_bytes = max(peak_scratch_bytes, observed_bytes)
+                return returncode
+
+            with (
+                _scratch_peak_sampler(scratch, 5.0) as aggregate_scratch_peak,
+                _candidate_projection(candidate_sha, scratch) as source,
+            ):
+                peak_scratch_bytes = _directory_bytes(scratch)
+                candidate_tree = _git_output(source, "rev-parse", f"{candidate_sha}^{{tree}}")
+                inventory = load_inventory(source / "tools" / "quality_gate_inventory.tsv")
+                inventory.validate_candidate_modules(source, candidate_sha)
+                static_environment = _git_environment()
+                static_environment.pop("PYTHONPATH", None)
+                static_environment.pop("PYTEST_ADDOPTS", None)
+                static_environment.update(
+                    {
+                        "PYTHONDONTWRITEBYTECODE": "1",
+                        "PYTHONPYCACHEPREFIX": str(scratch / "static-cache"),
+                        "MYPY_CACHE_DIR": str(scratch / "mypy-cache"),
+                        "RUFF_CACHE_DIR": str(scratch / "ruff-cache"),
+                    }
+                )
+                if args.tier != "nightly":
+                    assert isinstance(base_sha, str)
+                    for command in _tier_static_commands(
+                        source,
+                        python=sys.executable,
+                        tier=args.tier,
+                        base_sha=base_sha,
+                        candidate_sha=candidate_sha,
+                        environment=static_environment,
+                    ):
+                        if measured(command) != 0:
+                            return 1
+
+                with _isolated_test_environment(
+                    scratch,
+                    prepare_schema_backups=False,
+                    source_root=source,
+                ) as raw_environment:
+                    environment = dict(raw_environment)
+                    test_python = sys.executable
+                    if args.tier == "nightly":
+                        environment, observation_assets = _observation_environment(environment)
+                    if args.tier == "exact-release":
+                        (
+                            _wheel,
+                            wheel_sha256,
+                            comparison_observed_sha256,
+                            installed_site,
+                            test_python,
+                        ) = _build_reusable_wheel(
+                            source,
+                            scratch,
+                            candidate_sha=candidate_sha,
+                            python=sys.executable,
+                            environment=environment,
+                            runner=measured,
+                            comparison_epoch_sha=comparison_wheel_epoch_sha,
+                            comparison_sha256=comparison_wheel_sha256,
+                        )
+                        environment.update(
+                            {_INSTALLED_SITE_ENV: str(installed_site), "PYTHONPATH": str(installed_site)}
+                        )
+
+                    full_collection = scratch / "all-tests.json"
+                    collect = _tier_pytest_command(
+                        name="one authoritative candidate collection",
+                        python=test_python,
+                        source=source,
+                        environment=environment,
+                        report=None,
+                        collection=full_collection,
+                        selection=None,
+                        modules=("tests",),
+                        workers=1,
+                        distribution="load",
+                        basetemp=scratch / "collect",
+                        collect_only=True,
+                    )
+                    if measured(collect) != 0:
+                        return 1
+                    full_nodeids = collection_nodeids(full_collection)
+                    classified = inventory.classify(full_nodeids)
+                    selected_tiers = (
+                        {"change", "exact-release"} if args.tier == "exact-release" else {args.tier}
+                    )
+                    selected = tuple(node for node in classified if node.tier in selected_tiers)
+                    if not selected:
+                        raise RuntimeError("selected tier is empty")
+
+                    groups = (
+                        (
+                            "non-UI",
+                            tuple(node for node in selected if node.execution_kind != "browser"),
+                        ),
+                        ("UI", tuple(node for node in selected if node.execution_kind == "browser")),
+                    )
+                    for label, nodes in groups:
+                        if not nodes:
+                            continue
+                        group_root = scratch / f"run-{label.lower()}"
+                        group_root.mkdir(mode=0o700)
+                        with _isolated_test_environment(
+                            group_root,
+                            prepare_schema_backups=False,
+                            source_root=source,
+                        ) as group_environment:
+                            if _INSTALLED_SITE_ENV in environment:
+                                group_environment[_INSTALLED_SITE_ENV] = environment[_INSTALLED_SITE_ENV]
+                                group_environment["PYTHONPATH"] = environment["PYTHONPATH"]
+                            if args.tier == "nightly":
+                                group_environment.update(
+                                    {name: environment[name] for name in _OBSERVATION_TEST_ENV}
+                                )
+                            expected = tuple(node.nodeid for node in nodes)
+                            selection_path = group_root / "selection.json"
+                            collection_path = group_root / "collection.json"
+                            report_path = group_root / "results.xml"
+                            _write_collection_manifest(str(selection_path), expected)
+                            modules = tuple(dict.fromkeys(node.module_path for node in nodes))
+                            requested_workers = args.ui_workers if label == "UI" else args.workers
+                            workers = min(requested_workers, len(modules))
+                            effective_workers["ui" if label == "UI" else "non_ui"] = workers
+                            command = _tier_pytest_command(
+                                name=f"{args.tier} {label} tests",
+                                python=test_python,
+                                source=source,
+                                environment=group_environment,
+                                report=report_path,
+                                collection=collection_path,
+                                selection=selection_path,
+                                modules=modules,
+                                workers=workers,
+                                distribution="loadscope" if label == "UI" else "load",
+                                basetemp=group_root / "pytest",
+                            )
+                            scratch_baseline = _directory_bytes(scratch)
+                            budget_mb = sum(node.scratch_mb for node in nodes)
+                            if measured(command, observation_root=scratch) != 0:
+                                return 1
+                            observed = collection_nodeids(collection_path)
+                            if Counter(observed) != Counter(expected) or not _junit_phase_is_clean(
+                                report_path,
+                                phase=label,
+                                expected_nodeids=expected,
+                            ):
+                                raise RuntimeError(f"{label} execution differs from its classified tier")
+                            durations.update(_junit_durations(report_path))
+                            peak_total = observed_by_step[command.name]
+                            observed_bytes = max(0, peak_total - scratch_baseline)
+                            scratch_groups.append(
+                                {
+                                    "group": label,
+                                    "node_count": len(nodes),
+                                    "declared_budget_bytes": budget_mb * 1024 * 1024,
+                                    "baseline_bytes": scratch_baseline,
+                                    "peak_total_bytes": peak_total,
+                                    "incremental_peak_bytes": observed_bytes,
+                                    "enforced": False,
+                                    "method": "sampled regular-file peak minus fixed baseline",
+                                }
+                            )
+
+                    expected_executed = {node.nodeid for node in selected}
+                    if set(durations) != expected_executed:
+                        raise RuntimeError("completed results do not equal the selected tier union")
+                    by_nodeid = {node.nodeid: node for node in classified}
+                    if any(
+                        duration > by_nodeid[nodeid].max_runtime_s * 1_000_000_000
+                        for nodeid, duration in durations.items()
+                    ):
+                        raise RuntimeError("a node exceeded its declared maximum runtime")
+                    if observation_assets is not None:
+                        _require_observation_assets_stable(environment, observation_assets)
+                    peak_scratch_bytes = max(peak_scratch_bytes, _directory_bytes(scratch))
+
+                inventory_digest = inventory.digest
+            peak_scratch_bytes = max(peak_scratch_bytes, aggregate_scratch_peak[0])
+
+        finished_times = os.times()
+        try:
+            import resource
+
+            own_usage = resource.getrusage(resource.RUSAGE_SELF)
+            child_usage = resource.getrusage(resource.RUSAGE_CHILDREN)
+            rss_scale = 1 if sys.platform == "darwin" else 1024
+            max_rss_bytes = int(max(own_usage.ru_maxrss, child_usage.ru_maxrss) * rss_scale)
+        except ImportError:
+            max_rss_bytes = 0
+        wall_ns = time.monotonic_ns() - started_ns
+
+        def cpu_ns(name: str) -> int:
+            current = getattr(finished_times, name) + getattr(finished_times, f"children_{name}")
+            initial = getattr(started_times, name) + getattr(started_times, f"children_{name}")
+            return int((current - initial) * 1_000_000_000)
+
+        _require_candidate_launcher(candidate_sha)
+        _require_evidence_directory(evidence_dir, evidence_fd, ())
+        schema, result, certification_eligible = _tier_result_identity(args.tier, measurement_only)
+        summary = {
+            "schema": schema,
+            "result": result,
+            "certification_eligible": certification_eligible,
+            "candidate_sha": candidate_sha,
+            "candidate_tree": candidate_tree,
+            "base_sha": base_sha,
+            "tier": args.tier,
+            "inventory_sha256": inventory_digest,
+            "invariant_identity": "semantic-function+exact-parameter-set",
+            "wheel_sha256": wheel_sha256,
+            "test_runtime_wheel_sha256": comparison_observed_sha256 or wheel_sha256,
+            "comparison_wheel": {
+                "epoch_commit": comparison_wheel_epoch_sha,
+                "expected_sha256": comparison_wheel_sha256,
+                "observed_sha256": comparison_observed_sha256,
+            },
+            "topology": {
+                "requested_non_ui_workers": args.workers,
+                "requested_ui_workers": args.ui_workers,
+                "effective_non_ui_workers": effective_workers["non_ui"],
+                "effective_ui_workers": effective_workers["ui"],
+            },
+            "release_host_capacity": host_capacity,
+            "completed_steps": completed_steps,
+            "partition": _partition_evidence(classified),
+            "executed": [
+                {"nodeid": nodeid, "duration_ns": durations[nodeid]}
+                for nodeid in full_nodeids
+                if nodeid in durations
+            ],
+            "scratch_groups": scratch_groups,
+            "workload_metrics_before_evidence": {
+                "boundary": "after scratch cleanup, before summary composition",
+                "wall_ns": wall_ns,
+                "user_ns": cpu_ns("user"),
+                "sys_ns": cpu_ns("system"),
+                "max_rss_bytes": max_rss_bytes,
+                "peak_scratch_bytes": peak_scratch_bytes,
+                "retry_count": 0,
+            },
+        }
+        if observation_assets is not None:
+            summary["observation_assets"] = observation_assets
+        _write_tier_summary(evidence_fd, summary)
+        os.fsync(evidence_fd)
+        _require_evidence_directory(evidence_dir, evidence_fd, ("quality-gate-summary.json",))
+    except (OSError, RuntimeError, ValueError, subprocess.TimeoutExpired) as exc:
+        print(f"FAILED: {exc}", file=sys.stderr)
+        return 1
+    finally:
+        os.close(evidence_fd)
+
+    outcome = "PASS" if certification_eligible else f"{result.upper()} (NON-CERTIFYING)"
+    print(f"\nQuality gate ({args.tier}): {outcome}")
+    return 0
 
 
 def execute(
     args: argparse.Namespace,
     *,
     command_runner: Callable[[GateCommand], int] | None = None,
-    preflight: Callable[[], bool] | None = None,
 ) -> int:
     runner = command_runner or run_command
-    browser_preflight = preflight or playwright_preflight
     phases = selected_phases(args.phase)
-
     if args.ui_workers > len(UI_TEST_MODULES):
         print(
             f"FAILED: --ui-workers cannot exceed {len(UI_TEST_MODULES)} (one worker per UI module)",
             file=sys.stderr,
         )
         return 2
-
     static = static_commands()
-    toolchain = static[0]
-    if args.dry_run:
-        print(f"[{toolchain.name}] {_display_command(toolchain.argv)}")
-    elif runner(toolchain) != 0:
-        return 1
-
-    if "static" in phases:
-        for command in static[1:]:
-            if args.dry_run:
-                print(f"[{command.name}] {_display_command(command.argv)}")
-            elif runner(command) != 0:
-                return 1
-
+    for command in (*static[:1], *(static[1:] if "static" in phases else ())):
+        if args.dry_run:
+            print(f"[{command.name}] {_display_command(command.argv)}")
+        elif runner(command) != 0:
+            return 1
     dynamic_phases = {"tests", "ui"}.intersection(phases)
     environment_context = (
         _isolated_test_environment() if dynamic_phases and not args.dry_run else nullcontext(None)
     )
     report_context = (
-        # Keep this path deliberately short: several transport tests bind an
-        # AF_UNIX socket below pytest's per-worker/per-test hierarchy.
-        tempfile.TemporaryDirectory(prefix="fq-")
+        tempfile.TemporaryDirectory(prefix="fq-", dir=_scratch_parent())
         if dynamic_phases and not args.dry_run
         else nullcontext(None)
     )
     with environment_context as test_environment, report_context as report_directory:
-        expected_non_ui: tuple[str, ...] = ()
-        expected_ui: tuple[str, ...] = ()
         if dynamic_phases:
-            all_collection_path: str | Path = (
-                "<temporary>/all-tests-collection.json"
-                if args.dry_run
-                else Path(str(report_directory)) / "all-tests-collection.json"
+            root = Path(str(report_directory)) if report_directory else Path("<temporary>")
+            plans = (
+                (
+                    "tests",
+                    "non-UI",
+                    ("tests", *(f"--ignore={m}" for m in UI_TEST_MODULES)),
+                    args.workers,
+                    "load",
+                    "n",
+                ),
+                ("ui", "UI", UI_TEST_MODULES, args.ui_workers, "loadscope", "u"),
             )
-            collection_basetemp: str | Path = (
-                "<temporary>/c" if args.dry_run else Path(str(report_directory)) / "c"
-            )
-            command = collection_command(
-                manifest_path=all_collection_path,
-                basetemp_path=collection_basetemp,
-            )
-            if test_environment is not None:
-                command = _command_with_environment(command, test_environment)
-            if args.dry_run:
-                print(f"[{command.name}] {_display_command(command.argv)}")
-            elif runner(command) != 0:
-                return 1
-            else:
-                try:
-                    all_nodeids = collection_nodeids(all_collection_path)
-                    expected_non_ui, expected_ui = partition_collection(all_nodeids)
-                    require_release_blocking_battery(expected_non_ui)
-                except ValueError as exc:
-                    print(f"FAILED: {exc}", file=sys.stderr)
+            for phase, label, modules, workers, distribution, stem in plans:
+                if phase not in phases:
+                    continue
+                report_path = root / f"{stem}-results.xml"
+                collection_path = root / f"{stem}-collection.json"
+                command = _tier_pytest_command(
+                    name=f"{label} tests",
+                    environment=test_environment,
+                    report=report_path,
+                    collection=collection_path,
+                    modules=modules,
+                    workers=workers,
+                    distribution=distribution,
+                    basetemp=root / stem,
+                )
+                if args.dry_run:
+                    print(f"[{command.name}] {_display_command(command.argv)}")
+                    continue
+                if runner(command) != 0:
                     return 1
-
-        if "tests" in phases:
-            report_path: str | Path = (
-                "<temporary>/non-ui-results.xml"
-                if args.dry_run
-                else Path(str(report_directory)) / "non-ui-results.xml"
-            )
-            collection_path: str | Path = (
-                "<temporary>/non-ui-collection.json"
-                if args.dry_run
-                else Path(str(report_directory)) / "non-ui-collection.json"
-            )
-            command = non_ui_command(
-                report_path=report_path,
-                collection_path=collection_path,
-                workers=args.workers,
-                basetemp_path=("<temporary>/n" if args.dry_run else Path(str(report_directory)) / "n"),
-            )
-            if test_environment is not None:
-                command = _command_with_environment(command, test_environment)
-            if args.dry_run:
-                print(f"[{command.name}] {_display_command(command.argv)}")
-            elif runner(command) != 0:
-                return 1
-            else:
                 try:
                     selected_nodeids = collection_nodeids(collection_path)
                 except ValueError as exc:
                     print(f"FAILED: {exc}", file=sys.stderr)
                     return 1
-                if Counter(selected_nodeids) != Counter(expected_non_ui):
-                    print(
-                        "FAILED: non-UI selection differs from the canonical all-tests collection",
-                        file=sys.stderr,
-                    )
+                if not _junit_phase_is_clean(report_path, phase=label, expected_nodeids=selected_nodeids):
                     return 1
-                if not _junit_phase_is_clean(
-                    report_path,
-                    phase="non-UI",
-                    expected_nodeids=selected_nodeids,
-                ):
-                    return 1
-
-        if "ui" in phases and args.dry_run:
-            print("[Playwright preflight] launch headless Chromium")
-            command = ui_command(
-                report_path="<temporary>/ui-results.xml",
-                collection_path="<temporary>/ui-collection.json",
-                workers=args.ui_workers,
-                basetemp_path="<temporary>/u",
-            )
-            print(f"[{command.name}] {_display_command(command.argv)}")
-        elif "ui" in phases:
-            if not browser_preflight():
-                return 1
-            report_path = Path(str(report_directory)) / "ui-results.xml"
-            collection_path = Path(str(report_directory)) / "ui-collection.json"
-            command = ui_command(
-                report_path=report_path,
-                collection_path=collection_path,
-                workers=args.ui_workers,
-                basetemp_path=Path(str(report_directory)) / "u",
-            )
-            if test_environment is not None:
-                command = _command_with_environment(command, test_environment)
-            if runner(command) != 0:
-                return 1
-            try:
-                selected_nodeids = collection_nodeids(collection_path)
-            except ValueError as exc:
-                print(f"FAILED: {exc}", file=sys.stderr)
-                return 1
-            if Counter(selected_nodeids) != Counter(expected_ui):
-                print(
-                    "FAILED: UI selection differs from the canonical all-tests collection",
-                    file=sys.stderr,
-                )
-                return 1
-            if not _junit_phase_is_clean(
-                report_path,
-                phase="UI",
-                expected_nodeids=selected_nodeids,
-            ):
-                return 1
-
     outcome = "DRY RUN" if args.dry_run else "PASS"
     print(f"\nQuality gate: {outcome}")
     return 0
@@ -1309,7 +2250,9 @@ def execute(
 
 def main(argv: Sequence[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
-    return execute(args)
+    if args.inventory_collection is not None:
+        return execute_inventory_collection(args)
+    return execute_tier(args) if args.tier else execute(args)
 
 
 if __name__ == "__main__":
