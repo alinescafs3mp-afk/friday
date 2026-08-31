@@ -4,6 +4,7 @@ import base64
 import copy
 import errno
 import hashlib
+import json
 import os
 import select
 import stat
@@ -584,6 +585,10 @@ thread.join()
                 return [], probe._parse_maps(raw, pid=pid)
 
             monkeypatch.setattr(scanner, "_map_references", maps_without_privileged_links)
+            # This regression exercises per-TID FS/files closure.  Covered mounts
+            # on some CI hosts intentionally make the independent mount proof
+            # fail closed, so isolate that separately-tested surface here.
+            monkeypatch.setattr(scanner, "_mount_references", lambda _fd, _pid: ([], "6" * 64))
             observations = scanner._scan_tgid(
                 tgid,
                 expected,
@@ -632,3 +637,218 @@ def test_canonical_receipt_rejects_tampering_and_non_linux_proc_roots(tmp_path: 
     assert unsupported["diagnostic_complete"] is False
     assert unsupported["ambiguities"][0]["code"] == "proc_surface_unsupported"
     probe.canonical_probe_receipt_bytes(unsupported, expected_target_index=index)
+
+
+def test_same_euid_snapshot_uses_stable_process_identity_not_volatile_cpu_counters(
+    tmp_path: Path,
+) -> None:
+    held = tmp_path / "held.bin"
+    held.write_bytes(b"held")
+    child = subprocess.Popen(  # noqa: S603
+        [
+            sys.executable,
+            "-c",
+            (
+                "import os,sys\n"
+                "f=open(sys.argv[1],'rb')\n"
+                "print('ready',flush=True)\n"
+                "value=0\n"
+                "while True: value=(value+1)%1000003\n"
+            ),
+            str(held),
+        ],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+    try:
+        assert child.stdout is not None
+        assert child.stdout.readline() == b"ready\n"
+        proc_path = Path("/proc") / str(child.pid)
+        expected = os.stat(proc_path, follow_symlinks=False)
+        first = probe._same_euid_process_snapshot(  # noqa: SLF001
+            Path("/proc"),
+            pid=child.pid,
+            expected=expected,
+        )
+        second = probe._same_euid_process_snapshot(  # noqa: SLF001
+            Path("/proc"),
+            pid=child.pid,
+            expected=expected,
+        )
+        held_status = held.stat()
+
+        assert first[0:2] == second[0:2]
+        assert (held_status.st_dev, held_status.st_ino) in first[3]
+    finally:
+        child.terminate()
+        child.communicate(timeout=5)
+
+
+def test_complete_open_snapshot_requires_an_exact_two_pass_fixed_point(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    stable = ((101, "epoch-a", ("/exact",), ((8, 9),)),)
+    monkeypatch.setattr(probe, "_same_euid_open_pass", lambda _root: stable)
+
+    snapshot = probe.snapshot_same_euid_open_files()
+
+    assert snapshot.paths == (Path("/exact"),)
+    assert snapshot.identities == ((8, 9),)
+    assert snapshot.process_count == 1
+
+    passes = iter((stable, ((101, "epoch-a", ("/changed",), ((8, 9),)),)))
+    monkeypatch.setattr(probe, "_same_euid_open_pass", lambda _root: next(passes))
+    with pytest.raises(probe.ProcProbeInputError, match="open_inventory_proc_changed"):
+        probe.snapshot_same_euid_open_files()
+
+
+def test_privileged_target_index_round_trip_and_body_free_authority(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    object_key = probe.ObjectKey(8, 11, stat.S_IFREG)
+    index = _index(tmp_path, object_key)
+    raw = probe.canonical_target_index_bytes(index)
+    assert probe.parse_target_index_bytes(raw) == index
+
+    monkeypatch.setattr(probe.os, "geteuid", lambda: 0)
+    scope = _scope()
+    scope_sha256 = "a" * 64
+    monkeypatch.setattr(
+        probe,
+        "_host_scope_authority",
+        lambda: (
+            {
+                "required_capabilities": ["CAP_SYS_ADMIN", "CAP_SYS_PTRACE"],
+                "schema": probe.HOST_SCOPE_AUTHORITY_SCHEMA,
+                "scope": "initial_pid_namespace_and_proc_v1",
+            },
+            scope_sha256,
+        ),
+    )
+    monkeypatch.setattr(probe, "_require_initial_host_scope", lambda _observation: None)
+    monkeypatch.setattr(
+        probe,
+        "_capture_privileged_target_observation",
+        lambda _index: (_observation(scope=scope, matches=(_match(object_key),)), (), "b" * 64),
+    )
+    receipt = probe.privileged_target_reference_receipt(index)
+    canonical = probe.canonical_privileged_receipt_bytes(
+        receipt,
+        expected_target_index=index,
+        expected_implementation_sha256=probe._implementation_sha256(),  # noqa: SLF001
+        expected_host_scope_authority_sha256=scope_sha256,
+    )
+
+    assert receipt["status"] == "referenced"
+    assert receipt["referenced_target_ids"] == ["retired-release"]
+    assert b"/alias" not in canonical
+    assert b"link_target" not in canonical
+    assert b'"matches"' not in canonical
+
+
+def test_unprivileged_complete_snapshot_fails_closed_on_nondumpable_same_uid(
+    tmp_path: Path,
+) -> None:
+    if os.geteuid() == 0:
+        pytest.skip("root can inspect nondumpable processes")
+    held = tmp_path / "held.bin"
+    held.write_bytes(b"held")
+    child = subprocess.Popen(  # noqa: S603
+        [
+            sys.executable,
+            "-c",
+            (
+                "import ctypes,sys,time\n"
+                "f=open(sys.argv[1],'rb')\n"
+                "assert ctypes.CDLL(None).prctl(4,0,0,0,0)==0\n"
+                "print('ready',flush=True)\n"
+                "time.sleep(30)\n"
+            ),
+            str(held),
+        ],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+    try:
+        assert child.stdout is not None
+        assert child.stdout.readline() == b"ready\n"
+        with pytest.raises(probe.ProcProbeInputError, match="open_inventory_proc_incomplete"):
+            probe.snapshot_same_euid_open_files()
+    finally:
+        child.terminate()
+        child.communicate(timeout=5)
+
+
+def test_privileged_helper_cli_is_import_safe_and_body_free_outside_repo(tmp_path: Path) -> None:
+    index = _index(tmp_path, probe.ObjectKey(8, 11, stat.S_IFREG))
+    tool = Path(probe.__file__).resolve()
+    result = subprocess.run(  # noqa: S603
+        [sys.executable, "-I", "-B", str(tool), "privileged-target-probe"],
+        input=probe.canonical_target_index_bytes(index),
+        capture_output=True,
+        check=False,
+        cwd=tmp_path,
+        timeout=10,
+    )
+
+    assert result.returncode == 2
+    assert result.stdout == b""
+    assert json.loads(result.stderr) == {
+        "schema": probe.PRIVILEGED_RECEIPT_SCHEMA,
+        "status": "failed_closed",
+    }
+    assert b"Traceback" not in result.stderr
+    assert str(tmp_path).encode() not in result.stderr
+
+
+def test_repeated_mount_cache_hits_do_not_leak_task_root_descriptors(tmp_path: Path) -> None:
+    index = _index(tmp_path, probe.ObjectKey.from_stat(tmp_path.stat()))
+    scanner = probe._LinuxProcScanner(Path("/proc"), index)
+    with scanner:
+        pid = os.getpid()
+        pid_fd = scanner._open_pid(pid)
+        try:
+            namespace = os.stat("ns/mnt", dir_fd=pid_fd, follow_symlinks=True)
+            raw = probe._read_bounded_at(  # noqa: SLF001
+                pid_fd,
+                "mountinfo",
+                maximum=probe.MAX_PROC_FILE_BYTES,
+                pid=pid,
+                source="mountinfo",
+            )
+            root_fd = os.open(
+                "root",
+                getattr(os, "O_PATH", os.O_RDONLY) | getattr(os, "O_CLOEXEC", 0),
+                dir_fd=pid_fd,
+            )
+            try:
+                root = probe.ObjectKey.from_stat(os.fstat(root_fd))
+                root_mount = probe._descriptor_unique_mount_id(root_fd)  # noqa: SLF001
+            finally:
+                os.close(root_fd)
+            key = (
+                int(namespace.st_dev),
+                int(namespace.st_ino),
+                hashlib.sha256(raw).hexdigest(),
+                root.device,
+                root.inode,
+                root.file_type,
+                root_mount,
+            )
+            scanner._mount_cache[key] = (  # noqa: SLF001
+                (),
+                "6" * 64,
+                pid,
+                raw,
+                root,
+                root_mount,
+            )
+            owned_before = set(scanner._owned_fds)  # noqa: SLF001
+            open_before = len(os.listdir("/proc/self/fd"))
+            for _ in range(2_048):
+                assert scanner._mount_references(pid_fd, pid) == ([], "6" * 64)  # noqa: SLF001
+            assert scanner._owned_fds == owned_before  # noqa: SLF001
+            assert len(os.listdir("/proc/self/fd")) == open_before
+        finally:
+            scanner._close_owned(pid_fd)  # noqa: SLF001

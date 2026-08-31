@@ -1,0 +1,1 @@
+#@OWNER_UID@ ALL=(root) NOPASSWD: @PYTHON@ -I -B -S /usr/libexec/friday/release_artifact_proc_probe.py privileged-target-probe

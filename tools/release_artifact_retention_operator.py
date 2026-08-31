@@ -1,0 +1,3125 @@
+#!/usr/bin/env python3
+"""Apply one exactly reviewed Friday release-retention plan."""
+
+from __future__ import annotations
+
+import argparse
+import ctypes
+import errno
+import fcntl
+import hashlib
+import json
+import os
+import signal
+import stat
+import sys
+from collections.abc import Callable, Mapping, Sequence
+from contextlib import suppress
+from pathlib import Path
+from typing import Any
+
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+from tools import immutable_release_operator as release_operator  # noqa: E402
+from tools import release_artifact_retention as retention  # noqa: E402
+
+APPLY_JOURNAL_SCHEMA = "friday.release-artifact-retention-apply-journal.v3"
+APPLY_RECEIPT_SCHEMA = "friday.release-artifact-retention-apply-receipt.v2"
+APPLY_JOURNAL_NAME = "release-artifact-retention-apply.v1.json"
+APPLY_RECEIPT_DIRECTORY = "release-artifact-retention-receipts.v1"
+APPLY_PLAN_DIRECTORY = "release-artifact-retention-plans.v1"
+OBJECT_AUTHORITY_DIRECTORY = "release-artifact-retention-object-authority.v1"
+MAX_PLAN_BYTES = 64 << 20
+MAX_OBJECT_AUTHORITY_BYTES = retention.MAX_INVENTORY_ENTRIES * 32
+MAX_DELETE_ENTRIES = 1_000_000
+_HEX64 = frozenset("0123456789abcdef")
+_RENAME_NOREPLACE = 1
+
+
+class RetentionApplyError(RuntimeError):
+    def __init__(self, code: str) -> None:
+        super().__init__(code)
+        self.code = code
+
+
+class _InjectedCrash(BaseException):
+    pass
+
+
+def _fault(_point: str) -> None:
+    """Test-only crash boundary; production deliberately does nothing."""
+
+
+def _canonical(value: object) -> bytes:
+    return json.dumps(
+        value,
+        allow_nan=False,
+        ensure_ascii=True,
+        separators=(",", ":"),
+        sort_keys=True,
+    ).encode("ascii")
+
+
+def _rename_noreplace(
+    source_directory: int,
+    source: str,
+    target_directory: int,
+    target: str,
+) -> None:
+    try:
+        libc = ctypes.CDLL(None, use_errno=True)
+        renameat2 = libc.renameat2
+        renameat2.argtypes = [
+            ctypes.c_int,
+            ctypes.c_char_p,
+            ctypes.c_int,
+            ctypes.c_char_p,
+            ctypes.c_uint,
+        ]
+        renameat2.restype = ctypes.c_int
+        result = renameat2(
+            source_directory,
+            os.fsencode(source),
+            target_directory,
+            os.fsencode(target),
+            _RENAME_NOREPLACE,
+        )
+    except (AttributeError, TypeError, ValueError) as exc:
+        raise OSError(errno.ENOSYS, "renameat2") from exc
+    if result != 0:
+        error = ctypes.get_errno()
+        raise OSError(error, os.strerror(error))
+
+
+def _is_hex64(value: object) -> bool:
+    return isinstance(value, str) and len(value) == 64 and set(value) <= _HEX64
+
+
+def _body_free_code(value: object) -> str:
+    allowed = frozenset("abcdefghijklmnopqrstuvwxyz0123456789_")
+    if (
+        not isinstance(value, str)
+        or not 1 <= len(value) <= 128
+        or value[0] not in "abcdefghijklmnopqrstuvwxyz"
+        or not set(value) <= allowed
+    ):
+        return "retention_apply_unexpected_failure"
+    return value
+
+
+def _read_plan(path: Path, *, expected_sha256: str) -> dict[str, Any]:
+    if not _is_hex64(expected_sha256):
+        raise RetentionApplyError("retention_apply_plan_digest_invalid")
+    try:
+        raw = retention._stable_file_bytes(  # noqa: SLF001
+            path,
+            private=True,
+            code="retention_apply_plan_invalid",
+            maximum_bytes=MAX_PLAN_BYTES,
+        )
+        value = retention._unique_json(raw, code="retention_apply_plan_invalid")  # noqa: SLF001
+    except retention.RetentionPlanError as exc:
+        raise RetentionApplyError("retention_apply_plan_invalid") from exc
+    if raw != _canonical(value) + b"\n" or value.get("schema") != retention.PLAN_SCHEMA:
+        raise RetentionApplyError("retention_apply_plan_invalid")
+    supplied = value.get("plan_sha256")
+    core = {name: item for name, item in value.items() if name != "plan_sha256"}
+    if (
+        supplied != expected_sha256
+        or hashlib.sha256(_canonical(core)).hexdigest() != expected_sha256
+        or value.get("mode") != "eligible_classification"
+        or value.get("apply_authority") is not True
+        or value.get("classification_status") != "eligible"
+        or value.get("block_reason") != ""
+        or value.get("effect_authority")
+        != {
+            "bounded_contour": retention.BOUNDED_DELETE_CONTOUR,
+            "concurrent_open_attempts_excluded": True,
+            "filesystem_magic": retention._EXT4_SUPER_MAGIC,  # noqa: SLF001
+            "global_operator_lock": True,
+            "per_regular_file_write_lease": True,
+            "privileged_probe_role": "diagnostic_prerequisite",
+            "sealed_quarantine_mode": "0700",
+            "threat_boundary": retention.THREAT_BOUNDARY,
+            "unique_mount_identity": True,
+            "universal_absence_proof": False,
+        }
+    ):
+        raise RetentionApplyError("retention_apply_plan_digest_mismatch")
+    return value
+
+
+def _plan_inputs(plan: Mapping[str, Any]) -> dict[str, Any]:
+    try:
+        activation = plan["activation_journal"]
+        unit = plan["unit_install_journal"]
+        authority = plan["authority_bindings"]
+        evidence_raw = authority["canonical_evidence_roots"]
+        inventory_raw = plan["inventory_roots"]
+        backup_inventory_raw = plan["backup_inventory_roots"]
+        scratch_raw = plan["reviewed_scratch_targets"]
+        evidence = tuple(
+            retention.CanonicalEvidenceRoot(
+                path=Path(item["path"]),
+                authority_path=Path(item["authority_path"]),
+                authority_sha256=item["authority_sha256"],
+            )
+            for item in evidence_raw
+        )
+        reviewed_scratch = tuple(
+            retention.ReviewedScratchTarget(
+                path=Path(item["path"]),
+                inventory_sha256=item["inventory_sha256"],
+                contour=item["contour"],
+            )
+            for item in scratch_raw
+        )
+        result: dict[str, Any] = {
+            "activation_journal": Path(activation["path"]),
+            "unit_journal": Path(unit["path"]),
+            "backup_root": Path(plan["backup_root"]),
+            "inventory_roots": tuple(Path(item["path"]) for item in inventory_raw),
+            "backup_inventory_roots": tuple(Path(item["path"]) for item in backup_inventory_raw),
+            "canonical_evidence_roots": evidence,
+            "reviewed_scratch_targets": reviewed_scratch,
+        }
+    except (KeyError, TypeError, ValueError) as exc:
+        raise RetentionApplyError("retention_apply_plan_invalid") from exc
+    if not result["inventory_roots"] or not result["canonical_evidence_roots"]:
+        raise RetentionApplyError("retention_apply_plan_invalid")
+    try:
+        scope = retention.load_retention_scope_authority(
+            activation_journal=result["activation_journal"],
+        )
+    except retention.RetentionPlanError as exc:
+        raise RetentionApplyError("retention_apply_retention_scope_changed") from exc
+    supplied_evidence = tuple(
+        sorted(
+            result["canonical_evidence_roots"],
+            key=lambda item: (str(item.path), str(item.authority_path), item.authority_sha256),
+        )
+    )
+    if (
+        plan.get("retention_scope") != scope.receipt
+        or result["backup_root"] != scope.backup_root
+        or tuple(sorted(result["inventory_roots"], key=str)) != scope.inventory_roots
+        or tuple(sorted(result["backup_inventory_roots"], key=str)) != scope.backup_inventory_roots
+        or supplied_evidence != scope.canonical_evidence_roots
+    ):
+        raise RetentionApplyError("retention_apply_retention_scope_changed")
+    return result
+
+
+def _authority_projection(plan: Mapping[str, Any]) -> dict[str, Any]:
+    keys = (
+        "activation_journal",
+        "unit_install_journal",
+        "authority_bindings",
+        "activation_backup",
+        "backup_root",
+        "inventory_roots",
+        "backup_inventory_roots",
+        "reviewed_scratch_targets",
+        "protected_releases",
+        "targets",
+        "backup_targets",
+        "classification_status",
+        "block_reason",
+        "apply_authority",
+        "effect_authority",
+        "mode",
+        "scope",
+        "retention_scope",
+    )
+    try:
+        return {key: plan[key] for key in keys}
+    except KeyError as exc:
+        raise RetentionApplyError("retention_apply_plan_invalid") from exc
+
+
+def _candidate_records(plan: Mapping[str, Any]) -> tuple[dict[str, Any], ...]:
+    roots: dict[Path, tuple[int, int, int, int, str]] = {}
+    for key in ("inventory_roots", "backup_inventory_roots"):
+        raw_roots = plan.get(key)
+        if not isinstance(raw_roots, list):
+            raise RetentionApplyError("retention_apply_plan_invalid")
+        for raw in raw_roots:
+            if not isinstance(raw, Mapping):
+                raise RetentionApplyError("retention_apply_plan_invalid")
+            path = Path(str(raw.get("path") or ""))
+            device = raw.get("device")
+            inode = raw.get("inode")
+            mount_id = raw.get("mount_id")
+            filesystem_magic = raw.get("filesystem_magic")
+            writable_authority = raw.get("writable_authority_sha256")
+            if (
+                not path.is_absolute()
+                or type(device) is not int
+                or type(inode) is not int
+                or inode <= 0
+                or type(mount_id) is not int
+                or mount_id <= 0
+                or type(filesystem_magic) is not int
+                or filesystem_magic not in retention._SUPPORTED_FILESYSTEM_MAGICS  # noqa: SLF001
+                or not _is_hex64(writable_authority)
+                or path in roots
+            ):
+                raise RetentionApplyError("retention_apply_plan_invalid")
+            roots[path] = (device, inode, mount_id, filesystem_magic, str(writable_authority))
+    candidates: list[dict[str, Any]] = []
+    paths: set[Path] = set()
+    for key in ("targets", "backup_targets"):
+        raw_targets = plan.get(key)
+        if not isinstance(raw_targets, list):
+            raise RetentionApplyError("retention_apply_plan_invalid")
+        for raw in raw_targets:
+            if not isinstance(raw, Mapping) or raw.get("decision") != "delete_candidate":
+                continue
+            path = Path(str(raw.get("path") or ""))
+            root = path.parent
+            if (
+                root not in roots
+                or path in paths
+                or path.name in {"", ".", ".."}
+                or raw.get("type") != "directory"
+                or type(raw.get("device")) is not int
+                or type(raw.get("inode")) is not int
+                or type(raw.get("mount_id")) is not int
+                or int(raw["mount_id"]) <= 0
+                or type(raw.get("filesystem_magic")) is not int
+                or raw.get("filesystem_magic") not in retention._SUPPORTED_FILESYSTEM_MAGICS  # noqa: SLF001
+                or type(raw.get("mode")) is not int
+                or not stat.S_ISDIR(int(raw["mode"]))
+                or not _is_hex64(raw.get("writable_authority_sha256"))
+                or type(raw.get("recursive_bytes")) is not int
+                or type(raw.get("allocated_bytes")) is not int
+                or type(raw.get("entry_count")) is not int
+                or not _is_hex64(raw.get("inventory_sha256"))
+                or not isinstance(raw.get("identity"), Mapping)
+            ):
+                raise RetentionApplyError("retention_apply_plan_invalid")
+            paths.add(path)
+            candidate = dict(raw)
+            candidate["root_device"] = roots[root][0]
+            candidate["root_inode"] = roots[root][1]
+            candidate["root_mount_id"] = roots[root][2]
+            candidate["root_filesystem_magic"] = roots[root][3]
+            candidate["root_writable_authority_sha256"] = roots[root][4]
+            candidate["candidate_sha256"] = hashlib.sha256(_canonical(dict(raw))).hexdigest()
+            candidates.append(candidate)
+            if len(candidates) > retention.MAX_DELETE_CANDIDATES_PER_PLAN:
+                raise RetentionApplyError("retention_apply_candidate_bound_exceeded")
+    candidates.sort(key=lambda item: str(item["path"]))
+    return tuple(candidates)
+
+
+def _tree_material(path: Path) -> tuple[Any, str, str]:
+    try:
+        snapshot = retention._snapshot(path)  # noqa: SLF001
+    except (OSError, retention.RetentionPlanError) as exc:
+        raise RetentionApplyError("retention_apply_target_raced") from exc
+    objects = sorted({(record[1], record[2], record[9]) for record in snapshot.records})
+    normalized: list[list[Any]] = []
+    for record in snapshot.records:
+        values = list(record)
+        if values[0] == ".":
+            values[7:9] = [0, 0]
+        normalized.append(values)
+    return (
+        snapshot,
+        hashlib.sha256(_canonical(objects)).hexdigest(),
+        hashlib.sha256(_canonical(normalized)).hexdigest(),
+    )
+
+
+def _candidate_matches_observation(candidate: Mapping[str, Any], path: Path) -> tuple[Any, str, str]:
+    observed = retention._observe_target(path)  # noqa: SLF001
+    if (
+        observed.raced
+        or observed.device != candidate["device"]
+        or observed.inode != candidate["inode"]
+        or observed.mount_id != candidate["mount_id"]
+        or observed.filesystem_magic != candidate["filesystem_magic"]
+        or observed.mode != candidate["mode"]
+        or observed.writable_authority_sha256 != candidate["writable_authority_sha256"]
+        or observed.kind != "directory"
+        or observed.total_bytes != candidate["recursive_bytes"]
+        or observed.total_allocated_bytes != candidate["allocated_bytes"]
+        or observed.entry_count != candidate["entry_count"]
+        or observed.inventory_sha256 != candidate["inventory_sha256"]
+        or not observed.owner_ok
+        or observed.has_symlink
+        or observed.has_special
+        or observed.has_hardlink
+        or observed.has_group_world_writable
+    ):
+        raise RetentionApplyError("retention_apply_target_raced")
+    snapshot, objects_sha256, tree_sha256 = _tree_material(path)
+    return snapshot, objects_sha256, tree_sha256
+
+
+def _residual_record_digest(record: Sequence[Any]) -> bytes:
+    relative, device, inode, mode, nlink, uid, size, mtime, _ctime, mount_id, gid, flags = record
+    kind = stat.S_IFMT(int(mode))
+    permissions = stat.S_IMODE(int(mode))
+    if relative == ".":
+        permissions = 0o700
+    elif kind == stat.S_IFREG:
+        permissions = (permissions & 0o700) | 0o600
+    projection: list[Any] = [
+        relative,
+        int(device),
+        int(inode),
+        kind,
+        permissions,
+        int(uid),
+        int(gid),
+        int(mount_id),
+        int(flags),
+    ]
+    if kind == stat.S_IFREG:
+        if int(nlink) != 1:
+            raise RetentionApplyError("retention_apply_lease_unavailable")
+        projection.extend([int(nlink), int(size), int(mtime)])
+    elif kind != stat.S_IFDIR:
+        raise RetentionApplyError("retention_apply_child_unsafe")
+    return hashlib.sha256(_canonical(projection)).digest()
+
+
+def _residual_authority_payload(snapshot: Any) -> bytes:
+    digests = sorted(_residual_record_digest(record) for record in snapshot.records)
+    if not digests or len(digests) != len(set(digests)):
+        raise RetentionApplyError("retention_apply_residual_authority_invalid")
+    payload = b"".join(digests)
+    if len(payload) > MAX_OBJECT_AUTHORITY_BYTES:
+        raise RetentionApplyError("retention_apply_residual_authority_invalid")
+    return payload
+
+
+def _object_authority_directory(state_dir: Path) -> Path:
+    path = state_dir / OBJECT_AUTHORITY_DIRECTORY
+    try:
+        with suppress(FileExistsError):
+            path.mkdir(mode=0o700)
+        descriptor = os.open(
+            path,
+            os.O_RDONLY
+            | getattr(os, "O_CLOEXEC", 0)
+            | getattr(os, "O_DIRECTORY", 0)
+            | getattr(os, "O_NOFOLLOW", 0),
+        )
+        try:
+            status = os.fstat(descriptor)
+            if (
+                status.st_uid != os.geteuid()
+                or stat.S_IMODE(status.st_mode) != 0o700
+                or retention._descriptor_has_posix_acl(descriptor)  # noqa: SLF001
+            ):
+                raise RetentionApplyError("retention_apply_residual_authority_invalid")
+            os.fsync(descriptor)
+        finally:
+            os.close(descriptor)
+        parent = os.open(
+            state_dir,
+            os.O_RDONLY
+            | getattr(os, "O_CLOEXEC", 0)
+            | getattr(os, "O_DIRECTORY", 0)
+            | getattr(os, "O_NOFOLLOW", 0),
+        )
+        try:
+            os.fsync(parent)
+        finally:
+            os.close(parent)
+        retention._strict_private_directory(  # noqa: SLF001
+            path,
+            code="retention_apply_residual_authority_invalid",
+        )
+    except (OSError, retention.RetentionPlanError) as exc:
+        raise RetentionApplyError("retention_apply_residual_authority_invalid") from exc
+    return path
+
+
+def _persist_residual_authority(
+    state_dir: Path,
+    transaction_id: str,
+    index: int,
+    snapshot: Any,
+    *,
+    guard: Callable[[], None],
+) -> dict[str, Any]:
+    payload = _residual_authority_payload(snapshot)
+    digest = hashlib.sha256(payload).hexdigest()
+    directory = _object_authority_directory(state_dir)
+    path = directory / f"objects-{transaction_id}-{index:06d}.bin"
+    guard()
+    try:
+        directory_fd = os.open(
+            directory,
+            os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_DIRECTORY", 0),
+        )
+        try:
+            stages = sorted(
+                name
+                for name in os.listdir(directory_fd)
+                if name.startswith(f".{path.name}.") and name.endswith(".new")
+            )
+            if len(stages) > 32:
+                raise RetentionApplyError("retention_apply_residual_authority_invalid")
+            try:
+                final_status = os.stat(path.name, dir_fd=directory_fd, follow_symlinks=False)
+            except FileNotFoundError:
+                final_status = None
+            for name in stages:
+                staged = os.stat(name, dir_fd=directory_fd, follow_symlinks=False)
+                safe_stage = (
+                    stat.S_ISREG(staged.st_mode)
+                    and staged.st_uid == os.geteuid()
+                    and stat.S_IMODE(staged.st_mode) == 0o600
+                    and staged.st_nlink == 1
+                )
+                linked_final = (
+                    final_status is not None
+                    and staged.st_nlink == 2
+                    and (staged.st_dev, staged.st_ino) == (final_status.st_dev, final_status.st_ino)
+                )
+                if not safe_stage and not linked_final:
+                    raise RetentionApplyError("retention_apply_residual_authority_invalid")
+                guard()
+                os.unlink(name, dir_fd=directory_fd)
+                guard()
+            if stages:
+                os.fsync(directory_fd)
+        finally:
+            os.close(directory_fd)
+        if not path.exists() and not path.is_symlink():
+            guard()
+            retention._write_atomic(path, payload)  # noqa: SLF001
+            guard()
+        observed = retention._stable_file_bytes(  # noqa: SLF001
+            path,
+            private=True,
+            code="retention_apply_residual_authority_invalid",
+            maximum_bytes=MAX_OBJECT_AUTHORITY_BYTES,
+        )
+        if observed != payload:
+            raise RetentionApplyError("retention_apply_residual_authority_invalid")
+        os.chmod(path, 0o400)
+        descriptor = os.open(path, os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0))
+        try:
+            os.fsync(descriptor)
+            status = os.fstat(descriptor)
+        finally:
+            os.close(descriptor)
+        directory_fd = os.open(
+            directory, os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_DIRECTORY", 0)
+        )
+        try:
+            os.fsync(directory_fd)
+        finally:
+            os.close(directory_fd)
+    except (OSError, retention.RetentionPlanError) as exc:
+        if isinstance(exc, RetentionApplyError):
+            raise
+        raise RetentionApplyError("retention_apply_residual_authority_invalid") from exc
+    guard()
+    if (
+        not stat.S_ISREG(status.st_mode)
+        or status.st_uid != os.geteuid()
+        or status.st_nlink != 1
+        or stat.S_IMODE(status.st_mode) != 0o400
+    ):
+        raise RetentionApplyError("retention_apply_residual_authority_invalid")
+    return {
+        "count": len(payload) // 32,
+        "device": int(status.st_dev),
+        "inode": int(status.st_ino),
+        "path": str(path),
+        "sha256": digest,
+    }
+
+
+def _load_residual_authority(
+    binding: object,
+    *,
+    state_dir: Path,
+) -> frozenset[bytes]:
+    if not isinstance(binding, Mapping) or set(binding) != {"count", "device", "inode", "path", "sha256"}:
+        raise RetentionApplyError("retention_apply_residual_authority_invalid")
+    path = Path(str(binding.get("path") or ""))
+    expected_directory = state_dir / OBJECT_AUTHORITY_DIRECTORY
+    if (
+        path.parent != expected_directory
+        or not path.name.startswith("objects-")
+        or type(binding.get("count")) is not int
+        or not 1 <= int(binding["count"]) <= retention.MAX_INVENTORY_ENTRIES
+        or type(binding.get("device")) is not int
+        or type(binding.get("inode")) is not int
+        or int(binding["inode"]) <= 0
+        or not _is_hex64(binding.get("sha256"))
+    ):
+        raise RetentionApplyError("retention_apply_residual_authority_invalid")
+    try:
+        raw = retention._stable_file_bytes(  # noqa: SLF001
+            path,
+            private=True,
+            code="retention_apply_residual_authority_invalid",
+            maximum_bytes=MAX_OBJECT_AUTHORITY_BYTES,
+        )
+        status = os.lstat(path)
+    except (OSError, retention.RetentionPlanError) as exc:
+        raise RetentionApplyError("retention_apply_residual_authority_invalid") from exc
+    chunks = tuple(raw[offset : offset + 32] for offset in range(0, len(raw), 32))
+    if (
+        len(raw) != int(binding["count"]) * 32
+        or hashlib.sha256(raw).hexdigest() != binding["sha256"]
+        or chunks != tuple(sorted(set(chunks)))
+        or (status.st_dev, status.st_ino) != (binding["device"], binding["inode"])
+        or not stat.S_ISREG(status.st_mode)
+        or status.st_uid != os.geteuid()
+        or status.st_nlink != 1
+        or stat.S_IMODE(status.st_mode) != 0o400
+    ):
+        raise RetentionApplyError("retention_apply_residual_authority_invalid")
+    return frozenset(chunks)
+
+
+def _quarantine_matches(
+    candidate: Mapping[str, Any],
+    path: Path,
+    *,
+    objects_sha256: str,
+    tree_sha256: str,
+) -> Any:
+    observed = retention._observe_target(path)  # noqa: SLF001
+    snapshot, observed_objects, observed_tree = _tree_material(path)
+    if (
+        observed.raced
+        or observed.device != candidate["device"]
+        or observed.inode != candidate["inode"]
+        or observed.mount_id != candidate["mount_id"]
+        or observed.filesystem_magic != candidate["filesystem_magic"]
+        or observed.mode != candidate["mode"]
+        or observed.writable_authority_sha256 != candidate["writable_authority_sha256"]
+        or observed.kind != "directory"
+        or observed.total_bytes != candidate["recursive_bytes"]
+        or observed.total_allocated_bytes != candidate["allocated_bytes"]
+        or observed.entry_count != candidate["entry_count"]
+        or not observed.owner_ok
+        or observed.has_symlink
+        or observed.has_special
+        or observed.has_hardlink
+        or observed.has_group_world_writable
+        or observed_objects != objects_sha256
+        or observed_tree != tree_sha256
+    ):
+        raise RetentionApplyError("retention_apply_quarantine_changed")
+    return snapshot
+
+
+def _normalized_tree_sha256(snapshot: Any, *, root_mode: int | None = None) -> str:
+    normalized: list[list[Any]] = []
+    for record in snapshot.records:
+        values = list(record)
+        if values[0] == ".":
+            values[7:9] = [0, 0]
+            if root_mode is not None:
+                values[3] = root_mode
+        normalized.append(values)
+    return hashlib.sha256(_canonical(normalized)).hexdigest()
+
+
+def _sealed_quarantine_matches(
+    candidate: Mapping[str, Any],
+    path: Path,
+    *,
+    objects_sha256: str,
+    tree_sha256: str,
+    sealed_tree_sha256: str | None = None,
+) -> tuple[Any, str]:
+    observed = retention._observe_target(path)  # noqa: SLF001
+    snapshot, observed_objects, observed_tree = _tree_material(path)
+    if (
+        observed.raced
+        or observed.device != candidate["device"]
+        or observed.inode != candidate["inode"]
+        or observed.mount_id != candidate["mount_id"]
+        or observed.filesystem_magic != candidate["filesystem_magic"]
+        or observed.kind != "directory"
+        or observed.mode is None
+        or stat.S_IMODE(observed.mode) != 0o700
+        or observed.total_bytes != candidate["recursive_bytes"]
+        or observed.total_allocated_bytes != candidate["allocated_bytes"]
+        or observed.entry_count != candidate["entry_count"]
+        or not observed.owner_ok
+        or observed.has_symlink
+        or observed.has_special
+        or observed.has_hardlink
+        or observed.has_group_world_writable
+        or observed_objects != objects_sha256
+        or _normalized_tree_sha256(snapshot, root_mode=int(candidate["mode"])) != tree_sha256
+        or sealed_tree_sha256 is not None
+        and observed_tree != sealed_tree_sha256
+    ):
+        raise RetentionApplyError("retention_apply_quarantine_changed")
+    return snapshot, observed_tree
+
+
+def _seal_quarantine(
+    candidate: Mapping[str, Any],
+    quarantine_name: str,
+    *,
+    objects_sha256: str,
+    tree_sha256: str,
+    guard: Callable[[], None],
+) -> str:
+    quarantine = Path(str(candidate["path"])).parent / quarantine_name
+    try:
+        _quarantine_matches(
+            candidate,
+            quarantine,
+            objects_sha256=objects_sha256,
+            tree_sha256=tree_sha256,
+        )
+    except RetentionApplyError:
+        _snapshot, sealed_tree = _sealed_quarantine_matches(
+            candidate,
+            quarantine,
+            objects_sha256=objects_sha256,
+            tree_sha256=tree_sha256,
+        )
+        return sealed_tree
+    root_fd, _parts, _identities = _root_descriptor(candidate)
+    child_fd = -1
+    try:
+        child_fd = os.open(
+            quarantine_name,
+            os.O_RDONLY
+            | getattr(os, "O_CLOEXEC", 0)
+            | getattr(os, "O_DIRECTORY", 0)
+            | getattr(os, "O_NOFOLLOW", 0),
+            dir_fd=root_fd,
+        )
+        opened = os.fstat(child_fd)
+        if (
+            (opened.st_dev, opened.st_ino) != (candidate["device"], candidate["inode"])
+            or retention._descriptor_mount_id(child_fd) != candidate["mount_id"]  # noqa: SLF001
+        ):
+            raise RetentionApplyError("retention_apply_quarantine_changed")
+        guard()
+        os.fchmod(child_fd, 0o700)
+        os.fsync(child_fd)
+        os.fsync(root_fd)
+        guard()
+    except OSError as exc:
+        raise RetentionApplyError("retention_apply_quarantine_changed") from exc
+    finally:
+        if child_fd >= 0:
+            os.close(child_fd)
+        os.close(root_fd)
+    _snapshot, sealed_tree = _sealed_quarantine_matches(
+        candidate,
+        quarantine,
+        objects_sha256=objects_sha256,
+        tree_sha256=tree_sha256,
+    )
+    return sealed_tree
+
+
+def _partial_quarantine_contour(
+    candidate: Mapping[str, Any],
+    path: Path,
+    *,
+    residual_authority: frozenset[bytes],
+) -> tuple[Any, str]:
+    observed = retention._observe_target(path)  # noqa: SLF001
+    snapshot, _objects, tree = _tree_material(path)
+    if (
+        observed.raced
+        or observed.device != candidate["device"]
+        or observed.inode != candidate["inode"]
+        or observed.mount_id != candidate["mount_id"]
+        or observed.filesystem_magic != candidate["filesystem_magic"]
+        or observed.kind != "directory"
+        or observed.mode is None
+        or stat.S_IMODE(observed.mode) != 0o700
+        or observed.total_bytes is None
+        or observed.total_bytes > candidate["recursive_bytes"]
+        or observed.total_allocated_bytes is None
+        or observed.total_allocated_bytes > candidate["allocated_bytes"]
+        or observed.entry_count is None
+        or observed.entry_count > candidate["entry_count"]
+        or not observed.owner_ok
+        or observed.has_symlink
+        or observed.has_special
+        or observed.has_hardlink
+        or observed.has_group_world_writable
+    ):
+        raise RetentionApplyError("retention_apply_partial_state_invalid")
+    residual = tuple(_residual_record_digest(record) for record in snapshot.records)
+    if len(residual) != len(set(residual)) or not set(residual).issubset(residual_authority):
+        raise RetentionApplyError("retention_apply_partial_state_invalid")
+    return snapshot, tree
+
+
+def _live_authority_reauthenticate(plan: Mapping[str, Any], inputs: Mapping[str, Any]) -> None:
+    try:
+        scope = retention.load_retention_scope_authority(
+            activation_journal=inputs["activation_journal"],
+        )
+        bindings = retention.build_retention_authority_bindings(
+            activation_journal=inputs["activation_journal"],
+            unit_journal=inputs["unit_journal"],
+            canonical_evidence_roots=inputs["canonical_evidence_roots"],
+        )
+        authority = retention._normalize_authority_bindings(  # noqa: SLF001
+            bindings,
+            activation_sha256=bindings.activation_journal_sha256,
+            unit_sha256=bindings.unit_install_journal_sha256,
+            state_directory=Path(inputs["activation_journal"]).parent,
+        )
+    except (retention.RetentionPlanError, KeyError, TypeError) as exc:
+        raise RetentionApplyError("retention_apply_live_authority_changed") from exc
+    if (
+        scope.receipt != plan.get("retention_scope")
+        or scope.backup_root != inputs["backup_root"]
+        or scope.inventory_roots != tuple(sorted(inputs["inventory_roots"], key=str))
+        or scope.backup_inventory_roots != tuple(sorted(inputs["backup_inventory_roots"], key=str))
+        or scope.canonical_evidence_roots
+        != tuple(
+            sorted(
+                inputs["canonical_evidence_roots"],
+                key=lambda item: (str(item.path), str(item.authority_path), item.authority_sha256),
+            )
+        )
+        or bindings.activation_journal_sha256 != plan["activation_journal"]["sha256"]
+        or bindings.unit_install_journal_sha256 != plan["unit_install_journal"]["sha256"]
+        or authority.error
+        or authority.receipt != plan["authority_bindings"]
+    ):
+        raise RetentionApplyError("retention_apply_live_authority_changed")
+
+
+def _resume_candidate_reauthenticate(
+    candidates: Sequence[Mapping[str, Any]],
+    entries: Sequence[Mapping[str, Any]],
+    *,
+    state_dir: Path,
+) -> None:
+    for candidate, entry in zip(candidates, entries, strict=True):
+        status = entry["status"]
+        if status == "deleted":
+            continue
+        source = Path(str(candidate["path"]))
+        quarantine = source.parent / str(entry["quarantine_name"])
+        if status == "pending":
+            _candidate_matches_observation(candidate, source)
+        elif status == "renaming":
+            if source.exists() and not source.is_symlink():
+                _candidate_matches_observation(candidate, source)
+            elif quarantine.exists() and not quarantine.is_symlink():
+                try:
+                    _quarantine_matches(
+                        candidate,
+                        quarantine,
+                        objects_sha256=str(entry["objects_sha256"]),
+                        tree_sha256=str(entry["tree_sha256"]),
+                    )
+                except RetentionApplyError:
+                    _sealed_quarantine_matches(
+                        candidate,
+                        quarantine,
+                        objects_sha256=str(entry["objects_sha256"]),
+                        tree_sha256=str(entry["tree_sha256"]),
+                    )
+            else:
+                raise RetentionApplyError("retention_apply_target_raced") from None
+        elif status == "sealed":
+            _sealed_quarantine_matches(
+                candidate,
+                quarantine,
+                objects_sha256=str(entry["objects_sha256"]),
+                tree_sha256=str(entry["tree_sha256"]),
+                sealed_tree_sha256=str(entry["sealed_tree_sha256"]),
+            )
+        elif status == "deleting":
+            if quarantine.exists() and not quarantine.is_symlink():
+                residual_authority = _load_residual_authority(
+                    entry.get("residual_authority"),
+                    state_dir=state_dir,
+                )
+                _partial_quarantine_contour(
+                    candidate,
+                    quarantine,
+                    residual_authority=residual_authority,
+                )
+            elif source.exists() or source.is_symlink():
+                raise RetentionApplyError("retention_apply_partial_state_invalid")
+        else:
+            raise RetentionApplyError("retention_apply_journal_invalid")
+
+
+def _journal_core(value: Mapping[str, Any]) -> dict[str, Any]:
+    core = dict(value)
+    supplied = core.pop("journal_sha256", None)
+    if (
+        value.get("schema") != APPLY_JOURNAL_SCHEMA
+        or not _is_hex64(supplied)
+        or hashlib.sha256(_canonical(core)).hexdigest() != supplied
+    ):
+        raise RetentionApplyError("retention_apply_journal_invalid")
+    return core
+
+
+def _load_journal(path: Path) -> dict[str, Any] | None:
+    try:
+        raw = retention._stable_file_bytes(  # noqa: SLF001
+            path,
+            private=True,
+            code="retention_apply_journal_invalid",
+        )
+    except retention.RetentionPlanError as exc:
+        if not path.exists() and not path.is_symlink():
+            return None
+        raise RetentionApplyError("retention_apply_journal_invalid") from exc
+    try:
+        value = retention._unique_json(raw, code="retention_apply_journal_invalid")  # noqa: SLF001
+    except retention.RetentionPlanError as exc:
+        raise RetentionApplyError("retention_apply_journal_invalid") from exc
+    if raw != _canonical(value) + b"\n":
+        raise RetentionApplyError("retention_apply_journal_invalid")
+    _journal_core(value)
+    return value
+
+
+def _write_journal(
+    path: Path,
+    core: Mapping[str, Any],
+    *,
+    guard: Callable[[], None],
+) -> dict[str, Any]:
+    payload = {
+        **dict(core),
+        "journal_sha256": hashlib.sha256(_canonical(dict(core))).hexdigest(),
+    }
+    raw = _canonical(payload) + b"\n"
+    directory_fd = -1
+    temporary = f".{path.name}.{os.getpid()}.{os.urandom(8).hex()}.new"
+    try:
+        guard()
+        directory_fd, parts, identities = retention._open_absolute_directory_chain(  # noqa: SLF001
+            path.parent,
+            code="retention_apply_journal_invalid",
+        )
+        retention._require_pinned_directory(  # noqa: SLF001
+            directory_fd,
+            parts,
+            identities,
+            code="retention_apply_journal_invalid",
+            private=True,
+        )
+        flags = (
+            os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0)
+        )
+        descriptor = os.open(temporary, flags, 0o600, dir_fd=directory_fd)
+        try:
+            offset = 0
+            while offset < len(raw):
+                offset += os.write(descriptor, raw[offset:])
+            os.fsync(descriptor)
+        finally:
+            os.close(descriptor)
+        guard()
+        os.replace(temporary, path.name, src_dir_fd=directory_fd, dst_dir_fd=directory_fd)
+        temporary = ""
+        os.fsync(directory_fd)
+        guard()
+    except (OSError, retention.RetentionPlanError) as exc:
+        raise RetentionApplyError("retention_apply_journal_invalid") from exc
+    finally:
+        if directory_fd >= 0:
+            os.close(directory_fd)
+    return payload
+
+
+def _root_descriptor(candidate: Mapping[str, Any]) -> tuple[int, tuple[str, ...], tuple[Any, ...]]:
+    root = Path(str(candidate["path"])).parent
+    try:
+        descriptor, parts, identities = retention._open_absolute_directory_chain(  # noqa: SLF001
+            root,
+            code="retention_apply_root_changed",
+        )
+        held = retention._require_pinned_directory(  # noqa: SLF001
+            descriptor,
+            parts,
+            identities,
+            code="retention_apply_root_changed",
+            private=False,
+        )
+    except retention.RetentionPlanError as exc:
+        raise RetentionApplyError("retention_apply_root_changed") from exc
+    if (
+        (held.st_dev, held.st_ino) != (candidate["root_device"], candidate["root_inode"])
+        or retention._descriptor_mount_id(descriptor) != candidate["root_mount_id"]  # noqa: SLF001
+        or retention._descriptor_filesystem_magic(descriptor)  # noqa: SLF001
+        != candidate["root_filesystem_magic"]
+        or retention._writable_mode_authority(  # noqa: SLF001
+            held,
+            has_acl=retention._descriptor_has_posix_acl(descriptor),  # noqa: SLF001
+        )
+        != candidate["root_writable_authority_sha256"]
+    ):
+        os.close(descriptor)
+        raise RetentionApplyError("retention_apply_root_changed")
+    return descriptor, parts, identities
+
+
+def _named_identity(directory_fd: int, name: str) -> tuple[int, int] | None:
+    try:
+        status = os.stat(name, dir_fd=directory_fd, follow_symlinks=False)
+    except FileNotFoundError:
+        return None
+    except OSError as exc:
+        raise RetentionApplyError("retention_apply_target_raced") from exc
+    return int(status.st_dev), int(status.st_ino)
+
+
+def _restore_quarantine(
+    candidate: Mapping[str, Any],
+    quarantine_name: str,
+    *,
+    guard: Callable[[], None],
+) -> None:
+    guard()
+    descriptor, _parts, _identities = _root_descriptor(candidate)
+    quarantine_fd = -1
+    source_name = Path(str(candidate["path"])).name
+    expected = (candidate["device"], candidate["inode"])
+    try:
+        if _named_identity(descriptor, source_name) is not None:
+            raise RetentionApplyError("retention_apply_restore_blocked")
+        if _named_identity(descriptor, quarantine_name) != expected:
+            raise RetentionApplyError("retention_apply_restore_blocked")
+        quarantine_fd = os.open(
+            quarantine_name,
+            os.O_RDONLY
+            | getattr(os, "O_CLOEXEC", 0)
+            | getattr(os, "O_DIRECTORY", 0)
+            | getattr(os, "O_NOFOLLOW", 0),
+            dir_fd=descriptor,
+        )
+        if (
+            (os.fstat(quarantine_fd).st_dev, os.fstat(quarantine_fd).st_ino) != expected
+            or retention._descriptor_mount_id(quarantine_fd) != candidate["mount_id"]  # noqa: SLF001
+        ):
+            raise RetentionApplyError("retention_apply_restore_blocked")
+        os.fchmod(quarantine_fd, stat.S_IMODE(int(candidate["mode"])))
+        os.fsync(quarantine_fd)
+        guard()
+        _rename_noreplace(descriptor, quarantine_name, descriptor, source_name)
+        os.fsync(descriptor)
+        guard()
+    except OSError as exc:
+        raise RetentionApplyError("retention_apply_restore_blocked") from exc
+    finally:
+        if quarantine_fd >= 0:
+            os.close(quarantine_fd)
+        os.close(descriptor)
+
+
+def _restore_full_batch(
+    candidates: Sequence[Mapping[str, Any]],
+    core: dict[str, Any],
+    *,
+    journal_path: Path,
+    guard: Callable[[], None],
+) -> dict[str, Any]:
+    entries = core.get("entries")
+    if not isinstance(entries, list) or any(
+        not isinstance(entry, dict) or entry.get("status") in {"deleting", "deleted"} for entry in entries
+    ):
+        raise RetentionApplyError("retention_apply_batch_restore_unavailable")
+    by_candidate = {str(entry["candidate_sha256"]): entry for entry in entries}
+    for candidate in reversed(candidates):
+        entry = by_candidate[str(candidate["candidate_sha256"])]
+        if entry["status"] not in {"renaming", "sealed"}:
+            continue
+        if entry["status"] == "sealed":
+            entry["status"] = "renaming"
+            entry["sealed_tree_sha256"] = ""
+            journal = _write_journal(journal_path, core, guard=guard)
+            core = _journal_core(journal)
+            raw_entries = core.get("entries")
+            if not isinstance(raw_entries, list):
+                raise RetentionApplyError("retention_apply_journal_invalid")
+            by_candidate = {str(item["candidate_sha256"]): item for item in raw_entries}
+            entry = by_candidate[str(candidate["candidate_sha256"])]
+        source = Path(str(candidate["path"]))
+        quarantine = source.parent / str(entry["quarantine_name"])
+        if source.exists() and not source.is_symlink():
+            _candidate_matches_observation(candidate, source)
+            if quarantine.exists() or quarantine.is_symlink():
+                # A foreign no-replace collision is never part of this
+                # transaction.  Preserve it and the original failure while
+                # still restoring every earlier, exact batch member.
+                continue
+        elif quarantine.exists() and not quarantine.is_symlink():
+            _restore_quarantine(
+                candidate,
+                str(entry["quarantine_name"]),
+                guard=guard,
+            )
+        else:
+            raise RetentionApplyError("retention_apply_batch_restore_unavailable")
+        entry.update(
+            {
+                "objects_sha256": "",
+                "residual_authority": {},
+                "sealed_tree_sha256": "",
+                "status": "pending",
+                "tree_sha256": "",
+            }
+        )
+        journal = _write_journal(journal_path, core, guard=guard)
+        core = _journal_core(journal)
+        raw_entries = core.get("entries")
+        if not isinstance(raw_entries, list):
+            raise RetentionApplyError("retention_apply_journal_invalid")
+        by_candidate = {str(item["candidate_sha256"]): item for item in raw_entries}
+    return core
+
+
+def _open_reference_after_rename(snapshot: Any, target_path: Path) -> bool:
+    try:
+        inventory = retention.build_complete_open_inventory(target_paths=(target_path,))
+    except retention.RetentionPlanError as exc:
+        raise RetentionApplyError("retention_apply_open_recheck_failed") from exc
+    del snapshot
+    return target_path in inventory.open_paths
+
+
+def _preflight_filesystem_lease(
+    candidate: Mapping[str, Any],
+    *,
+    guard: Callable[[], None],
+) -> None:
+    root_fd, _parts, _identities = _root_descriptor(candidate)
+    descriptor = -1
+    try:
+        guard()
+        descriptor = os.open(
+            ".",
+            os.O_RDWR | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_TMPFILE", 0),
+            0o600,
+            dir_fd=root_fd,
+        )
+        if retention._descriptor_mount_id(descriptor) != candidate["root_mount_id"]:  # noqa: SLF001
+            raise RetentionApplyError("retention_apply_lease_unavailable")
+        fcntl.fcntl(descriptor, fcntl.F_SETLEASE, fcntl.F_WRLCK)
+        if fcntl.fcntl(descriptor, fcntl.F_GETLEASE) != fcntl.F_WRLCK:
+            raise RetentionApplyError("retention_apply_lease_unavailable")
+        fcntl.fcntl(descriptor, fcntl.F_SETLEASE, fcntl.F_UNLCK)
+        guard()
+    except RetentionApplyError:
+        raise
+    except OSError as exc:
+        raise RetentionApplyError("retention_apply_lease_unavailable") from exc
+    finally:
+        if descriptor >= 0:
+            with suppress(OSError):
+                fcntl.fcntl(descriptor, fcntl.F_SETLEASE, fcntl.F_UNLCK)
+            os.close(descriptor)
+        os.close(root_fd)
+
+
+def _unlink_regular_with_lease(
+    descriptor: int,
+    name: str,
+    before: os.stat_result,
+    *,
+    root_mount_id: int,
+    byte_counter: list[int],
+    guard: Callable[[], None],
+) -> None:
+    if not stat.S_ISREG(before.st_mode) or before.st_nlink != 1 or before.st_uid != os.geteuid():
+        raise RetentionApplyError("retention_apply_child_unsafe")
+    file_fd = -1
+    lease_set = False
+    lease_signal = signal.SIGRTMIN + 3
+    previous_mask: set[int | signal.Signals] | None = None
+    try:
+        safe_mode = (stat.S_IMODE(before.st_mode) & 0o700) | 0o600
+        os.chmod(name, safe_mode, dir_fd=descriptor, follow_symlinks=False)
+        guard()
+        file_fd = os.open(
+            name,
+            os.O_RDWR | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0),
+            dir_fd=descriptor,
+        )
+        opened = os.fstat(file_fd)
+        named = os.stat(name, dir_fd=descriptor, follow_symlinks=False)
+        if (
+            (opened.st_dev, opened.st_ino) != (before.st_dev, before.st_ino)
+            or (named.st_dev, named.st_ino) != (before.st_dev, before.st_ino)
+            or opened.st_nlink != 1
+            or named.st_nlink != 1
+            or retention._descriptor_mount_id(file_fd) != root_mount_id  # noqa: SLF001
+        ):
+            raise RetentionApplyError("retention_apply_child_raced")
+        previous_mask = signal.pthread_sigmask(signal.SIG_BLOCK, {lease_signal})
+        while signal.sigtimedwait({lease_signal}, 0) is not None:
+            pass
+        fcntl.fcntl(file_fd, fcntl.F_SETSIG, lease_signal)
+        try:
+            fcntl.fcntl(file_fd, fcntl.F_SETLEASE, fcntl.F_WRLCK)
+        except OSError as exc:
+            if exc.errno in {
+                errno.EAGAIN,
+                errno.EACCES,
+                errno.EINVAL,
+                errno.ENOSYS,
+                errno.ENOTSUP,
+                errno.EOPNOTSUPP,
+            }:
+                raise RetentionApplyError("retention_apply_lease_unavailable") from exc
+            raise
+        lease_set = True
+        after_lease = os.stat(name, dir_fd=descriptor, follow_symlinks=False)
+        if (
+            (after_lease.st_dev, after_lease.st_ino) != (before.st_dev, before.st_ino)
+            or after_lease.st_nlink != 1
+            or fcntl.fcntl(file_fd, fcntl.F_GETLEASE) != fcntl.F_WRLCK
+            or signal.sigtimedwait({lease_signal}, 0) is not None
+        ):
+            raise RetentionApplyError("retention_apply_lease_broken")
+        byte_counter[0] += int(opened.st_size)
+        guard()
+        os.unlink(name, dir_fd=descriptor)
+        guard()
+        unlinked = os.fstat(file_fd)
+        if (
+            unlinked.st_nlink != 0
+            or (unlinked.st_dev, unlinked.st_ino) != (before.st_dev, before.st_ino)
+            or fcntl.fcntl(file_fd, fcntl.F_GETLEASE) != fcntl.F_WRLCK
+        ):
+            raise RetentionApplyError("retention_apply_lease_broken")
+    except RetentionApplyError:
+        raise
+    except (OSError, ValueError) as exc:
+        raise RetentionApplyError("retention_apply_delete_failed") from exc
+    finally:
+        if lease_set and file_fd >= 0:
+            with suppress(OSError):
+                fcntl.fcntl(file_fd, fcntl.F_SETLEASE, fcntl.F_UNLCK)
+        if file_fd >= 0:
+            os.close(file_fd)
+        if previous_mask is not None:
+            signal.pthread_sigmask(signal.SIG_SETMASK, previous_mask)
+
+
+def _unlink_directory_bounded(
+    descriptor: int,
+    *,
+    root_device: int,
+    root_mount_id: int,
+    counter: list[int],
+    byte_counter: list[int],
+    guard: Callable[[], None],
+    depth: int = 0,
+    skip_names: frozenset[str] = frozenset(),
+    fault_point: str = "before_unlink_entry",
+) -> None:
+    if depth > retention.MAX_INVENTORY_DEPTH:
+        raise RetentionApplyError("retention_apply_delete_bound_exceeded")
+    flags = (
+        os.O_RDONLY
+        | getattr(os, "O_CLOEXEC", 0)
+        | getattr(os, "O_DIRECTORY", 0)
+        | getattr(os, "O_NOFOLLOW", 0)
+    )
+    try:
+        names = sorted(os.listdir(descriptor))
+    except OSError as exc:
+        raise RetentionApplyError("retention_apply_delete_failed") from exc
+    for name in names:
+        if name in skip_names:
+            continue
+        guard()
+        counter[0] += 1
+        if counter[0] > MAX_DELETE_ENTRIES or name in {"", ".", ".."}:
+            raise RetentionApplyError("retention_apply_delete_bound_exceeded")
+        _fault(fault_point)
+        try:
+            before = os.stat(name, dir_fd=descriptor, follow_symlinks=False)
+        except OSError as exc:
+            raise RetentionApplyError("retention_apply_child_raced") from exc
+        if before.st_uid != os.geteuid() or before.st_dev != root_device:
+            raise RetentionApplyError("retention_apply_child_unsafe")
+        if stat.S_ISDIR(before.st_mode):
+            child = -1
+            try:
+                child = os.open(name, flags, dir_fd=descriptor)
+                opened = os.fstat(child)
+                if (
+                    (opened.st_dev, opened.st_ino) != (before.st_dev, before.st_ino)
+                    or retention._descriptor_mount_id(child) != root_mount_id  # noqa: SLF001
+                ):
+                    raise RetentionApplyError("retention_apply_child_raced")
+                _unlink_directory_bounded(
+                    child,
+                    root_device=root_device,
+                    root_mount_id=root_mount_id,
+                    counter=counter,
+                    byte_counter=byte_counter,
+                    guard=guard,
+                    depth=depth + 1,
+                    skip_names=frozenset(),
+                    fault_point=fault_point,
+                )
+                after = os.stat(name, dir_fd=descriptor, follow_symlinks=False)
+                if (after.st_dev, after.st_ino) != (before.st_dev, before.st_ino):
+                    raise RetentionApplyError("retention_apply_child_raced")
+                guard()
+                os.rmdir(name, dir_fd=descriptor)
+                guard()
+                if os.fstat(child).st_nlink != 0:
+                    raise RetentionApplyError("retention_apply_child_raced")
+            finally:
+                if child >= 0:
+                    os.close(child)
+            continue
+        if not stat.S_ISREG(before.st_mode):
+            raise RetentionApplyError("retention_apply_child_unsafe")
+        _unlink_regular_with_lease(
+            descriptor,
+            name,
+            before,
+            root_mount_id=root_mount_id,
+            byte_counter=byte_counter,
+            guard=guard,
+        )
+    os.fsync(descriptor)
+
+
+def _delete_quarantine(
+    candidate: Mapping[str, Any],
+    quarantine_name: str,
+    *,
+    residual_authority: frozenset[bytes],
+    guard: Callable[[], None],
+) -> tuple[int, int]:
+    guard()
+    quarantine = Path(str(candidate["path"])).parent / quarantine_name
+    if quarantine.exists() and not quarantine.is_symlink():
+        _partial_quarantine_contour(
+            candidate,
+            quarantine,
+            residual_authority=residual_authority,
+        )
+    root_fd, _parts, _identities = _root_descriptor(candidate)
+    child_fd = -1
+    expected = (candidate["device"], candidate["inode"])
+    try:
+        flags = (
+            os.O_RDONLY
+            | getattr(os, "O_CLOEXEC", 0)
+            | getattr(os, "O_DIRECTORY", 0)
+            | getattr(os, "O_NOFOLLOW", 0)
+        )
+        try:
+            child_fd = os.open(quarantine_name, flags, dir_fd=root_fd)
+        except FileNotFoundError:
+            source_name = Path(str(candidate["path"])).name
+            if (
+                _named_identity(root_fd, source_name) is not None
+                or _named_identity(root_fd, quarantine_name) is not None
+            ):
+                raise RetentionApplyError("retention_apply_target_raced") from None
+            return int(candidate["recursive_bytes"]), int(candidate["entry_count"])
+        opened = os.fstat(child_fd)
+        named = os.stat(quarantine_name, dir_fd=root_fd, follow_symlinks=False)
+        if (
+            (opened.st_dev, opened.st_ino) != expected
+            or (named.st_dev, named.st_ino) != expected
+            or opened.st_uid != os.geteuid()
+            or not stat.S_ISDIR(opened.st_mode)
+            or retention._descriptor_mount_id(child_fd) != candidate["mount_id"]  # noqa: SLF001
+        ):
+            raise RetentionApplyError("retention_apply_quarantine_changed")
+        counter = [1]
+        byte_counter = [0]
+        _unlink_directory_bounded(
+            child_fd,
+            root_device=int(opened.st_dev),
+            root_mount_id=int(candidate["mount_id"]),
+            counter=counter,
+            byte_counter=byte_counter,
+            guard=guard,
+        )
+        after = os.stat(quarantine_name, dir_fd=root_fd, follow_symlinks=False)
+        if (after.st_dev, after.st_ino) != expected:
+            raise RetentionApplyError("retention_apply_quarantine_changed")
+        guard()
+        os.rmdir(quarantine_name, dir_fd=root_fd)
+        os.fsync(root_fd)
+        guard()
+        if os.fstat(child_fd).st_nlink != 0:
+            raise RetentionApplyError("retention_apply_quarantine_changed")
+        expected_bytes = int(candidate["recursive_bytes"])
+        expected_inodes = int(candidate["entry_count"])
+        if byte_counter[0] > expected_bytes or counter[0] > expected_inodes:
+            raise RetentionApplyError("retention_apply_delete_accounting_mismatch")
+        # A durable ``deleting`` phase can resume after an arbitrary prefix was
+        # already removed.  The pre-delete authenticated tree is the exact
+        # accounting authority for the eventually absent object.
+        return expected_bytes, expected_inodes
+    except OSError as exc:
+        raise RetentionApplyError("retention_apply_delete_failed") from exc
+    finally:
+        if child_fd >= 0:
+            os.close(child_fd)
+        os.close(root_fd)
+
+
+def _remove_legacy_registration(
+    candidate: Mapping[str, Any],
+    *,
+    guard: Callable[[], None],
+    transaction_id: str,
+) -> None:
+    if candidate.get("reason") != "retirable_registered_legacy_worktree":
+        return
+    identity = candidate.get("identity")
+    if not isinstance(identity, Mapping):
+        raise RetentionApplyError("retention_apply_legacy_registration_invalid")
+    try:
+        git_dir = Path(str(identity["git_dir"]))
+        common_dir = Path(str(identity["common_dir"]))
+        git_identity = (int(identity["git_device"]), int(identity["git_inode"]))
+        expected_manifest = identity["registration_manifest"]
+        expected_manifest_sha256 = str(identity["registration_manifest_sha256"])
+    except (KeyError, TypeError, ValueError) as exc:
+        raise RetentionApplyError("retention_apply_legacy_registration_invalid") from exc
+    if (
+        not git_dir.is_absolute()
+        or not common_dir.is_absolute()
+        or git_dir.parent.name != "worktrees"
+        or git_dir.parent.parent != common_dir
+        or not isinstance(expected_manifest, list)
+        or not _is_hex64(expected_manifest_sha256)
+        or hashlib.sha256(_canonical(expected_manifest)).hexdigest() != expected_manifest_sha256
+        or not _is_hex64(transaction_id)
+    ):
+        raise RetentionApplyError("retention_apply_legacy_registration_invalid")
+    source = Path(str(candidate["path"]))
+    guard()
+    root_fd, _parts, _identities = _root_descriptor(candidate)
+    try:
+        quarantine_names = (
+            name for name in os.listdir(root_fd) if name.startswith(".friday-retention-q-v1-")
+        )
+        if _named_identity(root_fd, source.name) is not None or any(quarantine_names):
+            raise RetentionApplyError("retention_apply_legacy_registration_live")
+    finally:
+        os.close(root_fd)
+    worktrees_fd = -1
+    git_fd = -1
+    lock_fd = -1
+    lock_name = ".friday-retention-registration.v1.lock"
+    try:
+        worktrees_fd, parts, identities = retention._open_absolute_directory_chain(  # noqa: SLF001
+            git_dir.parent,
+            code="retention_apply_legacy_registration_invalid",
+        )
+        retention._require_pinned_directory(  # noqa: SLF001
+            worktrees_fd,
+            parts,
+            identities,
+            code="retention_apply_legacy_registration_invalid",
+            private=False,
+        )
+        guard()
+        lock_fd = os.open(
+            lock_name,
+            os.O_RDWR | os.O_CREAT | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0),
+            0o600,
+            dir_fd=worktrees_fd,
+        )
+        lock_status = os.fstat(lock_fd)
+        lock_named = os.stat(lock_name, dir_fd=worktrees_fd, follow_symlinks=False)
+        if (
+            not stat.S_ISREG(lock_status.st_mode)
+            or lock_status.st_uid != os.geteuid()
+            or lock_status.st_nlink != 1
+            or stat.S_IMODE(lock_status.st_mode) != 0o600
+            or (lock_status.st_dev, lock_status.st_ino) != (lock_named.st_dev, lock_named.st_ino)
+        ):
+            raise RetentionApplyError("retention_apply_legacy_registration_invalid")
+        try:
+            fcntl.flock(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError as exc:
+            raise RetentionApplyError("retention_apply_legacy_registration_locked") from exc
+        guard()
+        try:
+            named = os.stat(git_dir.name, dir_fd=worktrees_fd, follow_symlinks=False)
+        except FileNotFoundError:
+            return
+        if (
+            (named.st_dev, named.st_ino) != git_identity
+            or named.st_uid != os.geteuid()
+            or not stat.S_ISDIR(named.st_mode)
+        ):
+            raise RetentionApplyError("retention_apply_legacy_registration_changed")
+        git_fd = os.open(
+            git_dir.name,
+            os.O_RDONLY
+            | getattr(os, "O_CLOEXEC", 0)
+            | getattr(os, "O_DIRECTORY", 0)
+            | getattr(os, "O_NOFOLLOW", 0),
+            dir_fd=worktrees_fd,
+        )
+        opened = os.fstat(git_fd)
+        if (opened.st_dev, opened.st_ino) != git_identity:
+            raise RetentionApplyError("retention_apply_legacy_registration_changed")
+        if not os.listdir(git_fd):
+            guard()
+            os.rmdir(git_dir.name, dir_fd=worktrees_fd)
+            os.fsync(worktrees_fd)
+            guard()
+            return
+        expected_by_path = {
+            str(item.get("path")): item for item in expected_manifest if isinstance(item, Mapping)
+        }
+        if len(expected_by_path) != len(expected_manifest) or "." not in expected_by_path:
+            raise RetentionApplyError("retention_apply_legacy_registration_invalid")
+
+        def require_subset(*, complete: bool) -> None:
+            try:
+                observed = retention._git_admin_manifest(  # noqa: SLF001
+                    git_dir,
+                    omit_locked=True,
+                )
+            except retention.RetentionPlanError as exc:
+                raise RetentionApplyError("retention_apply_legacy_registration_changed") from exc
+            if any(expected_by_path.get(str(item.get("path"))) != item for item in observed):
+                raise RetentionApplyError("retention_apply_legacy_registration_changed")
+            if complete and observed != expected_manifest:
+                raise RetentionApplyError("retention_apply_legacy_registration_changed")
+
+        locked_raw = f"friday-retention-v1:{transaction_id}:{candidate['candidate_sha256']}\n".encode("ascii")
+        locked_identity = _named_identity(git_fd, "locked")
+        if locked_identity is None:
+            require_subset(complete=True)
+            guard()
+            locked_fd = os.open(
+                "locked",
+                os.O_WRONLY
+                | os.O_CREAT
+                | os.O_EXCL
+                | getattr(os, "O_CLOEXEC", 0)
+                | getattr(os, "O_NOFOLLOW", 0),
+                0o600,
+                dir_fd=git_fd,
+            )
+            try:
+                offset = 0
+                while offset < len(locked_raw):
+                    offset += os.write(locked_fd, locked_raw[offset:])
+                os.fsync(locked_fd)
+            finally:
+                os.close(locked_fd)
+            os.fsync(git_fd)
+            guard()
+            require_subset(complete=True)
+        else:
+            try:
+                observed_locked = retention._stable_file_bytes(  # noqa: SLF001
+                    git_dir / "locked",
+                    private=False,
+                    code="retention_apply_legacy_registration_locked",
+                    maximum_bytes=4096,
+                )
+            except retention.RetentionPlanError as exc:
+                raise RetentionApplyError("retention_apply_legacy_registration_locked") from exc
+            if observed_locked != locked_raw:
+                raise RetentionApplyError("retention_apply_legacy_registration_locked")
+            require_subset(complete=False)
+        counter = [1]
+        byte_counter = [0]
+        _unlink_directory_bounded(
+            git_fd,
+            root_device=int(opened.st_dev),
+            root_mount_id=retention._descriptor_mount_id(git_fd),  # noqa: SLF001
+            counter=counter,
+            byte_counter=byte_counter,
+            guard=guard,
+            skip_names=frozenset({"locked"}),
+            fault_point="before_registration_unlink",
+        )
+        if os.listdir(git_fd) != ["locked"]:
+            raise RetentionApplyError("retention_apply_legacy_registration_changed")
+        locked_status = os.stat("locked", dir_fd=git_fd, follow_symlinks=False)
+        _unlink_regular_with_lease(
+            git_fd,
+            "locked",
+            locked_status,
+            root_mount_id=retention._descriptor_mount_id(git_fd),  # noqa: SLF001
+            byte_counter=[0],
+            guard=guard,
+        )
+        os.fsync(git_fd)
+        guard()
+        _fault("after_registration_locked_unlink")
+        after = os.stat(git_dir.name, dir_fd=worktrees_fd, follow_symlinks=False)
+        if (after.st_dev, after.st_ino) != git_identity:
+            raise RetentionApplyError("retention_apply_legacy_registration_changed")
+        guard()
+        os.rmdir(git_dir.name, dir_fd=worktrees_fd)
+        os.fsync(worktrees_fd)
+        guard()
+    except RetentionApplyError:
+        raise
+    except (OSError, retention.RetentionPlanError) as exc:
+        raise RetentionApplyError("retention_apply_legacy_registration_invalid") from exc
+    finally:
+        if git_fd >= 0:
+            os.close(git_fd)
+        if lock_fd >= 0:
+            with suppress(OSError):
+                fcntl.flock(lock_fd, fcntl.LOCK_UN)
+            os.close(lock_fd)
+        if worktrees_fd >= 0:
+            os.close(worktrees_fd)
+
+
+def _post_apply_reauthenticate(reviewed: Mapping[str, Any], inputs: Mapping[str, Any]) -> dict[str, Any]:
+    live_inputs = dict(inputs)
+    deleted_reviewed_scratch = {
+        Path(str(item["path"]))
+        for item in reviewed.get("targets", [])
+        if isinstance(item, Mapping)
+        and item.get("decision") == "delete_candidate"
+        and item.get("reason") == "retirable_reviewed_scratch"
+    }
+    scratch_inputs = inputs.get("reviewed_scratch_targets", ())
+    if not isinstance(scratch_inputs, tuple):
+        raise RetentionApplyError("retention_apply_post_authentication_failed")
+    for path in deleted_reviewed_scratch:
+        try:
+            os.lstat(path)
+        except FileNotFoundError:
+            continue
+        except OSError as exc:
+            raise RetentionApplyError("retention_apply_post_authentication_failed") from exc
+        raise RetentionApplyError("retention_apply_post_authentication_failed")
+    live_inputs["reviewed_scratch_targets"] = tuple(
+        item for item in scratch_inputs if item.path not in deleted_reviewed_scratch
+    )
+    try:
+        current = retention.build_eligible_retention_plan(**live_inputs)
+    except (retention.RetentionPlanError, release_operator.ReleaseFailure) as exc:
+        raise RetentionApplyError("retention_apply_post_authentication_failed") from exc
+    for key in (
+        "activation_journal",
+        "unit_install_journal",
+        "authority_bindings",
+        "protected_releases",
+        "retention_scope",
+    ):
+        if current.get(key) != reviewed.get(key):
+            raise RetentionApplyError("retention_apply_post_authentication_failed")
+    roles = {
+        item.get("role")
+        for item in current.get("authority_bindings", {}).get("dr_pins", [])
+        if isinstance(item, Mapping)
+    }
+    protected_roles = {
+        role
+        for item in current.get("protected_releases", [])
+        if isinstance(item, Mapping)
+        for role in item.get("roles", [])
+    }
+    if not {"current", "older"}.issubset(roles) or not {
+        "current",
+        "previous",
+        "fallback",
+        "dr_restore_release",
+    }.issubset(protected_roles):
+        raise RetentionApplyError("retention_apply_post_authentication_failed")
+    return current
+
+
+def _terminal_absence(
+    candidates: Sequence[Mapping[str, Any]],
+    entries: Sequence[Mapping[str, Any]],
+    *,
+    guard: Callable[[], None],
+) -> None:
+    for candidate, entry in zip(candidates, entries, strict=True):
+        guard()
+        descriptor, _parts, _identities = _root_descriptor(candidate)
+        try:
+            if (
+                _named_identity(descriptor, Path(str(candidate["path"])).name) is not None
+                or _named_identity(descriptor, str(entry["quarantine_name"])) is not None
+            ):
+                raise RetentionApplyError("retention_apply_terminal_absence_failed")
+        finally:
+            os.close(descriptor)
+        guard()
+
+
+def _receipt_with_digest(core: Mapping[str, Any]) -> dict[str, Any]:
+    return {
+        **dict(core),
+        "receipt_sha256": hashlib.sha256(_canonical(dict(core))).hexdigest(),
+    }
+
+
+def _publish_receipt(
+    state_dir: Path,
+    receipt: Mapping[str, Any],
+    *,
+    guard: Callable[[], None],
+) -> dict[str, Any]:
+    supplied = receipt.get("receipt_sha256")
+    core = {key: value for key, value in receipt.items() if key != "receipt_sha256"}
+    if (
+        receipt.get("schema") != APPLY_RECEIPT_SCHEMA
+        or not _is_hex64(supplied)
+        or hashlib.sha256(_canonical(core)).hexdigest() != supplied
+        or not _is_hex64(receipt.get("transaction_id"))
+    ):
+        raise RetentionApplyError("retention_apply_receipt_invalid")
+    state_fd = -1
+    receipt_fd = -1
+    name = f"receipt-{receipt['transaction_id']}.json"
+    temporary = f".{name}.new"
+    raw = _canonical(dict(receipt)) + b"\n"
+    try:
+        guard()
+        state_fd, parts, identities = retention._open_absolute_directory_chain(  # noqa: SLF001
+            state_dir,
+            code="retention_apply_receipt_invalid",
+        )
+        retention._require_pinned_directory(  # noqa: SLF001
+            state_fd,
+            parts,
+            identities,
+            code="retention_apply_receipt_invalid",
+            private=True,
+        )
+        try:
+            guard()
+            os.mkdir(APPLY_RECEIPT_DIRECTORY, 0o700, dir_fd=state_fd)
+        except FileExistsError:
+            pass
+        os.fsync(state_fd)
+        guard()
+        receipt_fd = os.open(
+            APPLY_RECEIPT_DIRECTORY,
+            os.O_RDONLY
+            | getattr(os, "O_CLOEXEC", 0)
+            | getattr(os, "O_DIRECTORY", 0)
+            | getattr(os, "O_NOFOLLOW", 0),
+            dir_fd=state_fd,
+        )
+        opened_directory = os.fstat(receipt_fd)
+        named_directory = os.stat(
+            APPLY_RECEIPT_DIRECTORY,
+            dir_fd=state_fd,
+            follow_symlinks=False,
+        )
+        if (
+            not stat.S_ISDIR(opened_directory.st_mode)
+            or opened_directory.st_uid != os.geteuid()
+            or stat.S_IMODE(opened_directory.st_mode) != 0o700
+            or (opened_directory.st_dev, opened_directory.st_ino)
+            != (named_directory.st_dev, named_directory.st_ino)
+        ):
+            raise RetentionApplyError("retention_apply_receipt_invalid")
+
+        def read_named(value: str) -> tuple[os.stat_result, bytes] | None:
+            try:
+                descriptor = os.open(
+                    value,
+                    os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0),
+                    dir_fd=receipt_fd,
+                )
+            except FileNotFoundError:
+                return None
+            try:
+                status = os.fstat(descriptor)
+                if (
+                    not stat.S_ISREG(status.st_mode)
+                    or status.st_uid != os.geteuid()
+                    or status.st_nlink not in {1, 2}
+                    or stat.S_IMODE(status.st_mode) != 0o400
+                    or status.st_size != len(raw)
+                ):
+                    raise RetentionApplyError("retention_apply_receipt_changed")
+                observed = b""
+                while len(observed) <= len(raw):
+                    chunk = os.read(descriptor, len(raw) + 1 - len(observed))
+                    if not chunk:
+                        break
+                    observed += chunk
+                named = os.stat(value, dir_fd=receipt_fd, follow_symlinks=False)
+                if observed != raw or (status.st_dev, status.st_ino) != (
+                    named.st_dev,
+                    named.st_ino,
+                ):
+                    raise RetentionApplyError("retention_apply_receipt_changed")
+                return status, observed
+            finally:
+                os.close(descriptor)
+
+        def read_stage() -> tuple[os.stat_result, bytes] | None:
+            try:
+                descriptor = os.open(
+                    temporary,
+                    os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0),
+                    dir_fd=receipt_fd,
+                )
+            except FileNotFoundError:
+                return None
+            try:
+                status = os.fstat(descriptor)
+                observed = b""
+                while len(observed) <= len(raw):
+                    chunk = os.read(descriptor, len(raw) + 1 - len(observed))
+                    if not chunk:
+                        break
+                    observed += chunk
+                named = os.stat(temporary, dir_fd=receipt_fd, follow_symlinks=False)
+                if (
+                    not stat.S_ISREG(status.st_mode)
+                    or status.st_uid != os.geteuid()
+                    or status.st_nlink not in {1, 2}
+                    or (status.st_dev, status.st_ino) != (named.st_dev, named.st_ino)
+                    or (
+                        not (
+                            stat.S_IMODE(status.st_mode) == 0o400
+                            and status.st_size == len(raw)
+                            and observed == raw
+                        )
+                        and not (
+                            status.st_nlink == 1
+                            and stat.S_IMODE(status.st_mode) == 0o600
+                            and status.st_size <= len(raw)
+                        )
+                    )
+                ):
+                    raise RetentionApplyError("retention_apply_receipt_changed")
+                return status, observed
+            finally:
+                os.close(descriptor)
+
+        existing = read_named(name)
+        staged = read_stage()
+        if existing is not None:
+            existing_status, _existing_raw = existing
+            if existing_status.st_nlink == 2:
+                if (
+                    staged is None
+                    or staged[1] != raw
+                    or stat.S_IMODE(staged[0].st_mode) != 0o400
+                    or (staged[0].st_dev, staged[0].st_ino)
+                    != (existing_status.st_dev, existing_status.st_ino)
+                ):
+                    raise RetentionApplyError("retention_apply_receipt_changed")
+                guard()
+                os.unlink(temporary, dir_fd=receipt_fd)
+                os.fsync(receipt_fd)
+                guard()
+                existing = read_named(name)
+            if existing is None or existing[0].st_nlink != 1:
+                raise RetentionApplyError("retention_apply_receipt_changed")
+            guard()
+            return dict(receipt)
+        if staged is not None and (staged[1] != raw or stat.S_IMODE(staged[0].st_mode) != 0o400):
+            guard()
+            os.unlink(temporary, dir_fd=receipt_fd)
+            os.fsync(receipt_fd)
+            guard()
+            staged = None
+        if staged is None:
+            flags = (
+                os.O_WRONLY
+                | os.O_CREAT
+                | os.O_EXCL
+                | getattr(os, "O_CLOEXEC", 0)
+                | getattr(os, "O_NOFOLLOW", 0)
+            )
+            guard()
+            descriptor = os.open(temporary, flags, 0o600, dir_fd=receipt_fd)
+            try:
+                offset = 0
+                while offset < len(raw):
+                    offset += os.write(descriptor, raw[offset:])
+                os.fsync(descriptor)
+                os.fchmod(descriptor, 0o400)
+                os.fsync(descriptor)
+            finally:
+                os.close(descriptor)
+            guard()
+        elif staged[0].st_nlink != 1:
+            raise RetentionApplyError("retention_apply_receipt_changed")
+        guard()
+        try:
+            os.link(
+                temporary,
+                name,
+                src_dir_fd=receipt_fd,
+                dst_dir_fd=receipt_fd,
+                follow_symlinks=False,
+            )
+        except FileExistsError as exc:
+            raise RetentionApplyError("retention_apply_receipt_changed") from exc
+        guard()
+        os.unlink(temporary, dir_fd=receipt_fd)
+        temporary = ""
+        os.fsync(receipt_fd)
+        guard()
+        final = os.stat(name, dir_fd=receipt_fd, follow_symlinks=False)
+        if (
+            not stat.S_ISREG(final.st_mode)
+            or final.st_uid != os.geteuid()
+            or final.st_nlink != 1
+            or stat.S_IMODE(final.st_mode) != 0o400
+            or final.st_size != len(raw)
+        ):
+            raise RetentionApplyError("retention_apply_receipt_changed")
+        return dict(receipt)
+    except RetentionApplyError:
+        raise
+    except (OSError, retention.RetentionPlanError) as exc:
+        raise RetentionApplyError("retention_apply_receipt_invalid") from exc
+    finally:
+        if receipt_fd >= 0:
+            os.close(receipt_fd)
+        if state_fd >= 0:
+            os.close(state_fd)
+
+
+def _persist_reviewed_plan(
+    state_dir: Path,
+    plan: Mapping[str, Any],
+    *,
+    guard: Callable[[], None],
+    allow_incomplete_stage_repair: bool,
+) -> tuple[Path, int, int]:
+    plan_sha256 = str(plan["plan_sha256"])
+    name = f"plan-{plan_sha256}.json"
+    raw = _canonical(dict(plan)) + b"\n"
+    state_fd = plan_fd = descriptor = -1
+    temporary = f".{name}.new"
+    cleanup_temporary = False
+    try:
+        guard()
+        state_fd, parts, identities = retention._open_absolute_directory_chain(  # noqa: SLF001
+            state_dir,
+            code="retention_apply_plan_invalid",
+        )
+        retention._require_pinned_directory(  # noqa: SLF001
+            state_fd,
+            parts,
+            identities,
+            code="retention_apply_plan_invalid",
+            private=True,
+        )
+        with suppress(FileExistsError):
+            os.mkdir(APPLY_PLAN_DIRECTORY, 0o700, dir_fd=state_fd)
+        os.fsync(state_fd)
+        guard()
+        plan_fd = os.open(
+            APPLY_PLAN_DIRECTORY,
+            os.O_RDONLY
+            | getattr(os, "O_CLOEXEC", 0)
+            | getattr(os, "O_DIRECTORY", 0)
+            | getattr(os, "O_NOFOLLOW", 0),
+            dir_fd=state_fd,
+        )
+        directory = os.fstat(plan_fd)
+        named_directory = os.stat(APPLY_PLAN_DIRECTORY, dir_fd=state_fd, follow_symlinks=False)
+        if (
+            not stat.S_ISDIR(directory.st_mode)
+            or directory.st_uid != os.geteuid()
+            or stat.S_IMODE(directory.st_mode) != 0o700
+            or (directory.st_dev, directory.st_ino) != (named_directory.st_dev, named_directory.st_ino)
+        ):
+            raise RetentionApplyError("retention_apply_plan_invalid")
+        try:
+            descriptor = os.open(
+                name,
+                os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0),
+                dir_fd=plan_fd,
+            )
+        except FileNotFoundError:
+            try:
+                descriptor = os.open(
+                    temporary,
+                    os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0),
+                    dir_fd=plan_fd,
+                )
+            except FileNotFoundError:
+                descriptor = os.open(
+                    temporary,
+                    os.O_WRONLY
+                    | os.O_CREAT
+                    | os.O_EXCL
+                    | getattr(os, "O_CLOEXEC", 0)
+                    | getattr(os, "O_NOFOLLOW", 0),
+                    0o600,
+                    dir_fd=plan_fd,
+                )
+                cleanup_temporary = True
+                offset = 0
+                while offset < len(raw):
+                    offset += os.write(descriptor, raw[offset:])
+                os.fsync(descriptor)
+                os.fchmod(descriptor, 0o400)
+                os.fsync(descriptor)
+                os.close(descriptor)
+                descriptor = os.open(
+                    temporary,
+                    os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0),
+                    dir_fd=plan_fd,
+                )
+            staged_status = os.fstat(descriptor)
+            staged_raw = b""
+            while len(staged_raw) <= len(raw):
+                chunk = os.read(descriptor, len(raw) + 1 - len(staged_raw))
+                if not chunk:
+                    break
+                staged_raw += chunk
+            staged_exact = (
+                staged_raw == raw
+                and stat.S_ISREG(staged_status.st_mode)
+                and staged_status.st_uid == os.geteuid()
+                and staged_status.st_nlink == 1
+                and stat.S_IMODE(staged_status.st_mode) == 0o400
+            )
+            recoverable_incomplete = (
+                allow_incomplete_stage_repair
+                and stat.S_ISREG(staged_status.st_mode)
+                and staged_status.st_uid == os.geteuid()
+                and staged_status.st_nlink == 1
+                and stat.S_IMODE(staged_status.st_mode) == 0o600
+                and staged_status.st_size <= len(raw)
+            )
+            if not staged_exact and not recoverable_incomplete:
+                raise RetentionApplyError("retention_apply_plan_changed") from None
+            os.close(descriptor)
+            descriptor = -1
+            if recoverable_incomplete:
+                guard()
+                os.unlink(temporary, dir_fd=plan_fd)
+                os.fsync(plan_fd)
+                descriptor = os.open(
+                    temporary,
+                    os.O_WRONLY
+                    | os.O_CREAT
+                    | os.O_EXCL
+                    | getattr(os, "O_CLOEXEC", 0)
+                    | getattr(os, "O_NOFOLLOW", 0),
+                    0o600,
+                    dir_fd=plan_fd,
+                )
+                cleanup_temporary = True
+                offset = 0
+                while offset < len(raw):
+                    offset += os.write(descriptor, raw[offset:])
+                os.fsync(descriptor)
+                os.fchmod(descriptor, 0o400)
+                os.fsync(descriptor)
+                os.close(descriptor)
+                descriptor = -1
+            guard()
+            with suppress(FileExistsError):
+                os.link(
+                    temporary,
+                    name,
+                    src_dir_fd=plan_fd,
+                    dst_dir_fd=plan_fd,
+                    follow_symlinks=False,
+                )
+            os.unlink(temporary, dir_fd=plan_fd)
+            temporary = ""
+            cleanup_temporary = False
+            os.fsync(plan_fd)
+            descriptor = os.open(
+                name,
+                os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0),
+                dir_fd=plan_fd,
+            )
+        status = os.fstat(descriptor)
+        observed = b""
+        while len(observed) <= len(raw):
+            chunk = os.read(descriptor, len(raw) + 1 - len(observed))
+            if not chunk:
+                break
+            observed += chunk
+        named = os.stat(name, dir_fd=plan_fd, follow_symlinks=False)
+        if status.st_nlink == 2:
+            staged = os.stat(temporary, dir_fd=plan_fd, follow_symlinks=False)
+            if (staged.st_dev, staged.st_ino) != (status.st_dev, status.st_ino):
+                raise RetentionApplyError("retention_apply_plan_changed")
+            guard()
+            os.unlink(temporary, dir_fd=plan_fd)
+            temporary = ""
+            cleanup_temporary = False
+            os.fsync(plan_fd)
+            guard()
+            status = os.fstat(descriptor)
+        if (
+            observed != raw
+            or not stat.S_ISREG(status.st_mode)
+            or status.st_uid != os.geteuid()
+            or status.st_nlink != 1
+            or stat.S_IMODE(status.st_mode) != 0o400
+            or (status.st_dev, status.st_ino) != (named.st_dev, named.st_ino)
+        ):
+            raise RetentionApplyError("retention_apply_plan_changed")
+        guard()
+        return state_dir / APPLY_PLAN_DIRECTORY / name, int(status.st_dev), int(status.st_ino)
+    except RetentionApplyError:
+        raise
+    except (OSError, retention.RetentionPlanError) as exc:
+        raise RetentionApplyError("retention_apply_plan_invalid") from exc
+    finally:
+        if descriptor >= 0:
+            os.close(descriptor)
+        if cleanup_temporary and temporary and plan_fd >= 0:
+            with suppress(OSError):
+                os.unlink(temporary, dir_fd=plan_fd)
+        if plan_fd >= 0:
+            os.close(plan_fd)
+        if state_fd >= 0:
+            os.close(state_fd)
+
+
+def _filesystem_free_evidence(
+    candidates: Sequence[Mapping[str, Any]],
+    *,
+    guard: Callable[[], None],
+) -> list[dict[str, Any]]:
+    evidence: dict[tuple[int, int, int, int], dict[str, Any]] = {}
+    for candidate in candidates:
+        guard()
+        descriptor, _parts, _identities = _root_descriptor(candidate)
+        try:
+            before = os.fstat(descriptor)
+            values = os.fstatvfs(descriptor)
+            filesystem_magic, fsid_first, fsid_second = retention._descriptor_filesystem_identity(descriptor)  # noqa: SLF001
+            after = os.fstat(descriptor)
+            if (
+                (before.st_dev, before.st_ino) != (after.st_dev, after.st_ino)
+                or retention._descriptor_mount_id(descriptor) != candidate["root_mount_id"]  # noqa: SLF001
+            ):
+                raise RetentionApplyError("retention_apply_filesystem_evidence_failed")
+        finally:
+            os.close(descriptor)
+        key = (int(before.st_dev), filesystem_magic, fsid_first, fsid_second)
+        fragment_size = int(values.f_frsize or values.f_bsize)
+        if fragment_size <= 0:
+            raise RetentionApplyError("retention_apply_filesystem_evidence_failed")
+        member = [int(candidate["root_inode"]), int(candidate["root_mount_id"])]
+        existing = evidence.get(key)
+        if existing is None:
+            evidence[key] = {
+                "available_blocks": int(values.f_bavail),
+                "available_bytes": int(values.f_bavail) * fragment_size,
+                "block_count": int(values.f_blocks),
+                "device": key[0],
+                "filesystem_magic": filesystem_magic,
+                "fragment_size": fragment_size,
+                "fsid": [fsid_first, fsid_second],
+                "members": [member],
+            }
+        else:
+            if any(
+                existing[name] != value
+                for name, value in {
+                    "block_count": int(values.f_blocks),
+                    "fragment_size": fragment_size,
+                }.items()
+            ):
+                raise RetentionApplyError("retention_apply_filesystem_evidence_failed")
+            existing["members"].append(member)
+        guard()
+    for item in evidence.values():
+        item["members"] = [list(member) for member in sorted({tuple(value) for value in item["members"]})]
+    return [evidence[key] for key in sorted(evidence)]
+
+
+def _validate_filesystem_evidence(value: object) -> list[dict[str, Any]]:
+    keys = {
+        "available_blocks",
+        "available_bytes",
+        "block_count",
+        "fragment_size",
+        "device",
+        "filesystem_magic",
+        "fsid",
+        "members",
+    }
+    if not isinstance(value, list):
+        raise RetentionApplyError("retention_apply_journal_invalid")
+    normalized: list[dict[str, Any]] = []
+    for raw in value:
+        if (
+            not isinstance(raw, Mapping)
+            or set(raw) != keys
+            or any(type(raw[key]) is not int for key in keys - {"fsid", "members"})
+            or not isinstance(raw["fsid"], list)
+            or len(raw["fsid"]) != 2
+            or any(type(item) is not int or item < 0 for item in raw["fsid"])
+            or not isinstance(raw["members"], list)
+            or not raw["members"]
+            or any(
+                not isinstance(item, list)
+                or len(item) != 2
+                or any(type(number) is not int or number <= 0 for number in item)
+                for item in raw["members"]
+            )
+            or raw["members"] != [list(item) for item in sorted({tuple(item) for item in raw["members"]})]
+            or raw["fragment_size"] <= 0
+            or raw["available_blocks"] < 0
+            or raw["available_bytes"] != raw["available_blocks"] * raw["fragment_size"]
+            or raw["block_count"] < raw["available_blocks"]
+        ):
+            raise RetentionApplyError("retention_apply_journal_invalid")
+        normalized.append(
+            {
+                **{key: int(raw[key]) for key in sorted(keys - {"fsid", "members"})},
+                "fsid": list(raw["fsid"]),
+                "members": [list(item) for item in raw["members"]],
+            }
+        )
+    identities = [(item["device"], item["filesystem_magic"], *item["fsid"]) for item in normalized]
+    if identities != sorted(set(identities)):
+        raise RetentionApplyError("retention_apply_journal_invalid")
+    return normalized
+
+
+def _new_journal(
+    plan: Mapping[str, Any],
+    candidates: Sequence[Mapping[str, Any]],
+    *,
+    durable_plan: tuple[Path, int, int],
+    filesystem_before: Sequence[Mapping[str, Any]],
+) -> dict[str, Any]:
+    plan_sha256 = str(plan["plan_sha256"])
+    transaction = hashlib.sha256(
+        _canonical({"plan_sha256": plan_sha256, "schema": APPLY_JOURNAL_SCHEMA})
+    ).hexdigest()
+    scope = plan.get("retention_scope")
+    if (
+        not isinstance(scope, Mapping)
+        or scope.get("schema") != retention.RETENTION_SCOPE_SCHEMA
+        or not _is_hex64(scope.get("file_sha256"))
+    ):
+        raise RetentionApplyError("retention_apply_plan_invalid")
+    return {
+        "schema": APPLY_JOURNAL_SCHEMA,
+        "transaction_id": transaction,
+        "plan_sha256": plan_sha256,
+        "retention_scope_schema": scope["schema"],
+        "retention_scope_sha256": scope["file_sha256"],
+        "phase": "prepared",
+        "durable_plan": {
+            "device": durable_plan[1],
+            "inode": durable_plan[2],
+            "path": str(durable_plan[0]),
+            "sha256": plan_sha256,
+        },
+        "filesystem_before": [dict(item) for item in filesystem_before],
+        "filesystem_after": [],
+        "entries": [
+            {
+                "candidate_sha256": candidate["candidate_sha256"],
+                "registration_manifest_sha256": (
+                    candidate["identity"].get("registration_manifest_sha256", "")
+                    if isinstance(candidate.get("identity"), Mapping)
+                    else ""
+                ),
+                "objects_sha256": "",
+                "tree_sha256": "",
+                "sealed_tree_sha256": "",
+                "residual_authority": {},
+                "quarantine_name": f".friday-retention-q-v1-{transaction[:16]}-{index:06d}",
+                "status": "pending",
+                "actual_bytes": 0,
+                "actual_allocated_bytes": 0,
+                "actual_inodes": 0,
+            }
+            for index, candidate in enumerate(candidates)
+        ],
+        "receipt_sha256": "",
+    }
+
+
+def _validate_journal_contract(
+    value: Mapping[str, Any],
+    *,
+    plan: Mapping[str, Any],
+    candidates: Sequence[Mapping[str, Any]],
+    durable_plan: tuple[Path, int, int],
+) -> dict[str, Any]:
+    core = _journal_core(value)
+    filesystem_before = _validate_filesystem_evidence(core.get("filesystem_before"))
+    filesystem_after = _validate_filesystem_evidence(core.get("filesystem_after"))
+    expected = _new_journal(
+        plan,
+        candidates,
+        durable_plan=durable_plan,
+        filesystem_before=filesystem_before,
+    )
+    if set(core) != set(expected) or core.get("transaction_id") != expected["transaction_id"]:
+        raise RetentionApplyError("retention_apply_journal_invalid")
+    if core.get("plan_sha256") != plan.get("plan_sha256") or core.get("phase") not in {
+        "prepared",
+        "applying",
+        "applied",
+    }:
+        raise RetentionApplyError("retention_apply_journal_invalid")
+    if (
+        core.get("retention_scope_schema") != expected["retention_scope_schema"]
+        or core.get("retention_scope_sha256") != expected["retention_scope_sha256"]
+    ):
+        raise RetentionApplyError("retention_apply_journal_invalid")
+    if core.get("durable_plan") != expected["durable_plan"]:
+        raise RetentionApplyError("retention_apply_journal_invalid")
+    entries = core.get("entries")
+    expected_entries = expected["entries"]
+    if (
+        not isinstance(entries, list)
+        or not isinstance(expected_entries, list)
+        or len(entries) != len(expected_entries)
+    ):
+        raise RetentionApplyError("retention_apply_journal_invalid")
+    state_directory = durable_plan[0].parent.parent
+    for index, (entry, expected_entry, candidate) in enumerate(
+        zip(entries, expected_entries, candidates, strict=True)
+    ):
+        if not isinstance(entry, dict) or set(entry) != set(expected_entry):
+            raise RetentionApplyError("retention_apply_journal_invalid")
+        static = (
+            "candidate_sha256",
+            "registration_manifest_sha256",
+            "quarantine_name",
+        )
+        if any(entry.get(key) != expected_entry.get(key) for key in static):
+            raise RetentionApplyError("retention_apply_journal_invalid")
+        status = entry.get("status")
+        objects = entry.get("objects_sha256")
+        tree = entry.get("tree_sha256")
+        sealed_tree = entry.get("sealed_tree_sha256")
+        residual_authority = entry.get("residual_authority")
+        actual_bytes = entry.get("actual_bytes")
+        actual_allocated_bytes = entry.get("actual_allocated_bytes")
+        actual_inodes = entry.get("actual_inodes")
+        if (
+            status not in {"pending", "renaming", "sealed", "deleting", "deleted"}
+            or (objects != "" and not _is_hex64(objects))
+            or (tree != "" and not _is_hex64(tree))
+            or (status != "pending" and (not _is_hex64(objects) or not _is_hex64(tree)))
+            or (status in {"sealed", "deleting", "deleted"} and not _is_hex64(sealed_tree))
+            or (status not in {"sealed", "deleting", "deleted"} and sealed_tree != "")
+            or (status == "pending" and residual_authority != {})
+            or (
+                status != "pending"
+                and (
+                    not isinstance(residual_authority, Mapping)
+                    or set(residual_authority) != {"count", "device", "inode", "path", "sha256"}
+                    or type(residual_authority.get("count")) is not int
+                    or not 1 <= int(residual_authority["count"]) <= retention.MAX_INVENTORY_ENTRIES
+                    or type(residual_authority.get("device")) is not int
+                    or type(residual_authority.get("inode")) is not int
+                    or int(residual_authority["inode"]) <= 0
+                    or not _is_hex64(residual_authority.get("sha256"))
+                    or not isinstance(residual_authority.get("path"), str)
+                    or residual_authority.get("path")
+                    != str(
+                        state_directory
+                        / OBJECT_AUTHORITY_DIRECTORY
+                        / f"objects-{core['transaction_id']}-{index:06d}.bin"
+                    )
+                )
+            )
+            or type(actual_bytes) is not int
+            or type(actual_inodes) is not int
+            or type(actual_allocated_bytes) is not int
+            or actual_bytes < 0
+            or actual_inodes < 0
+            or actual_allocated_bytes < 0
+            or (
+                status == "deleted"
+                and (
+                    actual_bytes != candidate["recursive_bytes"]
+                    or actual_allocated_bytes != candidate["allocated_bytes"]
+                    or actual_inodes != candidate["entry_count"]
+                )
+            )
+            or (
+                status != "deleted"
+                and (actual_bytes != 0 or actual_allocated_bytes != 0 or actual_inodes != 0)
+            )
+        ):
+            raise RetentionApplyError("retention_apply_journal_invalid")
+    phase = core["phase"]
+    receipt_sha256 = core.get("receipt_sha256")
+    expected_filesystems = sorted(
+        {
+            (
+                int(candidate["root_device"]),
+                int(candidate["root_inode"]),
+                int(candidate["root_mount_id"]),
+            )
+            for candidate in candidates
+        }
+    )
+    before_filesystems = [
+        (item["device"], member[0], member[1]) for item in filesystem_before for member in item["members"]
+    ]
+    after_filesystems = [
+        (item["device"], member[0], member[1]) for item in filesystem_after for member in item["members"]
+    ]
+    filesystem_identity = lambda item: (  # noqa: E731
+        item["device"],
+        item["filesystem_magic"],
+        tuple(item["fsid"]),
+        tuple(tuple(member) for member in item["members"]),
+        item["fragment_size"],
+        item["block_count"],
+    )
+    if (
+        (phase == "prepared" and any(entry["status"] != "pending" for entry in entries))
+        or (phase == "applied" and any(entry["status"] != "deleted" for entry in entries))
+        or (phase == "applied" and not _is_hex64(receipt_sha256))
+        or (phase != "applied" and receipt_sha256 != "")
+        or (filesystem_after and any(entry["status"] != "deleted" for entry in entries))
+        or (phase == "applied" and filesystem_after == [] and bool(candidates))
+        or before_filesystems != expected_filesystems
+        or (filesystem_after and after_filesystems != expected_filesystems)
+        or (
+            filesystem_after
+            and [filesystem_identity(item) for item in filesystem_before]
+            != [filesystem_identity(item) for item in filesystem_after]
+        )
+    ):
+        raise RetentionApplyError("retention_apply_journal_invalid")
+    return core
+
+
+def _result_receipt(
+    *,
+    plan: Mapping[str, Any],
+    journal: Mapping[str, Any],
+    candidates: Sequence[Mapping[str, Any]],
+    authority_bindings_sha256: str,
+) -> dict[str, Any]:
+    entries = journal.get("entries")
+    if not isinstance(entries, list) or any(
+        not isinstance(entry, Mapping) or entry.get("status") != "deleted" for entry in entries
+    ):
+        raise RetentionApplyError("retention_apply_journal_invalid")
+    authenticated_bytes = sum(int(candidate["recursive_bytes"]) for candidate in candidates)
+    authenticated_allocated_bytes = sum(int(candidate["allocated_bytes"]) for candidate in candidates)
+    authenticated_inodes = sum(int(candidate["entry_count"]) for candidate in candidates)
+    if (
+        journal.get("retention_scope_schema") != plan["retention_scope"]["schema"]
+        or journal.get("retention_scope_sha256") != plan["retention_scope"]["file_sha256"]
+    ):
+        raise RetentionApplyError("retention_apply_journal_invalid")
+    if (
+        sum(int(entry["actual_bytes"]) for entry in entries) != authenticated_bytes
+        or sum(int(entry["actual_allocated_bytes"]) for entry in entries) != authenticated_allocated_bytes
+        or sum(int(entry["actual_inodes"]) for entry in entries) != authenticated_inodes
+    ):
+        raise RetentionApplyError("retention_apply_delete_accounting_mismatch")
+    filesystem_before = _validate_filesystem_evidence(journal.get("filesystem_before"))
+    filesystem_after = _validate_filesystem_evidence(journal.get("filesystem_after"))
+    if len(filesystem_before) != len(filesystem_after):
+        raise RetentionApplyError("retention_apply_delete_accounting_mismatch")
+    statvfs_delta = sum(
+        after["available_bytes"] - before["available_bytes"]
+        for before, after in zip(filesystem_before, filesystem_after, strict=True)
+    )
+    core = {
+        "schema": APPLY_RECEIPT_SCHEMA,
+        "status": "applied",
+        "plan_sha256": plan["plan_sha256"],
+        "retention_scope_schema": plan["retention_scope"]["schema"],
+        "retention_scope_sha256": plan["retention_scope"]["file_sha256"],
+        "transaction_id": journal["transaction_id"],
+        "candidate_set_sha256": hashlib.sha256(
+            _canonical([candidate["candidate_sha256"] for candidate in candidates])
+        ).hexdigest(),
+        "residual_authority_set_sha256": hashlib.sha256(
+            _canonical(
+                [
+                    {
+                        "candidate_sha256": entry["candidate_sha256"],
+                        "count": entry["residual_authority"]["count"],
+                        "sha256": entry["residual_authority"]["sha256"],
+                    }
+                    for entry in entries
+                ]
+            )
+        ).hexdigest(),
+        "deleted_candidate_count": len(entries),
+        "pre_delete_authenticated_bytes": authenticated_bytes,
+        "pre_delete_authenticated_allocated_bytes": authenticated_allocated_bytes,
+        "pre_delete_authenticated_inodes": authenticated_inodes,
+        "actual_deleted_logical_bytes": authenticated_bytes,
+        "deleted_authenticated_allocated_bytes": authenticated_allocated_bytes,
+        "actual_deleted_inodes": authenticated_inodes,
+        "authority_bindings_sha256": authority_bindings_sha256,
+        "terminal_absence_observed": True,
+        "post_apply_reauthenticated": True,
+        "bounded_effect_contour": retention.BOUNDED_DELETE_CONTOUR,
+        "concurrent_open_attempts_excluded": True,
+        "privileged_probe_role": "diagnostic_prerequisite",
+        "threat_boundary": retention.THREAT_BOUNDARY,
+        "universal_absence_proof": False,
+        "allocated_bytes_are_not_exact_physical_attribution": True,
+        "statvfs_concurrent_activity_unexcluded": True,
+        "statvfs_available_delta_bytes": statvfs_delta,
+        "filesystem_before": filesystem_before,
+        "filesystem_after": filesystem_after,
+    }
+    return _receipt_with_digest(core)
+
+
+def _cleanup_object_authorities(
+    state_dir: Path,
+    entries: Sequence[Mapping[str, Any]],
+    *,
+    guard: Callable[[], None],
+) -> None:
+    directory = state_dir / OBJECT_AUTHORITY_DIRECTORY
+    if not directory.exists() and not directory.is_symlink():
+        return
+    directory_fd = -1
+    try:
+        directory_fd = os.open(
+            directory,
+            os.O_RDONLY
+            | getattr(os, "O_CLOEXEC", 0)
+            | getattr(os, "O_DIRECTORY", 0)
+            | getattr(os, "O_NOFOLLOW", 0),
+        )
+        for entry in entries:
+            binding = entry.get("residual_authority")
+            if not isinstance(binding, Mapping):
+                raise RetentionApplyError("retention_apply_residual_authority_invalid")
+            path = Path(str(binding.get("path") or ""))
+            if path.parent != directory:
+                raise RetentionApplyError("retention_apply_residual_authority_invalid")
+            try:
+                os.stat(path.name, dir_fd=directory_fd, follow_symlinks=False)
+            except FileNotFoundError:
+                continue
+            _load_residual_authority(binding, state_dir=state_dir)
+            guard()
+            os.unlink(path.name, dir_fd=directory_fd)
+            os.fsync(directory_fd)
+            guard()
+            try:
+                os.stat(path.name, dir_fd=directory_fd, follow_symlinks=False)
+            except FileNotFoundError:
+                pass
+            else:
+                raise RetentionApplyError("retention_apply_residual_authority_invalid")
+    except OSError as exc:
+        raise RetentionApplyError("retention_apply_residual_authority_invalid") from exc
+    finally:
+        if directory_fd >= 0:
+            os.close(directory_fd)
+
+
+def _cleanup_completed_transaction_before_rollover(
+    state_dir: Path,
+    journal: Mapping[str, Any],
+    *,
+    guard: Callable[[], None],
+) -> None:
+    plan_sha256 = journal.get("plan_sha256")
+    if not _is_hex64(plan_sha256) or journal.get("phase") != "applied":
+        raise RetentionApplyError("retention_apply_journal_invalid")
+    reviewed, durable_plan, loaded = _resume_plan_from_state(
+        state_dir,
+        expected_plan_sha256=str(plan_sha256),
+        guard=guard,
+    )
+    candidates = _candidate_records(reviewed)
+    core = _validate_journal_contract(
+        loaded,
+        plan=reviewed,
+        candidates=candidates,
+        durable_plan=durable_plan,
+    )
+    entries = core.get("entries")
+    if not isinstance(entries, list) or any(
+        not isinstance(entry, Mapping) or entry.get("status") != "deleted" for entry in entries
+    ):
+        raise RetentionApplyError("retention_apply_journal_invalid")
+    _terminal_absence(candidates, entries, guard=guard)
+    authority = reviewed.get("authority_bindings")
+    if not isinstance(authority, Mapping) or not _is_hex64(authority.get("bindings_sha256")):
+        raise RetentionApplyError("retention_apply_journal_invalid")
+    receipt = _result_receipt(
+        plan=reviewed,
+        journal=core,
+        candidates=candidates,
+        authority_bindings_sha256=str(authority["bindings_sha256"]),
+    )
+    if core.get("receipt_sha256") != receipt["receipt_sha256"]:
+        raise RetentionApplyError("retention_apply_journal_invalid")
+    _publish_receipt(state_dir, receipt, guard=guard)
+    _cleanup_object_authorities(state_dir, entries, guard=guard)
+
+
+def _validate_mutation_namespaces(
+    *,
+    plan_path: Path,
+    state_dir: Path,
+    candidates: Sequence[Mapping[str, Any]],
+    entries: Sequence[Mapping[str, Any]],
+    require_quarantine_absent: bool = True,
+) -> None:
+    plan_lexical = Path(os.path.abspath(plan_path))
+    journal_path = state_dir / APPLY_JOURNAL_NAME
+    receipt_path = state_dir / APPLY_RECEIPT_DIRECTORY
+    durable_plan_directory = state_dir / APPLY_PLAN_DIRECTORY
+    object_authority_directory = state_dir / OBJECT_AUTHORITY_DIRECTORY
+    retention_scope_path = state_dir / retention.RETENTION_SCOPE_NAME
+    inventory_roots = {Path(str(candidate["path"])).parent for candidate in candidates}
+    if any(plan_lexical == root or root in plan_lexical.parents for root in inventory_roots):
+        raise RetentionApplyError("retention_apply_plan_namespace_invalid")
+    for candidate, entry in zip(candidates, entries, strict=True):
+        target = Path(str(candidate["path"]))
+        quarantine = target.parent / str(entry["quarantine_name"])
+        for protected in (
+            plan_lexical,
+            journal_path,
+            receipt_path,
+            durable_plan_directory,
+            object_authority_directory,
+            retention_scope_path,
+        ):
+            if protected == target or protected in target.parents or target in protected.parents:
+                raise RetentionApplyError("retention_apply_namespace_intersection")
+        if quarantine == plan_lexical or quarantine in plan_lexical.parents:
+            raise RetentionApplyError("retention_apply_plan_namespace_invalid")
+        if require_quarantine_absent:
+            try:
+                os.stat(quarantine, follow_symlinks=False)
+            except FileNotFoundError:
+                pass
+            except OSError as exc:
+                raise RetentionApplyError("retention_apply_quarantine_collision") from exc
+            else:
+                raise RetentionApplyError("retention_apply_quarantine_collision")
+
+
+def _resume_plan_from_state(
+    state_dir: Path,
+    *,
+    expected_plan_sha256: str,
+    guard: Callable[[], None],
+) -> tuple[dict[str, Any], tuple[Path, int, int], dict[str, Any]]:
+    journal = _load_journal(state_dir / APPLY_JOURNAL_NAME)
+    if journal is None or journal.get("plan_sha256") != expected_plan_sha256:
+        raise RetentionApplyError("retention_apply_resume_authority_missing")
+    durable = journal.get("durable_plan")
+    if not isinstance(durable, Mapping) or set(durable) != {"device", "inode", "path", "sha256"}:
+        raise RetentionApplyError("retention_apply_resume_authority_missing")
+    expected_path = state_dir / APPLY_PLAN_DIRECTORY / f"plan-{expected_plan_sha256}.json"
+    path = Path(str(durable.get("path") or ""))
+    if (
+        path != expected_path
+        or durable.get("sha256") != expected_plan_sha256
+        or type(durable.get("device")) is not int
+        or type(durable.get("inode")) is not int
+        or int(durable["inode"]) <= 0
+    ):
+        raise RetentionApplyError("retention_apply_resume_authority_missing")
+    try:
+        status = os.lstat(path)
+    except OSError as exc:
+        raise RetentionApplyError("retention_apply_resume_authority_missing") from exc
+    if status.st_nlink == 2:
+        plan_fd = -1
+        try:
+            plan_fd, parts, identities = retention._open_absolute_directory_chain(  # noqa: SLF001
+                path.parent,
+                code="retention_apply_resume_authority_missing",
+            )
+            retention._require_pinned_directory(  # noqa: SLF001
+                plan_fd,
+                parts,
+                identities,
+                code="retention_apply_resume_authority_missing",
+                private=True,
+            )
+            staged_name = f".{path.name}.new"
+            staged = os.stat(staged_name, dir_fd=plan_fd, follow_symlinks=False)
+            if (staged.st_dev, staged.st_ino) != (status.st_dev, status.st_ino):
+                raise RetentionApplyError("retention_apply_resume_authority_missing")
+            guard()
+            os.unlink(staged_name, dir_fd=plan_fd)
+            os.fsync(plan_fd)
+            guard()
+            status = os.lstat(path)
+        except OSError as exc:
+            raise RetentionApplyError("retention_apply_resume_authority_missing") from exc
+        finally:
+            if plan_fd >= 0:
+                os.close(plan_fd)
+    if (
+        not stat.S_ISREG(status.st_mode)
+        or status.st_uid != os.geteuid()
+        or status.st_nlink != 1
+        or stat.S_IMODE(status.st_mode) != 0o400
+        or (status.st_dev, status.st_ino) != (durable["device"], durable["inode"])
+    ):
+        raise RetentionApplyError("retention_apply_resume_authority_missing")
+    reviewed = _read_plan(path, expected_sha256=expected_plan_sha256)
+    return reviewed, (path, int(status.st_dev), int(status.st_ino)), journal
+
+
+def apply_retention_plan(
+    *,
+    plan_path: Path | None,
+    expected_plan_sha256: str,
+    state_dir: Path | None = None,
+) -> dict[str, Any]:
+    resume_from_state = state_dir is not None
+    if resume_from_state:
+        assert state_dir is not None
+        try:
+            state_dir = retention._strict_private_directory(  # noqa: SLF001
+                Path(state_dir),
+                code="retention_apply_resume_authority_missing",
+            )
+        except retention.RetentionPlanError as exc:
+            raise RetentionApplyError("retention_apply_resume_authority_missing") from exc
+        reviewed: dict[str, Any] | None = None
+        durable_plan = (Path(), 0, 0)
+        source_plan_path = state_dir / APPLY_PLAN_DIRECTORY / f"plan-{expected_plan_sha256}.json"
+        inputs: dict[str, Any] = {}
+        candidates: tuple[dict[str, Any], ...] = ()
+    else:
+        if plan_path is None:
+            raise RetentionApplyError("retention_apply_plan_invalid")
+        source_plan_path = plan_path
+        reviewed = _read_plan(source_plan_path, expected_sha256=expected_plan_sha256)
+        inputs = _plan_inputs(reviewed)
+        state_dir = Path(inputs["activation_journal"]).parent
+        durable_plan = (Path(), 0, 0)
+    if reviewed is not None:
+        inputs = _plan_inputs(reviewed)
+        candidates = _candidate_records(reviewed)
+    assert state_dir is not None
+    lock_path = state_dir / "immutable-release-operator.v1.lock"
+    journal_path = state_dir / APPLY_JOURNAL_NAME
+    try:
+        lock_context = release_operator.OperatorTransactionLock(lock_path)
+        with lock_context as lock:
+            lock.assert_held()
+            existing = _load_journal(journal_path)
+            if (
+                not resume_from_state
+                and existing is not None
+                and existing.get("phase") == "applied"
+                and existing.get("plan_sha256") != expected_plan_sha256
+            ):
+                _cleanup_completed_transaction_before_rollover(
+                    state_dir,
+                    existing,
+                    guard=lock.assert_held,
+                )
+            if resume_from_state:
+                reviewed, durable_plan, existing = _resume_plan_from_state(
+                    state_dir,
+                    expected_plan_sha256=expected_plan_sha256,
+                    guard=lock.assert_held,
+                )
+                inputs = _plan_inputs(reviewed)
+                candidates = _candidate_records(reviewed)
+            else:
+                reviewed = _read_plan(source_plan_path, expected_sha256=expected_plan_sha256)
+                inputs = _plan_inputs(reviewed)
+                candidates = _candidate_records(reviewed)
+                durable_plan = _persist_reviewed_plan(
+                    state_dir,
+                    reviewed,
+                    guard=lock.assert_held,
+                    allow_incomplete_stage_repair=(
+                        existing is None
+                        or (
+                            existing.get("phase") == "applied"
+                            and existing.get("plan_sha256") != expected_plan_sha256
+                        )
+                    ),
+                )
+            plan_path = durable_plan[0]
+            new_transaction = existing is None or (
+                existing.get("phase") == "applied" and existing.get("plan_sha256") != expected_plan_sha256
+            )
+            if new_transaction:
+                initial = _new_journal(
+                    reviewed,
+                    candidates,
+                    durable_plan=durable_plan,
+                    filesystem_before=_filesystem_free_evidence(
+                        candidates,
+                        guard=lock.assert_held,
+                    ),
+                )
+                raw_initial_entries = initial["entries"]
+                assert isinstance(raw_initial_entries, list)
+                _validate_mutation_namespaces(
+                    plan_path=source_plan_path,
+                    state_dir=state_dir,
+                    candidates=candidates,
+                    entries=raw_initial_entries,
+                )
+                fresh = retention.build_eligible_retention_plan(**inputs)
+                if _authority_projection(fresh) != _authority_projection(reviewed):
+                    raise RetentionApplyError("retention_apply_plan_drift")
+                journal = _write_journal(
+                    journal_path,
+                    initial,
+                    guard=lock.assert_held,
+                )
+            else:
+                if existing is None:
+                    raise RetentionApplyError("retention_apply_journal_invalid")
+                journal = existing
+                if journal.get("plan_sha256") != expected_plan_sha256:
+                    raise RetentionApplyError("retention_apply_in_progress")
+            core = _validate_journal_contract(
+                journal,
+                plan=reviewed,
+                candidates=candidates,
+                durable_plan=durable_plan,
+            )
+            entries = core.get("entries")
+            if (
+                not isinstance(entries, list)
+                or len(entries) != len(candidates)
+                or any(
+                    not isinstance(entry, dict)
+                    or entry.get("candidate_sha256") != candidate["candidate_sha256"]
+                    for entry, candidate in zip(entries, candidates, strict=True)
+                )
+            ):
+                raise RetentionApplyError("retention_apply_journal_invalid")
+            _validate_mutation_namespaces(
+                plan_path=plan_path,
+                state_dir=state_dir,
+                candidates=candidates,
+                entries=entries,
+                require_quarantine_absent=False,
+            )
+            if not resume_from_state:
+                _validate_mutation_namespaces(
+                    plan_path=source_plan_path,
+                    state_dir=state_dir,
+                    candidates=candidates,
+                    entries=entries,
+                    require_quarantine_absent=False,
+                )
+            for entry in entries:
+                if core.get("phase") != "applied" and entry.get("status") != "pending":
+                    _load_residual_authority(
+                        entry.get("residual_authority"),
+                        state_dir=state_dir,
+                    )
+            if core.get("phase") == "applied":
+                authenticated = _post_apply_reauthenticate(reviewed, inputs)
+                _terminal_absence(candidates, entries, guard=lock.assert_held)
+                receipt = _result_receipt(
+                    plan=reviewed,
+                    journal=core,
+                    candidates=candidates,
+                    authority_bindings_sha256=authenticated["authority_bindings"]["bindings_sha256"],
+                )
+                if core.get("receipt_sha256") != receipt["receipt_sha256"]:
+                    raise RetentionApplyError("retention_apply_journal_invalid")
+                _live_authority_reauthenticate(reviewed, inputs)
+                published = _publish_receipt(state_dir, receipt, guard=lock.assert_held)
+                _cleanup_object_authorities(state_dir, entries, guard=lock.assert_held)
+                return published
+
+            if core.get("phase") == "prepared":
+                core["phase"] = "applying"
+                journal = _write_journal(journal_path, core, guard=lock.assert_held)
+                core = _journal_core(journal)
+                entries = core["entries"]
+            if core.get("phase") != "applying":
+                raise RetentionApplyError("retention_apply_journal_invalid")
+
+            _live_authority_reauthenticate(reviewed, inputs)
+            _resume_candidate_reauthenticate(candidates, entries, state_dir=state_dir)
+
+            for candidate, entry in zip(candidates, entries, strict=True):
+                if entry.get("status") != "deleted":
+                    _preflight_filesystem_lease(candidate, guard=lock.assert_held)
+                if entry.get("status") != "pending":
+                    _load_residual_authority(entry.get("residual_authority"), state_dir=state_dir)
+
+            prepared = False
+            for index, (candidate, entry) in enumerate(zip(candidates, entries, strict=True)):
+                if entry.get("status") != "pending":
+                    continue
+                source = Path(str(candidate["path"]))
+                snapshot, objects_sha256, tree_sha256 = _candidate_matches_observation(candidate, source)
+                entry["residual_authority"] = _persist_residual_authority(
+                    state_dir,
+                    str(core["transaction_id"]),
+                    index,
+                    snapshot,
+                    guard=lock.assert_held,
+                )
+                entry["objects_sha256"] = objects_sha256
+                entry["tree_sha256"] = tree_sha256
+                entry["status"] = "renaming"
+                prepared = True
+            if prepared:
+                journal = _write_journal(journal_path, core, guard=lock.assert_held)
+                core = _journal_core(journal)
+                entries = core["entries"]
+
+            _live_authority_reauthenticate(reviewed, inputs)
+            try:
+                for index, candidate in enumerate(candidates):
+                    entry = entries[index]
+                    lock.assert_held()
+                    status = entry.get("status")
+                    if status in {"deleted", "deleting"}:
+                        continue
+                    if status not in {"renaming", "sealed"}:
+                        raise RetentionApplyError("retention_apply_journal_invalid")
+                    source = Path(str(candidate["path"]))
+                    quarantine_name = str(entry["quarantine_name"])
+                    quarantine = source.parent / quarantine_name
+                    if status == "renaming":
+                        _fault("before_rename")
+                        root_fd, _parts, _identities = _root_descriptor(candidate)
+                        try:
+                            source_identity = _named_identity(root_fd, source.name)
+                            quarantine_identity = _named_identity(root_fd, quarantine_name)
+                            expected_identity = (candidate["device"], candidate["inode"])
+                            if source_identity == expected_identity and quarantine_identity is None:
+                                lock.assert_held()
+                                try:
+                                    _rename_noreplace(root_fd, source.name, root_fd, quarantine_name)
+                                except OSError as exc:
+                                    raise RetentionApplyError("retention_apply_target_raced") from exc
+                                os.fsync(root_fd)
+                                lock.assert_held()
+                            elif source_identity is not None or quarantine_identity != expected_identity:
+                                raise RetentionApplyError("retention_apply_target_raced")
+                        finally:
+                            os.close(root_fd)
+                        _fault("after_rename")
+                        entry["sealed_tree_sha256"] = _seal_quarantine(
+                            candidate,
+                            quarantine_name,
+                            objects_sha256=str(entry["objects_sha256"]),
+                            tree_sha256=str(entry["tree_sha256"]),
+                            guard=lock.assert_held,
+                        )
+                        entry["status"] = "sealed"
+                        journal = _write_journal(journal_path, core, guard=lock.assert_held)
+                        core = _journal_core(journal)
+                        entries = core["entries"]
+                        _fault("after_quarantine")
+                    else:
+                        _sealed_quarantine_matches(
+                            candidate,
+                            quarantine,
+                            objects_sha256=str(entry["objects_sha256"]),
+                            tree_sha256=str(entry["tree_sha256"]),
+                            sealed_tree_sha256=str(entry["sealed_tree_sha256"]),
+                        )
+            except RetentionApplyError:
+                if all(entry.get("status") not in {"deleting", "deleted"} for entry in entries):
+                    _restore_full_batch(
+                        candidates,
+                        core,
+                        journal_path=journal_path,
+                        guard=lock.assert_held,
+                    )
+                raise
+
+            probe_paths = tuple(
+                Path(str(candidate["path"])).parent / str(entry["quarantine_name"])
+                for candidate, entry in zip(candidates, entries, strict=True)
+                if entry.get("status") in {"sealed", "deleting"}
+                and (Path(str(candidate["path"])).parent / str(entry["quarantine_name"])).exists()
+            )
+            try:
+                if probe_paths:
+                    inventory = retention.build_complete_open_inventory(target_paths=probe_paths)
+                    if inventory.open_paths:
+                        raise RetentionApplyError("retention_apply_open_reference")
+            except retention.RetentionPlanError as exc:
+                if all(entry.get("status") not in {"deleting", "deleted"} for entry in entries):
+                    core = _restore_full_batch(
+                        candidates,
+                        core,
+                        journal_path=journal_path,
+                        guard=lock.assert_held,
+                    )
+                raise RetentionApplyError("retention_apply_open_recheck_failed") from exc
+            except RetentionApplyError:
+                if all(entry.get("status") not in {"deleting", "deleted"} for entry in entries):
+                    core = _restore_full_batch(
+                        candidates,
+                        core,
+                        journal_path=journal_path,
+                        guard=lock.assert_held,
+                    )
+                raise
+
+            deleting_started = False
+            for candidate, entry in zip(candidates, entries, strict=True):
+                if entry.get("status") != "sealed":
+                    continue
+                quarantine = Path(str(candidate["path"])).parent / str(entry["quarantine_name"])
+                residual_authority = _load_residual_authority(
+                    entry.get("residual_authority"),
+                    state_dir=state_dir,
+                )
+                _partial_quarantine_contour(
+                    candidate,
+                    quarantine,
+                    residual_authority=residual_authority,
+                )
+                entry["status"] = "deleting"
+                deleting_started = True
+            if deleting_started:
+                journal = _write_journal(journal_path, core, guard=lock.assert_held)
+                core = _journal_core(journal)
+                entries = core["entries"]
+                _fault("before_delete")
+
+            for index, candidate in enumerate(candidates):
+                entry = entries[index]
+                if entry.get("status") == "deleted":
+                    continue
+                if entry.get("status") != "deleting":
+                    raise RetentionApplyError("retention_apply_journal_invalid")
+                quarantine_name = str(entry["quarantine_name"])
+                residual_authority = _load_residual_authority(
+                    entry.get("residual_authority"),
+                    state_dir=state_dir,
+                )
+                actual_bytes, actual_inodes = _delete_quarantine(
+                    candidate,
+                    quarantine_name,
+                    residual_authority=residual_authority,
+                    guard=lock.assert_held,
+                )
+                _fault("after_delete")
+                if actual_bytes != candidate["recursive_bytes"] or actual_inodes != candidate["entry_count"]:
+                    raise RetentionApplyError("retention_apply_delete_accounting_mismatch")
+                entry["actual_bytes"] = actual_bytes
+                entry["actual_allocated_bytes"] = int(candidate["allocated_bytes"])
+                entry["actual_inodes"] = actual_inodes
+                entry["status"] = "deleted"
+                journal = _write_journal(journal_path, core, guard=lock.assert_held)
+                core = _journal_core(journal)
+                entries = core["entries"]
+
+            _terminal_absence(candidates, entries, guard=lock.assert_held)
+            authenticated = _post_apply_reauthenticate(reviewed, inputs)
+            if not core.get("filesystem_after") and candidates:
+                core["filesystem_after"] = _filesystem_free_evidence(
+                    candidates,
+                    guard=lock.assert_held,
+                )
+                journal = _write_journal(journal_path, core, guard=lock.assert_held)
+                core = _journal_core(journal)
+            receipt = _result_receipt(
+                plan=reviewed,
+                journal=core,
+                candidates=candidates,
+                authority_bindings_sha256=authenticated["authority_bindings"]["bindings_sha256"],
+            )
+            _fault("before_receipt_publish")
+            _live_authority_reauthenticate(reviewed, inputs)
+            _publish_receipt(state_dir, receipt, guard=lock.assert_held)
+            _fault("after_receipt_publish")
+            core["phase"] = "applied"
+            core["receipt_sha256"] = receipt["receipt_sha256"]
+            journal = _write_journal(journal_path, core, guard=lock.assert_held)
+            core = _journal_core(journal)
+            _fault("after_applied_journal_before_cleanup")
+            applied_entries = core.get("entries")
+            if not isinstance(applied_entries, list):
+                raise RetentionApplyError("retention_apply_journal_invalid")
+            _cleanup_object_authorities(state_dir, applied_entries, guard=lock.assert_held)
+            lock.assert_held()
+            return receipt
+    except RetentionApplyError:
+        raise
+    except release_operator.ReleaseFailure as exc:
+        raise RetentionApplyError("retention_apply_operator_lock_failed") from exc
+    except retention.RetentionPlanError as exc:
+        raise RetentionApplyError("retention_apply_authority_failed") from exc
+
+
+def _parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(description=__doc__)
+    subcommands = parser.add_subparsers(dest="command", required=True)
+    apply = subcommands.add_parser("apply")
+    source = apply.add_mutually_exclusive_group(required=True)
+    source.add_argument("--plan", type=Path)
+    source.add_argument("--state-dir", type=Path)
+    apply.add_argument("--expected-plan-sha256", required=True)
+    return parser
+
+
+def main(argv: Sequence[str] | None = None) -> int:
+    try:
+        args = _parser().parse_args(argv)
+        if args.command != "apply":
+            raise RetentionApplyError("retention_apply_command_invalid")
+        receipt = apply_retention_plan(
+            plan_path=args.plan,
+            expected_plan_sha256=args.expected_plan_sha256,
+            state_dir=args.state_dir,
+        )
+        sys.stdout.buffer.write(_canonical(receipt) + b"\n")
+        sys.stdout.buffer.flush()
+        return 0
+    except Exception as exc:
+        code = exc.code if isinstance(exc, RetentionApplyError) else None
+        failure = {
+            "failure_code": _body_free_code(code),
+            "schema": APPLY_RECEIPT_SCHEMA,
+            "status": "failed_closed",
+        }
+        sys.stderr.buffer.write(_canonical(failure) + b"\n")
+        sys.stderr.buffer.flush()
+        return 2
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
+
+
+__all__ = [
+    "APPLY_JOURNAL_SCHEMA",
+    "APPLY_RECEIPT_SCHEMA",
+    "RetentionApplyError",
+    "apply_retention_plan",
+]
