@@ -133,7 +133,12 @@ def copy_private_file(source: Path, destination: Path) -> Path:
 
 
 def restrict_private_tree(path: Path) -> Path:
-    """Repair regular files and nested directories in an existing private tree."""
+    """Remove non-owner access from an existing private tree.
+
+    Existing owner permissions are authoritative.  In particular, a sealed
+    read-only receipt must remain ``0400`` instead of becoming writable merely
+    because it lives below a runtime state directory.
+    """
 
     root = ensure_private_directory(Path(path))
     for current, directories, filenames in os.walk(root, topdown=True, followlinks=False):
@@ -150,7 +155,8 @@ def restrict_private_tree(path: Path) -> Path:
             except FileNotFoundError:
                 continue
             if stat.S_ISREG(mode):
-                candidate.chmod(_PRIVATE_FILE_MODE)
+                owner_mode = stat.S_IMODE(mode) & 0o700
+                candidate.chmod(0o400 if owner_mode == 0o400 else _PRIVATE_FILE_MODE)
     return root
 
 

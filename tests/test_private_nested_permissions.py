@@ -65,6 +65,11 @@ def test_storage_startup_repairs_owned_trees_without_touching_disabled_vault(
         payload.write_bytes(f"private-{index}".encode())
         payload.chmod(0o644)
 
+    sealed_receipt = secured.state_dir / "immutable-release-dr-generation-receipts" / "sealed-receipt.json"
+    sealed_receipt.parent.mkdir(parents=True, exist_ok=True)
+    sealed_receipt.write_text("{}\n", encoding="utf-8")
+    sealed_receipt.chmod(0o400)
+
     previous_umask = os.umask(0o022)
     storage = None
     try:
@@ -73,7 +78,11 @@ def test_storage_startup_repairs_owned_trees_without_touching_disabled_vault(
             for current, directories, filenames in os.walk(root):
                 assert _mode(Path(current)) == 0o700
                 assert all(_mode(Path(current) / name) == 0o700 for name in directories)
-                assert all(_mode(Path(current) / name) == 0o600 for name in filenames)
+                assert all(
+                    _mode(Path(current) / name)
+                    == (0o400 if Path(current) / name == sealed_receipt else 0o600)
+                    for name in filenames
+                )
         # Body-free mode may inventory a legacy projection, but startup must not
         # create, chmod, delete, or otherwise mutate it implicitly.
         assert _mode(secured.memory_vault_dir) == 0o755

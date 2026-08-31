@@ -754,6 +754,75 @@ def test_complete_closed_inventory_classifies_only_authenticated_old_release_for
     assert {call[0] for call in synthetic_inventory["calls"]} == {"load", "verify"}
 
 
+def test_canonical_evidence_is_an_independent_protected_contour(
+    synthetic_inventory: dict[str, Any],
+    tmp_path: Path,
+) -> None:
+    evidence_root = _private_directory(tmp_path / "release-evidence" / "candidate")
+    evidence_authority = evidence_root / "quality-gate-summary.json"
+    evidence_authority.write_bytes(_canonical({"status": "passed"}) + b"\n")
+    evidence_authority.chmod(0o600)
+    bindings = replace(
+        _bindings(synthetic_inventory),
+        canonical_evidence_roots=(
+            retention.CanonicalEvidenceRoot(
+                path=evidence_root,
+                authority_path=evidence_authority,
+                authority_sha256=_sha256_file(evidence_authority),
+            ),
+        ),
+    )
+
+    plan = _plan(synthetic_inventory, authority_bindings=bindings)
+
+    assert plan["classification_status"] == "eligible"
+    assert plan["block_reason"] == ""
+    assert plan["authority_bindings"]["canonical_evidence_roots"] == [
+        {
+            "authority_path": str(evidence_authority),
+            "authority_sha256": _sha256_file(evidence_authority),
+            "device": os.stat(evidence_root).st_dev,
+            "inode": os.stat(evidence_root).st_ino,
+            "observed_authority_sha256": _sha256_file(evidence_authority),
+            "path": str(evidence_root),
+        }
+    ]
+
+
+def test_independent_canonical_evidence_race_blocks_delete_authority(
+    synthetic_inventory: dict[str, Any],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    evidence_root = _private_directory(tmp_path / "external-evidence" / "candidate")
+    evidence_authority = evidence_root / "quality-gate-summary.json"
+    evidence_authority.write_bytes(_canonical({"status": "passed"}) + b"\n")
+    evidence_authority.chmod(0o600)
+    bindings = replace(
+        _bindings(synthetic_inventory),
+        canonical_evidence_roots=(
+            retention.CanonicalEvidenceRoot(
+                path=evidence_root,
+                authority_path=evidence_authority,
+                authority_sha256=_sha256_file(evidence_authority),
+            ),
+        ),
+    )
+    real_observe = retention._observe_target  # noqa: SLF001
+
+    def observe_with_race(path: Path) -> retention._TargetObservation:  # noqa: SLF001
+        observed = real_observe(path)
+        return replace(observed, raced=True) if path == evidence_root else observed
+
+    monkeypatch.setattr(retention, "_observe_target", observe_with_race)
+
+    plan = _plan(synthetic_inventory, authority_bindings=bindings)
+
+    assert plan["classification_status"] == "blocked"
+    assert plan["block_reason"] == "canonical_evidence_invalid"
+    assert not any(item["decision"] == "delete_candidate" for item in plan["targets"])
+
+
 def test_backup_inventory_binds_all_closed_retention_roles(
     synthetic_inventory: dict[str, Any],
 ) -> None:
@@ -1590,6 +1659,54 @@ def _enable_complete_delete_evidence(monkeypatch: pytest.MonkeyPatch) -> None:
         "_full_rollback_release_evidence_complete",
         lambda _authentication, _rehearsal: True,
     )
+
+
+@pytest.mark.parametrize("synthetic_inventory", ("v2",), indirect=True)
+def test_provisioned_external_evidence_scope_builds_eligible_plan(
+    synthetic_inventory: dict[str, Any],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    synthetic_inventory["retention_scope"].unlink()
+    evidence_root = _private_directory(tmp_path / "external-gate-evidence" / "candidate")
+    evidence_authority = evidence_root / "quality-gate-summary.json"
+    evidence_authority.write_bytes(_canonical({"status": "passed"}) + b"\n")
+    evidence_authority.chmod(0o600)
+    evidence = retention.CanonicalEvidenceRoot(
+        path=evidence_root,
+        authority_path=evidence_authority,
+        authority_sha256=_sha256_file(evidence_authority),
+    )
+    runtime_parent = synthetic_inventory["activation_journal"].parent.parent / "operator-runtime"
+    runtime_parent.mkdir(mode=0o1700, exist_ok=True)
+    runtime_parent.chmod(0o1700)
+    monkeypatch.setattr(operator.OperatorTransactionLock, "_RUNTIME_PARENT", runtime_parent)
+    monkeypatch.setattr(
+        retention,
+        "build_complete_open_inventory",
+        lambda *, target_paths: _privileged_open_inventory(target_paths=tuple(target_paths)),
+    )
+
+    retention.provision_retention_scope_authority(
+        activation_journal=synthetic_inventory["activation_journal"],
+        unit_journal=synthetic_inventory["unit_journal"],
+        backup_root=synthetic_inventory["backup_root"],
+        inventory_roots=(synthetic_inventory["inventory"],),
+        backup_inventory_roots=(synthetic_inventory["backup_root"],),
+        canonical_evidence_roots=(evidence,),
+    )
+    plan = retention.build_eligible_retention_plan(
+        activation_journal=synthetic_inventory["activation_journal"],
+        unit_journal=synthetic_inventory["unit_journal"],
+        backup_root=synthetic_inventory["backup_root"],
+        inventory_roots=(synthetic_inventory["inventory"],),
+        backup_inventory_roots=(synthetic_inventory["backup_root"],),
+        canonical_evidence_roots=(evidence,),
+    )
+
+    assert plan["classification_status"] == "eligible"
+    assert plan["block_reason"] == ""
+    assert plan["apply_authority"] is True
 
 
 def test_legacy_v1_dr_evidence_never_grants_destructive_authority(

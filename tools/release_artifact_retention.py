@@ -3371,7 +3371,6 @@ def plan_release_artifact_retention(
             blocker = blocker or "dr_pins_invalid"
     if activation_backup_path is not None and activation_backup_path not in backup_observations_by_path:
         blocker = blocker or "activation_journal_invalid"
-    all_observations = (*observations, *backup_observations)
     observations_by_path = {observation.path: observation for observation, _root in observations}
     reviewed_scratch_identities: dict[Path, dict[str, Any]] = {}
     for path, reviewed in reviewed_scratch.items():
@@ -3385,13 +3384,31 @@ def plan_release_artifact_retention(
             blocker = blocker or "reviewed_scratch_invalid"
         else:
             reviewed_scratch_identities[path] = identity
+    raw_evidence_records = authority.receipt.get("canonical_evidence_roots")
+    evidence_records = (
+        {
+            Path(str(item["path"])): item
+            for item in raw_evidence_records
+            if isinstance(item, Mapping) and isinstance(item.get("path"), str)
+        }
+        if isinstance(raw_evidence_records, list)
+        else {}
+    )
     for evidence_path in authority.evidence_paths:
-        matching_targets = [
-            observation
-            for observation, _root in all_observations
-            if _path_intersects(observation.path, frozenset({evidence_path}))
-        ]
-        if len(matching_targets) != 1 or matching_targets[0].raced:
+        evidence_observation = _observe_target(evidence_path)
+        evidence_record = evidence_records.get(evidence_path)
+        if (
+            evidence_record is None
+            or evidence_observation.raced
+            or evidence_observation.kind != "directory"
+            or evidence_observation.device != evidence_record.get("device")
+            or evidence_observation.inode != evidence_record.get("inode")
+            or not evidence_observation.owner_ok
+            or evidence_observation.has_symlink
+            or evidence_observation.has_special
+            or evidence_observation.has_hardlink
+            or evidence_observation.has_group_world_writable
+        ):
             blocker = blocker or "canonical_evidence_invalid"
 
     activation_after = _read_activation_journal(activation_path, backup_path)

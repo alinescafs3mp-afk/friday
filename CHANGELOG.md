@@ -1,3 +1,17 @@
+## 0.207.92 — 2026-09-01
+
+### Sealed DR receipt and retention evidence hotfix
+
+- Preserves owner-read-only `0400` DR receipts when runtime startup hardens the
+  private state tree, so an authenticated generation remains sealed across a
+  backend restart.
+- Authenticates canonical gate evidence as its own protected contour outside
+  disposable release and backup inventories, matching the one-time retention
+  scope contract without ever adding evidence to deletion authority.
+- Adds race-closed and provision-to-eligible regressions for the external
+  evidence contour. SQLite remains at schema 50; exact `0.207.91` is the
+  predecessor and `0.207.90` remains the immutable fallback.
+
 ## 0.207.91 — 2026-09-01
 
 ### Pair-bearing release retention writer
