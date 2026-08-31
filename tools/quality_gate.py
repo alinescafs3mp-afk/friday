@@ -480,12 +480,6 @@ def _isolated_test_environment(
             for source, alias in _TEST_ASSET_ENV_ALIASES.items()
             if (value := environment.get(source, "").strip())
         }
-        installed_site = environment.get(_INSTALLED_SITE_ENV, "").strip()
-        if installed_site:
-            site = Path(installed_site)
-            if not site.is_absolute() or site.resolve(strict=True) != site or not site.is_dir():
-                raise RuntimeError("installed wheel runtime is not canonical")
-            test_assets[_INSTALLED_SITE_ENV] = installed_site
         for name in tuple(environment):
             if name.startswith(_RUNTIME_ENV_PREFIXES):
                 environment.pop(name, None)
@@ -527,8 +521,6 @@ def _isolated_test_environment(
                 **test_assets,
             }
         )
-        if installed_site:
-            environment["PYTHONPATH"] = installed_site
         yield environment
 
 
@@ -2276,7 +2268,10 @@ def execute(
 
 def main(argv: Sequence[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
-    previous_umask = os.umask(0o077)
+    # Git and ordinary test fixtures must observe canonical 0644/0755 modes,
+    # independent of the operator shell.  Sensitive artifacts live below
+    # explicit 0700 roots and are written with explicit 0600 modes.
+    previous_umask = os.umask(0o022)
     try:
         if args.inventory_collection is not None:
             return execute_inventory_collection(args)

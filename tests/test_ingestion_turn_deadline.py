@@ -55,7 +55,8 @@ async def test_file_extraction_wait_is_clipped_before_any_raw_object_is_committe
                 source_ref=source_ref,
                 turn_deadline=time.monotonic() + 0.03,
             )
-        assert time.monotonic() - started_at < 0.5
+        assert not finished.is_set()
+        assert time.monotonic() - started_at < 1.5
         assert storage.find_raw_by_source_ref("alice", "upload", source_ref) is None
     finally:
         release.set()

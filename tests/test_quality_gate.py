@@ -347,6 +347,7 @@ def test_eager_settings_import_derives_the_database_from_the_scratch_home(
 
     with quality_gate._isolated_test_environment() as environment:
         assert not any(name.startswith("GIT_") for name in environment)
+        assert quality_gate._INSTALLED_SITE_ENV not in environment
         probe = (
             "import os; "
             "from pathlib import Path; "
@@ -686,13 +687,13 @@ def test_dry_run_never_executes_commands(capsys, monkeypatch: pytest.MonkeyPatch
 
     def umask(value: int) -> int:
         calls.append(value)
-        return 0o022
+        return 0o002
 
     monkeypatch.setattr(quality_gate.os, "umask", umask)
     monkeypatch.setattr(quality_gate, "execute", lambda _args: 0)
 
     assert quality_gate.main(()) == 0
-    assert calls == [0o077, 0o022]
+    assert calls == [0o022, 0o002]
 
 
 @pytest.mark.parametrize(("phase", "label"), (("ui", "UI"), ("tests", "non-UI")))

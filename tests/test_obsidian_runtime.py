@@ -244,7 +244,14 @@ class _BlockingPolicyClient(_Client):
 
 
 def _runtime(settings, storage, tmp_path, client: _Client | None = None, *, version="v2.1.3"):
-    root_identity = f"{tmp_path}:{next(_RUNTIME_ROOT_SEQUENCE)}".encode()
+    identity_path = tmp_path / ".obsidian-runtime-root-id"
+    try:
+        runtime_identity = identity_path.read_text(encoding="ascii")
+    except FileNotFoundError:
+        runtime_identity = str(next(_RUNTIME_ROOT_SEQUENCE))
+        identity_path.write_text(runtime_identity, encoding="ascii")
+        identity_path.chmod(0o600)
+    root_identity = f"{tmp_path}:{runtime_identity}".encode()
     short_root = tmp_path.parents[1] / f"obs-{hashlib.sha256(root_identity).hexdigest()[:8]}"
     configured = replace(
         settings,
