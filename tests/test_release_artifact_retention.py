@@ -1420,7 +1420,13 @@ def _plan_file(plan: dict[str, Any], path: Path) -> Path:
 
 @pytest.mark.parametrize(
     ("reader", "hardlinked"),
-    (("reviewed_plan", False), ("apply_journal", False), ("resume_plan", True)),
+    (
+        ("reviewed_plan", False),
+        ("apply_journal", False),
+        ("resume_plan", True),
+        ("retention_scope", False),
+        ("streaming_auth", False),
+    ),
 )
 def test_metadata_fifo_swap_is_bounded_for_plan_journal_and_two_link_resume(
     tmp_path: Path,
@@ -1428,7 +1434,7 @@ def test_metadata_fifo_swap_is_bounded_for_plan_journal_and_two_link_resume(
     hardlinked: bool,
 ) -> None:
     repository = Path(retention.__file__).resolve().parents[1]
-    target = tmp_path / "reviewed.json"
+    target = tmp_path / (retention.RETENTION_SCOPE_NAME if reader == "retention_scope" else "reviewed.json")
     target.write_bytes(b"{}\n")
     target.chmod(0o600)
     if hardlinked:
@@ -1447,10 +1453,14 @@ from tools import release_artifact_retention_operator as retention_apply
 
 real_open = os.open
 swapped = False
+target_opens = 0
 
 def swapping_open(path, flags, *args, **kwargs):
-    global swapped
-    if not swapped and path == target.name and kwargs.get("dir_fd") is not None:
+    global swapped, target_opens
+    if path == target.name or path == target:
+        target_opens += 1
+    swap_at = 2 if reader == "retention_scope" else 1
+    if not swapped and target_opens == swap_at:
         os.unlink(target)
         os.mkfifo(target, 0o600)
         swapped = True
@@ -1460,13 +1470,24 @@ retention.os.open = swapping_open
 try:
     if reader == "apply_journal":
         retention_apply._load_journal(target)
+    elif reader == "retention_scope":
+        retention.load_retention_scope_authority(
+            activation_journal=target.parent / "activation.json",
+        )
+    elif reader == "streaming_auth":
+        retention._stable_file_sha256_streaming(
+            target,
+            expected_size=3,
+            private=True,
+            code="streaming_auth_invalid",
+        )
     else:
         retention_apply._read_plan(
             target,
             expected_sha256="a" * 64,
             allow_recoverable_two_link=reader == "resume_plan",
         )
-except retention_apply.RetentionApplyError:
+except (retention.RetentionPlanError, retention_apply.RetentionApplyError):
     if swapped:
         raise SystemExit(0)
 raise SystemExit(3)

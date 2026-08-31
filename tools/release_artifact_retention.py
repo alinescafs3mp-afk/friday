@@ -551,7 +551,10 @@ def _stable_file_sha256_streaming(
             raise RetentionPlanError(code)
         descriptor = os.open(
             lexical.name,
-            os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0),
+            os.O_RDONLY
+            | getattr(os, "O_CLOEXEC", 0)
+            | getattr(os, "O_NOFOLLOW", 0)
+            | getattr(os, "O_NONBLOCK", 0),
             dir_fd=parent_fd,
         )
         opened = os.fstat(descriptor)
@@ -650,7 +653,10 @@ def load_retention_scope_authority(*, activation_journal: Path) -> RetentionScop
     try:
         descriptor = os.open(
             scope_path,
-            os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0),
+            os.O_RDONLY
+            | getattr(os, "O_CLOEXEC", 0)
+            | getattr(os, "O_NOFOLLOW", 0)
+            | getattr(os, "O_NONBLOCK", 0),
         )
         opened = os.fstat(descriptor)
         has_acl = _descriptor_has_posix_acl(descriptor)
