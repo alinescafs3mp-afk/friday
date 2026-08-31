@@ -9987,9 +9987,7 @@ def test_release_retention_toolchain_receipt_pair_preserves_historical_v1() -> N
     digest = "a" * 64
     assert operator._release_retention_toolchain_receipt_identity(  # noqa: SLF001
         {
-            "release_retention_toolchain_contract": (
-                operator.RELEASE_RETENTION_TOOLCHAIN_CONTRACT
-            ),
+            "release_retention_toolchain_contract": (operator.RELEASE_RETENTION_TOOLCHAIN_CONTRACT),
             "release_retention_toolchain_manifest_sha256": digest,
         }
     ) == (operator.RELEASE_RETENTION_TOOLCHAIN_CONTRACT, digest)
@@ -10005,9 +10003,7 @@ def test_release_retention_toolchain_receipt_pair_preserves_historical_v1() -> N
             "release_retention_toolchain_manifest_sha256": "a" * 64,
         },
         {
-            "release_retention_toolchain_contract": (
-                operator.RELEASE_RETENTION_TOOLCHAIN_CONTRACT
-            ),
+            "release_retention_toolchain_contract": (operator.RELEASE_RETENTION_TOOLCHAIN_CONTRACT),
             "release_retention_toolchain_manifest_sha256": "not-a-digest",
         },
     ],
@@ -10119,9 +10115,7 @@ def test_reader_only_release_profile_revalidates_bundle_and_omits_receipt_pairs(
         operator._require_reader_only_release_profile(  # noqa: SLF001
             replace(
                 release,
-                operator_transaction_lock_scope_contract=(
-                    operator.OPERATOR_TRANSACTION_LOCK_SCOPE_CONTRACT
-                ),
+                operator_transaction_lock_scope_contract=(operator.OPERATOR_TRANSACTION_LOCK_SCOPE_CONTRACT),
                 operator_transaction_lock_scope_sha256="c" * 64,
             )
         )
@@ -10204,9 +10198,7 @@ def _synthetic_build_spec(tmp_path: Path) -> operator.BuildSpec:
         alias_dependency_sha256=hashlib.sha256(alias_dependency.read_bytes()).hexdigest(),
         secondary_product_runner=product_runner,
         secondary_product_runner_sha256=hashlib.sha256(product_runner.read_bytes()).hexdigest(),
-        release_retention_toolchain_manifest_sha256=(
-            _release_retention_toolchain_manifest_sha256()
-        ),
+        release_retention_toolchain_manifest_sha256=(_release_retention_toolchain_manifest_sha256()),
         build_receipt_profile=operator.BUILD_RECEIPT_PROFILE_HISTORICAL_V1_READER,
         max_schema=34,
     )
@@ -10344,9 +10336,7 @@ def test_two_homes_cannot_reuse_one_release_root_under_independent_build_locks(
     )
 
     with (
-        operator.OperatorTransactionLock(
-            canonical.state_dir / "immutable-release-operator.v1.lock"
-        ),
+        operator.OperatorTransactionLock(canonical.state_dir / "immutable-release-operator.v1.lock"),
         pytest.raises(
             operator.ReleaseFailure,
             match="^operator_transaction_layout_invalid$",
@@ -10834,9 +10824,7 @@ def test_build_smoke_failure_cleans_only_prepublication_staging_and_quarantines_
     if build_receipt_profile == operator.BUILD_RECEIPT_PROFILE_HISTORICAL_V1_READER:
         assert loaded.release_retention_toolchain_contract == ""
         assert loaded.release_retention_toolchain_manifest_sha256 == ""
-        assert loaded.build_receipt_profile == (
-            operator.BUILD_RECEIPT_PROFILE_HISTORICAL_V1_READER
-        )
+        assert loaded.build_receipt_profile == (operator.BUILD_RECEIPT_PROFILE_HISTORICAL_V1_READER)
         operator._require_reader_only_release_profile(loaded)  # noqa: SLF001
         with pytest.raises(
             operator.ReleaseFailure,
@@ -10847,9 +10835,7 @@ def test_build_smoke_failure_cleans_only_prepublication_staging_and_quarantines_
         assert loaded.operator_transaction_lock_scope_sha256 == ""
     else:
         assert loaded.build_receipt_profile == operator.BUILD_RECEIPT_PROFILE_P0H_RETENTION
-        assert loaded.release_retention_toolchain_contract == (
-            operator.RELEASE_RETENTION_TOOLCHAIN_CONTRACT
-        )
+        assert loaded.release_retention_toolchain_contract == (operator.RELEASE_RETENTION_TOOLCHAIN_CONTRACT)
         assert loaded.release_retention_toolchain_manifest_sha256 == (
             spec.release_retention_toolchain_manifest_sha256
         )
@@ -11406,9 +11392,7 @@ def test_missing_venv_fails_before_release_staging_or_target(
         alias_dependency_sha256=hashlib.sha256(alias_dependency.read_bytes()).hexdigest(),
         secondary_product_runner=product_runner,
         secondary_product_runner_sha256=hashlib.sha256(product_runner.read_bytes()).hexdigest(),
-        release_retention_toolchain_manifest_sha256=(
-            _release_retention_toolchain_manifest_sha256()
-        ),
+        release_retention_toolchain_manifest_sha256=(_release_retention_toolchain_manifest_sha256()),
         build_receipt_profile=operator.BUILD_RECEIPT_PROFILE_HISTORICAL_V1_READER,
         max_schema=34,
     )
@@ -11493,9 +11477,7 @@ def test_post_seal_failure_removes_staging_and_preserves_original_failure(
         alias_dependency_sha256=hashlib.sha256(alias_dependency.read_bytes()).hexdigest(),
         secondary_product_runner=product_runner,
         secondary_product_runner_sha256=hashlib.sha256(product_runner.read_bytes()).hexdigest(),
-        release_retention_toolchain_manifest_sha256=(
-            _release_retention_toolchain_manifest_sha256()
-        ),
+        release_retention_toolchain_manifest_sha256=(_release_retention_toolchain_manifest_sha256()),
         build_receipt_profile=operator.BUILD_RECEIPT_PROFILE_HISTORICAL_V1_READER,
         max_schema=34,
     )
@@ -13375,7 +13357,9 @@ def test_operator_transaction_unit_pair_uses_filesystem_not_abstract_socket_name
         transaction.assert_held()
         assert transaction._runtime_descriptors  # noqa: SLF001
         assert len(transaction._runtime_descriptors) == 1  # noqa: SLF001
-        assert all(Path(name).name == name for name, _descriptor, _identity in transaction._runtime_descriptors)  # noqa: SLF001
+        assert all(
+            Path(name).name == name for name, _descriptor, _identity in transaction._runtime_descriptors
+        )  # noqa: SLF001
 
 
 def test_operator_transaction_lock_serializes_the_fixed_systemd_unit_pair_across_homes(
@@ -13426,9 +13410,7 @@ def test_operator_transaction_uses_one_portable_bounded_global_lock_domain(
     def transaction(ordinal: int) -> operator.OperatorTransactionLock:
         state = tmp_path / f"state-{ordinal}"
         state.mkdir(mode=0o700)
-        lock = operator.OperatorTransactionLock(
-            state / "immutable-release-operator.v1.lock"
-        )
+        lock = operator.OperatorTransactionLock(state / "immutable-release-operator.v1.lock")
         lock._runtime_parent = shared_tmp  # noqa: SLF001
         return lock
 
@@ -13473,12 +13455,8 @@ def test_operator_transaction_runtime_domain_cannot_split_when_run_user_appears(
     second_state = tmp_path / "second-state"
     first_state.mkdir(mode=0o700)
     second_state.mkdir(mode=0o700)
-    first = operator.OperatorTransactionLock(
-        first_state / "immutable-release-operator.v1.lock"
-    )
-    second = operator.OperatorTransactionLock(
-        second_state / "immutable-release-operator.v1.lock"
-    )
+    first = operator.OperatorTransactionLock(first_state / "immutable-release-operator.v1.lock")
+    second = operator.OperatorTransactionLock(second_state / "immutable-release-operator.v1.lock")
     first._runtime_parent = shared_tmp  # noqa: SLF001
     second._runtime_parent = shared_tmp  # noqa: SLF001
 
@@ -13505,9 +13483,7 @@ def test_operator_transaction_guard_pins_portable_runtime_root_inode(
     shared_tmp.chmod(0o1777)
     state = tmp_path / "state"
     state.mkdir(mode=0o700)
-    transaction = operator.OperatorTransactionLock(
-        state / "immutable-release-operator.v1.lock"
-    )
+    transaction = operator.OperatorTransactionLock(state / "immutable-release-operator.v1.lock")
     transaction._runtime_parent = shared_tmp  # noqa: SLF001
 
     with transaction:
@@ -13539,9 +13515,7 @@ def test_operator_transaction_rejects_preplanted_runtime_root_symlink(
     (shared_tmp / runtime_name).symlink_to(outside, target_is_directory=True)
     state = tmp_path / "state"
     state.mkdir(mode=0o700)
-    transaction = operator.OperatorTransactionLock(
-        state / "immutable-release-operator.v1.lock"
-    )
+    transaction = operator.OperatorTransactionLock(state / "immutable-release-operator.v1.lock")
     transaction._runtime_parent = shared_tmp  # noqa: SLF001
 
     with (
@@ -13566,9 +13540,7 @@ def test_operator_transaction_creation_fsync_failure_releases_global_lock(
     state.mkdir(mode=0o700)
 
     def transaction() -> operator.OperatorTransactionLock:
-        result = operator.OperatorTransactionLock(
-            state / "immutable-release-operator.v1.lock"
-        )
+        result = operator.OperatorTransactionLock(state / "immutable-release-operator.v1.lock")
         result._runtime_parent = shared_tmp  # noqa: SLF001
         return result
 

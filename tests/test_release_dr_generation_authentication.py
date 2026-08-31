@@ -190,11 +190,7 @@ def _fixture(
             release_operator.ReleaseIdentity,
         ]:
             self.release_calls += 1
-            previous = (
-                changed_previous
-                if release_change_on_recheck and self.release_calls > 1
-                else fallback
-            )
+            previous = changed_previous if release_change_on_recheck and self.release_calls > 1 else fallback
             return fallback, previous, fallback
 
     monkeypatch.setattr(release_operator, "DurableActivationJournal", FakeJournal)

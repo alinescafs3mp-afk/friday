@@ -65,9 +65,7 @@ OPERATOR_TRANSACTION_LOCK_SCOPE_CONTRACT = "canonical-friday-home-state-v1"
 OPERATOR_TRANSACTION_LOCK_SCOPE_SCHEMA = "friday.immutable-release-operator-lock-scope.v1"
 OPERATOR_TRANSACTION_UNIT_PAIR_SCOPE_SCHEMA = "friday.immutable-release-operator-unit-pair-lock-scope.v1"
 RELEASE_RETENTION_TOOLCHAIN_CONTRACT = "sealed-release-retention-dr-v1"
-RELEASE_RETENTION_TOOLCHAIN_MANIFEST_SCHEMA = (
-    "friday.immutable-release-retention-toolchain-manifest.v1"
-)
+RELEASE_RETENTION_TOOLCHAIN_MANIFEST_SCHEMA = "friday.immutable-release-retention-toolchain-manifest.v1"
 BUILD_RECEIPT_PROFILE_HISTORICAL_V1 = "historical-v1"
 BUILD_RECEIPT_PROFILE_HISTORICAL_V1_READER = "historical-v1-reader"
 BUILD_RECEIPT_PROFILE_P0H_RETENTION = "p0h-retention-v1"
@@ -7653,9 +7651,7 @@ def _build_release_locked(
     if spec.build_receipt_profile not in _BUILD_RECEIPT_BUILD_PROFILES:
         raise ReleaseFailure("release_build_receipt_profile_invalid")
     pair_bearing_receipt = spec.build_receipt_profile == BUILD_RECEIPT_PROFILE_P0H_RETENTION
-    lock_scope_sha256 = (
-        _operator_transaction_lock_scope_sha256(state_dir) if pair_bearing_receipt else ""
-    )
+    lock_scope_sha256 = _operator_transaction_lock_scope_sha256(state_dir) if pair_bearing_receipt else ""
     if _VERSION.fullmatch(spec.version) is None or type(spec.max_schema) is not int or spec.max_schema <= 0:
         raise ReleaseFailure("release_metadata_invalid")
     wheel = _regular_file(spec.wheel, maximum_bytes=MAX_WHEEL_BYTES, code="wheel_invalid")
@@ -7694,9 +7690,7 @@ def _build_release_locked(
         code="operator_source_invalid",
     )
     retention_toolchain_sources = _read_release_retention_toolchain_sources(operator_source)
-    retention_toolchain_manifest = _release_retention_toolchain_manifest_bytes(
-        retention_toolchain_sources
-    )
+    retention_toolchain_manifest = _release_retention_toolchain_manifest_bytes(retention_toolchain_sources)
     retention_toolchain_manifest_sha256 = _sha256_bytes(retention_toolchain_manifest)
     if retention_toolchain_manifest_sha256 != _closed_hash(
         spec.release_retention_toolchain_manifest_sha256,
@@ -7788,8 +7782,7 @@ def _build_release_locked(
                 code="secondary_product_runner_source_invalid",
             )
             != product_runner_bytes
-            or _read_release_retention_toolchain_sources(operator_source)
-            != retention_toolchain_sources
+            or _read_release_retention_toolchain_sources(operator_source) != retention_toolchain_sources
         ):
             raise ReleaseFailure("release_build_input_changed")
         artifacts = staging / "artifacts"
@@ -7800,9 +7793,7 @@ def _build_release_locked(
         retention_toolchain_tools.mkdir(parents=True, mode=0o700)
         for module in _RELEASE_RETENTION_TOOLCHAIN_PACKAGE_FILES:
             (retention_toolchain_tools / module).write_bytes(retention_toolchain_sources[module])
-        (staging / _RELEASE_RETENTION_TOOLCHAIN_MANIFEST).write_bytes(
-            retention_toolchain_manifest
-        )
+        (staging / _RELEASE_RETENTION_TOOLCHAIN_MANIFEST).write_bytes(retention_toolchain_manifest)
         alias_tool = _regular_file(spec.alias_tool, maximum_bytes=4 << 20, code="alias_tool_invalid")
         alias_dependency = _regular_file(
             spec.alias_dependency,
@@ -7853,16 +7844,10 @@ def _build_release_locked(
         if pair_bearing_receipt:
             metadata.update(
                 {
-                    "operator_transaction_lock_scope_contract": (
-                        OPERATOR_TRANSACTION_LOCK_SCOPE_CONTRACT
-                    ),
+                    "operator_transaction_lock_scope_contract": (OPERATOR_TRANSACTION_LOCK_SCOPE_CONTRACT),
                     "operator_transaction_lock_scope_sha256": lock_scope_sha256,
-                    "release_retention_toolchain_contract": (
-                        RELEASE_RETENTION_TOOLCHAIN_CONTRACT
-                    ),
-                    "release_retention_toolchain_manifest_sha256": (
-                        retention_toolchain_manifest_sha256
-                    ),
+                    "release_retention_toolchain_contract": (RELEASE_RETENTION_TOOLCHAIN_CONTRACT),
+                    "release_retention_toolchain_manifest_sha256": (retention_toolchain_manifest_sha256),
                 }
             )
         (artifacts / "immutable-release.json").write_bytes(_canonical_json(metadata) + b"\n")
@@ -7888,9 +7873,7 @@ def _build_release_locked(
                 retention_toolchain_manifest_sha256 if pair_bearing_receipt else ""
             ),
             build_receipt_profile=spec.build_receipt_profile,
-            sealed_release_retention_toolchain_manifest_sha256=(
-                retention_toolchain_manifest_sha256
-            ),
+            sealed_release_retention_toolchain_manifest_sha256=(retention_toolchain_manifest_sha256),
         )
         installed_surface_smoke(provisional)
         _relocate_venv_generated_paths(staging, target)
@@ -7953,9 +7936,7 @@ def _build_release_locked(
                 retention_toolchain_manifest_sha256 if pair_bearing_receipt else ""
             ),
             build_receipt_profile=spec.build_receipt_profile,
-            sealed_release_retention_toolchain_manifest_sha256=(
-                retention_toolchain_manifest_sha256
-            ),
+            sealed_release_retention_toolchain_manifest_sha256=(retention_toolchain_manifest_sha256),
         )
         verify_release_tree(release)
         installed_surface_smoke(release)
@@ -18216,11 +18197,7 @@ def load_release_identity(root: Path, *, expected_tree_sha256: str) -> ReleaseId
     (
         release_retention_toolchain_contract,
         release_retention_toolchain_manifest_sha256,
-    ) = (
-        _release_retention_toolchain_receipt_identity(metadata)
-        if isinstance(metadata, dict)
-        else ("", "")
-    )
+    ) = _release_retention_toolchain_receipt_identity(metadata) if isinstance(metadata, dict) else ("", "")
     if (
         not isinstance(metadata, dict)
         or not expected_metadata_keys.issubset(metadata_keys)
@@ -18339,21 +18316,16 @@ def load_release_identity(root: Path, *, expected_tree_sha256: str) -> ReleaseId
         operator_transaction_lock_scope_contract=operator_transaction_lock_scope_contract,
         operator_transaction_lock_scope_sha256=operator_transaction_lock_scope_sha256,
         release_retention_toolchain_contract=release_retention_toolchain_contract,
-        release_retention_toolchain_manifest_sha256=(
-            release_retention_toolchain_manifest_sha256
-        ),
+        release_retention_toolchain_manifest_sha256=(release_retention_toolchain_manifest_sha256),
     )
     verify_release_tree(release)
-    sealed_toolchain_manifest_sha256 = _sealed_release_retention_toolchain_manifest_sha256(
-        resolved
-    )
+    sealed_toolchain_manifest_sha256 = _sealed_release_retention_toolchain_manifest_sha256(resolved)
     lock_scope_present = bool(operator_transaction_lock_scope_contract)
     retention_receipt_present = bool(release_retention_toolchain_contract)
     if retention_receipt_present:
         if (
             not sealed_toolchain_manifest_sha256
-            or release_retention_toolchain_manifest_sha256
-            != sealed_toolchain_manifest_sha256
+            or release_retention_toolchain_manifest_sha256 != sealed_toolchain_manifest_sha256
             or not lock_scope_present
         ):
             raise ReleaseFailure("release_metadata_invalid")
@@ -18367,9 +18339,7 @@ def load_release_identity(root: Path, *, expected_tree_sha256: str) -> ReleaseId
     return replace(
         release,
         build_receipt_profile=build_receipt_profile,
-        sealed_release_retention_toolchain_manifest_sha256=(
-            sealed_toolchain_manifest_sha256
-        ),
+        sealed_release_retention_toolchain_manifest_sha256=(sealed_toolchain_manifest_sha256),
     )
 
 
