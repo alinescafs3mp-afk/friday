@@ -7,7 +7,7 @@ import io
 import json
 import zipfile
 from dataclasses import replace
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from typing import Any
 
 import pytest
@@ -193,8 +193,10 @@ def test_unqualified_document_period_uses_arrival_time_not_own_document_date() -
 def test_date_only_clarification_inherits_select_and_summarize_instead_of_archive(
     settings,
     storage,
+    monkeypatch,
 ) -> None:
     runtime, actor, tenant = _runtime(settings, storage)
+    monkeypatch.setattr(runtime, "_local_today", lambda: date(2026, 8, 15))
     for index in range(5):
         _file(
             storage,
@@ -268,6 +270,7 @@ async def test_archive_correction_full_chat_summarizes_exact_four_registered_doc
     monkeypatch,
 ) -> None:
     runtime, actor, tenant = _runtime(settings, storage)
+    monkeypatch.setattr(runtime, "_local_today", lambda: date(2026, 8, 15))
     configured = replace(settings, verify_answers=False)
     runtime.settings = configured
     runtime.llm.settings = configured

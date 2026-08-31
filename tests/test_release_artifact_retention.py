@@ -233,29 +233,61 @@ def _unit_core(current: _Release, previous: _Release, *, phase: str = "complete"
         "friday-bridge.service.d/dependency.conf": "5" * 64,
         "friday-bridge.service.d/security.conf": "5" * 64,
     }
-    receipt = hashlib.sha256(
-        _canonical(
-            {
-                "candidate_tree_sha256": current.identity.tree_manifest_sha256,
-                "previous_tree_sha256": previous.identity.tree_manifest_sha256,
-                "unit_hashes": unit_hashes,
-            }
-        )
-    ).hexdigest()
-    return {
+    admission_core = {
+        "accepted_root_plan_sha256": "8" * 64,
+        "activation_receipt_file_sha256": "9" * 64,
+        "activation_receipt_sha256": "a" * 64,
+        "batch_ordinal": 1,
+        "current_candidate_sha256": "b" * 64,
+        "current_generation_id": "c" * 64,
+        "current_generation_receipt_sha256": "d" * 64,
+        "cycle_sha256": "e" * 64,
+        "index_journal_sha256": "f" * 64,
+        "index_revision": 4,
+        "older_candidate_sha256": "0" * 64,
+        "older_generation_id": "1" * 64,
+        "older_generation_receipt_sha256": "2" * 64,
+        "retention_scope_schema": retention.RETENTION_SCOPE_SCHEMA,
+        "retention_scope_sha256": "3" * 64,
+        "reviewed_full_candidate_set_sha256": "4" * 64,
+        "schema": operator._RETENTION_CONVERGENCE_RECEIPT_SCHEMA,  # noqa: SLF001
+        "status": "converged",
+        "terminal_apply_receipt_sha256": "5" * 64,
+    }
+    admission = {
+        **admission_core,
+        "receipt_sha256": hashlib.sha256(_canonical(admission_core)).hexdigest(),
+    }
+    core = {
         "schema": operator.UNIT_INSTALL_JOURNAL_SCHEMA,
-        "transaction_id": "6" * 64,
         "phase": phase,
         "candidate": current.record,
         "previous": previous.record,
         "transition_root": str(previous.identity.root),
         "candidate_unit_hashes": unit_hashes,
+        "legacy_bootstrap_unit_install_file_sha256": "",
+        "retention_admission": admission,
+        "retention_admission_receipt_sha256": admission["receipt_sha256"],
         "transition_unit_hashes": {
             "friday-backend.service": "7" * 64,
             "friday-bridge.service": "8" * 64,
         },
-        "receipt_sha256": receipt if phase == "complete" else "",
+        "receipt_sha256": "",
     }
+    core["transaction_id"] = operator._unit_install_transaction_id(core)  # noqa: SLF001
+    if phase == "complete":
+        core["receipt_sha256"] = hashlib.sha256(
+            _canonical(
+                {
+                    "candidate_tree_sha256": current.identity.tree_manifest_sha256,
+                    "previous_tree_sha256": previous.identity.tree_manifest_sha256,
+                    "retention_admission": admission,
+                    "retention_admission_receipt_sha256": admission["receipt_sha256"],
+                    "unit_hashes": unit_hashes,
+                }
+            )
+        ).hexdigest()
+    return core
 
 
 @pytest.fixture
@@ -3712,7 +3744,7 @@ def test_plan_namespace_and_preexisting_quarantine_are_rejected_before_mutation(
     initial = retention_apply._new_journal(  # noqa: SLF001
         plan,
         candidates,
-        durable_plan=(tmp_path / "durable-plan.json", 1, 1),
+        durable_plan=(outside, 1, 1),
         filesystem_before=[],
     )
     entry = initial["entries"][0]
