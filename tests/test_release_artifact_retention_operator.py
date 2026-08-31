@@ -12,9 +12,7 @@ from tools import release_artifact_retention_operator as operator
 
 
 def _canonical(value: object) -> bytes:
-    return json.dumps(value, ensure_ascii=True, separators=(",", ":"), sort_keys=True).encode(
-        "ascii"
-    )
+    return json.dumps(value, ensure_ascii=True, separators=(",", ":"), sort_keys=True).encode("ascii")
 
 
 def _epoch() -> dict[str, Any]:
@@ -102,14 +100,18 @@ def test_seventeen_candidates_converge_as_sixteen_then_one_then_fresh_zero(
     monkeypatch.setattr(
         operator,
         "_candidate_records",
-        lambda plan: tuple({"path": f"/{index}"} for index in range({"root": 16, "one": 1}.get(plan["kind"], 0))),
+        lambda plan: tuple(
+            {"path": f"/{index}"} for index in range({"root": 16, "one": 1}.get(plan["kind"], 0))
+        ),
     )
     monkeypatch.setattr(
         operator,
         "_is_exact_terminal_zero_plan",
         lambda plan, _candidates: plan["kind"] == "zero",
     )
-    monkeypatch.setattr(operator, "_stage_generated_plan", lambda _state, plan: tmp_path / f"{plan['kind']}.json")
+    monkeypatch.setattr(
+        operator, "_stage_generated_plan", lambda _state, plan: tmp_path / f"{plan['kind']}.json"
+    )
     calls: list[tuple[Path | None, dict[str, Any]]] = []
 
     def apply(**kwargs: Any) -> dict[str, Any]:
@@ -132,12 +134,8 @@ def test_seventeen_candidates_converge_as_sixteen_then_one_then_fresh_zero(
 
     assert result["status"] == "converged"
     assert [context["batch_ordinal"] for _path, context in calls] == [0, 1, 2]
-    assert calls[1][1]["previous_receipt_sha256"] == _receipt(
-        calls[0][1], count=16
-    )["receipt_sha256"]
-    assert calls[2][1]["previous_receipt_sha256"] == _receipt(
-        calls[1][1], count=1
-    )["receipt_sha256"]
+    assert calls[1][1]["previous_receipt_sha256"] == _receipt(calls[0][1], count=16)["receipt_sha256"]
+    assert calls[2][1]["previous_receipt_sha256"] == _receipt(calls[1][1], count=1)["receipt_sha256"]
     assert len({context["cycle_sha256"] for _path, context in calls}) == 1
 
 
@@ -456,9 +454,7 @@ def test_open_only_root_never_stages_a_later_false_terminal_zero(
     monkeypatch.setattr(
         operator,
         "apply_retention_plan",
-        lambda **_kwargs: (_ for _ in ()).throw(
-            AssertionError("unexecutable review must not apply")
-        ),
+        lambda **_kwargs: (_ for _ in ()).throw(AssertionError("unexecutable review must not apply")),
     )
 
     with pytest.raises(
@@ -489,9 +485,7 @@ def test_oversized_deferred_root_is_rejected_before_any_effect(
     monkeypatch.setattr(
         operator,
         "apply_retention_plan",
-        lambda **_kwargs: (_ for _ in ()).throw(
-            AssertionError("oversized review must not apply")
-        ),
+        lambda **_kwargs: (_ for _ in ()).throw(AssertionError("oversized review must not apply")),
     )
 
     with pytest.raises(

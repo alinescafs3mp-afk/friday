@@ -2662,10 +2662,7 @@ class DurableDRGenerationIndex:
             )
             if (expected_transition is None) != (following_anchor is None) or (
                 expected_transition is not None
-                and (
-                    following_anchor != expected_anchor
-                    or dict(following_core) != expected_transition
-                )
+                and (following_anchor != expected_anchor or dict(following_core) != expected_transition)
             ):
                 raise DRGenerationIndexError("dr_generation_preactivation_anchor_invalid")
         expected_payload, raw = _encode_state(following_core)

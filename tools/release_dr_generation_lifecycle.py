@@ -310,9 +310,10 @@ def run_terminal_activation_lifecycle(
     try:
         if (reviewed_plan_path is None) != (expected_reviewed_plan_sha256 is None):
             raise DRGenerationLifecycleError("dr_lifecycle_retention_review_pair_required")
-        if expected_reviewed_plan_sha256 is not None and re.fullmatch(
-            r"[0-9a-f]{64}", expected_reviewed_plan_sha256
-        ) is None:
+        if (
+            expected_reviewed_plan_sha256 is not None
+            and re.fullmatch(r"[0-9a-f]{64}", expected_reviewed_plan_sha256) is None
+        ):
             raise DRGenerationLifecycleError("dr_lifecycle_retention_review_digest_invalid")
         admission = enrollment.enroll_terminal_activation_backup(
             activation_receipt=activation_receipt,
