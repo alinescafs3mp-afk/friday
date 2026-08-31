@@ -496,7 +496,7 @@ def _auth_receipt(candidate: dict[str, Any], ordinal: int = 1) -> dict[str, Any]
         ).hexdigest(),
         "database_schema": candidate["database_schema"],
         "restore_operator_sha256": digest(6),
-        "schema": dr_auth.AUTHENTICATION_RECEIPT_SCHEMA,
+        "schema": dr_index.AUTHENTICATION_RECEIPT_SCHEMA,
         "source_transaction_id": candidate["source_transaction_id"],
         "status": "authenticated",
         "surface_receipts": {
@@ -1382,6 +1382,8 @@ def test_isolated_port_rejects_each_tampered_sealed_release_identity_before_open
 def _authenticated_home(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
+    *,
+    v2: bool = False,
 ) -> tuple[
     Path,
     dr_index.DurableDRGenerationIndex,
@@ -1394,7 +1396,73 @@ def _authenticated_home(
     _private(data / "backups")
     monkeypatch.setenv("FRIDAY_HOME", str(home))
     candidate = _candidate(home)
-    authentication = _auth_receipt(candidate)
+    if v2:
+        activation_core = {
+            "alias_repair": {},
+            "backend_accepted": True,
+            "backup_receipt_sha256": candidate["database_receipt_sha256"],
+            "bridge_accepted": True,
+            "candidate_tree_sha256": "c" * 64,
+            "database_schema_before": candidate["database_schema"],
+            "engineer_backup_receipt_sha256": candidate["engineer_receipt_sha256"],
+            "inbox_backup_receipt_sha256": candidate["inbox_receipt_sha256"],
+            "obsidian_backup_receipt_sha256": candidate["obsidian_receipt_sha256"],
+            "runtime_policy": {},
+            "schema": release_operator.ACTIVATION_RECEIPT_SCHEMA,
+            "status": "clear",
+        }
+        activation_body = {
+            **activation_core,
+            "operator_schema": release_operator.OPERATOR_SCHEMA,
+            "receipt_sha256": hashlib.sha256(_canonical(activation_core)).hexdigest(),
+        }
+        candidate["source_receipt_sha256"] = activation_body["receipt_sha256"]
+        backup_status = Path(candidate["backup_directory"]).stat()
+        previous_record = {
+            "commit": "a" * 40,
+            "max_schema": 50,
+            "root": str(_private(home / "releases/previous-v2")),
+            "tree_manifest_sha256": "a" * 64,
+            "version": "0.207.0",
+            "wheel_sha256": "b" * 64,
+        }
+        authentication_core = {
+            "activation_receipt": activation_body,
+            "allowed_rollback_tree_sha256s": candidate["allowed_rollback_tree_sha256s"],
+            "activation_journal_file_sha256": "1" * 64,
+            "activation_journal_sha256": "2" * 64,
+            "activation_receipt_file_sha256": hashlib.sha256(_canonical(activation_body) + b"\n").hexdigest(),
+            "activation_receipt_sha256": activation_body["receipt_sha256"],
+            "backup_directory": {
+                "device": backup_status.st_dev,
+                "inode": backup_status.st_ino,
+                "path": candidate["backup_directory"],
+            },
+            "backup_manifest_sha256": "3" * 64,
+            "candidate_sha256": hashlib.sha256(_canonical(candidate)).hexdigest(),
+            "database_schema": candidate["database_schema"],
+            "release_records": {
+                "fallback": candidate["restore_release"],
+                "previous": previous_record,
+            },
+            "restore_operator_sha256": "4" * 64,
+            "schema": dr_index.AUTHENTICATION_RECEIPT_SCHEMA_V2,
+            "source_transaction_id": candidate["source_transaction_id"],
+            "status": "authenticated",
+            "surface_receipts": {
+                "database": candidate["database_receipt_sha256"],
+                "engineer": candidate["engineer_receipt_sha256"],
+                "inbox": candidate["inbox_receipt_sha256"],
+                "obsidian": candidate["obsidian_receipt_sha256"],
+            },
+        }
+        authentication = {
+            **authentication_core,
+            "receipt_sha256": hashlib.sha256(_canonical(authentication_core)).hexdigest(),
+        }
+    else:
+        activation_body = None
+        authentication = _auth_receipt(candidate)
     index = dr_index.DurableDRGenerationIndex(state)
     initial = index.initialize()
     prepared = index.prepare(
@@ -1407,7 +1475,9 @@ def _authenticated_home(
         expected_journal_sha256=prepared["journal_sha256"],
     )
     activation_receipt = tmp_path / "activation.json"
-    activation_receipt.write_text("{}\n", encoding="ascii")
+    activation_receipt.write_bytes(
+        (_canonical(activation_body) if activation_body is not None else b"{}") + b"\n"
+    )
     material = dr_auth.AuthenticatedDRMaterial(
         authenticated=dr_auth.AuthenticatedDRCandidate(candidate, authentication),
         backup=release_operator.DatabaseBackup(
@@ -1807,9 +1877,19 @@ def test_receipt_publication_before_cas_is_restart_safe(
     monkeypatch: pytest.MonkeyPatch,
     isolated_operator_transaction_domain: Path,
 ) -> None:
-    home, index, material, activation_receipt = _authenticated_home(tmp_path, monkeypatch)
+    home, index, material, activation_receipt = _authenticated_home(
+        tmp_path,
+        monkeypatch,
+        v2=True,
+    )
     monkeypatch.setattr(rehearsal, "_SCRATCH_PARENT", tmp_path)
-    monkeypatch.setattr(dr_auth, "_authenticate_material_locked", lambda **_kwargs: material)
+    authenticated_paths: list[Path] = []
+
+    def authenticate_from_durable(**kwargs: Any) -> dr_auth.AuthenticatedDRMaterial:
+        authenticated_paths.append(kwargs["activation_receipt"])
+        return material
+
+    monkeypatch.setattr(dr_auth, "_authenticate_material_locked", authenticate_from_durable)
     monkeypatch.setattr(rehearsal, "_engineer_authority_present", lambda _backup: False)
     run_calls: list[int] = []
     monkeypatch.setattr(
@@ -1861,13 +1941,22 @@ def test_receipt_publication_before_cas_is_restart_safe(
     assert index.load()["phase"] == "authenticated"
     receipt_directory = home / "data/state/immutable-release-dr-generation-receipts"
     assert len(tuple(receipt_directory.glob("rehearsal-*.json"))) == 1
+    activation_receipt.unlink()
 
     receipt = rehearsal.rehearse_authenticated_generation(activation_receipt=activation_receipt)
 
     assert receipt["status"] == "rehearsed"
+    assert receipt["schema"] == dr_index.REHEARSAL_RECEIPT_SCHEMA_V2
+    assert (
+        receipt["exercised_release"]
+        == material.authenticated.authentication_receipt["release_records"]["previous"]
+    )
     assert index.load()["phase"] == "rehearsed"
     assert len(run_calls) == 2
     assert len(tuple(receipt_directory.glob("rehearsal-*.json"))) == 1
+    assert authenticated_paths
+    assert all(path.parent == receipt_directory for path in authenticated_paths)
+    assert all(path.name.startswith("activation-") for path in authenticated_paths)
 
 
 def test_pending_identity_returns_bodies_from_one_authenticated_cas_epoch(

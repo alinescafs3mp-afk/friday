@@ -258,7 +258,12 @@ def _unit_core(current: _Release, previous: _Release, *, phase: str = "complete"
 
 
 @pytest.fixture
-def synthetic_inventory(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
+def synthetic_inventory(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    request: pytest.FixtureRequest,
+) -> dict[str, Any]:
+    receipt_version = getattr(request, "param", "v1")
     monkeypatch.setattr(
         retention,
         "_SUPPORTED_FILESYSTEM_MAGICS",
@@ -325,8 +330,17 @@ def synthetic_inventory(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict
         source_kind: str = "terminal_activation",
     ) -> dict[str, Any]:
         digest = lambda label: hashlib.sha256(f"{label}-{ordinal}".encode()).hexdigest()  # noqa: E731
-        return {
-            "allowed_rollback_tree_sha256s": [release.record["tree_manifest_sha256"]],
+        candidate = {
+            "allowed_rollback_tree_sha256s": (
+                sorted(
+                    {
+                        old.record["tree_manifest_sha256"],
+                        release.record["tree_manifest_sha256"],
+                    }
+                )
+                if receipt_version == "v2"
+                else [release.record["tree_manifest_sha256"]]
+            ),
             "backup_directory": str(backup["directory"]),
             "backup_record_sha256": hashlib.sha256(_canonical(backup)).hexdigest(),
             "database_schema": backup["schema_version"],
@@ -342,6 +356,30 @@ def synthetic_inventory(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict
             "source_kind": source_kind,
             "source_receipt_sha256": digest("source-receipt"),
             "source_transaction_id": digest("transaction"),
+        }
+        if receipt_version == "v2":
+            candidate["source_receipt_sha256"] = activation_receipt(candidate)["receipt_sha256"]
+        return candidate
+
+    def activation_receipt(candidate: dict[str, Any]) -> dict[str, Any]:
+        core = {
+            "alias_repair": {},
+            "backend_accepted": True,
+            "backup_receipt_sha256": candidate["database_receipt_sha256"],
+            "bridge_accepted": True,
+            "candidate_tree_sha256": current.identity.tree_manifest_sha256,
+            "database_schema_before": candidate["database_schema"],
+            "engineer_backup_receipt_sha256": candidate["engineer_receipt_sha256"],
+            "inbox_backup_receipt_sha256": candidate["inbox_receipt_sha256"],
+            "obsidian_backup_receipt_sha256": candidate["obsidian_receipt_sha256"],
+            "runtime_policy": {},
+            "schema": operator.ACTIVATION_RECEIPT_SCHEMA,
+            "status": "clear",
+        }
+        return {
+            **core,
+            "operator_schema": operator.OPERATOR_SCHEMA,
+            "receipt_sha256": hashlib.sha256(_canonical(core)).hexdigest(),
         }
 
     def authentication_receipt(candidate: dict[str, Any], ordinal: int) -> dict[str, Any]:
@@ -371,6 +409,21 @@ def synthetic_inventory(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict
                 "obsidian": candidate["obsidian_receipt_sha256"],
             },
         }
+        if receipt_version == "v2":
+            activation = activation_receipt(candidate)
+            core.update(
+                {
+                    "activation_receipt": activation,
+                    "activation_receipt_file_sha256": hashlib.sha256(
+                        _canonical(activation) + b"\n"
+                    ).hexdigest(),
+                    "release_records": {
+                        "fallback": candidate["restore_release"],
+                        "previous": {**old.record, "wheel_sha256": old.wheel_sha256},
+                    },
+                    "schema": retention.dr_index.AUTHENTICATION_RECEIPT_SCHEMA_V2,
+                }
+            )
         receipt = {**core, "receipt_sha256": hashlib.sha256(_canonical(core)).hexdigest()}
         return receipt
 
@@ -423,6 +476,13 @@ def synthetic_inventory(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict
             "status": "rehearsed",
             "systemctl_call_count": 0,
         }
+        if receipt_version == "v2":
+            core.update(
+                {
+                    "exercised_release": authentication["release_records"]["fallback"],
+                    "schema": retention.dr_index.REHEARSAL_RECEIPT_SCHEMA_V2,
+                }
+            )
         return {**core, "receipt_sha256": hashlib.sha256(_canonical(core)).hexdigest()}
 
     generation_index = retention.dr_index.DurableDRGenerationIndex(state)
@@ -1475,6 +1535,45 @@ def test_legacy_v1_dr_evidence_never_grants_destructive_authority(
         for item in read_only[key]
     )
     assert probed is False
+
+
+@pytest.mark.parametrize("synthetic_inventory", ("v2",), indirect=True)
+def test_exact_v2_pair_grants_authority_and_protects_every_bound_release(
+    synthetic_inventory: dict[str, Any],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    runtime_parent = synthetic_inventory["activation_journal"].parent.parent / "operator-runtime-v2"
+    runtime_parent.mkdir(mode=0o1700)
+    runtime_parent.chmod(0o1700)
+    monkeypatch.setattr(operator.OperatorTransactionLock, "_RUNTIME_PARENT", runtime_parent)
+    monkeypatch.setattr(
+        retention,
+        "build_complete_open_inventory",
+        lambda *, target_paths: _privileged_open_inventory(target_paths=tuple(target_paths)),
+    )
+    scope = retention.load_retention_scope_authority(
+        activation_journal=synthetic_inventory["activation_journal"]
+    )
+
+    plan = retention.build_eligible_retention_plan(
+        activation_journal=synthetic_inventory["activation_journal"],
+        unit_journal=synthetic_inventory["unit_journal"],
+        backup_root=synthetic_inventory["backup_root"],
+        inventory_roots=(synthetic_inventory["inventory"],),
+        backup_inventory_roots=(synthetic_inventory["backup_root"],),
+        canonical_evidence_roots=scope.canonical_evidence_roots,
+    )
+
+    assert plan["apply_authority"] is True
+    assert plan["block_reason"] == ""
+    old = next(item for item in plan["targets"] if Path(item["path"]).name == "old")
+    assert old["decision"] == "retain"
+    assert old["reason"] == "dr_restore_release"
+    pins = plan["authority_bindings"]["dr_pins"]
+    assert {pin["role"] for pin in pins} == {"current", "older"}
+    assert all(pin["activation_receipt_path"] for pin in pins)
+    assert all(len(pin["activation_receipt_file_sha256"]) == 64 for pin in pins)
+    assert all(Path(pin["activation_receipt_path"]).read_bytes() for pin in pins)
 
 
 def _plan_file(plan: dict[str, Any], path: Path) -> Path:

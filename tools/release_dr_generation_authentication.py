@@ -24,7 +24,7 @@ from typing import Any
 from tools import immutable_release_operator as release_operator
 from tools import release_dr_generation_index as dr_index
 
-AUTHENTICATION_RECEIPT_SCHEMA = dr_index.AUTHENTICATION_RECEIPT_SCHEMA
+AUTHENTICATION_RECEIPT_SCHEMA = dr_index.AUTHENTICATION_RECEIPT_SCHEMA_V2
 MAX_ACTIVATION_RECEIPT_BYTES = 1 << 20
 
 _HEX64 = frozenset("0123456789abcdef")
@@ -354,10 +354,14 @@ def _authenticate_locked(
     backup = journal.database_backup(verify_engineer_sqlite_integrity=False)
     if backup is None:
         raise DRGenerationAuthenticationError("dr_activation_backup_missing")
-    _candidate, previous, fallback = journal.release_identities()
+    activation_candidate, previous, fallback = journal.release_identities()
     if fallback.max_schema < backup.schema_version:
         raise DRGenerationAuthenticationError("dr_restore_release_schema_incapable")
-    restore_release = _release_record(fallback)
+    release_records = {
+        "fallback": _release_record(fallback),
+        "previous": _release_record(previous),
+    }
+    restore_release = release_records["fallback"]
     payload = backup.opaque
     directory = getattr(payload, "directory", None)
     if (
@@ -375,6 +379,8 @@ def _authenticate_locked(
         private=False,
     )
     activation_payload = _json(activation_raw, code="dr_activation_receipt_invalid")
+    if activation_raw != _canonical(activation_payload) + b"\n":
+        raise DRGenerationAuthenticationError("dr_activation_receipt_invalid")
     activation_receipt_sha256 = _validate_activation_receipt(
         activation_payload,
         state=state,
@@ -434,6 +440,7 @@ def _authenticate_locked(
         "activation_journal_file_sha256": _sha256(journal_raw_before),
         "activation_journal_sha256": activation_journal_sha256,
         "activation_receipt_file_sha256": _sha256(activation_raw),
+        "activation_receipt": activation_payload,
         "activation_receipt_sha256": activation_receipt_sha256,
         "backup_directory": {
             "device": directory_identity_before[0],
@@ -444,6 +451,7 @@ def _authenticate_locked(
         "candidate_sha256": candidate_sha256,
         "database_schema": candidate["database_schema"],
         "restore_operator_sha256": _sha256(operator_raw),
+        "release_records": release_records,
         "schema": AUTHENTICATION_RECEIPT_SCHEMA,
         "source_transaction_id": candidate["source_transaction_id"],
         "status": "authenticated",
@@ -466,8 +474,11 @@ def _authenticate_locked(
         private=False,
     )
     backup_after = journal.database_backup(verify_engineer_sqlite_integrity=False)
-    _candidate_after, previous_after, fallback_after = journal.release_identities()
-    restore_release_after = _release_record(fallback_after)
+    activation_candidate_after, previous_after, fallback_after = journal.release_identities()
+    release_records_after = {
+        "fallback": _release_record(fallback_after),
+        "previous": _release_record(previous_after),
+    }
     backup_manifest_after, manifest_status_after = _stable_private_file(
         backup_manifest,
         maximum=1 << 20,
@@ -488,9 +499,10 @@ def _authenticate_locked(
         or _directory_identity(backup_root) != backup_root_identity
         or _directory_identity(directory) != directory_identity_before
         or backup_after != backup
+        or activation_candidate_after != activation_candidate
         or previous_after != previous
         or fallback_after != fallback
-        or restore_release_after != restore_release
+        or release_records_after != release_records
         or backup_manifest_after != backup_manifest_raw
         or _file_identity(manifest_status_after) != _file_identity(manifest_status)
         or operator_after != operator_raw
@@ -501,6 +513,10 @@ def _authenticate_locked(
         **receipt_core,
         "receipt_sha256": _sha256(_canonical(receipt_core)),
     }
+    try:
+        dr_index.validate_authentication_receipt(authentication_receipt, candidate=candidate)
+    except dr_index.DRGenerationIndexError as exc:
+        raise DRGenerationAuthenticationError("dr_authentication_receipt_invalid") from exc
     return AuthenticatedDRCandidate(candidate, authentication_receipt)
 
 
@@ -692,6 +708,34 @@ def reauthenticate_generation_candidate(
         if _sha256(operator_raw) != receipt["restore_operator_sha256"]:
             raise DRGenerationAuthenticationError("dr_retained_restore_operator_mismatch")
 
+        bound_release_records: dict[str, dict[str, Any]] = {}
+        if receipt.get("schema") == dr_index.AUTHENTICATION_RECEIPT_SCHEMA_V2:
+            raw_records = receipt.get("release_records")
+            if not isinstance(raw_records, dict):
+                raise DRGenerationAuthenticationError("dr_retained_release_records_invalid")
+            for role in ("fallback", "previous"):
+                record = raw_records.get(role)
+                if not isinstance(record, dict):
+                    raise DRGenerationAuthenticationError("dr_retained_release_records_invalid")
+                identity = release_operator.load_release_identity(
+                    Path(str(record.get("root") or "")),
+                    expected_tree_sha256=str(record.get("tree_manifest_sha256") or ""),
+                )
+                release_operator.verify_release_tree(identity)
+                observed_record = _release_record(identity)
+                if observed_record != record:
+                    raise DRGenerationAuthenticationError("dr_retained_release_record_mismatch")
+                bound_release_records[role] = observed_record
+
+        bound_release_records_after: dict[str, dict[str, Any]] = {}
+        for role, record in bound_release_records.items():
+            identity = release_operator.load_release_identity(
+                Path(record["root"]),
+                expected_tree_sha256=record["tree_manifest_sha256"],
+            )
+            release_operator.verify_release_tree(identity)
+            bound_release_records_after[role] = _release_record(identity)
+
         manifest_after, manifest_after_status = _stable_private_file(
             directory / "manifest.json",
             maximum=1 << 20,
@@ -715,6 +759,7 @@ def reauthenticate_generation_candidate(
             or _file_identity(obsidian_after_status) != _file_identity(obsidian_status)
             or engineer_after != engineer_raw
             or _file_identity(engineer_after_status) != _file_identity(engineer_status)
+            or bound_release_records_after != bound_release_records
             or any(
                 _file_identity(
                     _stable_private_file_digest(
@@ -810,6 +855,10 @@ def _authenticate_material_locked(
             fallback.tree_manifest_sha256,
         }
     )
+    release_records = {
+        "fallback": _release_record(fallback),
+        "previous": _release_record(activation_previous),
+    }
     if (
         not isinstance(payload, release_operator._ExactBackupPayload)  # noqa: SLF001
         or payload.obsidian is None
@@ -822,6 +871,7 @@ def _authenticate_material_locked(
         or backup.engineer_receipt_sha256 != first.candidate["engineer_receipt_sha256"]
         or allowed_rollback_tree_sha256s != first.candidate["allowed_rollback_tree_sha256s"]
         or _release_record(fallback) != first.candidate["restore_release"]
+        or first.authentication_receipt.get("release_records") != release_records
     ):
         raise DRGenerationAuthenticationError("dr_rehearsal_material_mismatch")
     second = _authenticate_locked(

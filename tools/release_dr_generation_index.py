@@ -33,6 +33,8 @@ INDEX_SCHEMA = "friday.immutable-release-dr-generations.v1"
 HEAD_FENCE_SCHEMA = "friday.immutable-release-dr-generation-head-fence.v1"
 AUTHENTICATION_RECEIPT_SCHEMA = "friday.immutable-release-dr-authentication-receipt.v1"
 REHEARSAL_RECEIPT_SCHEMA = "friday.immutable-release-dr-rehearsal-receipt.v1"
+AUTHENTICATION_RECEIPT_SCHEMA_V2 = "friday.immutable-release-dr-authentication-receipt.v2"
+REHEARSAL_RECEIPT_SCHEMA_V2 = "friday.immutable-release-dr-rehearsal-receipt.v2"
 REHEARSAL_BINDING_SCHEMA = "friday.immutable-release-dr-rehearsal-binding.v1"
 GENERATION_CANDIDATE_SCHEMA = "friday.immutable-release-dr-generation-candidate.v1"
 GENERATION_SCHEMA = "friday.immutable-release-dr-generation.v1"
@@ -54,6 +56,10 @@ ZERO_SHA256 = "0" * 64
 
 AUTHENTICATION_RECEIPT_KIND = "authentication"
 REHEARSAL_RECEIPT_KIND = "rehearsal"
+ACTIVATION_RECEIPT_KIND = "activation"
+
+_ACTIVATION_RECEIPT_SCHEMA = "friday.immutable-release-activation.v1"
+_ACTIVATION_OPERATOR_SCHEMA = "friday.immutable-release-operator.v1"
 
 DR_REHEARSAL_CHECKS = (
     "authenticated_pending_bound",
@@ -100,6 +106,8 @@ class GenerationPin:
     receipt_sha256: str | None
     authentication_receipt_path: Path | None
     authentication_receipt_sha256: str | None
+    activation_receipt_path: Path | None
+    activation_receipt_file_sha256: str | None
     rehearsal_receipt_path: Path | None
     rehearsal_receipt_sha256: str | None
     rehearsal_binding: dict[str, Any] | None
@@ -574,6 +582,123 @@ def _external_receipt_body(
 DR_REHEARSAL_CHECKSET_SHA256 = _sha256(_canonical_json(DR_REHEARSAL_CHECKS))
 
 
+def _normalize_bound_release(value: object, *, code: str) -> dict[str, Any]:
+    expected = {
+        "commit",
+        "max_schema",
+        "root",
+        "tree_manifest_sha256",
+        "version",
+        "wheel_sha256",
+    }
+    if not isinstance(value, dict) or set(value) != expected:
+        raise DRGenerationIndexError(code)
+    commit = value.get("commit")
+    max_schema = value.get("max_schema")
+    version = value.get("version")
+    if (
+        not isinstance(commit, str)
+        or _HEX40_RE.fullmatch(commit) is None
+        or type(max_schema) is not int
+        or int(max_schema) <= 0
+        or not isinstance(version, str)
+        or _VERSION_RE.fullmatch(version) is None
+    ):
+        raise DRGenerationIndexError(code)
+    root = _absolute_lexical(Path(str(value.get("root") or "")), code=code)
+    return {
+        "commit": commit,
+        "max_schema": int(max_schema),
+        "root": str(root),
+        "tree_manifest_sha256": _hex64(value.get("tree_manifest_sha256"), code=code),
+        "version": version,
+        "wheel_sha256": _hex64(value.get("wheel_sha256"), code=code),
+    }
+
+
+def _normalize_release_records(
+    value: object,
+    *,
+    candidate: Mapping[str, Any],
+    code: str,
+) -> dict[str, dict[str, Any]]:
+    if not isinstance(value, dict) or set(value) != {"fallback", "previous"}:
+        raise DRGenerationIndexError(code)
+    records = {
+        role: _normalize_bound_release(value.get(role), code=code) for role in ("fallback", "previous")
+    }
+    rollback_trees = sorted(
+        {
+            records["fallback"]["tree_manifest_sha256"],
+            records["previous"]["tree_manifest_sha256"],
+        }
+    )
+    if (
+        records["fallback"] != candidate["restore_release"]
+        or rollback_trees != candidate["allowed_rollback_tree_sha256s"]
+        or candidate["database_schema"] > records["fallback"]["max_schema"]
+        or candidate["database_schema"] > records["previous"]["max_schema"]
+    ):
+        raise DRGenerationIndexError(code)
+    return records
+
+
+def activation_receipt_evidence(
+    authentication_receipt: Mapping[str, Any],
+) -> tuple[dict[str, str], bytes, dict[str, Any]]:
+    """Return the exact v2 activation body and its durable file identity."""
+
+    code = "activation_receipt_invalid"
+    if authentication_receipt.get("schema") != AUTHENTICATION_RECEIPT_SCHEMA_V2:
+        raise DRGenerationIndexError(code)
+    value = authentication_receipt.get("activation_receipt")
+    expected = {
+        "alias_repair",
+        "backend_accepted",
+        "backup_receipt_sha256",
+        "bridge_accepted",
+        "candidate_tree_sha256",
+        "database_schema_before",
+        "engineer_backup_receipt_sha256",
+        "inbox_backup_receipt_sha256",
+        "obsidian_backup_receipt_sha256",
+        "operator_schema",
+        "receipt_sha256",
+        "runtime_policy",
+        "schema",
+        "status",
+    }
+    if not isinstance(value, dict) or set(value) != expected:
+        raise DRGenerationIndexError(code)
+    try:
+        canonical = _canonical_json(value)
+    except DRGenerationIndexError as exc:
+        raise DRGenerationIndexError(code) from exc
+    payload = _unique_json(canonical, code=code)
+    if canonical != _canonical_json(payload):
+        raise DRGenerationIndexError(code)
+    receipt_sha256 = _hex64(payload.get("receipt_sha256"), code=code)
+    semantic_core = {
+        key: item for key, item in payload.items() if key not in {"operator_schema", "receipt_sha256"}
+    }
+    raw = canonical + b"\n"
+    file_sha256 = _sha256(raw)
+    if (
+        payload.get("schema") != _ACTIVATION_RECEIPT_SCHEMA
+        or payload.get("operator_schema") != _ACTIVATION_OPERATOR_SCHEMA
+        or payload.get("status") != "clear"
+        or payload.get("backend_accepted") is not True
+        or payload.get("bridge_accepted") is not True
+        or not isinstance(payload.get("alias_repair"), dict)
+        or not isinstance(payload.get("runtime_policy"), dict)
+        or receipt_sha256 != _sha256(_canonical_json(semantic_core))
+        or authentication_receipt.get("activation_receipt_sha256") != receipt_sha256
+        or authentication_receipt.get("activation_receipt_file_sha256") != file_sha256
+    ):
+        raise DRGenerationIndexError(code)
+    return {"schema": _ACTIVATION_RECEIPT_SCHEMA, "sha256": file_sha256}, raw, payload
+
+
 def validate_authentication_receipt(
     value: object,
     *,
@@ -582,7 +707,7 @@ def validate_authentication_receipt(
     """Authenticate the sole code-owned DR authentication receipt contract."""
 
     normalized_candidate = normalize_generation_candidate(candidate)
-    expected = {
+    expected_v1 = {
         "allowed_rollback_tree_sha256s",
         "activation_journal_file_sha256",
         "activation_journal_sha256",
@@ -599,15 +724,25 @@ def validate_authentication_receipt(
         "status",
         "surface_receipts",
     }
-    if not isinstance(value, dict) or set(value) != expected:
+    if not isinstance(value, dict):
         raise DRGenerationIndexError("authentication_receipt_invalid")
     reference, raw = _external_receipt_body(value, code="authentication_receipt_invalid")
     payload = _unique_json(raw, code="authentication_receipt_invalid")
+    schema = reference["schema"]
+    expected = (
+        expected_v1
+        if schema == AUTHENTICATION_RECEIPT_SCHEMA
+        else expected_v1 | {"activation_receipt", "release_records"}
+    )
+    if (
+        schema not in {AUTHENTICATION_RECEIPT_SCHEMA, AUTHENTICATION_RECEIPT_SCHEMA_V2}
+        or set(payload) != expected
+    ):
+        raise DRGenerationIndexError("authentication_receipt_invalid")
     directory = payload.get("backup_directory")
     surfaces = payload.get("surface_receipts")
     if (
-        reference["schema"] != AUTHENTICATION_RECEIPT_SCHEMA
-        or payload.get("status") != "authenticated"
+        payload.get("status") != "authenticated"
         or payload.get("candidate_sha256") != _sha256(_canonical_json(normalized_candidate))
         or type(payload.get("database_schema")) is not int
         or payload.get("database_schema") != normalized_candidate["database_schema"]
@@ -643,6 +778,27 @@ def validate_authentication_receipt(
         "restore_operator_sha256",
     ):
         _hex64(payload.get(key), code="authentication_receipt_invalid")
+    if schema == AUTHENTICATION_RECEIPT_SCHEMA_V2:
+        try:
+            _activation_reference, _activation_raw, activation = activation_receipt_evidence(payload)
+            records = _normalize_release_records(
+                payload.get("release_records"),
+                candidate=normalized_candidate,
+                code="authentication_receipt_invalid",
+            )
+        except DRGenerationIndexError as exc:
+            raise DRGenerationIndexError("authentication_receipt_invalid") from exc
+        if (
+            activation.get("database_schema_before") != normalized_candidate["database_schema"]
+            or activation.get("backup_receipt_sha256") != normalized_candidate["database_receipt_sha256"]
+            or activation.get("engineer_backup_receipt_sha256")
+            != normalized_candidate["engineer_receipt_sha256"]
+            or activation.get("inbox_backup_receipt_sha256") != normalized_candidate["inbox_receipt_sha256"]
+            or activation.get("obsidian_backup_receipt_sha256")
+            != normalized_candidate["obsidian_receipt_sha256"]
+            or records != payload["release_records"]
+        ):
+            raise DRGenerationIndexError("authentication_receipt_invalid")
     return reference, raw, payload
 
 
@@ -664,7 +820,7 @@ def validate_rehearsal_receipt(
         authentication_receipt,
         candidate=normalized_candidate,
     )
-    expected = {
+    expected_v1 = {
         "authentication_receipt_sha256",
         "candidate_sha256",
         "check_count",
@@ -698,10 +854,20 @@ def validate_rehearsal_receipt(
         "status",
         "systemctl_call_count",
     }
-    if not isinstance(value, dict) or set(value) != expected:
+    if not isinstance(value, dict):
         raise DRGenerationIndexError("rehearsal_receipt_invalid")
     reference, raw = _external_receipt_body(value, code="rehearsal_receipt_invalid")
     payload = _unique_json(raw, code="rehearsal_receipt_invalid")
+    receipt_schema = reference["schema"]
+    expected = (
+        expected_v1 if receipt_schema == REHEARSAL_RECEIPT_SCHEMA else expected_v1 | {"exercised_release"}
+    )
+    expected_pair = {
+        (AUTHENTICATION_RECEIPT_SCHEMA, REHEARSAL_RECEIPT_SCHEMA),
+        (AUTHENTICATION_RECEIPT_SCHEMA_V2, REHEARSAL_RECEIPT_SCHEMA_V2),
+    }
+    if set(payload) != expected or (auth_ref["schema"], receipt_schema) not in expected_pair:
+        raise DRGenerationIndexError("rehearsal_receipt_invalid")
     restore = normalized_candidate["restore_release"]
     restore_projection = {
         key: restore[key]
@@ -740,8 +906,7 @@ def validate_rehearsal_receipt(
         "scratch_removed",
     )
     if (
-        reference["schema"] != REHEARSAL_RECEIPT_SCHEMA
-        or payload.get("status") != "rehearsed"
+        payload.get("status") != "rehearsed"
         or payload.get("candidate_sha256") != _sha256(_canonical_json(normalized_candidate))
         or payload.get("authentication_receipt_sha256") != auth_ref["sha256"]
         or payload.get("index_transaction_id")
@@ -769,11 +934,33 @@ def validate_rehearsal_receipt(
         raise DRGenerationIndexError("rehearsal_receipt_invalid")
     if payload.get("rollback_tree_sha256") not in normalized_candidate["allowed_rollback_tree_sha256s"]:
         raise DRGenerationIndexError("rehearsal_receipt_invalid")
+    if receipt_schema == REHEARSAL_RECEIPT_SCHEMA_V2:
+        try:
+            authentication_records = _normalize_release_records(
+                auth.get("release_records"),
+                candidate=normalized_candidate,
+                code="rehearsal_receipt_invalid",
+            )
+            exercised = _normalize_bound_release(
+                payload.get("exercised_release"), code="rehearsal_receipt_invalid"
+            )
+        except DRGenerationIndexError as exc:
+            raise DRGenerationIndexError("rehearsal_receipt_invalid") from exc
+        if (
+            exercised not in authentication_records.values()
+            or payload.get("rollback_tree_sha256") != exercised["tree_manifest_sha256"]
+            or normalized_candidate["database_schema"] > exercised["max_schema"]
+        ):
+            raise DRGenerationIndexError("rehearsal_receipt_invalid")
     return reference, raw, payload
 
 
 def _external_receipt_name(kind: str, sha256: str) -> str:
-    if kind not in {AUTHENTICATION_RECEIPT_KIND, REHEARSAL_RECEIPT_KIND}:
+    if kind not in {
+        ACTIVATION_RECEIPT_KIND,
+        AUTHENTICATION_RECEIPT_KIND,
+        REHEARSAL_RECEIPT_KIND,
+    }:
         raise DRGenerationIndexError("external_receipt_kind_invalid")
     digest = _hex64(sha256, code="external_receipt_ref_invalid")
     return f"{kind}-{digest}.json"
@@ -1545,6 +1732,24 @@ class DurableDRGenerationIndex:
     def _external_receipt_path(self, kind: str, sha256: str) -> Path:
         return self.receipt_directory / _external_receipt_name(kind, sha256)
 
+    def _load_activation_receipt(
+        self,
+        authentication_receipt: Mapping[str, Any],
+        receipt_fd: int,
+    ) -> dict[str, Any]:
+        reference, expected_raw, expected = activation_receipt_evidence(authentication_receipt)
+        raw = _stable_private_file_at(
+            receipt_fd,
+            _external_receipt_name(ACTIVATION_RECEIPT_KIND, reference["sha256"]),
+            mode=0o400,
+            maximum_bytes=MAX_RECEIPT_BYTES,
+            code="activation_receipt_invalid",
+        )
+        payload = _unique_json(raw, code="activation_receipt_invalid")
+        if raw != expected_raw or payload != expected:
+            raise DRGenerationIndexError("activation_receipt_invalid")
+        return payload
+
     def _load_external_receipt(
         self,
         reference: Mapping[str, str],
@@ -1565,7 +1770,32 @@ class DurableDRGenerationIndex:
         body_ref, expected_raw = _external_receipt_body(payload, code=code)
         if raw != expected_raw or body_ref != normalized_ref:
             raise DRGenerationIndexError(code)
+        if kind == AUTHENTICATION_RECEIPT_KIND and body_ref["schema"] == AUTHENTICATION_RECEIPT_SCHEMA_V2:
+            self._load_activation_receipt(payload, receipt_fd)
         return payload
+
+    def _publish_activation_receipt(
+        self,
+        *,
+        authentication_receipt: Mapping[str, Any],
+        pins: _PinnedDirectories,
+        namespace_guard: Callable[[], None] | None = None,
+    ) -> None:
+        guard = namespace_guard or (lambda: None)
+        reference, raw, _payload = activation_receipt_evidence(authentication_receipt)
+        guard()
+        self._publish_no_replace(
+            directory_fd=pins.receipt_fd,
+            name=_external_receipt_name(ACTIVATION_RECEIPT_KIND, reference["sha256"]),
+            raw=raw,
+            final_mode=0o400,
+            maximum_bytes=MAX_RECEIPT_BYTES,
+            code="activation_receipt_publication_failed",
+        )
+        guard()
+        self._load_activation_receipt(authentication_receipt, pins.receipt_fd)
+        self._require_pinned_namespace(pins)
+        guard()
 
     def _publish_external_receipt(
         self,
@@ -1914,6 +2144,56 @@ class DurableDRGenerationIndex:
                 rehearsal_receipt=rehearsal_ref,
             )
 
+    def current_activation_receipt_path(
+        self,
+        *,
+        expected_journal_sha256: str,
+    ) -> Path | None:
+        """Resolve the exact durable activation body for the current slot."""
+
+        with self._guard() as pins:
+            state = self._load_unlocked(pins)
+            self._require_cas(state, expected_journal_sha256)
+            current = state["current"]
+            if current is None:
+                return None
+            generation = self._load_receipt(current, pins.receipt_fd)["generation"]
+            authentication = self._load_external_receipt(
+                generation["authentication_receipt"],
+                pins.receipt_fd,
+                kind=AUTHENTICATION_RECEIPT_KIND,
+                code="authentication_receipt_invalid",
+            )
+            if authentication.get("schema") != AUTHENTICATION_RECEIPT_SCHEMA_V2:
+                return None
+            reference, _raw, _payload = activation_receipt_evidence(authentication)
+            self._require_pinned_namespace(pins)
+            return self._external_receipt_path(ACTIVATION_RECEIPT_KIND, reference["sha256"])
+
+    def pending_activation_receipt_path(
+        self,
+        *,
+        expected_journal_sha256: str,
+    ) -> Path | None:
+        """Resolve the exact durable activation body for authenticated pending work."""
+
+        with self._guard() as pins:
+            state = self._load_unlocked(pins)
+            self._require_cas(state, expected_journal_sha256)
+            if state["phase"] not in {"authenticated", "rehearsed"}:
+                raise DRGenerationIndexError("dr_generation_pending_not_authenticated")
+            authentication = self._load_external_receipt(
+                state["pending"]["authentication_receipt"],
+                pins.receipt_fd,
+                kind=AUTHENTICATION_RECEIPT_KIND,
+                code="authentication_receipt_invalid",
+            )
+            if authentication.get("schema") != AUTHENTICATION_RECEIPT_SCHEMA_V2:
+                return None
+            reference, _raw, _payload = activation_receipt_evidence(authentication)
+            self._require_pinned_namespace(pins)
+            return self._external_receipt_path(ACTIVATION_RECEIPT_KIND, reference["sha256"])
+
     def pending_generation_identity(
         self,
         *,
@@ -2097,10 +2377,16 @@ class DurableDRGenerationIndex:
             self._require_cas(state, expected_journal_sha256)
             if state["phase"] != "prepared":
                 raise DRGenerationIndexError("dr_generation_transition_invalid")
-            normalized_receipt, receipt_raw, _payload = validate_authentication_receipt(
+            normalized_receipt, receipt_raw, payload = validate_authentication_receipt(
                 receipt,
                 candidate=state["pending"]["candidate"],
             )
+            if normalized_receipt["schema"] == AUTHENTICATION_RECEIPT_SCHEMA_V2:
+                self._publish_activation_receipt(
+                    authentication_receipt=payload,
+                    pins=pins,
+                    namespace_guard=namespace_guard,
+                )
             self._publish_external_receipt(
                 reference=normalized_receipt,
                 raw=receipt_raw,
@@ -2340,6 +2626,34 @@ class DurableDRGenerationIndex:
                 "restore_release_version": str(release["version"]),
             }
 
+        def activation_receipt_fields(
+            authentication_reference: Mapping[str, str] | None,
+        ) -> dict[str, Any]:
+            if authentication_reference is None:
+                return {
+                    "activation_receipt_path": None,
+                    "activation_receipt_file_sha256": None,
+                }
+            authentication_body = self._load_external_receipt(
+                authentication_reference,
+                directories.receipt_fd,
+                kind=AUTHENTICATION_RECEIPT_KIND,
+                code="authentication_receipt_invalid",
+            )
+            if authentication_body.get("schema") != AUTHENTICATION_RECEIPT_SCHEMA_V2:
+                return {
+                    "activation_receipt_path": None,
+                    "activation_receipt_file_sha256": None,
+                }
+            activation_reference, _raw, _payload = activation_receipt_evidence(authentication_body)
+            return {
+                "activation_receipt_path": self._external_receipt_path(
+                    ACTIVATION_RECEIPT_KIND,
+                    activation_reference["sha256"],
+                ),
+                "activation_receipt_file_sha256": activation_reference["sha256"],
+            }
+
         for role in ("current", "older"):
             reference = state[role]
             if reference is None:
@@ -2362,6 +2676,7 @@ class DurableDRGenerationIndex:
                         str(authentication_ref["sha256"]),
                     ),
                     authentication_receipt_sha256=str(authentication_ref["sha256"]),
+                    **activation_receipt_fields(authentication_ref),
                     rehearsal_receipt_path=self._external_receipt_path(
                         REHEARSAL_RECEIPT_KIND,
                         str(rehearsal_ref["sha256"]),
@@ -2406,6 +2721,7 @@ class DurableDRGenerationIndex:
                     authentication_receipt_sha256=(
                         str(authentication_ref["sha256"]) if authentication_ref is not None else None
                     ),
+                    **activation_receipt_fields(authentication_ref),
                     rehearsal_receipt_path=(
                         self._external_receipt_path(
                             REHEARSAL_RECEIPT_KIND,
@@ -2444,7 +2760,9 @@ class DurableDRGenerationIndex:
 
 
 __all__ = [
+    "ACTIVATION_RECEIPT_KIND",
     "AUTHENTICATION_RECEIPT_SCHEMA",
+    "AUTHENTICATION_RECEIPT_SCHEMA_V2",
     "AUTHENTICATION_RECEIPT_KIND",
     "CurrentDRGenerationIdentity",
     "DR_REHEARSAL_CHECKS",
@@ -2467,8 +2785,10 @@ __all__ = [
     "PendingDRGenerationIdentity",
     "RECEIPT_DIRECTORY_NAME",
     "REHEARSAL_RECEIPT_SCHEMA",
+    "REHEARSAL_RECEIPT_SCHEMA_V2",
     "REHEARSAL_RECEIPT_KIND",
     "REHEARSAL_BINDING_SCHEMA",
+    "activation_receipt_evidence",
     "normalize_generation_candidate",
     "validate_authentication_receipt",
     "validate_rehearsal_receipt",

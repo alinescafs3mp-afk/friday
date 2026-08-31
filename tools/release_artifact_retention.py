@@ -83,10 +83,14 @@ _APPLY_AUTHORITY_OPEN_SOURCES = frozenset(
     }
 )
 _SCRATCH_CONTOUR = "exact_owner_tree_without_git_v1"
-# Reader-first release: no currently accepted receipt schema binds the full
-# previous + fallback + exercised rollback release set needed for deletion.
-# The writer package may add a pair only together with exact validators.
-_DELETE_AUTHORITY_EVIDENCE_SCHEMA_PAIRS: frozenset[tuple[str, str]] = frozenset()
+_DELETE_AUTHORITY_EVIDENCE_SCHEMA_PAIRS = frozenset(
+    {
+        (
+            dr_index.AUTHENTICATION_RECEIPT_SCHEMA_V2,
+            dr_index.REHEARSAL_RECEIPT_SCHEMA_V2,
+        )
+    }
+)
 _REASONS = frozenset(
     {
         "activation_journal_invalid",
@@ -176,6 +180,8 @@ class DRGenerationPin:
     receipt_sha256: str | None
     authentication_receipt_path: Path | None
     authentication_receipt_sha256: str | None
+    activation_receipt_path: Path | None
+    activation_receipt_file_sha256: str | None
     rehearsal_receipt_path: Path | None
     rehearsal_receipt_sha256: str | None
     rehearsal_binding: dict[str, Any] | None
@@ -1553,13 +1559,7 @@ def _full_rollback_release_evidence_complete(
     authentication_receipt: Mapping[str, Any],
     rehearsal_receipt: Mapping[str, Any],
 ) -> bool:
-    """Reject legacy evidence until the full-root writer contract exists.
-
-    The v1 pair authenticates the backup and one rollback tree, but does not
-    bind the complete previous, fallback, and exercised release identities.
-    Unknown future schemas also fail closed; the writer package must add one
-    exact, fully validated contract here before it can authorize deletion.
-    """
+    """Grant eligibility only to the exact full-root v2/v2 evidence pair."""
 
     schemas = (
         authentication_receipt.get("schema"),
@@ -1639,6 +1639,8 @@ def _normalize_authority_bindings(
                 receipt_sha256=pin.receipt_sha256,
                 authentication_receipt_path=pin.authentication_receipt_path,
                 authentication_receipt_sha256=pin.authentication_receipt_sha256,
+                activation_receipt_path=pin.activation_receipt_path,
+                activation_receipt_file_sha256=pin.activation_receipt_file_sha256,
                 rehearsal_receipt_path=pin.rehearsal_receipt_path,
                 rehearsal_receipt_sha256=pin.rehearsal_receipt_sha256,
                 rehearsal_binding=(
@@ -1724,6 +1726,7 @@ def _normalize_authority_bindings(
             except RetentionPlanError:
                 error = error or "dr_pins_invalid"
         authentication_path: Path | None = None
+        activation_receipt_path: Path | None = None
         rehearsal_path: Path | None = None
         authentication_body: dict[str, Any] | None = None
         authentication_reference: dict[str, str] | None = None
@@ -1758,11 +1761,46 @@ def _normalize_authority_bindings(
                     )
                     if authentication_raw != _canonical_json(authentication_body) + b"\n":
                         raise RetentionPlanError("dr_pins_invalid")
-                    authentication_reference, _raw, _payload = dr_index.validate_authentication_receipt(
-                        authentication_body,
-                        candidate=candidate,
+                    authentication_reference, _raw, authentication_payload = (
+                        dr_index.validate_authentication_receipt(
+                            authentication_body,
+                            candidate=candidate,
+                        )
                     )
                     if authentication_reference["sha256"] != pin.authentication_receipt_sha256:
+                        raise RetentionPlanError("dr_pins_invalid")
+                    if authentication_reference["schema"] == dr_index.AUTHENTICATION_RECEIPT_SCHEMA_V2:
+                        activation_reference, activation_raw, _activation_payload = (
+                            dr_index.activation_receipt_evidence(authentication_payload)
+                        )
+                        if (
+                            pin.activation_receipt_path is None
+                            or pin.activation_receipt_file_sha256 != activation_reference["sha256"]
+                        ):
+                            raise RetentionPlanError("dr_pins_invalid")
+                        activation_receipt_path = _absolute_lexical(
+                            pin.activation_receipt_path,
+                            code="dr_pins_invalid",
+                        )
+                        expected_activation_path = generation_index.receipt_directory / (
+                            f"activation-{activation_reference['sha256']}.json"
+                        )
+                        if (
+                            activation_receipt_path != expected_activation_path
+                            or activation_receipt_path in evidence_receipt_paths
+                            or _stable_file_bytes(
+                                activation_receipt_path,
+                                private=True,
+                                code="dr_pins_invalid",
+                            )
+                            != activation_raw
+                        ):
+                            raise RetentionPlanError("dr_pins_invalid")
+                        evidence_receipt_paths.add(activation_receipt_path)
+                    elif (
+                        pin.activation_receipt_path is not None
+                        or pin.activation_receipt_file_sha256 is not None
+                    ):
                         raise RetentionPlanError("dr_pins_invalid")
                     dr_auth.reauthenticate_generation_candidate(
                         candidate=candidate,
@@ -1775,7 +1813,11 @@ def _normalize_authority_bindings(
                     dr_index.DRGenerationIndexError,
                 ):
                     error = error or "dr_pins_invalid"
-        elif pin.authentication_receipt_sha256 is not None:
+        elif (
+            pin.authentication_receipt_sha256 is not None
+            or pin.activation_receipt_path is not None
+            or pin.activation_receipt_file_sha256 is not None
+        ):
             error = error or "dr_pins_invalid"
         if pin.rehearsal_receipt_path is not None:
             if not _is_hex64(pin.rehearsal_receipt_sha256) or generation_index is None:
@@ -1833,7 +1875,44 @@ def _normalize_authority_bindings(
                 rehearsal_body,
             )
         ):
-            complete_delete_evidence_roles.add(pin.role)
+            try:
+                release_evidence: list[Mapping[str, Any]] = []
+                if (
+                    authentication_body.get("schema") == dr_index.AUTHENTICATION_RECEIPT_SCHEMA_V2
+                    and rehearsal_body.get("schema") == dr_index.REHEARSAL_RECEIPT_SCHEMA_V2
+                ):
+                    release_evidence = [
+                        *authentication_body["release_records"].values(),
+                        rehearsal_body["exercised_release"],
+                    ]
+                for evidence_record in release_evidence:
+                    if not isinstance(evidence_record, Mapping):
+                        raise RetentionPlanError("dr_pins_invalid")
+                    evidence_root = _absolute_lexical(
+                        Path(str(evidence_record.get("root") or "")),
+                        code="dr_pins_invalid",
+                    )
+                    protected_record = {
+                        key: evidence_record[key]
+                        for key in (
+                            "commit",
+                            "max_schema",
+                            "root",
+                            "tree_manifest_sha256",
+                            "version",
+                        )
+                    }
+                    existing_record = restore_release_records.get(evidence_root)
+                    if existing_record is not None and dict(existing_record) != protected_record:
+                        raise RetentionPlanError("dr_pins_invalid")
+                    restore_release_records[evidence_root] = protected_record
+                    authenticated_release = _authenticate_release(protected_record)
+                    if authenticated_release["wheel_sha256"] != evidence_record.get("wheel_sha256"):
+                        raise RetentionPlanError("dr_pins_invalid")
+                complete_delete_evidence_roles.add(pin.role)
+            except (KeyError, RetentionPlanError):
+                error = error or "dr_pins_invalid"
+                incomplete_delete_evidence = True
         else:
             incomplete_delete_evidence = True
         if pin.role in {"current", "older"} and (
@@ -1891,6 +1970,10 @@ def _normalize_authority_bindings(
                     str(authentication_path) if authentication_path is not None else None
                 ),
                 "authentication_receipt_sha256": pin.authentication_receipt_sha256,
+                "activation_receipt_path": (
+                    str(activation_receipt_path) if activation_receipt_path is not None else None
+                ),
+                "activation_receipt_file_sha256": pin.activation_receipt_file_sha256,
                 "rehearsal_receipt_path": str(rehearsal_path) if rehearsal_path is not None else None,
                 "rehearsal_receipt_sha256": pin.rehearsal_receipt_sha256,
                 "rehearsal_binding": pin.rehearsal_binding,
@@ -2584,6 +2667,8 @@ def build_retention_authority_bindings(
             receipt_sha256=pin.receipt_sha256,
             authentication_receipt_path=pin.authentication_receipt_path,
             authentication_receipt_sha256=pin.authentication_receipt_sha256,
+            activation_receipt_path=pin.activation_receipt_path,
+            activation_receipt_file_sha256=pin.activation_receipt_file_sha256,
             rehearsal_receipt_path=pin.rehearsal_receipt_path,
             rehearsal_receipt_sha256=pin.rehearsal_receipt_sha256,
             rehearsal_binding=(dict(pin.rehearsal_binding) if pin.rehearsal_binding is not None else None),

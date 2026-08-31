@@ -38,7 +38,7 @@ from tools import immutable_release_operator as release_operator  # noqa: E402
 from tools import release_dr_generation_authentication as dr_auth  # noqa: E402
 from tools import release_dr_generation_index as dr_index  # noqa: E402
 
-REHEARSAL_RECEIPT_SCHEMA = dr_index.REHEARSAL_RECEIPT_SCHEMA
+REHEARSAL_RECEIPT_SCHEMA = dr_index.REHEARSAL_RECEIPT_SCHEMA_V2
 _SCRATCH_PARENT = Path("/var/tmp")
 _SCRATCH_PREFIX = "friday-dr-rehearsal-"
 _SCRATCH_REGISTRY = ".friday-dr-rehearsal-registry.v1"
@@ -89,6 +89,7 @@ class _RunResult:
     engineer_authority_present: bool
     database_reopen_count: int = 2
     inbox_reopen_count: int = 2
+    exercised_release: dict[str, Any] | None = None
 
 
 @dataclass(frozen=True)
@@ -1909,6 +1910,7 @@ class _IsolatedActivationPort:
         self.checkpoint_non_sqlite_digest = ""
         self.restored_digest = ""
         self.rollback_tree_sha256 = ""
+        self.rollback_release_identity: release_operator.ReleaseIdentity | None = None
         self.release_open_trees: list[str] = []
         self.rollback_release_receipt: dict[str, Any] | None = None
         self.database_reopen_count = 0
@@ -2080,6 +2082,7 @@ class _IsolatedActivationPort:
         if release not in self.releases:
             raise release_operator.ReleaseFailure("dr_rehearsal_rollback_release_changed")
         self.rollback_tree_sha256 = release.tree_manifest_sha256
+        self.rollback_release_identity = release
 
     def start_backend(self, release: release_operator.ReleaseIdentity) -> None:
         if release not in self.releases:
@@ -2211,6 +2214,7 @@ def _run_isolated_rehearsal(
         or not port.checkpoint_digest
         or port.restored_digest != port.checkpoint_digest
         or not port.rollback_tree_sha256
+        or port.rollback_release_identity is None
         or port.systemctl_calls != 0
         or port.network_calls != 0
         or port.production_write_calls != 0
@@ -2235,6 +2239,27 @@ def _run_isolated_rehearsal(
         or _surface_digest(config, include_sqlite=False) != port.checkpoint_non_sqlite_digest
     ):
         raise DRGenerationRehearsalError("dr_rehearsal_second_reopen_mismatch")
+    exercised_release: dict[str, Any] | None = None
+    authentication = material.authenticated.authentication_receipt
+    if authentication.get("schema") == dr_index.AUTHENTICATION_RECEIPT_SCHEMA_V2:
+        assert port.rollback_release_identity is not None
+        identity = port.rollback_release_identity
+        raw_records = authentication.get("release_records")
+        if not isinstance(raw_records, dict):
+            raise DRGenerationRehearsalError("dr_rehearsal_release_records_invalid")
+        matches = [
+            record
+            for record in raw_records.values()
+            if isinstance(record, dict)
+            and record.get("root") == str(identity.root)
+            and record.get("commit") == identity.commit
+            and record.get("version") == identity.version
+            and record.get("max_schema") == identity.max_schema
+            and record.get("tree_manifest_sha256") == identity.tree_manifest_sha256
+        ]
+        if len({_canonical(record) for record in matches}) != 1:
+            raise DRGenerationRehearsalError("dr_rehearsal_exercised_release_invalid")
+        exercised_release = matches[0]
     return _RunResult(
         schema_version=int(port.rollback_release_receipt["main_schema"]),
         rollback_tree_sha256=port.rollback_tree_sha256,
@@ -2245,6 +2270,7 @@ def _run_isolated_rehearsal(
         engineer_authority_present=checkpoint_authority,
         database_reopen_count=port.database_reopen_count,
         inbox_reopen_count=port.inbox_reopen_count,
+        exercised_release=exercised_release,
     )
 
 
@@ -2299,6 +2325,27 @@ def _receipt(
     result: _RunResult,
 ) -> dict[str, Any]:
     authentication = material.authenticated.authentication_receipt
+    authentication_schema = authentication.get("schema")
+    if authentication_schema == dr_index.AUTHENTICATION_RECEIPT_SCHEMA_V2:
+        receipt_schema = dr_index.REHEARSAL_RECEIPT_SCHEMA_V2
+        release_records = authentication.get("release_records")
+        if not isinstance(release_records, dict):
+            raise DRGenerationRehearsalError("dr_rehearsal_release_records_invalid")
+        exercised_by_identity = {
+            _canonical(record): record
+            for record in release_records.values()
+            if isinstance(record, dict)
+            and record.get("tree_manifest_sha256") == result.rollback_tree_sha256
+            and (result.exercised_release is None or record == result.exercised_release)
+        }
+        if len(exercised_by_identity) != 1:
+            raise DRGenerationRehearsalError("dr_rehearsal_exercised_release_invalid")
+        exercised_release = next(iter(exercised_by_identity.values()))
+    elif authentication_schema == dr_index.AUTHENTICATION_RECEIPT_SCHEMA:
+        receipt_schema = dr_index.REHEARSAL_RECEIPT_SCHEMA
+        exercised_release = None
+    else:
+        raise DRGenerationRehearsalError("dr_rehearsal_authentication_receipt_invalid")
     restore = pending.candidate["restore_release"]
     restore_identity = {
         key: restore[key]
@@ -2331,12 +2378,14 @@ def _receipt(
         "rollback_restore_observed": True,
         "rollback_tree_sha256": result.rollback_tree_sha256,
         "rolled_back": True,
-        "schema": REHEARSAL_RECEIPT_SCHEMA,
+        "schema": receipt_schema,
         "scratch_removed": True,
         "source": _source_projection(authentication),
         "status": "rehearsed",
         "systemctl_call_count": 0,
     }
+    if exercised_release is not None:
+        core["exercised_release"] = exercised_release
     return {**core, "receipt_sha256": _sha256(_canonical(core))}
 
 
@@ -2449,11 +2498,16 @@ def rehearse_authenticated_generation(*, activation_receipt: Path) -> dict[str, 
                 expected_journal_sha256=str(state["journal_sha256"]),
             )
             transaction_lock.assert_held()
+            durable_activation_receipt = index.pending_activation_receipt_path(
+                expected_journal_sha256=pending.index_journal_sha256,
+            )
+            transaction_lock.assert_held()
+            authenticated_activation_receipt = durable_activation_receipt or activation_receipt
             if pending.index_phase == "rehearsed":
                 validated = _validate_rehearsed_pending_locked(
                     index=index,
                     activation_journal=activation_journal,
-                    activation_receipt=activation_receipt,
+                    activation_receipt=authenticated_activation_receipt,
                     backup_root=backup_root,
                     expected_journal_sha256=pending.index_journal_sha256,
                     namespace_guard=transaction_lock.assert_held,
@@ -2463,7 +2517,7 @@ def rehearse_authenticated_generation(*, activation_receipt: Path) -> dict[str, 
             transaction_lock.assert_held()
             material = dr_auth._authenticate_material_locked(  # noqa: SLF001
                 activation_journal=activation_journal,
-                activation_receipt=activation_receipt,
+                activation_receipt=authenticated_activation_receipt,
                 backup_root=backup_root,
             )
             transaction_lock.assert_held()
@@ -2490,7 +2544,7 @@ def rehearse_authenticated_generation(*, activation_receipt: Path) -> dict[str, 
             transaction_lock.assert_held()
             material_after = dr_auth._authenticate_material_locked(  # noqa: SLF001
                 activation_journal=activation_journal,
-                activation_receipt=activation_receipt,
+                activation_receipt=authenticated_activation_receipt,
                 backup_root=backup_root,
             )
             transaction_lock.assert_held()

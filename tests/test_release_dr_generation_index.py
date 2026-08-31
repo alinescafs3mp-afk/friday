@@ -95,6 +95,81 @@ def _authentication_receipt(candidate: dict[str, Any], ordinal: int) -> dict[str
     return {**core, "receipt_sha256": hashlib.sha256(_canonical(core)).hexdigest()}
 
 
+def _activation_receipt(candidate: dict[str, Any], *, candidate_tree_sha256: str) -> dict[str, Any]:
+    core = {
+        "alias_repair": {},
+        "backend_accepted": True,
+        "backup_receipt_sha256": candidate["database_receipt_sha256"],
+        "bridge_accepted": True,
+        "candidate_tree_sha256": candidate_tree_sha256,
+        "database_schema_before": candidate["database_schema"],
+        "engineer_backup_receipt_sha256": candidate["engineer_receipt_sha256"],
+        "inbox_backup_receipt_sha256": candidate["inbox_receipt_sha256"],
+        "obsidian_backup_receipt_sha256": candidate["obsidian_receipt_sha256"],
+        "runtime_policy": {},
+        "schema": release_operator.ACTIVATION_RECEIPT_SCHEMA,
+        "status": "clear",
+    }
+    return {
+        **core,
+        "operator_schema": release_operator.OPERATOR_SCHEMA,
+        "receipt_sha256": hashlib.sha256(_canonical(core)).hexdigest(),
+    }
+
+
+def _v2_candidate_and_authentication(
+    root: Path,
+    ordinal: int,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    candidate = _candidate(root, ordinal)
+    activation = _activation_receipt(candidate, candidate_tree_sha256=f"{ordinal + 500:064x}")
+    candidate["source_receipt_sha256"] = activation["receipt_sha256"]
+    status = Path(candidate["backup_directory"]).stat()
+    release_record = dict(candidate["restore_release"])
+    core = {
+        "activation_receipt": activation,
+        "allowed_rollback_tree_sha256s": candidate["allowed_rollback_tree_sha256s"],
+        "activation_journal_file_sha256": f"{ordinal + 1:064x}",
+        "activation_journal_sha256": f"{ordinal + 2:064x}",
+        "activation_receipt_file_sha256": hashlib.sha256(_canonical(activation) + b"\n").hexdigest(),
+        "activation_receipt_sha256": activation["receipt_sha256"],
+        "backup_directory": {
+            "device": status.st_dev,
+            "inode": status.st_ino,
+            "path": candidate["backup_directory"],
+        },
+        "backup_manifest_sha256": f"{ordinal + 4:064x}",
+        "candidate_sha256": hashlib.sha256(_canonical(candidate)).hexdigest(),
+        "database_schema": candidate["database_schema"],
+        "release_records": {"fallback": release_record, "previous": release_record},
+        "restore_operator_sha256": f"{ordinal + 5:064x}",
+        "schema": dr_index.AUTHENTICATION_RECEIPT_SCHEMA_V2,
+        "source_transaction_id": candidate["source_transaction_id"],
+        "status": "authenticated",
+        "surface_receipts": {
+            "database": candidate["database_receipt_sha256"],
+            "engineer": candidate["engineer_receipt_sha256"],
+            "inbox": candidate["inbox_receipt_sha256"],
+            "obsidian": candidate["obsidian_receipt_sha256"],
+        },
+    }
+    return candidate, {**core, "receipt_sha256": hashlib.sha256(_canonical(core)).hexdigest()}
+
+
+def _v2_rehearsal_receipt(
+    candidate: dict[str, Any],
+    authentication: dict[str, Any],
+    authenticated: dict[str, Any],
+) -> dict[str, Any]:
+    receipt = _rehearsal_receipt(candidate, authentication, authenticated, 0)
+    core = {
+        **{key: value for key, value in receipt.items() if key != "receipt_sha256"},
+        "exercised_release": authentication["release_records"]["fallback"],
+        "schema": dr_index.REHEARSAL_RECEIPT_SCHEMA_V2,
+    }
+    return {**core, "receipt_sha256": hashlib.sha256(_canonical(core)).hexdigest()}
+
+
 def _rehearsal_receipt(
     candidate: dict[str, Any],
     authentication: dict[str, Any],
@@ -342,6 +417,107 @@ def test_bootstrap_publishes_exact_immutable_receipt_then_clear_cas(tmp_path: Pa
     status = receipt_path.stat()
     assert stat.S_IMODE(status.st_mode) == 0o400
     assert status.st_nlink == 1
+
+
+def test_v2_publishes_and_resolves_exact_activation_body_after_source_disappears(
+    tmp_path: Path,
+) -> None:
+    index = _index(tmp_path)
+    candidate, authentication = _v2_candidate_and_authentication(tmp_path, 301)
+    state = index.load()
+    prepared = index.prepare(
+        intent="bootstrap_current",
+        candidate=candidate,
+        expected_journal_sha256=state["journal_sha256"],
+    )
+    authenticated = index.record_authenticated(
+        receipt=authentication,
+        expected_journal_sha256=prepared["journal_sha256"],
+    )
+
+    activation_path = index.pending_activation_receipt_path(
+        expected_journal_sha256=authenticated["journal_sha256"],
+    )
+    assert activation_path is not None
+    expected_raw = _canonical(authentication["activation_receipt"]) + b"\n"
+    assert activation_path.read_bytes() == expected_raw
+    assert activation_path.name == (f"activation-{hashlib.sha256(expected_raw).hexdigest()}.json")
+    assert stat.S_IMODE(activation_path.stat().st_mode) == 0o400
+    assert activation_path.stat().st_nlink == 1
+
+    with pytest.raises(dr_index.DRGenerationIndexError, match="^rehearsal_receipt_invalid$"):
+        index.record_rehearsed(
+            receipt=_rehearsal_receipt(candidate, authentication, authenticated, 0),
+            expected_journal_sha256=authenticated["journal_sha256"],
+        )
+
+    rehearsal_receipt = _v2_rehearsal_receipt(candidate, authentication, authenticated)
+    forged = dict(rehearsal_receipt)
+    forged["exercised_release"] = {
+        **forged["exercised_release"],
+        "root": str(_private_directory(tmp_path / "foreign-exercised")),
+    }
+    forged_core = {key: value for key, value in forged.items() if key != "receipt_sha256"}
+    forged["receipt_sha256"] = hashlib.sha256(_canonical(forged_core)).hexdigest()
+    with pytest.raises(dr_index.DRGenerationIndexError, match="^rehearsal_receipt_invalid$"):
+        index.record_rehearsed(
+            receipt=forged,
+            expected_journal_sha256=authenticated["journal_sha256"],
+        )
+
+    rehearsed = index.record_rehearsed(
+        receipt=rehearsal_receipt,
+        expected_journal_sha256=authenticated["journal_sha256"],
+    )
+    clear = index.publish(expected_journal_sha256=rehearsed["journal_sha256"])
+    assert (
+        index.current_activation_receipt_path(
+            expected_journal_sha256=clear["journal_sha256"],
+        )
+        == activation_path
+    )
+    pin = index.authority_snapshot().pins[0]
+    assert pin.activation_receipt_path == activation_path
+    assert pin.activation_receipt_file_sha256 == hashlib.sha256(expected_raw).hexdigest()
+
+
+def test_v2_activation_body_collision_and_tamper_fail_closed(tmp_path: Path) -> None:
+    index = _index(tmp_path)
+    candidate, authentication = _v2_candidate_and_authentication(tmp_path, 302)
+    state = index.load()
+    prepared = index.prepare(
+        intent="bootstrap_current",
+        candidate=candidate,
+        expected_journal_sha256=state["journal_sha256"],
+    )
+    activation_reference, expected_raw, _payload = dr_index.activation_receipt_evidence(authentication)
+    activation_path = index.receipt_directory / (f"activation-{activation_reference['sha256']}.json")
+    activation_path.write_bytes(b'{"foreign":true}\n')
+    activation_path.chmod(0o400)
+    with pytest.raises(
+        dr_index.DRGenerationIndexError,
+        match="^activation_receipt_publication_failed$",
+    ):
+        index.record_authenticated(
+            receipt=authentication,
+            expected_journal_sha256=prepared["journal_sha256"],
+        )
+    assert activation_path.read_bytes() != expected_raw
+    assert index.load()["phase"] == "prepared"
+
+    activation_path.chmod(0o600)
+    activation_path.unlink()
+    authenticated = index.record_authenticated(
+        receipt=authentication,
+        expected_journal_sha256=prepared["journal_sha256"],
+    )
+    activation_path.chmod(0o600)
+    activation_path.write_bytes(expected_raw + b" ")
+    activation_path.chmod(0o400)
+    with pytest.raises(dr_index.DRGenerationIndexError, match="^activation_receipt_invalid$"):
+        index.pending_activation_receipt_path(
+            expected_journal_sha256=authenticated["journal_sha256"],
+        )
 
 
 def test_current_generation_identity_is_exact_compact_and_detached(tmp_path: Path) -> None:

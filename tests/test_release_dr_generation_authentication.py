@@ -12,6 +12,7 @@ import pytest
 
 from tools import immutable_release_operator as release_operator
 from tools import release_dr_generation_authentication as dr_auth
+from tools import release_dr_generation_index as dr_index
 
 
 def _canonical(value: Any) -> bytes:
@@ -223,6 +224,20 @@ def test_authenticates_only_exact_four_surface_terminal_backup(
     assert result.authentication_receipt["source_transaction_id"] == "b" * 64
     assert result.authentication_receipt["database_schema"] == 46
     assert result.authentication_receipt["allowed_rollback_tree_sha256s"] == ["e" * 64]
+    assert result.authentication_receipt["schema"] == dr_index.AUTHENTICATION_RECEIPT_SCHEMA_V2
+    assert result.authentication_receipt["activation_receipt"] == json.loads(activation_receipt.read_bytes())
+    assert (
+        result.authentication_receipt["activation_receipt_file_sha256"]
+        == hashlib.sha256(activation_receipt.read_bytes()).hexdigest()
+    )
+    assert set(result.authentication_receipt["release_records"]) == {"fallback", "previous"}
+    assert result.authentication_receipt["release_records"]["fallback"] == result.candidate["restore_release"]
+    reference, raw, payload = dr_index.validate_authentication_receipt(
+        result.authentication_receipt,
+        candidate=result.candidate,
+    )
+    assert reference["schema"] == dr_index.AUTHENTICATION_RECEIPT_SCHEMA_V2
+    assert raw == _canonical(payload) + b"\n"
     assert {path: path.read_bytes() for path in before} == before
 
 
