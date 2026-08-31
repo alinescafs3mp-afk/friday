@@ -16,6 +16,9 @@
 export FRIDAY_SYNCTHING_AMD64_TARBALL="${FRIDAY_SYNCTHING_AMD64_TARBALL:-$HOME/.cache/friday/test-assets/syncthing-linux-amd64-v2.1.3.tar.gz}"
 candidate_sha="$(git rev-parse --verify 'HEAD^{commit}')"
 base_sha="$(git rev-parse --verify "${QUALITY_GATE_BASE_SHA:?set accepted base}^{commit}")"
+GOLDEN_JOURNEY_RELEASE_ROOT="$(readlink -f -- "$HOME/.jericho/current-release")" || exit 1
+test -d "$GOLDEN_JOURNEY_RELEASE_ROOT" || exit 1
+export GOLDEN_JOURNEY_RELEASE_ROOT
 evidence_dir="$(mktemp -d -p /var/tmp friday-exact-evidence.XXXXXXXX)"
 .venv/bin/python -I -B tools/quality_gate.py \
   --tier exact-release --candidate-sha "$candidate_sha" --base-sha "$base_sha" \

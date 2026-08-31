@@ -340,13 +340,23 @@ def test_eager_settings_import_derives_the_database_from_the_scratch_home(
     monkeypatch.setenv("FRIDAY_DATABASE_PATH", "/sentinel/live.sqlite3")
     monkeypatch.setenv("FRIDAY_DATABASE_MUST_EXIST", "1")
     monkeypatch.setenv("FRIDAY_ENV_FILE", "/sentinel/live.env")
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", "/sentinel/global.gitconfig")
+    monkeypatch.setenv("GIT_CONFIG_COUNT", "1")
+    monkeypatch.setenv("GIT_CONFIG_KEY_0", "core.hooksPath")
+    monkeypatch.setenv("GIT_CONFIG_VALUE_0", "/sentinel/hooks")
+    monkeypatch.setenv("XDG_CONFIG_HOME", "/sentinel/xdg")
     for prefix in quality_gate._RUNTIME_ENV_PREFIXES:
         monkeypatch.setenv(prefix + "SSL_CERTFILE", "/sentinel/live-server.crt")
         monkeypatch.setenv(prefix + "SSL_KEYFILE", "/sentinel/live-server.key")
         monkeypatch.setenv(prefix + "BACKEND_CA_FILE", "/sentinel/live-backend-ca.crt")
 
     with quality_gate._isolated_test_environment() as environment:
-        assert not any(name.startswith("GIT_") for name in environment)
+        assert {name: value for name, value in environment.items() if name.startswith("GIT_")} == {
+            "GIT_ATTR_NOSYSTEM": "1",
+            "GIT_CONFIG_GLOBAL": os.devnull,
+            "GIT_CONFIG_NOSYSTEM": "1",
+        }
+        assert Path(environment["XDG_CONFIG_HOME"]).is_relative_to(Path(environment["FRIDAY_HOME"]))
         assert quality_gate._INSTALLED_SITE_ENV not in environment
         probe = (
             "import os; "

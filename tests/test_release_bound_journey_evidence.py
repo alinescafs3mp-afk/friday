@@ -567,6 +567,7 @@ def _run_installed_bootstrap(
                 site.relative_to(release).as_posix(),
                 "venv/bin/python",
                 str(tooling_site),
+                str(source / "tools/quality_gate.py"),
                 hashlib.sha256((source / "tools/quality_gate.py").read_bytes()).hexdigest(),
                 str(internal_report),
                 "a" * 40,
@@ -1098,7 +1099,7 @@ def test_closed_clean_runner_binds_the_installed_bootstrap_and_origin_report(
             next(item[29:] for item in command if item.startswith("--friday-collection-manifest="))
         )
         bootstrap_index = command.index(evidence._INSTALLED_PYTEST_BOOTSTRAP)  # noqa: SLF001
-        origin = Path(command[bootstrap_index + 8])
+        origin = Path(command[bootstrap_index + 9])
         collection.write_bytes(evidence.canonical_json_bytes({"nodeids": [ref], "version": 1}))
         report.write_text(
             '<testsuite tests="1" failures="0" errors="0" skipped="0">'
@@ -1148,15 +1149,16 @@ def test_closed_clean_runner_binds_the_installed_bootstrap_and_origin_report(
         evidence._INSTALLED_PYTEST_BOOTSTRAP,  # noqa: SLF001
     )
     bootstrap_index = command.index(evidence._INSTALLED_PYTEST_BOOTSTRAP)  # noqa: SLF001
-    assert command[bootstrap_index + 1 : bootstrap_index + 11] == (
+    assert command[bootstrap_index + 1 : bootstrap_index + 12] == (
         str(tmp_path),
         str(runtime.root),
         str(runtime.site_packages),
         runtime.site_packages_ref,
         runtime.interpreter_ref,
         str(tooling_site),
+        str(Path(quality_gate.__file__).resolve(strict=True)),
         "5" * 64,
-        command[bootstrap_index + 8],
+        command[bootstrap_index + 9],
         identity.source_commit,
         identity.wheel_sha256,
     )

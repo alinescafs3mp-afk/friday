@@ -296,6 +296,13 @@ async def test_one_phone_flow_uses_fragment_token_and_exact_delivery_evidence(
     raw_token = started["setup_url"].split("#", 1)[1]
     assert raw_token not in str(storage.get_obsidian_onboarding("alice"))
 
+    vault = storage.get_obsidian_vault("alice")
+    VaultStore(vault["server_path"]).write_text(
+        "Friday Connection Test.md",
+        "# Friday Connection Test\n\nIf you can read this note, the free Android sync path works.\n",
+        create_only=True,
+    )
+
     client.available = False
     offered = await runtime.check("alice")
     assert offered["state"] == "awaiting_obsidian_vault_registration"
@@ -305,10 +312,10 @@ async def test_one_phone_flow_uses_fragment_token_and_exact_delivery_evidence(
     pending = await runtime.confirm_open("alice")
     assert pending["state"] == "awaiting_obsidian_vault_registration"
     assert "confirm_open" not in pending["actions"]
-    operation = storage.get_obsidian_operation(
-        "alice", f"verify:{storage.get_obsidian_onboarding('alice')['id']}"
-    )
+    operation_id = f"verify:v1:{hashlib.sha256(str(vault['folder_id']).encode()).hexdigest()}"
+    operation = storage.get_obsidian_operation("alice", operation_id)
     assert operation["status"] == "delivery_pending"
+    assert json.loads(operation["result_json"])["applied"] is False
 
     client.available = True
     delivered = await runtime.check("alice")
@@ -1405,11 +1412,10 @@ async def test_onboarding_revision_changing_during_remote_observation_stays_pend
     pending = await runtime.check("alice")
     assert pending["state"] == "awaiting_obsidian_vault_registration"
 
-    session = storage.get_obsidian_onboarding("alice")
-    operation_id = f"verify:{session['id']}"
+    vault = storage.get_obsidian_vault("alice")
+    operation_id = f"verify:v1:{hashlib.sha256(str(vault['folder_id']).encode()).hexdigest()}"
     operation = storage.get_obsidian_operation("alice", operation_id)
     expected_revision = json.loads(operation["result_json"])["revision"]
-    vault = storage.get_obsidian_vault("alice")
     store = VaultStore(vault["server_path"])
     revision_a = store.read("Friday Connection Test.md")
     original_file_status = client.file_status

@@ -459,10 +459,15 @@ class ObsidianService:
         *,
         properties: Mapping[str, PropertyInput] | None = None,
         operation_id: str | None = None,
+        adopt_existing_exact: bool = False,
     ) -> NoteWriteResult:
+        if type(adopt_existing_exact) is not bool:
+            raise TypeError("adopt_existing_exact must be a boolean")
         note_path = self._note_path(path)
         rendered = self.render_create_content(content, properties=properties)
         if operation_id is None:
+            if adopt_existing_exact:
+                raise InvalidOperationIdError("operation_id is required when adopting an exact existing note")
             with self._lock:
                 written = self.store.write_text(note_path, rendered, create_only=True)
             return _write_result(
@@ -503,10 +508,17 @@ class ObsidianService:
                     )
                     if legacy_clean is None:
                         raise IdempotencyConflictError("legacy create operation marker is ambiguous")
-            if prior is None and observed is not None and legacy_clean is None:
+            adopting = (
+                prior is None
+                and observed is not None
+                and legacy_clean is None
+                and adopt_existing_exact
+                and observed.revision == target_revision
+            )
+            if prior is None and observed is not None and legacy_clean is None and not adopting:
                 raise NoteAlreadyExistsError(note_path)
             base_revision = None
-            if prior is None and legacy_clean is not None:
+            if (prior is None and legacy_clean is not None) or adopting:
                 assert observed is not None
                 base_revision = observed.revision
             if prior is None and legacy_clean is not None:
@@ -519,7 +531,7 @@ class ObsidianService:
                     note_path=note_path,
                     base_revision=base_revision,
                     target_revision=target_revision,
-                    created=True,
+                    created=not adopting,
                 )
             else:
                 receipt = prior

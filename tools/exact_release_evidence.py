@@ -300,6 +300,7 @@ site=pathlib.Path(sys.argv.pop(1)).resolve(strict=True)
 site_ref=sys.argv.pop(1)
 interpreter_ref=sys.argv.pop(1)
 tooling_site=pathlib.Path(sys.argv.pop(1)).resolve(strict=True)
+quality_gate_path=pathlib.Path(sys.argv.pop(1)).resolve(strict=True)
 quality_gate_sha256=sys.argv.pop(1)
 report_path=pathlib.Path(sys.argv.pop(1))
 source_commit=sys.argv.pop(1)
@@ -973,7 +974,7 @@ if anyio_eventloop.loaded_backends.get("asyncio") is not pinned_async_backend:
 if "tools" in sys.modules or "tools.quality_gate" in sys.modules:
     raise RuntimeError("quality_gate_preloaded")
 tools_path=source_root/"tools"
-gate_path=tools_path/"quality_gate.py"
+gate_path=quality_gate_path
 try:
     tools_status=tools_path.lstat()
     gate_status=gate_path.lstat()
@@ -983,6 +984,8 @@ except OSError as exc:
 if (
     tools_path.resolve(strict=True) != tools_path
     or gate_path.resolve(strict=True) != gate_path
+    or tools_path.name != "tools"
+    or gate_path.name != "quality_gate.py"
     or not stat.S_ISDIR(tools_status.st_mode)
     or not stat.S_ISREG(gate_status.st_mode)
     or gate_status.st_nlink != 1
@@ -2880,10 +2883,23 @@ def _run_closed_pytest(
     gate = _authenticated_quality_gate(require_isolated_startup=require_isolated_startup)
     quality_gate_sha256 = getattr(gate, "__authenticated_source_sha256__", None)
     authenticated_gate_sha256: str | None = None
+    authenticated_gate_path: Path | None = None
     if runtime is not None:
         if type(quality_gate_sha256) is not str or _SHA256.fullmatch(quality_gate_sha256) is None:
             raise ExactReleaseEvidenceError("producer_helper_invalid")
         authenticated_gate_sha256 = quality_gate_sha256
+        try:
+            authenticated_gate_path = Path(str(gate.__file__)).resolve(strict=True)
+            gate_status = authenticated_gate_path.lstat()
+        except (AttributeError, OSError, TypeError, ValueError) as exc:
+            raise ExactReleaseEvidenceError("producer_helper_invalid") from exc
+        if (
+            authenticated_gate_path.name != "quality_gate.py"
+            or authenticated_gate_path.parent.name != "tools"
+            or not stat.S_ISREG(gate_status.st_mode)
+            or gate_status.st_nlink != 1
+        ):
+            raise ExactReleaseEvidenceError("producer_helper_invalid")
         source_tooling_site = _test_tooling_site(repo_root, runtime.root)
     run_error: BaseException | None = None
     result: subprocess.CompletedProcess[bytes] | None = None
@@ -2909,6 +2925,7 @@ def _run_closed_pytest(
             else:
                 assert source_tooling_site is not None
                 assert authenticated_gate_sha256 is not None
+                assert authenticated_gate_path is not None
                 tooling_site, tooling_projection = _snapshot_test_tooling(
                     source_tooling_site,
                     scratch,
@@ -2922,6 +2939,7 @@ def _run_closed_pytest(
                     runtime.site_packages_ref,
                     runtime.interpreter_ref,
                     str(tooling_site),
+                    str(authenticated_gate_path),
                     authenticated_gate_sha256,
                     str(origin_report),
                     identity.source_commit,

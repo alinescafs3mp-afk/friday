@@ -470,10 +470,9 @@ def _isolated_test_environment(
             backup_directory = home / "synthetic-backups"
             _private_directory(backup_directory)
 
-        # Test semantics must not inherit the controller's Git hardening flags:
-        # several adversarial tests deliberately exercise replacement/config
-        # behavior.  Controller-owned Git calls pass `_git_environment()`
-        # explicitly instead.
+        # Test semantics retain repository-local Git behavior (including the
+        # replacement/config adversarial cases) but never inherit ambient
+        # global/system configuration, attributes or hooks.
         environment = {name: value for name, value in os.environ.items() if not name.startswith("GIT_")}
         test_assets = {
             alias: value
@@ -507,6 +506,9 @@ def _isolated_test_environment(
                 "FRIDAY_EMBEDDINGS_ENABLED": "0",
                 "FRIDAY_WORKERS_ENABLED": "0",
                 "FRIDAY_CODE_EXECUTION_ENABLED": "0",
+                "GIT_ATTR_NOSYSTEM": "1",
+                "GIT_CONFIG_GLOBAL": os.devnull,
+                "GIT_CONFIG_NOSYSTEM": "1",
                 "PYTHONDONTWRITEBYTECODE": "1",
                 "PYTHONHASHSEED": "0",
                 "PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1",
@@ -514,6 +516,7 @@ def _isolated_test_environment(
                 "PYTHONPYCACHEPREFIX": str(scratch / "python-cache"),
                 "PYTHONSAFEPATH": "1",
                 "TMPDIR": str(test_tmp),
+                "XDG_CONFIG_HOME": str(config),
                 # Exercise the complete directory-based restore rehearsal with
                 # tracked synthetic databases.  Never inherit or inspect an
                 # operator's real backup directory in an offline quality run.

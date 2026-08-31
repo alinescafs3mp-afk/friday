@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 from copy import deepcopy
@@ -172,3 +173,14 @@ def test_cli_emits_the_same_canonical_body_free_report_twice() -> None:
     report = json.loads(first.stdout)
     assert report["evidence"]["acceptance_authority"] == "none"
     assert report["non_owning_counts"]["execution_count"] == 0
+
+    rejected = subprocess.run(
+        commands,
+        cwd=ROOT,
+        env={**os.environ, "FRIDAY_QUALITY_GATE_INSTALLED_SITE": "relative/wheel-site"},
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    assert rejected.returncode != 0
+    assert rejected.stdout == ""

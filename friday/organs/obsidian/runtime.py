@@ -50,6 +50,14 @@ from .workflows import ObsidianWorkflowService
 
 _VERSION = re.compile(r"^v?(\d+)\.(\d+)\.(\d+)(?:[-+].*)?$")
 _DELIVERY_FILE = "Friday Connection Test.md"
+_DELIVERY_CONTENT = (
+    "# Friday Connection Test\n\nIf you can read this note, the free Android sync path works.\n"
+)
+
+
+def _verification_operation_id(vault: Mapping[str, Any]) -> str:
+    folder_digest = hashlib.sha256(str(vault["folder_id"]).encode("utf-8")).hexdigest()
+    return f"verify:v1:{folder_digest}"
 
 
 class _SyncthingNoteSyncAdapter:
@@ -1039,10 +1047,10 @@ class ObsidianRuntime:
         session = self.storage.get_obsidian_onboarding(owner_id)
         if vault is None or session is None:
             raise ValueError("Obsidian onboarding aggregate not found")
-        operation_id = f"verify:{session['id']}"
+        operation_id = _verification_operation_id(vault)
         arguments = {
             "path": _DELIVERY_FILE,
-            "content": "# Friday Connection Test\n\nIf you can read this note, the free Android sync path works.\n",
+            "content": _DELIVERY_CONTENT,
         }
         operation, created = self.storage.prepare_obsidian_operation(
             owner_id,
@@ -1057,6 +1065,7 @@ class ObsidianRuntime:
                 _DELIVERY_FILE,
                 arguments["content"],
                 operation_id=operation_id,
+                adopt_existing_exact=True,
             )
             operation = self.storage.transition_obsidian_operation(
                 owner_id,
@@ -1124,7 +1133,7 @@ class ObsidianRuntime:
         session = self.storage.get_obsidian_onboarding(owner_id)
         if vault is None or device is None or session is None:
             return False
-        operation_id = f"verify:{session['id']}"
+        operation_id = _verification_operation_id(vault)
         operation = self.storage.get_obsidian_operation(owner_id, operation_id)
         if operation is None:
             return False
@@ -1174,10 +1183,10 @@ class ObsidianRuntime:
         return False
 
     def _verification_operation(self, owner_id: str) -> Mapping[str, Any] | None:
-        session = self.storage.get_obsidian_onboarding(owner_id)
-        if session is None:
+        vault = self.storage.get_obsidian_vault(owner_id)
+        if vault is None:
             return None
-        return self.storage.get_obsidian_operation(owner_id, f"verify:{session['id']}")
+        return self.storage.get_obsidian_operation(owner_id, _verification_operation_id(vault))
 
     @staticmethod
     def _stored_delivery(operation: Mapping[str, Any] | None) -> dict[str, Any]:

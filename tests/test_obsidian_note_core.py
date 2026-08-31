@@ -81,6 +81,35 @@ def test_create_read_list_and_sha256_revision(service: ObsidianService, vault: P
 
     with pytest.raises(NoteAlreadyExistsError):
         service.create_note("Projects/Friday.md", "replacement")
+    with pytest.raises(NoteAlreadyExistsError):
+        service.create_note(
+            "Projects/Friday.md",
+            "# Friday\n\nRelease notes.\n",
+            operation_id="ordinary-create-does-not-adopt",
+        )
+    with pytest.raises(NoteAlreadyExistsError):
+        service.create_note(
+            "Projects/Friday.md",
+            "different content",
+            operation_id="exact-adoption-rejects-different-content",
+            adopt_existing_exact=True,
+        )
+
+    adopted = service.create_note(
+        "Projects/Friday.md",
+        "# Friday\n\nRelease notes.\n",
+        operation_id="explicit-exact-adoption",
+        adopt_existing_exact=True,
+    )
+    replay = service.create_note(
+        "Projects/Friday.md",
+        "# Friday\n\nRelease notes.\n",
+        operation_id="explicit-exact-adoption",
+        adopt_existing_exact=True,
+    )
+    assert adopted.created is False and adopted.applied is False
+    assert adopted.previous_revision == result.revision
+    assert replay == adopted
 
 
 def test_template_listing_is_recursive_body_free_sorted_and_symlink_safe(
