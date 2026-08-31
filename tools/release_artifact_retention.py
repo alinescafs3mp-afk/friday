@@ -2843,10 +2843,7 @@ def plan_release_artifact_retention(
     unit_path = _absolute_lexical(unit_journal, code="unit_install_journal_invalid")
     backup_path = _absolute_lexical(backup_root, code="activation_journal_invalid")
     open_receipt, open_paths, open_identities = _normalize_open_inventory(open_inventory)
-    apply_open_authority = open_inventory.source in _APPLY_AUTHORITY_OPEN_SOURCES or (
-        open_inventory.source == "code_owned_no_delete_candidates_v1"
-        and _candidate_scope_paths == frozenset()
-    )
+    apply_open_authority = open_inventory.source in _APPLY_AUTHORITY_OPEN_SOURCES
 
     roots_with_status = [_strict_inventory_root(path) for path in inventory_roots]
     roots = tuple(sorted({path for path, _status in roots_with_status}, key=str))
@@ -3578,10 +3575,7 @@ def build_eligible_retention_plan(
     if target_paths:
         if plan["apply_authority"] is not True:
             raise RetentionPlanError(str(plan["block_reason"] or "retention_authority_unbound"))
-    elif (
-        plan["apply_authority"] is not True
-        or inventory.source != "code_owned_no_delete_candidates_v1"
-    ):
+    elif plan["apply_authority"] is not False or inventory.source != "code_owned_no_delete_candidates_v1":
         raise RetentionPlanError(str(plan["block_reason"] or "retention_authority_unbound"))
     if inventory.source == "code_owned_privileged_target_diagnostic_v1":
         after_index, _after = _target_probe_index(target_paths)
@@ -3698,9 +3692,7 @@ def _validate_output_namespace(path: Path, plan: Mapping[str, Any]) -> None:
             for item in values:
                 if not isinstance(item, Mapping):
                     raise RetentionPlanError("output_path_invalid")
-                protected_roots.add(
-                    _absolute_lexical(Path(str(item["path"])), code="output_path_invalid")
-                )
+                protected_roots.add(_absolute_lexical(Path(str(item["path"])), code="output_path_invalid"))
         authority = plan.get("authority_bindings")
         if isinstance(authority, Mapping):
             evidence = authority.get("canonical_evidence_roots")
@@ -3709,9 +3701,7 @@ def _validate_output_namespace(path: Path, plan: Mapping[str, Any]) -> None:
             for item in evidence or []:
                 if not isinstance(item, Mapping):
                     raise RetentionPlanError("output_path_invalid")
-                protected_roots.add(
-                    _absolute_lexical(Path(str(item["path"])), code="output_path_invalid")
-                )
+                protected_roots.add(_absolute_lexical(Path(str(item["path"])), code="output_path_invalid"))
                 protected_roots.add(
                     _absolute_lexical(
                         Path(str(item["authority_path"])),

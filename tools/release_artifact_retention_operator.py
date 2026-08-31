@@ -142,7 +142,6 @@ def _read_plan(
         supplied != expected_sha256
         or hashlib.sha256(_canonical(core)).hexdigest() != expected_sha256
         or value.get("mode") != "eligible_classification"
-        or value.get("apply_authority") is not True
         or value.get("classification_status") != "eligible"
         or value.get("block_reason") != ""
         or value.get("effect_authority")
@@ -158,6 +157,24 @@ def _read_plan(
             "unique_mount_identity": True,
             "universal_absence_proof": False,
         }
+    ):
+        raise RetentionApplyError("retention_apply_plan_digest_mismatch")
+    candidates = _candidate_records(value)
+    open_inventory = value.get("open_inventory")
+    source = open_inventory.get("source") if isinstance(open_inventory, Mapping) else None
+    if (
+        candidates
+        and (
+            value.get("apply_authority") is not True
+            or source
+            not in {
+                "code_owned_privileged_target_proc_v1",
+                "code_owned_privileged_target_diagnostic_v1",
+            }
+        )
+    ) or (
+        not candidates
+        and (value.get("apply_authority") is not False or source != "code_owned_no_delete_candidates_v1")
     ):
         raise RetentionApplyError("retention_apply_plan_digest_mismatch")
     return value
@@ -2741,6 +2758,10 @@ def _resume_plan_after_live_authority(
     )
     inputs = _plan_inputs(reviewed)
     _live_authority_reauthenticate(reviewed, inputs)
+    if _journal.get("phase") != "applied" and not _candidate_records(reviewed):
+        fresh = retention.build_eligible_retention_plan(**inputs)
+        if _authority_projection(fresh) != _authority_projection(reviewed):
+            raise RetentionApplyError("retention_apply_plan_drift")
     reviewed, durable_plan, journal = _resume_plan_from_state(
         state_dir,
         expected_plan_sha256=expected_plan_sha256,
@@ -2790,22 +2811,7 @@ def apply_retention_plan(
         lock_context = release_operator.OperatorTransactionLock(lock_path)
         with lock_context as lock:
             lock.assert_held()
-            if reviewed is not None:
-                # Reject a pre-fence executable plan before publishing any
-                # durable plan or journal bytes.
-                _live_authority_reauthenticate(reviewed, inputs)
             existing = _load_journal(journal_path)
-            if (
-                not resume_from_state
-                and existing is not None
-                and existing.get("phase") == "applied"
-                and existing.get("plan_sha256") != expected_plan_sha256
-            ):
-                _cleanup_completed_transaction_before_rollover(
-                    state_dir,
-                    existing,
-                    guard=lock.assert_held,
-                )
             if resume_from_state:
                 reviewed, durable_plan, existing, inputs = _resume_plan_after_live_authority(
                     state_dir,
@@ -2817,19 +2823,67 @@ def apply_retention_plan(
                 reviewed = _read_plan(source_plan_path, expected_sha256=expected_plan_sha256)
                 inputs = _plan_inputs(reviewed)
                 candidates = _candidate_records(reviewed)
+                source_lexical = Path(os.path.abspath(source_plan_path))
+                if any(
+                    source_lexical == Path(str(candidate["path"])).parent
+                    or Path(str(candidate["path"])).parent in source_lexical.parents
+                    for candidate in candidates
+                ):
+                    raise RetentionApplyError("retention_apply_plan_namespace_invalid")
                 _live_authority_reauthenticate(reviewed, inputs)
-                durable_plan = _persist_reviewed_plan(
-                    state_dir,
-                    reviewed,
-                    guard=lock.assert_held,
-                    allow_incomplete_stage_repair=(
-                        existing is None
-                        or (
-                            existing.get("phase") == "applied"
-                            and existing.get("plan_sha256") != expected_plan_sha256
+                if (
+                    existing is not None
+                    and existing.get("phase") != "applied"
+                    and existing.get("plan_sha256") != expected_plan_sha256
+                ):
+                    raise RetentionApplyError("retention_apply_in_progress")
+                if existing is not None and existing.get("plan_sha256") == expected_plan_sha256:
+                    reviewed, durable_plan, existing, inputs = _resume_plan_after_live_authority(
+                        state_dir,
+                        expected_plan_sha256=expected_plan_sha256,
+                        guard=lock.assert_held,
+                    )
+                    candidates = _candidate_records(reviewed)
+                else:
+                    dry_run = _new_journal(
+                        reviewed,
+                        candidates,
+                        durable_plan=(source_plan_path, 1, 1),
+                        filesystem_before=(),
+                    )
+                    dry_entries = dry_run["entries"]
+                    assert isinstance(dry_entries, list)
+                    _validate_mutation_namespaces(
+                        plan_path=source_plan_path,
+                        state_dir=state_dir,
+                        candidates=candidates,
+                        entries=dry_entries,
+                    )
+                    fresh = retention.build_eligible_retention_plan(**inputs)
+                    if _authority_projection(fresh) != _authority_projection(reviewed):
+                        raise RetentionApplyError("retention_apply_plan_drift")
+                    if (
+                        existing is not None
+                        and existing.get("phase") == "applied"
+                        and existing.get("plan_sha256") != expected_plan_sha256
+                    ):
+                        _cleanup_completed_transaction_before_rollover(
+                            state_dir,
+                            existing,
+                            guard=lock.assert_held,
                         )
-                    ),
-                )
+                    durable_plan = _persist_reviewed_plan(
+                        state_dir,
+                        reviewed,
+                        guard=lock.assert_held,
+                        allow_incomplete_stage_repair=(
+                            existing is None
+                            or (
+                                existing.get("phase") == "applied"
+                                and existing.get("plan_sha256") != expected_plan_sha256
+                            )
+                        ),
+                    )
             plan_path = durable_plan[0]
             new_transaction = existing is None or (
                 existing.get("phase") == "applied" and existing.get("plan_sha256") != expected_plan_sha256
@@ -2852,9 +2906,6 @@ def apply_retention_plan(
                     candidates=candidates,
                     entries=raw_initial_entries,
                 )
-                fresh = retention.build_eligible_retention_plan(**inputs)
-                if _authority_projection(fresh) != _authority_projection(reviewed):
-                    raise RetentionApplyError("retention_apply_plan_drift")
                 journal = _write_journal(
                     journal_path,
                     initial,

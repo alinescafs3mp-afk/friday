@@ -1897,6 +1897,8 @@ def test_stale_v1_resume_does_not_repair_two_link_plan_before_rejection(
         path: retention._snapshot(path).records  # noqa: SLF001
         for path in target_snapshots
     } == target_snapshots
+
+
 def _with_plan_sha256(plan: dict[str, Any]) -> dict[str, Any]:
     core = {key: value for key, value in plan.items() if key != "plan_sha256"}
     return {**core, "plan_sha256": hashlib.sha256(_canonical(core)).hexdigest()}
@@ -2048,7 +2050,10 @@ def test_eligible_cli_builds_code_owned_authority_and_classifies_exact_backup(
     ("source", "snapshot"),
     (
         ("synthetic_test", retention.OpenInventorySnapshot(source="synthetic_test", complete=True)),
-        ("code_owned_fd_inventory_v1", retention.OpenInventorySnapshot(source="code_owned_fd_inventory_v1", complete=True)),
+        (
+            "code_owned_fd_inventory_v1",
+            retention.OpenInventorySnapshot(source="code_owned_fd_inventory_v1", complete=True),
+        ),
         (
             "code_owned_candidate_scope_seed_v1",
             retention.OpenInventorySnapshot(source="code_owned_candidate_scope_seed_v1", complete=True),
@@ -2065,10 +2070,12 @@ def test_eligible_cli_builds_code_owned_authority_and_classifies_exact_backup(
 )
 def test_non_privileged_or_seed_open_inventory_never_mints_apply_authority(
     synthetic_inventory: dict[str, Any],
+    monkeypatch: pytest.MonkeyPatch,
     source: str,
     snapshot: retention.OpenInventorySnapshot,
     tmp_path: Path,
 ) -> None:
+    _enable_complete_delete_evidence(monkeypatch)
     plan = retention.plan_release_artifact_retention(
         activation_journal=synthetic_inventory["activation_journal"],
         unit_journal=synthetic_inventory["unit_journal"],
@@ -2097,6 +2104,121 @@ def test_non_privileged_or_seed_open_inventory_never_mints_apply_authority(
     assert not (
         synthetic_inventory["activation_journal"].parent / retention_apply.APPLY_JOURNAL_NAME
     ).exists()
+
+
+def test_code_owned_no_delete_plan_completes_zero_effect_terminal_idempotently(
+    synthetic_inventory: dict[str, Any],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    shutil.rmtree(synthetic_inventory["old"].identity.root)
+    shutil.rmtree(synthetic_inventory["backup_root"] / "legacy-unpinned")
+    _enable_complete_delete_evidence(monkeypatch)
+    monkeypatch.setattr(
+        retention,
+        "build_complete_open_inventory",
+        lambda *, target_paths: _privileged_open_inventory(target_paths=tuple(target_paths)),
+    )
+    plan = retention.build_eligible_retention_plan(
+        activation_journal=synthetic_inventory["activation_journal"],
+        unit_journal=synthetic_inventory["unit_journal"],
+        backup_root=synthetic_inventory["backup_root"],
+        inventory_roots=(synthetic_inventory["inventory"],),
+        backup_inventory_roots=(synthetic_inventory["backup_root"],),
+        canonical_evidence_roots=(
+            retention.CanonicalEvidenceRoot(
+                path=synthetic_inventory["evidence_root"],
+                authority_path=synthetic_inventory["evidence_authority"],
+                authority_sha256=_sha256_file(synthetic_inventory["evidence_authority"]),
+            ),
+        ),
+    )
+    assert plan["apply_authority"] is False
+    assert plan["open_inventory"]["source"] == "code_owned_no_delete_candidates_v1"
+    assert not any(
+        item["decision"] == "delete_candidate" for key in ("targets", "backup_targets") for item in plan[key]
+    )
+    for name in ("_rename_noreplace", "_seal_quarantine", "_delete_quarantine"):
+        monkeypatch.setattr(
+            retention_apply,
+            name,
+            lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("zero pass mutated")),
+        )
+    plan_path = _plan_file(plan, tmp_path / "zero-plan.json")
+    first = retention_apply.apply_retention_plan(
+        plan_path=plan_path,
+        expected_plan_sha256=str(plan["plan_sha256"]),
+    )
+    state_dir = synthetic_inventory["activation_journal"].parent
+    second = retention_apply.apply_retention_plan(
+        plan_path=None,
+        expected_plan_sha256=str(plan["plan_sha256"]),
+        state_dir=state_dir,
+    )
+
+    assert first == second
+    assert first["deleted_candidate_count"] == 0
+    assert first["actual_deleted_logical_bytes"] == 0
+    assert first["actual_deleted_inodes"] == 0
+    assert (
+        retention_apply._load_journal(  # noqa: SLF001
+            state_dir / retention_apply.APPLY_JOURNAL_NAME
+        )["phase"]
+        == "applied"
+    )
+    operator._require_retention_apply_quiesced(state_dir)  # noqa: SLF001
+
+
+def test_unfinished_zero_effect_resume_rejects_new_candidate_before_receipt(
+    synthetic_inventory: dict[str, Any],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    shutil.rmtree(synthetic_inventory["old"].identity.root)
+    shutil.rmtree(synthetic_inventory["backup_root"] / "legacy-unpinned")
+    _enable_complete_delete_evidence(monkeypatch)
+    monkeypatch.setattr(
+        retention,
+        "build_complete_open_inventory",
+        lambda *, target_paths: _privileged_open_inventory(target_paths=tuple(target_paths)),
+    )
+    plan = retention.build_eligible_retention_plan(
+        activation_journal=synthetic_inventory["activation_journal"],
+        unit_journal=synthetic_inventory["unit_journal"],
+        backup_root=synthetic_inventory["backup_root"],
+        inventory_roots=(synthetic_inventory["inventory"],),
+        backup_inventory_roots=(synthetic_inventory["backup_root"],),
+        canonical_evidence_roots=(
+            retention.CanonicalEvidenceRoot(
+                path=synthetic_inventory["evidence_root"],
+                authority_path=synthetic_inventory["evidence_authority"],
+                authority_sha256=_sha256_file(synthetic_inventory["evidence_authority"]),
+            ),
+        ),
+    )
+    plan_path = _plan_file(plan, tmp_path / "zero-plan.json")
+
+    def crash(point: str) -> None:
+        if point == "before_receipt_publish":
+            raise retention_apply._InjectedCrash  # noqa: SLF001
+
+    monkeypatch.setattr(retention_apply, "_fault", crash)
+    with pytest.raises(retention_apply._InjectedCrash):  # noqa: SLF001
+        retention_apply.apply_retention_plan(
+            plan_path=plan_path,
+            expected_plan_sha256=str(plan["plan_sha256"]),
+        )
+
+    _exact_backup(synthetic_inventory["backup_root"] / "legacy-unpinned", 3)
+    monkeypatch.setattr(retention_apply, "_fault", lambda _point: None)
+    state_dir = synthetic_inventory["activation_journal"].parent
+    with pytest.raises(retention_apply.RetentionApplyError, match="^retention_apply_plan_drift$"):
+        retention_apply.apply_retention_plan(
+            plan_path=None,
+            expected_plan_sha256=str(plan["plan_sha256"]),
+            state_dir=state_dir,
+        )
+    assert not (state_dir / retention_apply.APPLY_RECEIPT_DIRECTORY).exists()
 
 
 def test_apply_rejects_forged_open_inventory_authority_before_journal_write(
@@ -2136,7 +2258,7 @@ def test_apply_rejects_forged_open_inventory_authority_before_journal_write(
 
     with pytest.raises(
         retention_apply.RetentionApplyError,
-        match="^retention_apply_plan_drift$",
+        match="^retention_apply_plan_digest_mismatch$",
     ):
         retention_apply.apply_retention_plan(
             plan_path=plan_path,
@@ -2146,6 +2268,9 @@ def test_apply_rejects_forged_open_inventory_authority_before_journal_write(
     assert synthetic_inventory["old"].identity.root.exists()
     assert not (
         synthetic_inventory["activation_journal"].parent / retention_apply.APPLY_JOURNAL_NAME
+    ).exists()
+    assert not (
+        synthetic_inventory["activation_journal"].parent / retention_apply.APPLY_PLAN_DIRECTORY
     ).exists()
 
 
@@ -2266,7 +2391,7 @@ def test_zero_candidate_scope_cannot_race_into_unprobed_delete_candidate(
             }
         return {
             "classification_status": "eligible",
-            "apply_authority": True,
+            "apply_authority": False,
             "block_reason": "",
             "targets": ({"decision": "delete_candidate", "path": str(candidate)},),
             "backup_targets": (),
