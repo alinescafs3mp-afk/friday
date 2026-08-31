@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 from dataclasses import replace
@@ -102,11 +103,12 @@ def test_evidence_bundle_is_one_closed_projection_for_synthesis_and_verification
 
 
 def test_shared_evidence_import_does_not_load_runtime_or_heavy_organs() -> None:
-    root = Path(__file__).resolve().parents[1]
+    root = Path(os.environ.get("FRIDAY_QUALITY_GATE_INSTALLED_SITE", Path(__file__).parents[1])).resolve()
     code = """
-import json, sys
+import json, pathlib, sys
 sys.path.insert(0, sys.argv[1])
 import friday.file_evidence, friday.evidence_bundle
+assert all(pathlib.Path(sys.modules[name].__file__).resolve().is_relative_to(pathlib.Path(sys.argv[1])) for name in ('friday.file_evidence', 'friday.evidence_bundle'))
 blocked = [name for name in sys.modules if name.startswith(('friday.agent_runtime', 'friday.ingestion', 'friday.orchestration', 'friday.retrieval'))]
 print(json.dumps(blocked))
 """

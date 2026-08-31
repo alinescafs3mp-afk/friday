@@ -11,6 +11,7 @@ import subprocess
 import pytest
 
 from friday.organs.engineer import sandbox
+from friday_host_agent.inventory import DpkgPackageResolver
 
 yaml = pytest.importorskip("yaml")
 
@@ -29,6 +30,27 @@ def _seccomp_rules(name: str, *, action: str | None = None) -> list[dict[str, ob
         for rule in profile["syscalls"]
         if name in rule["names"] and (action is None or rule["action"] == action)
     ]
+
+
+def _require_package_file(path: pathlib.Path, package: str, *, executable: bool = False) -> pathlib.Path:
+    try:
+        details = path.lstat()
+        identity = DpkgPackageResolver().resolve(str(path))
+        valid = (
+            path.is_absolute()
+            and path.resolve(strict=True) == path
+            and stat.S_ISREG(details.st_mode)
+            and details.st_uid == 0
+            and not details.st_mode & 0o022
+            and (not executable or bool(details.st_mode & 0o111))
+            and identity is not None
+            and identity.name == package
+        )
+    except OSError:
+        valid = False
+    if not valid:
+        raise AssertionError("release-host package prerequisite is not authenticated")
+    return path
 
 
 def test_engineer_compose_override_preserves_the_outer_boundary() -> None:
@@ -143,10 +165,13 @@ def test_apparmor_profile_is_enforcing_grammar_not_an_escape_hatch() -> None:
     assert "deny mount" not in profile
     assert "flags=(unconfined)" not in profile
 
-    parser = pathlib.Path("/usr/sbin/apparmor_parser")
-    if parser.is_file():
-        completed = subprocess.run(  # noqa: S603 - fixed distro parser and release profile
-            [str(parser), "-Q", "-K", "-T", str(DEPLOY / "apparmor/friday-engineer-backend")],
+    with pytest.raises(AssertionError, match="prerequisite is not authenticated"):
+        _require_package_file(DEPLOY / "missing-apparmor-parser", "apparmor", executable=True)
+    parser = _require_package_file(pathlib.Path("/usr/sbin/apparmor_parser"), "apparmor", executable=True)
+    system_policy = _require_package_file(pathlib.Path("/etc/apparmor.d/bwrap-userns-restrict"), "apparmor")
+    for policy in (system_policy, DEPLOY / "apparmor/friday-engineer-backend"):
+        completed = subprocess.run(  # noqa: S603 - fixed parser and reviewed policies
+            [str(parser), "-Q", "-K", "-T", str(policy)],
             check=False,
             capture_output=True,
             text=True,

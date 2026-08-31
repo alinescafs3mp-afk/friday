@@ -21,6 +21,7 @@ from friday.host_control.contracts import ExecutableAttestation, ExecutionProfil
 from friday.host_control.plans import HostActionPlan, create_action_plan
 from friday.host_control.plans import WorkspaceGrant as PlanGrant
 from friday_host_agent.executable_attestation import attest_executable
+from friday_host_agent.inventory import DpkgPackageResolver
 from friday_host_agent.process_runner import (
     DirectExecTestBackend,
     ProcessResult,
@@ -33,17 +34,52 @@ from friday_host_agent.process_runner import (
 
 
 def _root_executable(source: str):
+    package = DpkgPackageResolver().resolve(source)
+    assert package is not None and package.name in {"rust-coreutils", "gnu-coreutils"}
     return attest_executable(
         source,
         allowed_paths=(source,),
         allowed_owner_uids=(0,),
-        package_name="coreutils",
-        package_version="1.0",
-        architecture="amd64",
+        package_name=package.name,
+        package_version=package.version,
+        architecture=package.architecture,
         adapter_id="data.synthetic",
         adapter_schema_version=1,
         implementation_version=1,
         observed_version="synthetic 1.0",
+    )
+
+
+def _host_tool(name: str) -> str:
+    public = Path(f"/usr/bin/{name}")
+    target = public.resolve(strict=True)
+    resolver = DpkgPackageResolver()
+    public_package, target_package = resolver.resolve(str(public)), resolver.resolve(str(target))
+    expected = "gnu-coreutils" if name == "true" else "rust-coreutils"
+    assert public_package is not None and public_package.name == "coreutils-from-uutils"
+    assert target_package is not None and target_package.name == expected
+    return str(target)
+
+
+def _deterministic_executable():
+    return ExecutableAttestation(
+        schema_version=1,
+        canonical_path="/code-owned/synthetic-executable",
+        device=8,
+        inode=42,
+        mode=0o755,
+        owner_uid=0,
+        owner_gid=0,
+        size_bytes=1024,
+        mtime_ns=100,
+        sha256="a" * 64,
+        package_name="synthetic-package",
+        package_version="1.0",
+        architecture="amd64",
+        observed_version="synthetic 1.0",
+        adapter_id="data.synthetic",
+        adapter_schema_version=1,
+        implementation_version=1,
     )
 
 
@@ -74,8 +110,8 @@ def _execution_and_plan(
         summary="Synthetic adapter",
         categories=("data",),
         supported_platforms=("ubuntu",),
-        packages=(PackageRequirement("apt", "coreutils"),),
-        executable=ExecutableRequirement("synthetic", "coreutils", (executable.canonical_path,)),
+        packages=(PackageRequirement("apt", executable.package_name),),
+        executable=ExecutableRequirement("synthetic", executable.package_name, (executable.canonical_path,)),
         actions=(action,),
     )
     execution = ExecutionSpec(
@@ -189,7 +225,7 @@ def _sealed_base(tmp_path: Path) -> Path:
 
 
 def test_direct_test_backend_treats_shell_metacharacters_as_literal_data(tmp_path) -> None:
-    executable = _root_executable("/usr/lib/cargo/bin/coreutils/printf")
+    executable = _root_executable(_host_tool("printf"))
     execution, plan = _execution_and_plan(executable, arguments=("%s", "; touch escaped"))
     workspace = _workspace(tmp_path)
     result = ProcessRunner(DirectExecTestBackend(), workspace_base=tmp_path).run(
@@ -207,7 +243,7 @@ def test_direct_test_backend_treats_shell_metacharacters_as_literal_data(tmp_pat
 
 
 def test_output_timeout_and_cancel_are_bounded(tmp_path) -> None:
-    yes = _root_executable("/usr/lib/cargo/bin/coreutils/yes")
+    yes = _root_executable(_host_tool("yes"))
     execution, plan = _execution_and_plan(yes, arguments=("bounded",), timeout=1, output=1024)
     workspace = _workspace(tmp_path)
     timed = ProcessRunner(DirectExecTestBackend(), workspace_base=tmp_path).run(
@@ -222,7 +258,7 @@ def test_output_timeout_and_cancel_are_bounded(tmp_path) -> None:
     assert timed.output_truncated is True
     assert len(timed.stdout) + len(timed.stderr) == 1024
 
-    sleep = _root_executable("/usr/lib/cargo/bin/coreutils/sleep")
+    sleep = _root_executable(_host_tool("sleep"))
     execution, plan = _execution_and_plan(sleep, arguments=("10",), timeout=10)
     cancellation = threading.Event()
     cancellation.set()
@@ -240,7 +276,7 @@ def test_output_timeout_and_cancel_are_bounded(tmp_path) -> None:
 
 
 def test_capture_failure_after_start_is_reported_as_unknown(tmp_path, monkeypatch) -> None:
-    executable = _root_executable("/usr/lib/cargo/bin/coreutils/printf")
+    executable = _root_executable(_host_tool("printf"))
     execution, plan = _execution_and_plan(executable, arguments=("output",))
     workspace = _workspace(tmp_path)
 
@@ -261,7 +297,7 @@ def test_capture_failure_after_start_is_reported_as_unknown(tmp_path, monkeypatc
     assert result.error_code in {"runner_failure_after_start", "termination_unconfirmed"}
 
 
-def test_swapped_workspace_input_is_rejected_before_backend(tmp_path) -> None:
+def test_swapped_workspace_input_is_rejected_before_backend(tmp_path, monkeypatch) -> None:
     workspace = _workspace(tmp_path)
     source = Path(workspace.workspace_root) / "input" / "source.bin"
     source.write_bytes(b"approved")
@@ -278,8 +314,13 @@ def test_swapped_workspace_input_is_rejected_before_backend(tmp_path) -> None:
         workspace_root=workspace.workspace_root,
         grants=(grant,),
     )
-    executable = _root_executable("/usr/lib/cargo/bin/coreutils/printf")
+    executable = _deterministic_executable()
     execution, plan = _execution_and_plan(executable, arguments=("ok",), grants=(grant,))
+
+    def forbidden_verification(_observed):
+        raise AssertionError("swapped input reached executable verification")
+
+    monkeypatch.setattr(runner_module, "verify_executable", forbidden_verification)
     source.write_bytes(b"swapped")
     with pytest.raises(ValueError, match="identity changed"):
         ProcessRunner(DirectExecTestBackend(), workspace_base=tmp_path).run(
@@ -504,11 +545,16 @@ def test_concurrent_jq_jobs_receive_isolated_ephemeral_snapshots(
     assert list(sealed_base.iterdir()) == []
 
 
-def test_production_default_fails_closed_without_systemd_boundary(tmp_path) -> None:
-    executable = _root_executable("/usr/lib/cargo/bin/coreutils/printf")
+def test_production_default_fails_closed_without_systemd_boundary(tmp_path, monkeypatch) -> None:
+    executable = _deterministic_executable()
     execution, plan = _execution_and_plan(executable, arguments=("ok",))
     workspace = _workspace(tmp_path)
     unavailable = SystemdUserBackend(systemd_run="/missing/systemd-run", systemctl="/missing/systemctl")
+
+    def verify_synthetic(observed):
+        assert observed == executable
+
+    monkeypatch.setattr(runner_module, "verify_executable", verify_synthetic)
     with pytest.raises(RunnerUnavailable, match="unavailable"):
         ProcessRunner(unavailable, workspace_base=tmp_path).run(
             job_id=workspace.job_id,
@@ -523,7 +569,7 @@ def test_production_default_fails_closed_without_systemd_boundary(tmp_path) -> N
 def test_static_boundary_preflight_rejects_missing_bwrap_without_user_bus(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    trusted_launcher = "/usr/lib/cargo/bin/coreutils/true"
+    trusted_launcher = _host_tool("true")
     backend = SystemdUserBackend(systemd_run=trusted_launcher, systemctl=trusted_launcher)
     monkeypatch.setattr(runner_module, "_BWRAP_EXECUTABLE", "/missing/friday-bwrap")
 
@@ -536,10 +582,11 @@ def test_static_boundary_preflight_rejects_missing_bwrap_without_user_bus(
 
 
 def test_systemd_backend_builds_code_owned_cgroup_and_resource_limits(tmp_path, monkeypatch) -> None:
-    executable = _root_executable("/usr/lib/cargo/bin/coreutils/printf")
+    executable = _deterministic_executable()
     execution, _plan = _execution_and_plan(executable, arguments=("ok",))
     workspace = _workspace(tmp_path)
     captured: dict[str, object] = {}
+    verified_executables: list[ExecutableAttestation] = []
     expected = ProcessResult(
         outcome="completed",
         effect_boundary_crossed=True,
@@ -561,8 +608,15 @@ def test_systemd_backend_builds_code_owned_cgroup_and_resource_limits(tmp_path, 
         captured.update(kwargs)
         return expected
 
-    trusted_launcher = "/usr/lib/cargo/bin/coreutils/true"
+    trusted_launcher = "/code-owned/systemd-control"
     backend = SystemdUserBackend(systemd_run=trusted_launcher, systemctl=trusted_launcher)
+    monkeypatch.setattr(backend, "available", lambda: True)
+
+    def verify_synthetic(observed):
+        assert observed == executable
+        verified_executables.append(observed)
+
+    monkeypatch.setattr(runner_module, "verify_executable", verify_synthetic)
     monkeypatch.setattr(runner_module, "_capture_process", capture)
     result = backend.run(
         job_id=workspace.job_id,
@@ -608,15 +662,15 @@ def test_systemd_backend_builds_code_owned_cgroup_and_resource_limits(tmp_path, 
     working_directory = str(workspace.resolve("job_work"))
     assert ["--ro-bind", working_directory, working_directory] == sandbox[-6:-3]
     assert ["--chdir", working_directory, "--"] == sandbox[-3:]
-    verified = argv[bwrap_separator + 1 :]
-    assert verified[:4] == [
+    verified_argv = argv[bwrap_separator + 1 :]
+    assert verified_argv[:4] == [
         "/usr/bin/python3",
         "-I",
         "-c",
         runner_module._VERIFIED_EXEC_SCRIPT,  # noqa: SLF001 - exact production boundary
     ]
-    assert verified[4] == executable.canonical_path
-    assert verified[-len(execution.argv) :] == list(execution.argv)
+    assert verified_argv[4] == executable.canonical_path
+    assert verified_argv[-len(execution.argv) :] == list(execution.argv)
     assert captured["environment"] == {
         "DBUS_SESSION_BUS_ADDRESS": f"unix:path=/run/user/{os.geteuid()}/bus",
         "LANG": "C.UTF-8",
@@ -645,6 +699,7 @@ def test_systemd_backend_builds_code_owned_cgroup_and_resource_limits(tmp_path, 
     assert isinstance(network_argv, list)
     assert "--property=RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK" in network_argv
     assert "--share-net" in network_argv
+    assert verified_executables == [executable, executable]
 
 
 def test_systemd_availability_smokes_both_exact_bwrap_profiles_once(
@@ -657,7 +712,7 @@ def test_systemd_availability_smokes_both_exact_bwrap_profiles_once(
         calls.append(argv)
         return runner_module.subprocess.CompletedProcess(argv, 0, stdout=b"", stderr=b"")
 
-    trusted_launcher = "/usr/lib/cargo/bin/coreutils/true"
+    trusted_launcher = _host_tool("true")
     monkeypatch.setattr(runner_module.subprocess, "run", successful_probe)
     backend = SystemdUserBackend(
         systemd_run=trusted_launcher,
@@ -686,7 +741,7 @@ def test_systemd_availability_fails_closed_when_effective_bwrap_probe_fails(
         calls += 1
         return runner_module.subprocess.CompletedProcess(argv, 1, stdout=b"", stderr=b"denied")
 
-    trusted_launcher = "/usr/lib/cargo/bin/coreutils/true"
+    trusted_launcher = _host_tool("true")
     monkeypatch.setattr(runner_module.subprocess, "run", failed_probe)
     backend = SystemdUserBackend(
         systemd_run=trusted_launcher,
@@ -721,7 +776,7 @@ def test_systemd_reconcile_requires_terminal_unit_and_empty_exact_cgroup(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    trusted_launcher = "/usr/lib/cargo/bin/coreutils/true"
+    trusted_launcher = "/code-owned/systemd-control"
     backend = SystemdUserBackend(systemd_run=trusted_launcher, systemctl=trusted_launcher)
     backend._cgroup_root = tmp_path  # noqa: SLF001 - synthetic cgroup-v2 mount
     cgroup = "/user.slice/friday-host-test.scope"
@@ -758,7 +813,7 @@ def test_systemd_reconcile_requires_terminal_unit_and_empty_exact_cgroup(
 def test_systemd_cancel_escalates_and_never_trusts_kill_return_code_alone(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    trusted_launcher = "/usr/lib/cargo/bin/coreutils/true"
+    trusted_launcher = "/code-owned/systemd-control"
     backend = SystemdUserBackend(systemd_run=trusted_launcher, systemctl=trusted_launcher)
     signals: list[tuple[str, str]] = []
 
@@ -791,7 +846,7 @@ def test_systemd_cancel_escalates_and_never_trusts_kill_return_code_alone(
 def test_systemd_cancel_reports_success_only_after_polled_terminal_observation(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    trusted_launcher = "/usr/lib/cargo/bin/coreutils/true"
+    trusted_launcher = "/code-owned/systemd-control"
     backend = SystemdUserBackend(systemd_run=trusted_launcher, systemctl=trusted_launcher)
     unit = "friday-host-0123456789abcdef.service"
     observations = iter(

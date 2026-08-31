@@ -21,6 +21,7 @@ from friday.config import FridaySettings
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 CONFIG_SOURCE = ROOT / "friday" / "config" / "__init__.py"
+WORD_TOKEN = re.compile(r"\b\w+\b")
 
 # These fields are consumed INSIDE the config module. ``data_dir`` and
 # ``cache_dir`` derive other paths; the two latency fields are strictly validated
@@ -35,6 +36,12 @@ CONSUMED_INSIDE_CONFIG = {
 }
 
 
+def _mentioned_settings(text: str, names: set[str]) -> set[str]:
+    """Keep the existing exact word-boundary lexical semantics in one scan."""
+
+    return names & set(WORD_TOKEN.findall(text))
+
+
 def _fields_no_code_reads() -> set[str]:
     names = {field.name for field in dataclasses.fields(FridaySettings)}
     seen: set[str] = set()
@@ -42,8 +49,26 @@ def _fields_no_code_reads() -> set[str]:
         if path == CONFIG_SOURCE or path.name == pathlib.Path(__file__).name:
             continue
         text = path.read_text(encoding="utf-8")
-        seen |= {name for name in names if re.search(rf"\b{name}\b", text)}
+        seen.update(_mentioned_settings(text, names))
     return names - seen - CONSUMED_INSIDE_CONFIG
+
+
+def test_setting_mentions_are_exact_and_preserve_non_code_semantics():
+    names = {"exact_name", "near_miss", "comment_name", "string_name", "prose_name"}
+    text = """
+settings.exact_name
+prefix_near_miss = near_miss_suffix
+# comment_name
+label = "string_name"
+arbitrary non-code prose_name text
+"""
+
+    assert _mentioned_settings(text, names) == {
+        "exact_name",
+        "comment_name",
+        "string_name",
+        "prose_name",
+    }
 
 
 def test_every_setting_is_read_by_something():

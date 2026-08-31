@@ -67,7 +67,11 @@ for entry in pathlib.Path("/proc/self/fd").iterdir():
         [sys.executable, "-c", script, str(key)],
         check=False,
         capture_output=True,
-        env={"PATH": os.environ.get("PATH", ""), "PYTHONPATH": os.getcwd()},
+        env={
+            "PATH": os.environ.get("PATH", ""),
+            "PYTHONPATH": os.environ.get("FRIDAY_QUALITY_GATE_INSTALLED_SITE", os.getcwd()),
+            "PYTHONSAFEPATH": "1",
+        },
         text=True,
         timeout=10,
     )

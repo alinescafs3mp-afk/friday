@@ -20,7 +20,7 @@ from __future__ import annotations
 import hashlib
 import io
 import zipfile
-from datetime import date
+from datetime import date, datetime
 
 import pytest
 
@@ -115,15 +115,21 @@ def test_a_bare_number_means_the_last_one_that_happened(settings, storage) -> No
     assert picked <= today, f"{picked} ещё не наступило"
 
 
-def test_a_number_already_passed_this_month_stays_in_it(settings, storage) -> None:
+def test_a_number_already_passed_this_month_stays_in_it(
+    settings, storage, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """Число, которое в этом месяце уже было, берётся из этого месяца."""
+    import friday.execution_kernel as kernel_module
+
+    class FrozenLaterDay(datetime):
+        @classmethod
+        def now(cls, tz=None):  # noqa: ANN001, ANN206
+            return cls(2026, 8, 15, 12, tzinfo=tz)
+
+    monkeypatch.setattr(kernel_module, "datetime", FrozenLaterDay)
     kernel = _kernel(settings, storage)
-    today = date.today()
-    if today.day < 2:
-        pytest.skip("первое число месяца: проверять нечего")
-        return
-    days, _ = kernel._days_meant(["1"])
-    assert date.fromisoformat(days[0]) == today.replace(day=1)
+    days, unclear = kernel._days_meant(["1"])
+    assert days == ["2026-08-01"] and unclear == []
 
 
 def test_three_numbers_are_three_days_not_a_range(settings, storage) -> None:

@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import os
-import shutil
 import subprocess
 from dataclasses import replace
 
@@ -27,9 +26,7 @@ from friday_host_agent.executable_attestation import (
     attest_executable,
     verify_executable,
 )
-from friday_host_agent.inventory import ExecutableInventory, PackageIdentity
-
-_PRINTF = "/usr/lib/cargo/bin/coreutils/printf"
+from friday_host_agent.inventory import ExecutableInventory, InventoryEntry, PackageIdentity
 
 
 class _Packages:
@@ -41,8 +38,23 @@ class _Packages:
         return self.identity
 
 
+class _RegistryInventoryFixture:
+    """Start registry-only tests at the already-authenticated inventory boundary."""
+
+    def __init__(self, delegate: ExecutableInventory) -> None:
+        entry = delegate.inspect("data.echo")
+        assert entry.attestation is not None
+        attestation = replace(entry.attestation, owner_uid=0)
+        self._entry = replace(entry, attestation=attestation)
+
+    def inspect(self, adapter_id: str) -> InventoryEntry:
+        if adapter_id != self._entry.adapter_id:
+            raise KeyError(adapter_id)
+        return self._entry
+
+
 class _EchoAdapter:
-    def __init__(self, path: str = _PRINTF) -> None:
+    def __init__(self, path: str) -> None:
         self.spec = AdapterSpec(
             adapter_id="data.echo",
             adapter_schema_version=1,
@@ -92,13 +104,20 @@ def _inventory(adapter: _EchoAdapter, package: PackageIdentity | None = None) ->
         (adapter.spec,),
         package_resolver=_Packages(package or PackageIdentity("coreutils", "9.9", "amd64")),
         version_probes={adapter.spec.adapter_id: lambda _path, _descriptor: "printf (coreutils) 9.9"},
-        allowed_owner_uids=(0,),
+        allowed_owner_uids=(os.geteuid(),),
     )
+
+
+def _owned_executable(tmp_path) -> str:
+    executable = tmp_path / "owned-executable"
+    executable.write_bytes(b"code-owned test executable\n")
+    executable.chmod(0o700)
+    return str(executable)
 
 
 def test_attestation_round_trips_through_the_shared_dto_and_detects_replacement(tmp_path) -> None:
     executable = tmp_path / "reviewed-tool"
-    shutil.copyfile(_PRINTF, executable)
+    executable.write_bytes(b"reviewed executable\n")
     executable.chmod(0o700)
     observed = attest_executable(
         executable,
@@ -124,7 +143,7 @@ def test_attestation_round_trips_through_the_shared_dto_and_detects_replacement(
 
 def test_attestation_rejects_symlink_and_writable_executable(tmp_path) -> None:
     target = tmp_path / "target"
-    shutil.copyfile(_PRINTF, target)
+    target.write_bytes(b"reviewed executable\n")
     target.chmod(0o722)
     link = tmp_path / "link"
     link.symlink_to(target)
@@ -140,6 +159,8 @@ def test_attestation_rejects_symlink_and_writable_executable(tmp_path) -> None:
     }
     with pytest.raises(ExecutableAttestationError, match="without following"):
         attest_executable(link, allowed_paths=(link,), **metadata)
+    with pytest.raises(ExecutableAttestationError, match="could not be opened"):
+        attest_executable(tmp_path / "missing", allowed_paths=(tmp_path / "missing",), **metadata)
     with pytest.raises(ExecutableAttestationError, match="writable"):
         attest_executable(target, allowed_paths=(target,), **metadata)
 
@@ -214,8 +235,8 @@ def test_inventory_version_probe_executes_held_inode_and_rejects_path_swap(tmp_p
     assert not marker.exists()
 
 
-def test_reviewed_inventory_is_not_available_without_package_ownership() -> None:
-    adapter = _EchoAdapter()
+def test_reviewed_inventory_is_not_available_without_package_ownership(tmp_path) -> None:
+    adapter = _EchoAdapter(_owned_executable(tmp_path))
     inventory = _inventory(adapter, PackageIdentity("not-coreutils", "1", "amd64"))
     entry = inventory.inspect(adapter.spec.adapter_id)
     assert entry.state == "unattested"
@@ -223,9 +244,9 @@ def test_reviewed_inventory_is_not_available_without_package_ownership() -> None
     assert "ownership" in str(entry.reason)
 
 
-def test_registry_consumes_exact_shared_plan_and_preserves_target_snapshot() -> None:
-    adapter = _EchoAdapter()
-    inventory = _inventory(adapter)
+def test_registry_consumes_exact_shared_plan_and_preserves_target_snapshot(tmp_path) -> None:
+    adapter = _EchoAdapter(_owned_executable(tmp_path))
+    inventory = _RegistryInventoryFixture(_inventory(adapter))
     attestation = inventory.inspect(adapter.spec.adapter_id).attestation
     assert attestation is not None
     plan = create_action_plan(
@@ -257,9 +278,9 @@ def test_registry_consumes_exact_shared_plan_and_preserves_target_snapshot() -> 
     assert validated.execution.argv[-1] == "; echo not-a-shell"
 
 
-def test_registry_rejects_plan_or_adapter_drift() -> None:
-    adapter = _EchoAdapter()
-    inventory = _inventory(adapter)
+def test_registry_rejects_plan_or_adapter_drift(tmp_path) -> None:
+    adapter = _EchoAdapter(_owned_executable(tmp_path))
+    inventory = _RegistryInventoryFixture(_inventory(adapter))
     attestation = inventory.inspect(adapter.spec.adapter_id).attestation
     assert attestation is not None
     plan = create_action_plan(
@@ -286,7 +307,7 @@ def test_registry_rejects_plan_or_adapter_drift() -> None:
             now=1_001,
         )
 
-    drifted_adapter = _EchoAdapter()
+    drifted_adapter = _EchoAdapter(adapter.spec.executable.allowed_paths[0])
     drifted_adapter.spec = replace(drifted_adapter.spec, implementation_version=4)
     with pytest.raises(AdapterValidationError, match="version"):
         AdapterRegistry((drifted_adapter,), inventory=inventory).validate_action(

@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import os
 import subprocess
 import sys
 import unicodedata
@@ -613,6 +614,26 @@ def _reopen_storage(settings: Any, storage: Any) -> FridayStorage:
     )
 
 
+_ISOLATED_FIRST_PARTY_BOOTSTRAP = r"""
+import pathlib
+import sys
+
+root = pathlib.Path(sys.argv.pop(1)).resolve(strict=True)
+code = sys.argv.pop(1)
+sys.path.insert(0, str(root))
+exec(compile(code, "<friday-isolated-probe>", "exec"), {"__name__": "__main__"})
+for name, module in tuple(sys.modules.items()):
+    origin = getattr(module, "__file__", None)
+    if name.partition(".")[0] in {"friday", "friday_host_agent", "friday_package_broker"} and origin:
+        assert pathlib.Path(origin).resolve().is_relative_to(root), (name, origin, root)
+"""
+
+
+def _isolated_first_party_command(code: str, *arguments: str) -> tuple[str, ...]:
+    root = os.environ.get("FRIDAY_QUALITY_GATE_INSTALLED_SITE", str(Path(__file__).parents[1]))
+    return (sys.executable, "-I", "-B", "-c", _ISOLATED_FIRST_PARTY_BOOTSTRAP, root, code, *arguments)
+
+
 _FRESH_INTERPRETER_REPLAY_PROBE = r"""
 from __future__ import annotations
 
@@ -622,8 +643,8 @@ import sys
 from dataclasses import replace
 from pathlib import Path
 
-source_root, database_path, user_id, conversation_id, work_item_id = sys.argv[1:]
-sys.path.insert(0, source_root)
+database_path, user_id, conversation_id, work_item_id = sys.argv[1:]
+assert sys.dont_write_bytecode
 
 from friday.config import load_settings
 from friday.interaction_control_plane.archive_evidence_work_item_store import (
@@ -689,12 +710,8 @@ finally:
 
 def _fresh_interpreter_replay(storage: Any, item: Any) -> dict[str, Any]:
     completed = subprocess.run(  # noqa: S603 - fixed interpreter and inline probe
-        (
-            sys.executable,
-            "-I",
-            "-c",
+        _isolated_first_party_command(
             _FRESH_INTERPRETER_REPLAY_PROBE,
-            str(Path(__file__).resolve().parents[1]),
             str(storage.settings.database_path),
             item.user_id,
             item.conversation_id,
@@ -2953,20 +2970,17 @@ async def test_archive_candidate_hook_is_exact_owner_conversation_and_live_scope
         await web.close()
 
 
-def test_interaction_control_plane_and_runtime_cold_import_together() -> None:
-    source_root = str(Path(__file__).resolve().parents[1])
+def test_interaction_control_plane_and_runtime_cold_import_together(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     completed = subprocess.run(  # noqa: S603 - fixed interpreter and inline probe
-        (
-            sys.executable,
-            "-I",
-            "-c",
+        _isolated_first_party_command(
             (
                 "import sys; "
-                "sys.path.insert(0, sys.argv[1]); "
+                "assert sys.dont_write_bytecode; "
                 "import friday.interaction_control_plane; "
                 "import friday.agent_runtime"
             ),
-            source_root,
         ),
         check=False,
         capture_output=True,
@@ -2974,6 +2988,19 @@ def test_interaction_control_plane_and_runtime_cold_import_together() -> None:
         timeout=30,
     )
     assert completed.returncode == 0, completed.stderr
+    site, source = tmp_path / "wheel-site", tmp_path / "candidate-source"
+    for root, body in ((site, "ORIGIN='wheel'\n"), (source, "raise RuntimeError('source won')\n")):
+        (root / "friday").mkdir(parents=True)
+        (root / "friday" / "__init__.py").write_text(body, encoding="utf-8")
+    monkeypatch.setenv("FRIDAY_QUALITY_GATE_INSTALLED_SITE", str(site))
+    divergent = subprocess.run(
+        _isolated_first_party_command("import friday; print(friday.ORIGIN)"),
+        cwd=source,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert divergent.returncode == 0 and divergent.stdout.strip() == "wheel"
 
 
 @pytest.mark.asyncio

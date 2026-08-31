@@ -181,6 +181,40 @@ def test_loopback_is_allowed_and_an_open_port_is_reported():
         worker.join(timeout=2)
     assert report["ok"] is True
     assert port in report["open_ports"]
+    scan = report["nmap"]
+    assert report["local_tools"]["nmap"] is True
+    assert scan["used"] is True and scan["ok"] is True
+    assert scan["binary"] == "/usr/bin/nmap" and scan["exit_code"] == 0
+    assert scan["parser_status"] == "complete"
+    assert scan["coverage"] == {
+        "accounted": 1,
+        "grade": "complete",
+        "reasons": [],
+        "requested": 1,
+        "skipped": 0,
+    }
+    assert scan["report"]["result"]["targets_scanned"] == 1
+    assert scan["report"]["result"]["open_ports"] == 1
+    attestation = scan["executable_attestation"]
+    assert set(attestation) == {
+        "architecture",
+        "binary_sha256",
+        "digest",
+        "observed_version",
+        "package_name",
+        "package_version",
+    }
+    assert attestation["package_name"] == "nmap" and attestation["observed_version"].startswith(
+        "Nmap version "
+    )
+    assert all(len(attestation[name]) == 64 for name in ("binary_sha256", "digest"))
+    assert len(scan["evidence"]) == 1 and scan["evidence_retention"] == "digest_only"
+    evidence = scan["evidence"][0]
+    assert set(evidence) == {"evidence_id", "media_type", "sha256", "size_bytes"}
+    assert evidence["evidence_id"] == f"evidence_{evidence['sha256'][:32]}"
+    assert evidence["media_type"] == "application/xml" and evidence["size_bytes"] > 0
+    assert len(evidence["sha256"]) == 64 and len(scan["target_snapshot_digest"]) == 64
+    assert "nmap_service_detection" in report["active_probes"]
     assert report["payloads_sent"] is False
 
 
