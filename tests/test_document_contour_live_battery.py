@@ -3147,7 +3147,10 @@ def test_release_runner_pins_and_attests_friday_import_origin(tmp_path) -> None:
     shutil.copy2(RUNNER, copied_runner)
     (release_package / "__init__.py").write_text("ORIGIN = 'release'\n", encoding="utf-8")
     (decoy_package / "__init__.py").write_text("ORIGIN = 'dirty'\n", encoding="utf-8")
-    environment = {**os.environ, "PYTHONPATH": str(decoy_root)}
+    environment = {
+        **{name: value for name, value in os.environ.items() if name != "FRIDAY_QUALITY_GATE_INSTALLED_SITE"},
+        "PYTHONPATH": str(decoy_root),
+    }
 
     direct = subprocess.run(
         [sys.executable, str(copied_runner), "--self-test"],

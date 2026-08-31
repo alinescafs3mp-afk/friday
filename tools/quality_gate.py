@@ -210,12 +210,12 @@ def _require_installed_wheel_imports(site: Path, modules: Mapping[str, object] |
             )
     for name, module in tuple(loaded.items()):
         module_file = getattr(module, "__file__", None)
-        if (
-            module_file
-            and any(name == root or name.startswith(f"{root}.") for root in _WHEEL_NAMESPACES)
-            and not Path(module_file).resolve(strict=True).is_relative_to(site)
-        ):
-            raise RuntimeError("a shipped module escaped the clean-installed wheel")
+        if module_file and any(name == root or name.startswith(f"{root}.") for root in _WHEEL_NAMESPACES):
+            resolved = Path(module_file).resolve(strict=True)
+            if not resolved.is_relative_to(site):
+                raise RuntimeError(
+                    f"a shipped module escaped the clean-installed wheel: {name} from {resolved}"
+                )
 
 
 def pytest_collection_modifyitems(items: list[Any]) -> None:
@@ -470,7 +470,11 @@ def _isolated_test_environment(
             backup_directory = home / "synthetic-backups"
             _private_directory(backup_directory)
 
-        environment = _git_environment()
+        # Test semantics must not inherit the controller's Git hardening flags:
+        # several adversarial tests deliberately exercise replacement/config
+        # behavior.  Controller-owned Git calls pass `_git_environment()`
+        # explicitly instead.
+        environment = {name: value for name, value in os.environ.items() if not name.startswith("GIT_")}
         test_assets = {
             alias: value
             for source, alias in _TEST_ASSET_ENV_ALIASES.items()
@@ -2272,9 +2276,13 @@ def execute(
 
 def main(argv: Sequence[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
-    if args.inventory_collection is not None:
-        return execute_inventory_collection(args)
-    return execute_tier(args) if args.tier else execute(args)
+    previous_umask = os.umask(0o077)
+    try:
+        if args.inventory_collection is not None:
+            return execute_inventory_collection(args)
+        return execute_tier(args) if args.tier else execute(args)
+    finally:
+        os.umask(previous_umask)
 
 
 if __name__ == "__main__":

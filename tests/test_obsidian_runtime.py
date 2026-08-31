@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import itertools
 import json
 import threading
 from dataclasses import replace
@@ -35,6 +36,7 @@ from friday.organs.obsidian.vault_store import VaultStore
 SERVER_ID = "DOVII4U-SQEEESM-VZ2CVTC-CJM4YN5-QNV7DCU-5U3ASRL-YVFG6TH-W5DV5AA"
 PHONE_ID = "YZJBJFX-RDBL7WY-6ZGKJ2D-4MJB4E7-ZATSDUY-LD6Y3L3-MLFUYWE-AEMXJAC"
 OTHER_ID = "AAAAAAA-AAAAAAA-AAAAAAA-AAAAAAA-AAAAAAA-AAAAAAA-AAAAAAA-AAAAAAA"
+_RUNTIME_ROOT_SEQUENCE = itertools.count()
 
 
 class _Client:
@@ -242,7 +244,8 @@ class _BlockingPolicyClient(_Client):
 
 
 def _runtime(settings, storage, tmp_path, client: _Client | None = None, *, version="v2.1.3"):
-    short_root = tmp_path.parents[1] / f"obs-{hashlib.sha256(str(tmp_path).encode()).hexdigest()[:8]}"
+    root_identity = f"{tmp_path}:{next(_RUNTIME_ROOT_SEQUENCE)}".encode()
+    short_root = tmp_path.parents[1] / f"obs-{hashlib.sha256(root_identity).hexdigest()[:8]}"
     configured = replace(
         settings,
         obsidian_enabled=True,

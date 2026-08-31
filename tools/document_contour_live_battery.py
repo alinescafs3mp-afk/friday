@@ -45,7 +45,26 @@ from typing import Any, cast
 from urllib.parse import urlsplit
 
 ROOT = Path(__file__).resolve().parents[1]
-_root_import_path = str(ROOT)
+_quality_gate_site = os.environ.get("FRIDAY_QUALITY_GATE_INSTALLED_SITE", "").strip()
+if _quality_gate_site:
+    _candidate_site = Path(_quality_gate_site)
+    try:
+        _candidate_site_details = _candidate_site.lstat()
+        _package_root = _candidate_site.resolve(strict=True)
+    except OSError as exc:
+        raise RuntimeError("Friday quality-gate package root is invalid") from exc
+    if (
+        not _candidate_site.is_absolute()
+        or _candidate_site.is_symlink()
+        or _package_root != _candidate_site
+        or not stat.S_ISDIR(_candidate_site_details.st_mode)
+        or _candidate_site_details.st_uid != os.geteuid()
+        or stat.S_IMODE(_candidate_site_details.st_mode) != 0o700
+    ):
+        raise RuntimeError("Friday quality-gate package root is invalid")
+else:
+    _package_root = ROOT
+_root_import_path = str(_package_root)
 if not sys.path or sys.path[0] != _root_import_path:
     sys.path.insert(0, _root_import_path)
 
@@ -56,7 +75,7 @@ if not sys.path or sys.path[0] != _root_import_path:
 import friday as _friday_package  # noqa: E402
 
 _friday_origin = Path(str(_friday_package.__file__ or "")).resolve()
-if not _friday_origin.is_relative_to(ROOT):
+if not _friday_origin.is_relative_to(_package_root):
     raise RuntimeError("Friday package origin is outside the frozen release root")
 
 RUNS = 2

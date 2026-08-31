@@ -346,6 +346,7 @@ def test_eager_settings_import_derives_the_database_from_the_scratch_home(
         monkeypatch.setenv(prefix + "BACKEND_CA_FILE", "/sentinel/live-backend-ca.crt")
 
     with quality_gate._isolated_test_environment() as environment:
+        assert not any(name.startswith("GIT_") for name in environment)
         probe = (
             "import os; "
             "from pathlib import Path; "
@@ -663,7 +664,7 @@ def test_exact_host_evidence_binds_package_owned_bwrap_apparmor_contour(monkeypa
     assert len(writes) == 1
 
 
-def test_dry_run_never_executes_commands(capsys) -> None:
+def test_dry_run_never_executes_commands(capsys, monkeypatch: pytest.MonkeyPatch) -> None:
     executed = False
 
     def runner(_command: quality_gate.GateCommand) -> int:
@@ -681,6 +682,17 @@ def test_dry_run_never_executes_commands(capsys) -> None:
     output = capsys.readouterr().out
     assert "--dist=loadscope" in output
     assert "Quality gate: DRY RUN" in output
+    calls: list[int] = []
+
+    def umask(value: int) -> int:
+        calls.append(value)
+        return 0o022
+
+    monkeypatch.setattr(quality_gate.os, "umask", umask)
+    monkeypatch.setattr(quality_gate, "execute", lambda _args: 0)
+
+    assert quality_gate.main(()) == 0
+    assert calls == [0o077, 0o022]
 
 
 @pytest.mark.parametrize(("phase", "label"), (("ui", "UI"), ("tests", "non-UI")))
@@ -792,7 +804,10 @@ def test_collection_manifest_rejects_duplicate_nodeids(
 
 
 @pytest.mark.parametrize("problem", ["skip", "deselect"])
-def test_local_collection_problem_is_terminal(tmp_path: Path, problem: str) -> None:
+def test_local_collection_problem_is_terminal(
+    tmp_path: Path, problem: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.delenv(quality_gate._INSTALLED_SITE_ENV, raising=False)
     manifest = tmp_path / "collection.json"
     session = _collection_session(manifest)
     skip_length = len(quality_gate._COLLECTION_SKIPS)
@@ -812,7 +827,10 @@ def test_local_collection_problem_is_terminal(tmp_path: Path, problem: str) -> N
 
 
 @pytest.mark.parametrize("problem", ["deselected", "missing-attestation"])
-def test_xdist_worker_problem_is_terminal_in_the_controller(tmp_path: Path, problem: str) -> None:
+def test_xdist_worker_problem_is_terminal_in_the_controller(
+    tmp_path: Path, problem: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.delenv(quality_gate._INSTALLED_SITE_ENV, raising=False)
     manifest = tmp_path / "collection.json"
     worker_id = "unit-test-worker-problem"
     node = SimpleNamespace(
