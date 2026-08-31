@@ -1418,6 +1418,72 @@ def _plan_file(plan: dict[str, Any], path: Path) -> Path:
     return path
 
 
+@pytest.mark.parametrize(
+    ("reader", "hardlinked"),
+    (("reviewed_plan", False), ("apply_journal", False), ("resume_plan", True)),
+)
+def test_metadata_fifo_swap_is_bounded_for_plan_journal_and_two_link_resume(
+    tmp_path: Path,
+    reader: str,
+    hardlinked: bool,
+) -> None:
+    repository = Path(retention.__file__).resolve().parents[1]
+    target = tmp_path / "reviewed.json"
+    target.write_bytes(b"{}\n")
+    target.chmod(0o600)
+    if hardlinked:
+        os.link(target, tmp_path / "reviewed-stage.json")
+    child = r"""
+import os
+import pathlib
+import sys
+
+repository = pathlib.Path(sys.argv[1])
+target = pathlib.Path(sys.argv[2])
+reader = sys.argv[3]
+sys.path.insert(0, str(repository))
+from tools import release_artifact_retention as retention
+from tools import release_artifact_retention_operator as retention_apply
+
+real_open = os.open
+swapped = False
+
+def swapping_open(path, flags, *args, **kwargs):
+    global swapped
+    if not swapped and path == target.name and kwargs.get("dir_fd") is not None:
+        os.unlink(target)
+        os.mkfifo(target, 0o600)
+        swapped = True
+    return real_open(path, flags, *args, **kwargs)
+
+retention.os.open = swapping_open
+try:
+    if reader == "apply_journal":
+        retention_apply._load_journal(target)
+    else:
+        retention_apply._read_plan(
+            target,
+            expected_sha256="a" * 64,
+            allow_recoverable_two_link=reader == "resume_plan",
+        )
+except retention_apply.RetentionApplyError:
+    if swapped:
+        raise SystemExit(0)
+raise SystemExit(3)
+"""
+    completed = subprocess.run(  # noqa: S603  # nosec B603 - fixed test interpreter and program
+        [sys.executable, "-I", "-B", "-c", child, str(repository), str(target), reader],
+        cwd=tmp_path,
+        check=False,
+        capture_output=True,
+        timeout=3,
+    )
+
+    assert completed.returncode == 0
+    assert completed.stdout == b""
+    assert completed.stderr == b""
+
+
 def test_stale_v1_executable_plan_is_rejected_before_durable_apply_state(
     synthetic_inventory: dict[str, Any],
     monkeypatch: pytest.MonkeyPatch,

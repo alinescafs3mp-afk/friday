@@ -454,7 +454,16 @@ def _stable_file_bytes(
     ):
         os.close(parent_fd)
         raise RetentionPlanError(code)
-    flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0)
+    # A pathname which passed the pre-open stat can still be replaced by a FIFO
+    # before open(2).  O_NONBLOCK keeps that race fail-closed and bounded; the
+    # descriptor and post-open identity checks below still require the exact
+    # reviewed regular file.
+    flags = (
+        os.O_RDONLY
+        | getattr(os, "O_CLOEXEC", 0)
+        | getattr(os, "O_NOFOLLOW", 0)
+        | getattr(os, "O_NONBLOCK", 0)
+    )
     chunks: list[bytes] = []
     try:
         descriptor = os.open(lexical.name, flags, dir_fd=parent_fd)
