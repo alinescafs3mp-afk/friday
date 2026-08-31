@@ -36,6 +36,12 @@ MAX_OBJECT_AUTHORITY_BYTES = retention.MAX_INVENTORY_ENTRIES * 32
 MAX_DELETE_ENTRIES = 1_000_000
 _HEX64 = frozenset("0123456789abcdef")
 _RENAME_NOREPLACE = 1
+_METADATA_READ_FLAGS = (
+    os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0)
+)
+_METADATA_RDWR_FLAGS = (
+    os.O_RDWR | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0)
+)
 
 
 class RetentionApplyError(RuntimeError):
@@ -512,10 +518,12 @@ def _persist_residual_authority(
         if observed != payload:
             raise RetentionApplyError("retention_apply_residual_authority_invalid")
         os.chmod(path, 0o400)
-        descriptor = os.open(path, os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0))
+        descriptor = os.open(path, _METADATA_READ_FLAGS)
         try:
-            os.fsync(descriptor)
             status = os.fstat(descriptor)
+            if not stat.S_ISREG(status.st_mode):
+                raise RetentionApplyError("retention_apply_residual_authority_invalid")
+            os.fsync(descriptor)
         finally:
             os.close(descriptor)
         directory_fd = os.open(
@@ -1162,13 +1170,14 @@ def _unlink_regular_with_lease(
         guard()
         file_fd = os.open(
             name,
-            os.O_RDWR | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0),
+            _METADATA_RDWR_FLAGS,
             dir_fd=descriptor,
         )
         opened = os.fstat(file_fd)
         named = os.stat(name, dir_fd=descriptor, follow_symlinks=False)
         if (
-            (opened.st_dev, opened.st_ino) != (before.st_dev, before.st_ino)
+            not stat.S_ISREG(opened.st_mode)
+            or (opened.st_dev, opened.st_ino) != (before.st_dev, before.st_ino)
             or (named.st_dev, named.st_ino) != (before.st_dev, before.st_ino)
             or opened.st_nlink != 1
             or named.st_nlink != 1
@@ -1450,7 +1459,7 @@ def _remove_legacy_registration(
         guard()
         lock_fd = os.open(
             lock_name,
-            os.O_RDWR | os.O_CREAT | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0),
+            _METADATA_RDWR_FLAGS | os.O_CREAT,
             0o600,
             dir_fd=worktrees_fd,
         )
@@ -1752,7 +1761,7 @@ def _publish_receipt(
             try:
                 descriptor = os.open(
                     value,
-                    os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0),
+                    _METADATA_READ_FLAGS,
                     dir_fd=receipt_fd,
                 )
             except FileNotFoundError:
@@ -1787,13 +1796,15 @@ def _publish_receipt(
             try:
                 descriptor = os.open(
                     temporary,
-                    os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0),
+                    _METADATA_READ_FLAGS,
                     dir_fd=receipt_fd,
                 )
             except FileNotFoundError:
                 return None
             try:
                 status = os.fstat(descriptor)
+                if not stat.S_ISREG(status.st_mode):
+                    raise RetentionApplyError("retention_apply_receipt_changed")
                 observed = b""
                 while len(observed) <= len(raw):
                     chunk = os.read(descriptor, len(raw) + 1 - len(observed))
@@ -1961,14 +1972,14 @@ def _persist_reviewed_plan(
         try:
             descriptor = os.open(
                 name,
-                os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0),
+                _METADATA_READ_FLAGS,
                 dir_fd=plan_fd,
             )
         except FileNotFoundError:
             try:
                 descriptor = os.open(
                     temporary,
-                    os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0),
+                    _METADATA_READ_FLAGS,
                     dir_fd=plan_fd,
                 )
             except FileNotFoundError:
@@ -1992,10 +2003,12 @@ def _persist_reviewed_plan(
                 os.close(descriptor)
                 descriptor = os.open(
                     temporary,
-                    os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0),
+                    _METADATA_READ_FLAGS,
                     dir_fd=plan_fd,
                 )
             staged_status = os.fstat(descriptor)
+            if not stat.S_ISREG(staged_status.st_mode):
+                raise RetentionApplyError("retention_apply_plan_changed") from None
             staged_raw = b""
             while len(staged_raw) <= len(raw):
                 chunk = os.read(descriptor, len(raw) + 1 - len(staged_raw))
@@ -2059,10 +2072,12 @@ def _persist_reviewed_plan(
             os.fsync(plan_fd)
             descriptor = os.open(
                 name,
-                os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0),
+                _METADATA_READ_FLAGS,
                 dir_fd=plan_fd,
             )
         status = os.fstat(descriptor)
+        if not stat.S_ISREG(status.st_mode):
+            raise RetentionApplyError("retention_apply_plan_changed")
         observed = b""
         while len(observed) <= len(raw):
             chunk = os.read(descriptor, len(raw) + 1 - len(observed))

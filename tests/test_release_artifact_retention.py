@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import shutil
 import subprocess
 import sys
 import tracemalloc
@@ -1434,11 +1435,15 @@ def test_metadata_fifo_swap_is_bounded_for_plan_journal_and_two_link_resume(
     hardlinked: bool,
 ) -> None:
     repository = Path(retention.__file__).resolve().parents[1]
-    target = tmp_path / (retention.RETENTION_SCOPE_NAME if reader == "retention_scope" else "reviewed.json")
+    scenario_root = tmp_path / "scenario"
+    scenario_root.mkdir(mode=0o700)
+    target = scenario_root / (
+        retention.RETENTION_SCOPE_NAME if reader == "retention_scope" else "reviewed.json"
+    )
     target.write_bytes(b"{}\n")
     target.chmod(0o600)
     if hardlinked:
-        os.link(target, tmp_path / "reviewed-stage.json")
+        os.link(target, scenario_root / "reviewed-stage.json")
     child = r"""
 import os
 import pathlib
@@ -1492,13 +1497,241 @@ except (retention.RetentionPlanError, retention_apply.RetentionApplyError):
         raise SystemExit(0)
 raise SystemExit(3)
 """
-    completed = subprocess.run(  # noqa: S603  # nosec B603 - fixed test interpreter and program
-        [sys.executable, "-I", "-B", "-c", child, str(repository), str(target), reader],
-        cwd=tmp_path,
-        check=False,
-        capture_output=True,
-        timeout=3,
+    try:
+        completed = subprocess.run(  # noqa: S603  # nosec B603 - fixed test interpreter and program
+            [sys.executable, "-I", "-B", "-c", child, str(repository), str(target), reader],
+            cwd=scenario_root,
+            check=False,
+            capture_output=True,
+            timeout=3,
+        )
+    finally:
+        shutil.rmtree(scenario_root)
+
+    assert completed.returncode == 0
+    assert completed.stdout == b""
+    assert completed.stderr == b""
+
+
+@pytest.mark.parametrize(
+    "scenario",
+    (
+        "residual_post_validation",
+        "receipt_existing",
+        "receipt_stage",
+        "plan_final",
+        "plan_stage",
+        "plan_post_create_stage",
+        "plan_post_link_final",
+        "unlink_regular_lease_rdwr",
+        "legacy_registration_lock_rdwr",
+    ),
+)
+def test_operator_direct_metadata_fifo_substitutions_are_bounded(
+    tmp_path: Path,
+    scenario: str,
+) -> None:
+    repository = Path(retention_apply.__file__).resolve().parents[1]
+    child = r"""
+import os
+import pathlib
+import sys
+
+repository = pathlib.Path(sys.argv[1])
+root = pathlib.Path(sys.argv[2])
+scenario = sys.argv[3]
+sys.path.insert(0, str(repository))
+from tools import release_artifact_retention as retention
+from tools import release_artifact_retention_operator as retention_apply
+
+state = root / "state"
+state.mkdir(mode=0o700)
+transaction_id = "c" * 64
+plan_sha256 = "a" * 64
+plan = {"plan_sha256": plan_sha256, "value": 1}
+plan_raw = retention_apply._canonical(plan) + b"\n"
+receipt = retention_apply._receipt_with_digest(
+    {
+        "schema": retention_apply.APPLY_RECEIPT_SCHEMA,
+        "status": "applied",
+        "transaction_id": transaction_id,
+    }
+)
+swap_state = {"required": False, "swapped": False, "reads": 0}
+rdwr_state = {"required": False, "observed": False}
+
+if not (
+    retention_apply._METADATA_READ_FLAGS & os.O_NONBLOCK
+    and retention_apply._METADATA_RDWR_FLAGS & os.O_NONBLOCK
+):
+    raise SystemExit(5)
+
+def private_directory(path):
+    path.mkdir(parents=True, mode=0o700, exist_ok=True)
+    path.chmod(0o700)
+    return path
+
+def fifo(path):
+    private_directory(path.parent)
+    os.mkfifo(path, 0o600)
+
+def swap_on_read(path, ordinal=1):
+    real_open = os.open
+    swap_state["required"] = True
+
+    def swapping_open(name, flags, *args, **kwargs):
+        matches = name == path or name == path.name
+        reading = flags & os.O_ACCMODE == os.O_RDONLY
+        if matches and reading and path.exists():
+            swap_state["reads"] += 1
+            if not swap_state["swapped"] and swap_state["reads"] == ordinal:
+                os.unlink(path)
+                os.mkfifo(path, 0o600)
+                swap_state["swapped"] = True
+        return real_open(name, flags, *args, **kwargs)
+
+    retention_apply.os.open = swapping_open
+
+def require_nonblocking_rdwr(path):
+    real_open = os.open
+    rdwr_state["required"] = True
+
+    def checking_open(name, flags, *args, **kwargs):
+        matches = name == path or name == path.name
+        if matches and flags & os.O_ACCMODE == os.O_RDWR:
+            if not flags & os.O_NONBLOCK:
+                raise SystemExit(6)
+            rdwr_state["observed"] = True
+        return real_open(name, flags, *args, **kwargs)
+
+    retention_apply.os.open = checking_open
+
+if scenario.startswith("receipt_"):
+    directory = private_directory(state / retention_apply.APPLY_RECEIPT_DIRECTORY)
+    final = directory / f"receipt-{transaction_id}.json"
+    stage = directory / f".receipt-{transaction_id}.json.new"
+    fifo(final if scenario == "receipt_existing" else stage)
+    operation = lambda: retention_apply._publish_receipt(state, receipt, guard=lambda: None)
+elif scenario.startswith("plan_"):
+    directory = private_directory(state / retention_apply.APPLY_PLAN_DIRECTORY)
+    final = directory / f"plan-{plan_sha256}.json"
+    stage = directory / f".plan-{plan_sha256}.json.new"
+    if scenario == "plan_final":
+        fifo(final)
+    elif scenario == "plan_stage":
+        fifo(stage)
+    elif scenario == "plan_post_create_stage":
+        swap_on_read(stage)
+    else:
+        stage.write_bytes(plan_raw)
+        stage.chmod(0o400)
+        swap_on_read(final)
+    operation = lambda: retention_apply._persist_reviewed_plan(
+        state,
+        plan,
+        guard=lambda: None,
+        allow_incomplete_stage_repair=True,
     )
+elif scenario == "unlink_regular_lease_rdwr":
+    directory = private_directory(root / "lease")
+    member = directory / "member.bin"
+    member.write_bytes(b"payload")
+    member.chmod(0o600)
+    directory_fd = os.open(directory, os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC)
+    before = os.stat(member.name, dir_fd=directory_fd, follow_symlinks=False)
+    mount_id = retention._descriptor_mount_id(directory_fd)
+    os.unlink(member)
+    os.mkfifo(member, 0o600)
+    require_nonblocking_rdwr(member)
+    operation = lambda: retention_apply._unlink_regular_with_lease(
+        directory_fd,
+        member.name,
+        before,
+        root_mount_id=mount_id,
+        byte_counter=[0],
+        guard=lambda: None,
+    )
+elif scenario == "legacy_registration_lock_rdwr":
+    candidate_parent = private_directory(root / "candidate-parent")
+    common = private_directory(root / "repository.git")
+    worktrees = private_directory(common / "worktrees")
+    git_dir = private_directory(worktrees / "candidate")
+    git_status = git_dir.stat()
+    manifest = []
+    lock = worktrees / ".friday-retention-registration.v1.lock"
+    os.mkfifo(lock, 0o600)
+    require_nonblocking_rdwr(lock)
+    candidate = {
+        "candidate_sha256": "d" * 64,
+        "path": str(candidate_parent / "absent"),
+        "reason": "retirable_registered_legacy_worktree",
+        "identity": {
+            "common_dir": str(common),
+            "git_dir": str(git_dir),
+            "git_device": int(git_status.st_dev),
+            "git_inode": int(git_status.st_ino),
+            "registration_manifest": manifest,
+            "registration_manifest_sha256": retention_apply.hashlib.sha256(
+                retention_apply._canonical(manifest)
+            ).hexdigest(),
+        },
+    }
+
+    def root_descriptor(_candidate):
+        return (
+            os.open(candidate_parent, os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC),
+            (),
+            (),
+        )
+
+    retention_apply._root_descriptor = root_descriptor
+    operation = lambda: retention_apply._remove_legacy_registration(
+        candidate,
+        guard=lambda: None,
+        transaction_id=transaction_id,
+    )
+else:
+    source = private_directory(root / "source")
+    member = source / "member.bin"
+    member.write_bytes(b"payload")
+    member.chmod(0o600)
+    snapshot = retention._snapshot(source)
+    target = (
+        state
+        / retention_apply.OBJECT_AUTHORITY_DIRECTORY
+        / f"objects-{transaction_id}-000000.bin"
+    )
+    swap_on_read(target, ordinal=2)
+    operation = lambda: retention_apply._persist_residual_authority(
+        state,
+        transaction_id,
+        0,
+        snapshot,
+        guard=lambda: None,
+    )
+
+try:
+    operation()
+except retention_apply.RetentionApplyError:
+    if swap_state["required"] and not swap_state["swapped"]:
+        raise SystemExit(4)
+    if rdwr_state["required"] and not rdwr_state["observed"]:
+        raise SystemExit(7)
+    raise SystemExit(0)
+raise SystemExit(3)
+"""
+    scenario_root = tmp_path / "scenario"
+    scenario_root.mkdir(mode=0o700)
+    try:
+        completed = subprocess.run(  # noqa: S603  # nosec B603 - fixed test interpreter and program
+            [sys.executable, "-I", "-B", "-c", child, str(repository), str(scenario_root), scenario],
+            cwd=scenario_root,
+            check=False,
+            capture_output=True,
+            timeout=3,
+        )
+    finally:
+        shutil.rmtree(scenario_root)
 
     assert completed.returncode == 0
     assert completed.stdout == b""
