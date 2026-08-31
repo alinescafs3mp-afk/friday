@@ -14443,7 +14443,15 @@ def materialize_exact_backup_into_fresh_contour(
     )
     if database_schema != backup.schema_version:
         raise ReleaseFailure("fresh_materialization_database_schema_changed")
-    _sqlite_integrity(config.inbox_database, require_schema=False)
+    # A read-only SQLite connection still creates a ``-shm`` wal-index when a
+    # non-empty WAL is present and the containing directory is writable.  Keep
+    # the exact materialized inbox image unopened: integrity-check a transient
+    # copy just as we do for the main database above.
+    _verify_sqlite_snapshot_copy(
+        config.inbox_database.parent,
+        label=config.inbox_database.stem,
+        require_schema=False,
+    )
     _restore_exact_obsidian_backup(config, payload)
     engineer_identity = _materialize_exact_engineer_backup_fresh(config, payload)
     _verify_obsidian_backup(payload.directory, payload.obsidian)

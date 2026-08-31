@@ -1,3 +1,13 @@
+## 0.207.86 — 2026-08-31
+
+### Exact hot-WAL DR verification
+
+- Verifies copied inbox snapshots in a disposable contour, preserving the exact
+  database/WAL pair without creating a `-shm` file on retained material.
+- Adds a production-shaped committed-WAL regression for DR bootstrap and keeps
+  SQLite at schema 50 with exact `0.207.84` as predecessor and fallback.
+- Supersedes unactivated `0.207.85`; no retention deletion is enabled.
+
 ## 0.207.85 — 2026-08-31
 
 ### Reader-first release retention precursor

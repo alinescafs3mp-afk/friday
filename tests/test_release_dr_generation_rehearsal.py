@@ -326,6 +326,42 @@ def test_fresh_materialization_preserves_zero_byte_main_and_inbox_wals(
     assert Path(f"{target.inbox_database}-wal").read_bytes() == b""
 
 
+def test_fresh_materialization_preserves_committed_inbox_wal_without_creating_shm(
+    tmp_path: Path,
+) -> None:
+    tmp_path.chmod(0o700)
+    source = _source_config(_private(tmp_path / "source"))
+    connection = sqlite3.connect(source.inbox_database)
+    try:
+        assert connection.execute("PRAGMA journal_mode=WAL").fetchone() == ("wal",)
+        connection.execute("PRAGMA wal_autocheckpoint=0")
+        connection.execute("CREATE TABLE committed_wal(value TEXT NOT NULL)")
+        connection.execute("INSERT INTO committed_wal VALUES('must-survive')")
+        connection.commit()
+        source_wal = Path(f"{source.inbox_database}-wal")
+        assert source_wal.stat().st_size > 32
+        backup = release_operator._exact_sqlite_backup(source)  # noqa: SLF001
+    finally:
+        connection.close()
+
+    payload = backup.opaque
+    assert isinstance(payload, release_operator._ExactBackupPayload)  # noqa: SLF001
+    backup_wal = payload.directory / "inbox.sqlite3-wal"
+    backup_wal_bytes = backup_wal.read_bytes()
+    backup_wal_sha256 = hashlib.sha256(backup_wal_bytes).hexdigest()
+    assert len(backup_wal_bytes) > 32
+    assert not (payload.directory / "inbox.sqlite3-shm").exists()
+    target = _fresh_config(tmp_path / "target")
+
+    release_operator.materialize_exact_backup_into_fresh_contour(target, backup)
+
+    target_wal = Path(f"{target.inbox_database}-wal")
+    assert target_wal.read_bytes() == backup_wal_bytes
+    assert hashlib.sha256(target_wal.read_bytes()).hexdigest() == backup_wal_sha256
+    assert backup_wal.read_bytes() == backup_wal_bytes
+    assert not Path(f"{target.inbox_database}-shm").exists()
+
+
 def test_fresh_materialization_reports_no_identity_when_engineer_database_absent(
     tmp_path: Path,
 ) -> None:
