@@ -20,7 +20,6 @@ import pytest
 
 import friday
 import tools.immutable_release_operator as operator
-from tools import release_artifact_retention_operator as retention_apply
 from friday import semantic_supervisor_policy
 from friday.orchestration.capability_binding import expected_effect_capability_snapshot
 from friday.orchestration.supervisor_assist_promotion import (
@@ -53,6 +52,8 @@ from friday.orchestration.supervisor_representative_window_attestation import (
     representative_window_sha256,
 )
 from friday.storage import SCHEMA_VERSION
+from tools import release_artifact_retention as retention
+from tools import release_artifact_retention_operator as retention_apply
 
 
 def _release(tmp_path: Path, name: str, *, schema: int, commit: str) -> operator.ReleaseIdentity:
@@ -9903,6 +9904,169 @@ def test_build_parser_binds_all_manifest_digests_into_build_spec(
     assert captured[0].build_receipt_profile == build_receipt_profile
 
 
+def _write_unfinished_retention_apply(state_dir: Path, *, phase: str) -> None:
+    plan_sha256 = "a" * 64
+    core = retention_apply._new_journal(  # noqa: SLF001
+        {
+            "plan_sha256": plan_sha256,
+            "retention_scope": {
+                "file_sha256": "b" * 64,
+                "schema": "friday.release-artifact-retention-scope.v1",
+            },
+        },
+        (),
+        durable_plan=(
+            state_dir / retention_apply.APPLY_PLAN_DIRECTORY / f"plan-{plan_sha256}.json",
+            1,
+            1,
+        ),
+        filesystem_before=(),
+    )
+    core["phase"] = phase
+    retention_apply._write_journal(  # noqa: SLF001
+        state_dir / retention_apply.APPLY_JOURNAL_NAME,
+        core,
+        guard=lambda: None,
+    )
+
+
+def _write_exact_zero_retention_apply(state_dir: Path) -> None:
+    plan_directory = state_dir / retention_apply.APPLY_PLAN_DIRECTORY
+    receipt_directory = state_dir / retention_apply.APPLY_RECEIPT_DIRECTORY
+    plan_directory.mkdir(mode=0o700)
+    receipt_directory.mkdir(mode=0o700)
+    plan_core = {
+        "apply_authority": False,
+        "block_reason": "",
+        "classification_status": "eligible",
+        "mode": "eligible_classification",
+        "retention_scope": {
+            "file_sha256": "b" * 64,
+            "schema": retention.RETENTION_SCOPE_SCHEMA,
+        },
+        "schema": retention.PLAN_SCHEMA,
+    }
+    plan_sha256 = hashlib.sha256(retention_apply._canonical(plan_core)).hexdigest()  # noqa: SLF001
+    plan = {**plan_core, "plan_sha256": plan_sha256}
+    plan_path = plan_directory / f"plan-{plan_sha256}.json"
+    plan_path.write_bytes(retention_apply._canonical(plan) + b"\n")  # noqa: SLF001
+    plan_path.chmod(0o600)
+    plan_status = plan_path.stat()
+    transaction_id = hashlib.sha256(
+        retention_apply._canonical(  # noqa: SLF001
+            {
+                "plan_sha256": plan_sha256,
+                "schema": retention_apply.APPLY_JOURNAL_SCHEMA,
+            }
+        )
+    ).hexdigest()
+    candidate_set_sha256 = hashlib.sha256(retention_apply._canonical([])).hexdigest()  # noqa: SLF001
+    receipt_core = {
+        "actual_deleted_inodes": 0,
+        "actual_deleted_logical_bytes": 0,
+        "allocated_bytes_are_not_exact_physical_attribution": True,
+        "authority_bindings_sha256": "c" * 64,
+        "bounded_effect_contour": retention.BOUNDED_DELETE_CONTOUR,
+        "candidate_set_sha256": candidate_set_sha256,
+        "concurrent_open_attempts_excluded": True,
+        "deleted_authenticated_allocated_bytes": 0,
+        "deleted_candidate_count": 0,
+        "filesystem_after": [],
+        "filesystem_before": [],
+        "plan_sha256": plan_sha256,
+        "post_apply_reauthenticated": True,
+        "pre_delete_authenticated_allocated_bytes": 0,
+        "pre_delete_authenticated_bytes": 0,
+        "pre_delete_authenticated_inodes": 0,
+        "privileged_probe_role": "diagnostic_prerequisite",
+        "residual_authority_set_sha256": candidate_set_sha256,
+        "retention_scope_schema": retention.RETENTION_SCOPE_SCHEMA,
+        "retention_scope_sha256": "b" * 64,
+        "schema": retention_apply.APPLY_RECEIPT_SCHEMA,
+        "status": "applied",
+        "statvfs_available_delta_bytes": 0,
+        "statvfs_concurrent_activity_unexcluded": True,
+        "terminal_absence_observed": True,
+        "threat_boundary": retention.THREAT_BOUNDARY,
+        "transaction_id": transaction_id,
+        "universal_absence_proof": False,
+    }
+    receipt = retention_apply._receipt_with_digest(receipt_core)  # noqa: SLF001
+    receipt_path = receipt_directory / f"receipt-{transaction_id}.json"
+    receipt_path.write_bytes(retention_apply._canonical(receipt) + b"\n")  # noqa: SLF001
+    receipt_path.chmod(0o600)
+    journal = retention_apply._new_journal(  # noqa: SLF001
+        plan,
+        (),
+        durable_plan=(plan_path, int(plan_status.st_dev), int(plan_status.st_ino)),
+        filesystem_before=(),
+    )
+    journal["phase"] = "applied"
+    journal["receipt_sha256"] = receipt["receipt_sha256"]
+    retention_apply._write_journal(  # noqa: SLF001
+        state_dir / retention_apply.APPLY_JOURNAL_NAME,
+        journal,
+        guard=lambda: None,
+    )
+
+
+@pytest.mark.parametrize(
+    ("scenario", "expected"),
+    (
+        ("absent", "clear"),
+        ("applied", "clear"),
+        ("prepared", "unfinished_retention_apply_requires_recovery"),
+        ("applying", "unfinished_retention_apply_requires_recovery"),
+        ("malformed", "retention_apply_journal_invalid"),
+    ),
+)
+def test_retention_apply_quiescence_is_standalone_under_isolated_python(
+    tmp_path: Path,
+    scenario: str,
+    expected: str,
+) -> None:
+    state_dir = tmp_path / "state"
+    state_dir.mkdir(mode=0o700)
+    if scenario == "applied":
+        _write_exact_zero_retention_apply(state_dir)
+    elif scenario in {"prepared", "applying"}:
+        _write_unfinished_retention_apply(state_dir, phase=scenario)
+    elif scenario == "malformed":
+        journal = state_dir / retention_apply.APPLY_JOURNAL_NAME
+        journal.write_text("{}\n", encoding="ascii")
+        journal.chmod(0o600)
+    child = r"""
+import pathlib
+import runpy
+import sys
+
+namespace = runpy.run_path(sys.argv[1])
+try:
+    namespace["_require_retention_apply_quiesced"](pathlib.Path(sys.argv[2]))
+except namespace["ReleaseFailure"] as exc:
+    raise SystemExit(0 if str(exc) == sys.argv[3] else 3)
+raise SystemExit(0 if sys.argv[3] == "clear" else 4)
+"""
+    completed = subprocess.run(  # noqa: S603  # nosec B603 - fixed interpreter and program
+        [
+            sys.executable,
+            "-I",
+            "-B",
+            "-c",
+            child,
+            str(Path(operator.__file__).resolve()),
+            str(state_dir),
+            expected,
+        ],
+        check=False,
+        capture_output=True,
+        timeout=5,
+    )
+    assert completed.returncode == 0, completed.stderr.decode("utf-8", "replace")
+    assert completed.stdout == b""
+    assert completed.stderr == b""
+
+
 def test_build_release_blocks_on_unfinished_retention_apply(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -9913,11 +10077,7 @@ def test_build_release_blocks_on_unfinished_retention_apply(
     releases_root = friday_home / "wheel-only-releases"
     for path in (friday_home, friday_home / "data", state_dir, releases_root):
         path.mkdir(mode=0o700, parents=True, exist_ok=True)
-    monkeypatch.setattr(
-        retention_apply,
-        "_load_journal",
-        lambda path: {"phase": "prepared"} if path == state_dir / retention_apply.APPLY_JOURNAL_NAME else None,
-    )
+    _write_unfinished_retention_apply(state_dir, phase="prepared")
     monkeypatch.setattr(
         operator,
         "_build_release_locked",
@@ -9968,11 +10128,7 @@ def test_activate_cli_blocks_on_unfinished_retention_apply_before_release_loadin
     unit_dir = tmp_path / "units"
     for path in (friday_home, friday_home / "data", state_dir, unit_dir):
         path.mkdir(mode=0o700, parents=True, exist_ok=True)
-    monkeypatch.setattr(
-        retention_apply,
-        "_load_journal",
-        lambda path: {"phase": "applying"} if path == state_dir / retention_apply.APPLY_JOURNAL_NAME else None,
-    )
+    _write_unfinished_retention_apply(state_dir, phase="applying")
     monkeypatch.setattr(
         operator,
         "load_release_identity",

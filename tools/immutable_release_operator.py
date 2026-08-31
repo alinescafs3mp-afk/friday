@@ -190,6 +190,14 @@ _RELEASE_RETENTION_TOOLCHAIN_PACKAGE_FILES = (
     "__init__.py",
     *_RELEASE_RETENTION_TOOLCHAIN_MODULES,
 )
+_RETENTION_APPLY_JOURNAL_SCHEMA = "friday.release-artifact-retention-apply-journal.v3"
+_RETENTION_APPLY_RECEIPT_SCHEMA = "friday.release-artifact-retention-apply-receipt.v2"
+_RETENTION_PLAN_SCHEMA = "friday.release-artifact-retention-plan.v3"
+_RETENTION_SCOPE_SCHEMA = "friday.release-artifact-retention-scope.v1"
+_RETENTION_APPLY_JOURNAL_NAME = "release-artifact-retention-apply.v1.json"
+_RETENTION_APPLY_PLAN_DIRECTORY = "release-artifact-retention-plans.v1"
+_RETENTION_APPLY_RECEIPT_DIRECTORY = "release-artifact-retention-receipts.v1"
+_RETENTION_OBJECT_AUTHORITY_DIRECTORY = "release-artifact-retention-object-authority.v1"
 _SECONDARY_ROLLOUT_RECEIPT_STAGE = {
     _SECONDARY_SHADOW_TO_PRIVATE_SHADOW_TRANSITION: "public-shadow",
     _SECONDARY_SHADOW_TO_ASSIST_TRANSITION: "private-shadow",
@@ -14965,19 +14973,249 @@ def _require_completed_unit_install(state_dir: Path, candidate: ReleaseIdentity)
         raise ReleaseFailure("unit_install_not_complete_for_candidate")
 
 
-def _require_retention_apply_quiesced(state_dir: Path) -> None:
+def _read_retention_apply_record(path: Path, *, missing_ok: bool = False) -> dict[str, Any] | None:
     try:
-        from tools import release_artifact_retention_operator as retention_apply
-    except ImportError as exc:
+        os.lstat(path)
+    except FileNotFoundError:
+        if missing_ok:
+            return None
+        raise ReleaseFailure("retention_apply_journal_invalid") from None
+    except OSError as exc:
         raise ReleaseFailure("retention_apply_journal_invalid") from exc
+    raw = _read_private_regular_file(
+        path,
+        maximum_bytes=1 << 20,
+        code="retention_apply_journal_invalid",
+    )
     try:
-        journal = retention_apply._load_journal(  # noqa: SLF001
-            state_dir / retention_apply.APPLY_JOURNAL_NAME
+        payload = _unique_json(raw.decode("ascii"))
+    except (UnicodeError, ValueError, json.JSONDecodeError) as exc:
+        raise ReleaseFailure("retention_apply_journal_invalid") from exc
+    if raw != _canonical_json(payload) + b"\n":
+        raise ReleaseFailure("retention_apply_journal_invalid")
+    return payload
+
+
+def _validate_retention_apply_entry(
+    value: object,
+    *,
+    state_dir: Path,
+    transaction_id: str,
+    index: int,
+) -> dict[str, Any]:
+    expected = {
+        "actual_allocated_bytes",
+        "actual_bytes",
+        "actual_inodes",
+        "candidate_sha256",
+        "objects_sha256",
+        "quarantine_name",
+        "registration_manifest_sha256",
+        "residual_authority",
+        "sealed_tree_sha256",
+        "status",
+        "tree_sha256",
+    }
+    if not isinstance(value, dict) or set(value) != expected:
+        raise ReleaseFailure("retention_apply_journal_invalid")
+    residual = value.get("residual_authority")
+    expected_residual_path = (
+        state_dir / _RETENTION_OBJECT_AUTHORITY_DIRECTORY / f"objects-{transaction_id}-{index:06d}.bin"
+    )
+    if (
+        value.get("status") != "deleted"
+        or _HEX64.fullmatch(str(value.get("candidate_sha256") or "")) is None
+        or (
+            value.get("registration_manifest_sha256") != ""
+            and _HEX64.fullmatch(str(value.get("registration_manifest_sha256") or "")) is None
         )
-    except retention_apply.RetentionApplyError as exc:
-        raise ReleaseFailure("retention_apply_journal_invalid") from exc
-    if journal is not None and journal.get("phase") != "applied":
+        or _HEX64.fullmatch(str(value.get("objects_sha256") or "")) is None
+        or _HEX64.fullmatch(str(value.get("tree_sha256") or "")) is None
+        or _HEX64.fullmatch(str(value.get("sealed_tree_sha256") or "")) is None
+        or value.get("quarantine_name") != f".friday-retention-q-v1-{transaction_id[:16]}-{index:06d}"
+        or not isinstance(residual, dict)
+        or set(residual) != {"count", "device", "inode", "path", "sha256"}
+        or type(residual.get("count")) is not int
+        or int(residual["count"]) <= 0
+        or type(residual.get("device")) is not int
+        or type(residual.get("inode")) is not int
+        or int(residual["inode"]) <= 0
+        or residual.get("path") != str(expected_residual_path)
+        or _HEX64.fullmatch(str(residual.get("sha256") or "")) is None
+        or any(
+            type(value.get(key)) is not int or int(value[key]) < 0
+            for key in ("actual_allocated_bytes", "actual_bytes", "actual_inodes")
+        )
+    ):
+        raise ReleaseFailure("retention_apply_journal_invalid")
+    return value
+
+
+def _require_retention_apply_quiesced(state_dir: Path) -> None:
+    journal = _read_retention_apply_record(
+        state_dir / _RETENTION_APPLY_JOURNAL_NAME,
+        missing_ok=True,
+    )
+    if journal is None:
+        return
+    expected = {
+        "durable_plan",
+        "entries",
+        "filesystem_after",
+        "filesystem_before",
+        "journal_sha256",
+        "phase",
+        "plan_sha256",
+        "receipt_sha256",
+        "retention_scope_schema",
+        "retention_scope_sha256",
+        "schema",
+        "transaction_id",
+    }
+    supplied_journal_sha256 = str(journal.get("journal_sha256") or "")
+    core = {key: value for key, value in journal.items() if key != "journal_sha256"}
+    transaction_id = str(journal.get("transaction_id") or "")
+    plan_sha256 = str(journal.get("plan_sha256") or "")
+    receipt_sha256 = str(journal.get("receipt_sha256") or "")
+    durable_plan = journal.get("durable_plan")
+    expected_plan_path = state_dir / _RETENTION_APPLY_PLAN_DIRECTORY / f"plan-{plan_sha256}.json"
+    expected_transaction_id = _sha256_bytes(
+        _canonical_json(
+            {
+                "plan_sha256": plan_sha256,
+                "schema": _RETENTION_APPLY_JOURNAL_SCHEMA,
+            }
+        )
+    )
+    if (
+        set(journal) != expected
+        or journal.get("schema") != _RETENTION_APPLY_JOURNAL_SCHEMA
+        or _HEX64.fullmatch(supplied_journal_sha256) is None
+        or supplied_journal_sha256 != _sha256_bytes(_canonical_json(core))
+        or _HEX64.fullmatch(transaction_id) is None
+        or transaction_id != expected_transaction_id
+        or _HEX64.fullmatch(plan_sha256) is None
+        or journal.get("retention_scope_schema") != _RETENTION_SCOPE_SCHEMA
+        or _HEX64.fullmatch(str(journal.get("retention_scope_sha256") or "")) is None
+        or not isinstance(durable_plan, dict)
+        or set(durable_plan) != {"device", "inode", "path", "sha256"}
+        or durable_plan.get("path") != str(expected_plan_path)
+        or durable_plan.get("sha256") != plan_sha256
+        or type(durable_plan.get("device")) is not int
+        or type(durable_plan.get("inode")) is not int
+        or int(durable_plan["inode"]) <= 0
+        or not isinstance(journal.get("filesystem_before"), list)
+        or not isinstance(journal.get("filesystem_after"), list)
+        or not isinstance(journal.get("entries"), list)
+    ):
+        raise ReleaseFailure("retention_apply_journal_invalid")
+    if journal.get("phase") != "applied":
         raise ReleaseFailure("unfinished_retention_apply_requires_recovery")
+    if _HEX64.fullmatch(receipt_sha256) is None:
+        raise ReleaseFailure("retention_apply_journal_invalid")
+    entries = [
+        _validate_retention_apply_entry(
+            item,
+            state_dir=state_dir,
+            transaction_id=transaction_id,
+            index=index,
+        )
+        for index, item in enumerate(journal["entries"])
+    ]
+    plan = _read_retention_apply_record(expected_plan_path)
+    assert plan is not None
+    try:
+        plan_status = os.lstat(expected_plan_path)
+    except OSError as exc:
+        raise ReleaseFailure("retention_apply_journal_invalid") from exc
+    plan_core = {key: value for key, value in plan.items() if key != "plan_sha256"}
+    if (
+        (plan_status.st_dev, plan_status.st_ino) != (durable_plan["device"], durable_plan["inode"])
+        or plan.get("schema") != _RETENTION_PLAN_SCHEMA
+        or plan.get("plan_sha256") != plan_sha256
+        or _sha256_bytes(_canonical_json(plan_core)) != plan_sha256
+        or plan.get("mode") != "eligible_classification"
+        or plan.get("classification_status") != "eligible"
+        or plan.get("block_reason") != ""
+    ):
+        raise ReleaseFailure("retention_apply_journal_invalid")
+    receipt_path = state_dir / _RETENTION_APPLY_RECEIPT_DIRECTORY / f"receipt-{transaction_id}.json"
+    receipt = _read_retention_apply_record(receipt_path)
+    assert receipt is not None
+    receipt_expected = {
+        "actual_deleted_inodes",
+        "actual_deleted_logical_bytes",
+        "allocated_bytes_are_not_exact_physical_attribution",
+        "authority_bindings_sha256",
+        "bounded_effect_contour",
+        "candidate_set_sha256",
+        "concurrent_open_attempts_excluded",
+        "deleted_authenticated_allocated_bytes",
+        "deleted_candidate_count",
+        "filesystem_after",
+        "filesystem_before",
+        "plan_sha256",
+        "post_apply_reauthenticated",
+        "pre_delete_authenticated_allocated_bytes",
+        "pre_delete_authenticated_bytes",
+        "pre_delete_authenticated_inodes",
+        "privileged_probe_role",
+        "receipt_sha256",
+        "residual_authority_set_sha256",
+        "retention_scope_schema",
+        "retention_scope_sha256",
+        "schema",
+        "status",
+        "statvfs_available_delta_bytes",
+        "statvfs_concurrent_activity_unexcluded",
+        "terminal_absence_observed",
+        "threat_boundary",
+        "transaction_id",
+        "universal_absence_proof",
+    }
+    receipt_core = {key: value for key, value in receipt.items() if key != "receipt_sha256"}
+    candidate_set_sha256 = _sha256_bytes(_canonical_json([item["candidate_sha256"] for item in entries]))
+    residual_set_sha256 = _sha256_bytes(
+        _canonical_json(
+            [
+                {
+                    "candidate_sha256": item["candidate_sha256"],
+                    "count": item["residual_authority"]["count"],
+                    "sha256": item["residual_authority"]["sha256"],
+                }
+                for item in entries
+            ]
+        )
+    )
+    logical_bytes = sum(int(item["actual_bytes"]) for item in entries)
+    allocated_bytes = sum(int(item["actual_allocated_bytes"]) for item in entries)
+    inodes = sum(int(item["actual_inodes"]) for item in entries)
+    if (
+        set(receipt) != receipt_expected
+        or receipt.get("schema") != _RETENTION_APPLY_RECEIPT_SCHEMA
+        or receipt.get("status") != "applied"
+        or receipt.get("receipt_sha256") != receipt_sha256
+        or receipt_sha256 != _sha256_bytes(_canonical_json(receipt_core))
+        or receipt.get("transaction_id") != transaction_id
+        or receipt.get("plan_sha256") != plan_sha256
+        or receipt.get("retention_scope_schema") != journal.get("retention_scope_schema")
+        or receipt.get("retention_scope_sha256") != journal.get("retention_scope_sha256")
+        or receipt.get("candidate_set_sha256") != candidate_set_sha256
+        or receipt.get("residual_authority_set_sha256") != residual_set_sha256
+        or receipt.get("deleted_candidate_count") != len(entries)
+        or receipt.get("pre_delete_authenticated_bytes") != logical_bytes
+        or receipt.get("actual_deleted_logical_bytes") != logical_bytes
+        or receipt.get("pre_delete_authenticated_allocated_bytes") != allocated_bytes
+        or receipt.get("deleted_authenticated_allocated_bytes") != allocated_bytes
+        or receipt.get("pre_delete_authenticated_inodes") != inodes
+        or receipt.get("actual_deleted_inodes") != inodes
+        or receipt.get("filesystem_before") != journal.get("filesystem_before")
+        or receipt.get("filesystem_after") != journal.get("filesystem_after")
+        or _HEX64.fullmatch(str(receipt.get("authority_bindings_sha256") or "")) is None
+        or receipt.get("terminal_absence_observed") is not True
+        or receipt.get("post_apply_reauthenticated") is not True
+    ):
+        raise ReleaseFailure("retention_apply_journal_invalid")
 
 
 def _unit_exec_argv(content: bytes, *, code: str) -> tuple[str, ...]:

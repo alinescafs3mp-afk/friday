@@ -1431,10 +1431,28 @@ def test_rehearsal_blocks_on_unfinished_retention_apply(
 ) -> None:
     home, _index, _material, activation_receipt = _authenticated_home(tmp_path, monkeypatch)
     state_dir = home / "data/state"
-    monkeypatch.setattr(
-        retention_apply,
-        "_load_journal",
-        lambda path: {"phase": "applying"} if path == state_dir / retention_apply.APPLY_JOURNAL_NAME else None,
+    plan_sha256 = "a" * 64
+    core = retention_apply._new_journal(  # noqa: SLF001
+        {
+            "plan_sha256": plan_sha256,
+            "retention_scope": {
+                "file_sha256": "b" * 64,
+                "schema": "friday.release-artifact-retention-scope.v1",
+            },
+        },
+        (),
+        durable_plan=(
+            state_dir / retention_apply.APPLY_PLAN_DIRECTORY / f"plan-{plan_sha256}.json",
+            1,
+            1,
+        ),
+        filesystem_before=(),
+    )
+    core["phase"] = "applying"
+    retention_apply._write_journal(  # noqa: SLF001
+        state_dir / retention_apply.APPLY_JOURNAL_NAME,
+        core,
+        guard=lambda: None,
     )
     monkeypatch.setattr(
         dr_auth,
