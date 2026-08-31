@@ -1674,6 +1674,165 @@ def _engineer_authority_present(backup: release_operator.DatabaseBackup) -> bool
     return isinstance(manifest.get("engineer_command_ledger_authority"), dict)
 
 
+def _rename_noreplace(directory_fd: int, source: str, destination: str) -> None:
+    """Atomically quarantine one scratch entry without replacing another."""
+
+    dr_index._rename_noreplace(directory_fd, source, destination)  # noqa: SLF001
+
+
+def _remove_historical_restore_derived_sidecars(
+    config: release_operator.SystemdConfig,
+    backup: release_operator.DatabaseBackup,
+) -> None:
+    """Quarantine inert SQLite sidecars synthesized by a historical verifier."""
+
+    payload = backup.opaque
+    if not isinstance(payload, release_operator._ExactBackupPayload):  # noqa: SLF001
+        raise release_operator.ReleaseFailure("dr_rehearsal_historical_sidecar_invalid")
+    declared = {name for name, _digest, _size in payload.files}
+    directory_flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0)
+    directory_flags |= getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0)
+    file_flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0)
+    file_flags |= getattr(os, "O_NONBLOCK", 0)
+    for label, database in (("database", config.database), ("inbox", config.inbox_database)):
+        parent = database.parent
+        parent_fd = -1
+        try:
+            parent_fd = os.open(parent, directory_flags)
+            parent_opened = os.fstat(parent_fd)
+            parent_lexical = os.stat(parent, follow_symlinks=False)
+            parent_identity = (int(parent_opened.st_dev), int(parent_opened.st_ino))
+            if (
+                parent_identity != (int(parent_lexical.st_dev), int(parent_lexical.st_ino))
+                or not stat.S_ISDIR(parent_opened.st_mode)
+                or parent_opened.st_uid != os.geteuid()
+                or stat.S_IMODE(parent_opened.st_mode) != 0o700
+            ):
+                raise release_operator.ReleaseFailure("dr_rehearsal_historical_sidecar_invalid")
+            quarantined_any = False
+            for suffix, permitted_sizes in (("-wal", {0}), ("-shm", {0, 32 << 10})):
+                if f"{label}.sqlite3{suffix}" in declared:
+                    continue
+                name = f"{database.name}{suffix}"
+                try:
+                    lexical = os.stat(name, dir_fd=parent_fd, follow_symlinks=False)
+                except FileNotFoundError:
+                    continue
+                if (
+                    not stat.S_ISREG(lexical.st_mode)
+                    or lexical.st_uid != os.geteuid()
+                    or lexical.st_nlink != 1
+                    or stat.S_IMODE(lexical.st_mode) != 0o600
+                    or lexical.st_size not in permitted_sizes
+                ):
+                    raise release_operator.ReleaseFailure("dr_rehearsal_historical_sidecar_invalid")
+                descriptor = -1
+                try:
+                    descriptor = os.open(name, file_flags, dir_fd=parent_fd)
+                    opened = os.fstat(descriptor)
+                    identity = (
+                        int(opened.st_dev),
+                        int(opened.st_ino),
+                        int(opened.st_mode),
+                        int(opened.st_nlink),
+                        int(opened.st_uid),
+                        int(opened.st_size),
+                        int(opened.st_mtime_ns),
+                        int(opened.st_ctime_ns),
+                    )
+                    content = os.pread(descriptor, (32 << 10) + 1, 0)
+                    after_read = os.fstat(descriptor)
+                    if (
+                        not stat.S_ISREG(opened.st_mode)
+                        or opened.st_uid != os.geteuid()
+                        or opened.st_nlink != 1
+                        or stat.S_IMODE(opened.st_mode) != 0o600
+                        or opened.st_size not in permitted_sizes
+                        or len(content) != opened.st_size
+                        or identity
+                        != (
+                            int(after_read.st_dev),
+                            int(after_read.st_ino),
+                            int(after_read.st_mode),
+                            int(after_read.st_nlink),
+                            int(after_read.st_uid),
+                            int(after_read.st_size),
+                            int(after_read.st_mtime_ns),
+                            int(after_read.st_ctime_ns),
+                        )
+                        or identity
+                        != (
+                            int(lexical.st_dev),
+                            int(lexical.st_ino),
+                            int(lexical.st_mode),
+                            int(lexical.st_nlink),
+                            int(lexical.st_uid),
+                            int(lexical.st_size),
+                            int(lexical.st_mtime_ns),
+                            int(lexical.st_ctime_ns),
+                        )
+                    ):
+                        raise release_operator.ReleaseFailure("dr_rehearsal_historical_sidecar_invalid")
+                    current = os.stat(name, dir_fd=parent_fd, follow_symlinks=False)
+                    if identity != (
+                        int(current.st_dev),
+                        int(current.st_ino),
+                        int(current.st_mode),
+                        int(current.st_nlink),
+                        int(current.st_uid),
+                        int(current.st_size),
+                        int(current.st_mtime_ns),
+                        int(current.st_ctime_ns),
+                    ):
+                        raise release_operator.ReleaseFailure("dr_rehearsal_historical_sidecar_invalid")
+                    quarantine = f".friday-dr-historical-{label}-{suffix[1:]}-{os.urandom(16).hex()}"
+                    # There is no conditional unlink-by-descriptor on Linux.
+                    # Retain the bound inode until authenticated whole-scratch
+                    # teardown instead of reopening a final pathname race.
+                    _rename_noreplace(parent_fd, name, quarantine)
+                    os.fsync(parent_fd)
+                    quarantined = os.stat(quarantine, dir_fd=parent_fd, follow_symlinks=False)
+                    after = os.fstat(descriptor)
+                    after_content = os.pread(descriptor, (32 << 10) + 1, 0)
+                    try:
+                        os.stat(name, dir_fd=parent_fd, follow_symlinks=False)
+                    except FileNotFoundError:
+                        pass
+                    else:
+                        raise release_operator.ReleaseFailure("dr_rehearsal_historical_sidecar_invalid")
+                    stable_identity = lambda value: (  # noqa: E731
+                        int(value.st_dev),
+                        int(value.st_ino),
+                        int(value.st_mode),
+                        int(value.st_nlink),
+                        int(value.st_uid),
+                        int(value.st_size),
+                        int(value.st_mtime_ns),
+                    )
+                    if (
+                        stable_identity(after) != stable_identity(opened)
+                        or stable_identity(quarantined) != stable_identity(opened)
+                        or after_content != content
+                    ):
+                        raise release_operator.ReleaseFailure("dr_rehearsal_historical_sidecar_invalid")
+                    quarantined_any = True
+                finally:
+                    if descriptor >= 0:
+                        os.close(descriptor)
+            parent_after = os.stat(parent, follow_symlinks=False)
+            if parent_identity != (int(parent_after.st_dev), int(parent_after.st_ino)):
+                raise release_operator.ReleaseFailure("dr_rehearsal_historical_sidecar_invalid")
+            if quarantined_any:
+                os.fsync(parent_fd)
+        except release_operator.ReleaseFailure:
+            raise
+        except (OSError, dr_index.DRGenerationIndexError) as exc:
+            raise release_operator.ReleaseFailure("dr_rehearsal_historical_sidecar_invalid") from exc
+        finally:
+            if parent_fd >= 0:
+                os.close(parent_fd)
+
+
 def _four_surface_receipt_sha256(backup: release_operator.DatabaseBackup) -> str:
     surfaces = {
         "database": backup.receipt_sha256,
@@ -1958,6 +2117,7 @@ class _IsolatedActivationPort:
             backup=backup,
             expected_operator_sha256=self.restore_operator_sha256,
         )
+        _remove_historical_restore_derived_sidecars(self.config, backup)
         self.restored_digest = _surface_digest(self.config)
         if self.restored_digest != self.checkpoint_digest:
             raise release_operator.ReleaseFailure("dr_rehearsal_four_surface_restore_mismatch")

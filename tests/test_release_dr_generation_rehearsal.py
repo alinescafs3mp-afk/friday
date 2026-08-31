@@ -362,6 +362,43 @@ def test_fresh_materialization_preserves_committed_inbox_wal_without_creating_sh
     assert not Path(f"{target.inbox_database}-shm").exists()
 
 
+def test_exact_restore_verifies_wal_mode_databases_without_synthesizing_sidecars(
+    tmp_path: Path,
+) -> None:
+    tmp_path.chmod(0o700)
+    source = _source_config(_private(tmp_path / "source"))
+    for database in (source.database, source.inbox_database):
+        connection = sqlite3.connect(database)
+        try:
+            assert connection.execute("PRAGMA journal_mode=WAL").fetchone() == ("wal",)
+        finally:
+            connection.close()
+        assert not Path(f"{database}-wal").exists()
+        assert not Path(f"{database}-shm").exists()
+    backup = release_operator._exact_sqlite_backup(source)  # noqa: SLF001
+    payload = backup.opaque
+    assert isinstance(payload, release_operator._ExactBackupPayload)  # noqa: SLF001
+    expected = {
+        name: (payload.directory / name).read_bytes() for name in ("database.sqlite3", "inbox.sqlite3")
+    }
+
+    for database in (source.database, source.inbox_database):
+        connection = sqlite3.connect(database)
+        try:
+            connection.execute("UPDATE marker SET value='changed'")
+            connection.commit()
+        finally:
+            connection.close()
+
+    release_operator._restore_exact_sqlite_backup(source, backup)  # noqa: SLF001
+
+    assert source.database.read_bytes() == expected["database.sqlite3"]
+    assert source.inbox_database.read_bytes() == expected["inbox.sqlite3"]
+    for database in (source.database, source.inbox_database):
+        assert not Path(f"{database}-wal").exists()
+        assert not Path(f"{database}-shm").exists()
+
+
 def test_fresh_materialization_reports_no_identity_when_engineer_database_absent(
     tmp_path: Path,
 ) -> None:
@@ -666,6 +703,8 @@ def test_isolated_rehearsal_runs_real_four_surface_rollback_without_systemctl(
     )
     monkeypatch.setattr(rehearsal, "_run_release_engineer_authority", _local_engineer_authority)
 
+    restored_configs: list[release_operator.SystemdConfig] = []
+
     def local_exact_restore(
         _sealed_release: rehearsal._SealedReleaseCopy,
         config: release_operator.SystemdConfig,
@@ -688,6 +727,14 @@ def test_isolated_rehearsal_runs_real_four_surface_rollback_without_systemctl(
                 evidence=evidence,
             ),
         )
+        for database in (config.database, config.inbox_database):
+            wal = Path(f"{database}-wal")
+            shm = Path(f"{database}-shm")
+            wal.write_bytes(b"")
+            shm.write_bytes(b"\0" * (32 << 10))
+            wal.chmod(0o600)
+            shm.chmod(0o600)
+        restored_configs.append(config)
         return {"status": "restored"}
 
     monkeypatch.setattr(rehearsal, "_run_exact_fallback_restore", local_exact_restore)
@@ -707,6 +754,108 @@ def test_isolated_rehearsal_runs_real_four_surface_rollback_without_systemctl(
     assert result.rollback_tree_sha256 == releases[1].tree_manifest_sha256
     assert result.four_surface_sha256 == rehearsal._four_surface_receipt_sha256(backup)
     assert (scratch / "work/data/friday.sqlite3").exists()
+    restored = restored_configs[0]
+    for database in (restored.database, restored.inbox_database):
+        assert not Path(f"{database}-wal").exists()
+        assert not Path(f"{database}-shm").exists()
+        assert len(list(database.parent.glob(".friday-dr-historical-*"))) == 2
+    fifo_wal = Path(f"{restored.database}-wal")
+    os.mkfifo(fifo_wal, mode=0o600)
+    real_os_open = rehearsal.os.open
+
+    def reject_fifo_open(path: Any, flags: int, *args: Any, **kwargs: Any) -> int:
+        if path == fifo_wal.name and kwargs.get("dir_fd") is not None:
+            raise AssertionError("special sidecar must be rejected before open")
+        return real_os_open(path, flags, *args, **kwargs)
+
+    monkeypatch.setattr(rehearsal.os, "open", reject_fifo_open)
+    with pytest.raises(
+        release_operator.ReleaseFailure,
+        match="^dr_rehearsal_historical_sidecar_invalid$",
+    ):
+        rehearsal._remove_historical_restore_derived_sidecars(restored, backup)  # noqa: SLF001
+    monkeypatch.setattr(rehearsal.os, "open", real_os_open)
+    fifo_wal.unlink()
+    unexpected_wal = Path(f"{restored.database}-wal")
+    unexpected_wal.write_bytes(b"not-inert")
+    unexpected_wal.chmod(0o600)
+    with pytest.raises(
+        release_operator.ReleaseFailure,
+        match="^dr_rehearsal_historical_sidecar_invalid$",
+    ):
+        rehearsal._remove_historical_restore_derived_sidecars(restored, backup)  # noqa: SLF001
+    unexpected_wal.unlink()
+
+    real_rename_noreplace = rehearsal._rename_noreplace  # noqa: SLF001
+    race_source = Path(f"{restored.database}-wal")
+    race_source.write_bytes(b"")
+    race_source.chmod(0o600)
+    replacement = restored.database.parent / ".replacement-sidecar"
+    replacement_payload = b"racing-nonempty-sidecar"
+    replacement.write_bytes(replacement_payload)
+    replacement.chmod(0o600)
+    replacement_identity = (replacement.stat().st_dev, replacement.stat().st_ino)
+    race_quarantine: list[str] = []
+
+    def replace_before_quarantine(directory_fd: int, source_name: str, target_name: str) -> None:
+        if source_name == race_source.name and not race_quarantine:
+            os.replace(
+                replacement.name,
+                source_name,
+                src_dir_fd=directory_fd,
+                dst_dir_fd=directory_fd,
+            )
+            race_quarantine.append(target_name)
+        real_rename_noreplace(directory_fd, source_name, target_name)
+
+    monkeypatch.setattr(rehearsal, "_rename_noreplace", replace_before_quarantine)
+    with pytest.raises(
+        release_operator.ReleaseFailure,
+        match="^dr_rehearsal_historical_sidecar_invalid$",
+    ):
+        rehearsal._remove_historical_restore_derived_sidecars(restored, backup)  # noqa: SLF001
+    quarantined_replacement = restored.database.parent / race_quarantine[0]
+    assert quarantined_replacement.read_bytes() == replacement_payload
+    assert (
+        quarantined_replacement.stat().st_dev,
+        quarantined_replacement.stat().st_ino,
+    ) == replacement_identity
+    assert quarantined_replacement.stat().st_nlink == 1
+
+    collision_source = Path(f"{restored.inbox_database}-wal")
+    collision_source.write_bytes(b"")
+    collision_source.chmod(0o600)
+    collision_identity = (collision_source.stat().st_dev, collision_source.stat().st_ino)
+    collision_payload = b"collision-must-survive"
+    collision_quarantine: list[str] = []
+
+    def collide_with_quarantine(directory_fd: int, source_name: str, target_name: str) -> None:
+        if source_name == collision_source.name and not collision_quarantine:
+            target_fd = os.open(
+                target_name,
+                os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0),
+                0o600,
+                dir_fd=directory_fd,
+            )
+            try:
+                os.write(target_fd, collision_payload)
+                os.fsync(target_fd)
+            finally:
+                os.close(target_fd)
+            collision_quarantine.append(target_name)
+        real_rename_noreplace(directory_fd, source_name, target_name)
+
+    monkeypatch.setattr(rehearsal, "_rename_noreplace", collide_with_quarantine)
+    with pytest.raises(
+        release_operator.ReleaseFailure,
+        match="^dr_rehearsal_historical_sidecar_invalid$",
+    ):
+        rehearsal._remove_historical_restore_derived_sidecars(restored, backup)  # noqa: SLF001
+    assert collision_source.read_bytes() == b""
+    assert (collision_source.stat().st_dev, collision_source.stat().st_ino) == collision_identity
+    collision_target = restored.inbox_database.parent / collision_quarantine[0]
+    assert collision_target.read_bytes() == collision_payload
+    assert collision_target.stat().st_nlink == 1
 
 
 def test_exact_release_store_open_uses_closed_bounded_interpreter_invocation(

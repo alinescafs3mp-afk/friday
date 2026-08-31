@@ -1,3 +1,17 @@
+## 0.207.88 — 2026-08-31
+
+### Exact WAL-mode rollback preservation
+
+- Verifies restored main and Telegram-inbox SQLite images on disposable copies,
+  so read-only integrity checks cannot synthesize `-wal`/`-shm` beside the
+  authenticated recovery image.
+- Keeps the four-surface DR digest strict by atomically quarantining bounded
+  inert sidecars created by an authenticated historical fallback verifier;
+  they remain inside the registered scratch until whole-tree teardown, while
+  replacement races, collisions and non-empty unexpected artifacts fail closed.
+- Supersedes unactivated `0.207.85`–`0.207.87`; SQLite remains at schema 50
+  with exact `0.207.84` as predecessor and fallback. Retention deletion remains disabled.
+
 ## 0.207.87 — 2026-08-31
 
 ### Exact bind-mounted release-copy authentication

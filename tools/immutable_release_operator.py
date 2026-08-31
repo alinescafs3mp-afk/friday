@@ -14578,9 +14578,24 @@ def _restore_exact_sqlite_backup(
             os.fsync(directory_fd)
         finally:
             os.close(directory_fd)
-    if _sqlite_integrity(config.database, require_schema=True) != backup.schema_version:
+    # Even a read-only SQLite open creates ``-wal``/``-shm`` beside a database
+    # whose persistent journal mode is WAL.  Verify disposable copies so an
+    # exact restore cannot synthesize sidecars that were absent from the
+    # authenticated recovery image.
+    if (
+        _verify_sqlite_snapshot_copy(
+            config.database.parent,
+            label=config.database.stem,
+            require_schema=True,
+        )
+        != backup.schema_version
+    ):
         raise ReleaseFailure("restored_database_schema_changed")
-    _sqlite_integrity(config.inbox_database, require_schema=False)
+    _verify_sqlite_snapshot_copy(
+        config.inbox_database.parent,
+        label=config.inbox_database.stem,
+        require_schema=False,
+    )
     _restore_exact_obsidian_backup(config, payload)
 
 
