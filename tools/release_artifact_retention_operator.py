@@ -23,10 +23,14 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from tools import immutable_release_operator as release_operator  # noqa: E402
+from tools import release_artifact_proc_probe as proc_probe  # noqa: E402
 from tools import release_artifact_retention as retention  # noqa: E402
+from tools import release_dr_generation_authentication as dr_auth  # noqa: E402
+from tools import release_dr_generation_index as dr_index  # noqa: E402
 
-APPLY_JOURNAL_SCHEMA = "friday.release-artifact-retention-apply-journal.v3"
-APPLY_RECEIPT_SCHEMA = "friday.release-artifact-retention-apply-receipt.v2"
+APPLY_JOURNAL_SCHEMA = "friday.release-artifact-retention-apply-journal.v4"
+APPLY_RECEIPT_SCHEMA = "friday.release-artifact-retention-apply-receipt.v3"
+CONVERGENCE_RECEIPT_SCHEMA = "friday.release-artifact-retention-convergence-receipt.v1"
 APPLY_JOURNAL_NAME = "release-artifact-retention-apply.v1.json"
 APPLY_RECEIPT_DIRECTORY = "release-artifact-retention-receipts.v1"
 APPLY_PLAN_DIRECTORY = "release-artifact-retention-plans.v1"
@@ -34,6 +38,7 @@ OBJECT_AUTHORITY_DIRECTORY = "release-artifact-retention-object-authority.v1"
 MAX_PLAN_BYTES = 64 << 20
 MAX_OBJECT_AUTHORITY_BYTES = retention.MAX_INVENTORY_ENTRIES * 32
 MAX_DELETE_ENTRIES = 1_000_000
+MAX_EFFECTFUL_BATCHES_PER_INVOCATION = 16
 _HEX64 = frozenset("0123456789abcdef")
 _RENAME_NOREPLACE = 1
 _METADATA_READ_FLAGS = (
@@ -52,6 +57,24 @@ class RetentionApplyError(RuntimeError):
 
 class _InjectedCrash(BaseException):
     pass
+
+
+_REVIEWED_IDENTITY_KEYS = (
+    "allocated_bytes",
+    "device",
+    "entry_count",
+    "filesystem_magic",
+    "identity",
+    "inode",
+    "inventory_sha256",
+    "mode",
+    "mount_id",
+    "nlink",
+    "path",
+    "recursive_bytes",
+    "type",
+    "writable_authority_sha256",
+)
 
 
 def _fault(_point: str) -> None:
@@ -115,7 +138,84 @@ def _body_free_code(value: object) -> str:
     return value
 
 
-def _read_plan(
+def _reviewed_identity(
+    value: Mapping[str, Any],
+    *,
+    collection: str,
+) -> dict[str, Any]:
+    if collection not in {"backup_targets", "targets"} or any(
+        key not in value for key in _REVIEWED_IDENTITY_KEYS
+    ):
+        raise RetentionApplyError("retention_convergence_review_invalid")
+    return {
+        "collection": collection,
+        **{key: value[key] for key in _REVIEWED_IDENTITY_KEYS},
+    }
+
+
+def _reviewed_identity_sha256(value: Mapping[str, Any], *, collection: str) -> str:
+    return hashlib.sha256(_canonical(_reviewed_identity(value, collection=collection))).hexdigest()
+
+
+def _reviewed_candidate_identities(plan: Mapping[str, Any]) -> tuple[dict[str, Any], ...]:
+    values: list[dict[str, Any]] = []
+    paths: set[str] = set()
+    for collection in ("targets", "backup_targets"):
+        records = plan.get(collection)
+        if not isinstance(records, list):
+            raise RetentionApplyError("retention_convergence_review_invalid")
+        for record in records:
+            if not isinstance(record, Mapping):
+                raise RetentionApplyError("retention_convergence_review_invalid")
+            if record.get("decision") != "delete_candidate" and record.get("reason") != "deferred_batch_bound":
+                continue
+            normalized = _reviewed_identity(record, collection=collection)
+            path = str(normalized["path"])
+            if path in paths:
+                raise RetentionApplyError("retention_convergence_review_invalid")
+            paths.add(path)
+            values.append(normalized)
+    return tuple(sorted(values, key=lambda item: (str(item["path"]), str(item["collection"]))))
+
+
+def _reviewed_candidate_set_sha256(plan: Mapping[str, Any]) -> str:
+    return hashlib.sha256(_canonical(list(_reviewed_candidate_identities(plan)))).hexdigest()
+
+
+def _has_deferred_batch_bound(plan: Mapping[str, Any]) -> bool:
+    return any(
+        isinstance(record, Mapping) and record.get("reason") == "deferred_batch_bound"
+        for collection in ("targets", "backup_targets")
+        for record in (plan.get(collection) if isinstance(plan.get(collection), list) else ())
+    )
+
+
+def _has_open_only_identity(plan: Mapping[str, Any]) -> bool:
+    return any(
+        isinstance(record, Mapping) and record.get("reason") == "open_reference"
+        for collection in ("targets", "backup_targets")
+        for record in (plan.get(collection) if isinstance(plan.get(collection), list) else ())
+    )
+
+
+def _preflight_reviewed_root(
+    plan: Mapping[str, Any],
+) -> tuple[dict[str, Any], ...]:
+    """Reject reviewed roots that can never complete their accepted cycle."""
+
+    if _has_open_only_identity(plan):
+        raise RetentionApplyError("retention_convergence_review_unexecutable")
+    identities = _reviewed_candidate_identities(plan)
+    if any(
+        type(identity.get("entry_count")) is not int
+        or not 1 <= int(identity["entry_count"]) <= proc_probe.MAX_TARGET_OBJECTS
+        for identity in identities
+    ):
+        raise RetentionApplyError("retention_convergence_review_unexecutable")
+    return identities
+
+
+def _read_reviewed_plan(
     path: Path,
     *,
     expected_sha256: str,
@@ -159,6 +259,20 @@ def _read_plan(
         }
     ):
         raise RetentionApplyError("retention_apply_plan_digest_mismatch")
+    return value
+
+
+def _read_plan(
+    path: Path,
+    *,
+    expected_sha256: str,
+    allow_recoverable_two_link: bool = False,
+) -> dict[str, Any]:
+    value = _read_reviewed_plan(
+        path,
+        expected_sha256=expected_sha256,
+        allow_recoverable_two_link=allow_recoverable_two_link,
+    )
     candidates = _candidate_records(value)
     open_inventory = value.get("open_inventory")
     source = open_inventory.get("source") if isinstance(open_inventory, Mapping) else None
@@ -174,7 +288,17 @@ def _read_plan(
         )
     ) or (
         not candidates
-        and (value.get("apply_authority") is not False or source != "code_owned_no_delete_candidates_v1")
+        and not (
+            (value.get("apply_authority") is False and source == "code_owned_no_delete_candidates_v1")
+            or (
+                value.get("apply_authority") is True
+                and source
+                in {
+                    "code_owned_privileged_target_proc_v1",
+                    "code_owned_privileged_target_diagnostic_v1",
+                }
+            )
+        )
     ):
         raise RetentionApplyError("retention_apply_plan_digest_mismatch")
     return value
@@ -269,6 +393,24 @@ def _authority_projection(plan: Mapping[str, Any]) -> dict[str, Any]:
         raise RetentionApplyError("retention_apply_plan_invalid") from exc
 
 
+def _cycle_authority_projection(plan: Mapping[str, Any]) -> dict[str, Any]:
+    keys = (
+        "activation_journal",
+        "unit_install_journal",
+        "authority_bindings",
+        "backup_root",
+        "inventory_roots",
+        "backup_inventory_roots",
+        "reviewed_scratch_targets",
+        "protected_releases",
+        "retention_scope",
+    )
+    try:
+        return {key: plan[key] for key in keys}
+    except KeyError as exc:
+        raise RetentionApplyError("retention_apply_plan_invalid") from exc
+
+
 def _candidate_records(plan: Mapping[str, Any]) -> tuple[dict[str, Any], ...]:
     roots: dict[Path, tuple[int, int, int, int, str]] = {}
     for key in ("inventory_roots", "backup_inventory_roots"):
@@ -343,6 +485,135 @@ def _candidate_records(plan: Mapping[str, Any]) -> tuple[dict[str, Any], ...]:
                 raise RetentionApplyError("retention_apply_candidate_bound_exceeded")
     candidates.sort(key=lambda item: str(item["path"]))
     return tuple(candidates)
+
+
+_CYCLE_CONTEXT_KEYS = frozenset(
+    {
+        "accepted_root_plan_path",
+        "accepted_root_plan_sha256",
+        "batch_ordinal",
+        "cycle_sha256",
+        "previous_receipt_sha256",
+        "retention_epoch_sha256",
+        "reviewed_full_candidate_set_sha256",
+    }
+)
+
+
+def _cycle_identity_core(value: Mapping[str, Any]) -> dict[str, Any]:
+    return {
+        "accepted_root_plan_path": value["accepted_root_plan_path"],
+        "accepted_root_plan_sha256": value["accepted_root_plan_sha256"],
+        "retention_epoch_sha256": value["retention_epoch_sha256"],
+        "reviewed_full_candidate_set_sha256": value["reviewed_full_candidate_set_sha256"],
+        "schema": CONVERGENCE_RECEIPT_SCHEMA,
+    }
+
+
+def _normalize_cycle_context(value: Mapping[str, Any]) -> dict[str, Any]:
+    if not isinstance(value, Mapping) or set(value) != _CYCLE_CONTEXT_KEYS:
+        raise RetentionApplyError("retention_apply_cycle_invalid")
+    accepted_path = Path(str(value.get("accepted_root_plan_path") or ""))
+    ordinal = value.get("batch_ordinal")
+    previous = value.get("previous_receipt_sha256")
+    normalized = {
+        "accepted_root_plan_path": str(accepted_path),
+        "accepted_root_plan_sha256": value.get("accepted_root_plan_sha256"),
+        "batch_ordinal": ordinal,
+        "cycle_sha256": value.get("cycle_sha256"),
+        "previous_receipt_sha256": previous,
+        "retention_epoch_sha256": value.get("retention_epoch_sha256"),
+        "reviewed_full_candidate_set_sha256": value.get("reviewed_full_candidate_set_sha256"),
+    }
+    if (
+        not accepted_path.is_absolute()
+        or accepted_path != Path(os.path.abspath(accepted_path))
+        or type(ordinal) is not int
+        or not 0 <= int(ordinal) <= MAX_DELETE_ENTRIES
+        or (ordinal == 0 and previous != "")
+        or (ordinal > 0 and not _is_hex64(previous))
+        or any(
+            not _is_hex64(normalized[key])
+            for key in (
+                "accepted_root_plan_sha256",
+                "cycle_sha256",
+                "retention_epoch_sha256",
+                "reviewed_full_candidate_set_sha256",
+            )
+        )
+        or hashlib.sha256(_canonical(_cycle_identity_core(normalized))).hexdigest()
+        != normalized["cycle_sha256"]
+    ):
+        raise RetentionApplyError("retention_apply_cycle_invalid")
+    return normalized
+
+
+def _new_cycle_context(
+    *,
+    accepted_root_plan_path: Path,
+    accepted_root_plan_sha256: str,
+    reviewed_full_candidate_set_sha256: str,
+    retention_epoch_sha256: str,
+    batch_ordinal: int,
+    previous_receipt_sha256: str,
+) -> dict[str, Any]:
+    core = {
+        "accepted_root_plan_path": str(Path(os.path.abspath(accepted_root_plan_path))),
+        "accepted_root_plan_sha256": accepted_root_plan_sha256,
+        "retention_epoch_sha256": retention_epoch_sha256,
+        "reviewed_full_candidate_set_sha256": reviewed_full_candidate_set_sha256,
+        "schema": CONVERGENCE_RECEIPT_SCHEMA,
+    }
+    return _normalize_cycle_context(
+        {
+            **{key: item for key, item in core.items() if key != "schema"},
+            "batch_ordinal": batch_ordinal,
+            "cycle_sha256": hashlib.sha256(_canonical(core)).hexdigest(),
+            "previous_receipt_sha256": previous_receipt_sha256,
+        }
+    )
+
+
+def _standalone_cycle_context(
+    plan: Mapping[str, Any],
+    *,
+    accepted_path: Path,
+) -> dict[str, Any]:
+    authority = plan.get("authority_bindings")
+    epoch_material = {
+        "authority_bindings_sha256": (
+            authority.get("bindings_sha256") if isinstance(authority, Mapping) else ""
+        ),
+        "plan_sha256": plan.get("plan_sha256"),
+        "retention_scope": plan.get("retention_scope"),
+    }
+    reviewed_set_sha256 = (
+        _reviewed_candidate_set_sha256(plan)
+        if all(isinstance(plan.get(key), list) for key in ("targets", "backup_targets"))
+        else hashlib.sha256(_canonical([])).hexdigest()
+    )
+    return _new_cycle_context(
+        accepted_root_plan_path=accepted_path,
+        accepted_root_plan_sha256=str(plan["plan_sha256"]),
+        reviewed_full_candidate_set_sha256=reviewed_set_sha256,
+        retention_epoch_sha256=hashlib.sha256(_canonical(epoch_material)).hexdigest(),
+        batch_ordinal=0,
+        previous_receipt_sha256="",
+    )
+
+
+def _cycle_context_from_record(value: Mapping[str, Any]) -> dict[str, Any]:
+    try:
+        raw = {key: value[key] for key in _CYCLE_CONTEXT_KEYS}
+    except KeyError as exc:
+        raise RetentionApplyError("retention_apply_cycle_invalid") from exc
+    return _normalize_cycle_context(raw)
+
+
+def _same_cycle(first: Mapping[str, Any], second: Mapping[str, Any]) -> bool:
+    left = _normalize_cycle_context(first)
+    right = _normalize_cycle_context(second)
+    return _cycle_identity_core(left) == _cycle_identity_core(right)
 
 
 def _tree_material(path: Path) -> tuple[Any, str, str]:
@@ -1712,12 +1983,122 @@ def _receipt_with_digest(core: Mapping[str, Any]) -> dict[str, Any]:
     }
 
 
+def _validate_apply_receipt(value: Mapping[str, Any]) -> dict[str, Any]:
+    expected = {
+        "accepted_root_plan_sha256",
+        "actual_deleted_inodes",
+        "actual_deleted_logical_bytes",
+        "admission_reason",
+        "admission_status",
+        "allocated_bytes_are_not_exact_physical_attribution",
+        "authority_bindings_sha256",
+        "batch_ordinal",
+        "bounded_effect_contour",
+        "candidate_set_sha256",
+        "concurrent_open_attempts_excluded",
+        "cycle_sha256",
+        "deleted_authenticated_allocated_bytes",
+        "deleted_candidate_count",
+        "filesystem_after",
+        "filesystem_before",
+        "plan_sha256",
+        "post_apply_reauthenticated",
+        "pre_delete_authenticated_allocated_bytes",
+        "pre_delete_authenticated_bytes",
+        "pre_delete_authenticated_inodes",
+        "previous_receipt_sha256",
+        "privileged_probe_role",
+        "receipt_sha256",
+        "residual_authority_set_sha256",
+        "retention_epoch_sha256",
+        "retention_scope_schema",
+        "retention_scope_sha256",
+        "reviewed_full_candidate_set_sha256",
+        "schema",
+        "status",
+        "statvfs_available_delta_bytes",
+        "statvfs_concurrent_activity_unexcluded",
+        "terminal_absence_observed",
+        "threat_boundary",
+        "transaction_id",
+        "universal_absence_proof",
+    }
+    receipt = dict(value)
+    core = {key: item for key, item in receipt.items() if key != "receipt_sha256"}
+    ordinal = receipt.get("batch_ordinal")
+    previous = receipt.get("previous_receipt_sha256")
+    count = receipt.get("deleted_candidate_count")
+    admission = receipt.get("admission_status")
+    reason = receipt.get("admission_reason")
+    if (
+        set(receipt) != expected
+        or receipt.get("schema") != APPLY_RECEIPT_SCHEMA
+        or receipt.get("status") != "applied"
+        or not _is_hex64(receipt.get("receipt_sha256"))
+        or receipt["receipt_sha256"] != hashlib.sha256(_canonical(core)).hexdigest()
+        or any(
+            not _is_hex64(receipt.get(key))
+            for key in (
+                "accepted_root_plan_sha256",
+                "authority_bindings_sha256",
+                "candidate_set_sha256",
+                "cycle_sha256",
+                "plan_sha256",
+                "residual_authority_set_sha256",
+                "retention_epoch_sha256",
+                "retention_scope_sha256",
+                "reviewed_full_candidate_set_sha256",
+                "transaction_id",
+            )
+        )
+        or type(ordinal) is not int
+        or not 0 <= int(ordinal) <= MAX_DELETE_ENTRIES
+        or (ordinal == 0 and previous != "")
+        or (ordinal > 0 and not _is_hex64(previous))
+        or type(count) is not int
+        or not 0 <= int(count) <= retention.MAX_DELETE_CANDIDATES_PER_PLAN
+        or admission not in {"nonterminal", "release_admissible"}
+        or (admission == "release_admissible")
+        != (reason == "fresh_eligible_zero" and count == 0)
+        or (
+            admission == "nonterminal"
+            and reason
+            != ("effectful_applied" if isinstance(count, int) and count > 0 else "deferred_zero")
+        )
+        or any(
+            type(receipt.get(key)) is not int or int(receipt[key]) < 0
+            for key in (
+                "actual_deleted_inodes",
+                "actual_deleted_logical_bytes",
+                "deleted_authenticated_allocated_bytes",
+                "pre_delete_authenticated_allocated_bytes",
+                "pre_delete_authenticated_bytes",
+                "pre_delete_authenticated_inodes",
+            )
+        )
+        or (count == 0 and any(int(receipt[key]) != 0 for key in (
+            "actual_deleted_inodes",
+            "actual_deleted_logical_bytes",
+            "deleted_authenticated_allocated_bytes",
+            "pre_delete_authenticated_allocated_bytes",
+            "pre_delete_authenticated_bytes",
+            "pre_delete_authenticated_inodes",
+        )))
+        or receipt.get("retention_scope_schema") != retention.RETENTION_SCOPE_SCHEMA
+        or receipt.get("terminal_absence_observed") is not True
+        or receipt.get("post_apply_reauthenticated") is not True
+    ):
+        raise RetentionApplyError("retention_apply_receipt_invalid")
+    return receipt
+
+
 def _publish_receipt(
     state_dir: Path,
     receipt: Mapping[str, Any],
     *,
     guard: Callable[[], None],
 ) -> dict[str, Any]:
+    receipt = _validate_apply_receipt(receipt)
     supplied = receipt.get("receipt_sha256")
     core = {key: value for key, value in receipt.items() if key != "receipt_sha256"}
     if (
@@ -2251,10 +2632,22 @@ def _new_journal(
     *,
     durable_plan: tuple[Path, int, int],
     filesystem_before: Sequence[Mapping[str, Any]],
+    cycle_context: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     plan_sha256 = str(plan["plan_sha256"])
+    cycle = _normalize_cycle_context(cycle_context) if cycle_context is not None else (
+        _standalone_cycle_context(plan, accepted_path=durable_plan[0])
+    )
     transaction = hashlib.sha256(
-        _canonical({"plan_sha256": plan_sha256, "schema": APPLY_JOURNAL_SCHEMA})
+        _canonical(
+            {
+                "batch_ordinal": cycle["batch_ordinal"],
+                "cycle_sha256": cycle["cycle_sha256"],
+                "plan_sha256": plan_sha256,
+                "previous_receipt_sha256": cycle["previous_receipt_sha256"],
+                "schema": APPLY_JOURNAL_SCHEMA,
+            }
+        )
     ).hexdigest()
     scope = plan.get("retention_scope")
     if (
@@ -2266,6 +2659,7 @@ def _new_journal(
     return {
         "schema": APPLY_JOURNAL_SCHEMA,
         "transaction_id": transaction,
+        **cycle,
         "plan_sha256": plan_sha256,
         "retention_scope_schema": scope["schema"],
         "retention_scope_sha256": scope["file_sha256"],
@@ -2308,8 +2702,12 @@ def _validate_journal_contract(
     plan: Mapping[str, Any],
     candidates: Sequence[Mapping[str, Any]],
     durable_plan: tuple[Path, int, int],
+    cycle_context: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     core = _journal_core(value)
+    observed_cycle = _cycle_context_from_record(core)
+    if cycle_context is not None and observed_cycle != _normalize_cycle_context(cycle_context):
+        raise RetentionApplyError("retention_apply_journal_invalid")
     filesystem_before = _validate_filesystem_evidence(core.get("filesystem_before"))
     filesystem_after = _validate_filesystem_evidence(core.get("filesystem_after"))
     expected = _new_journal(
@@ -2317,6 +2715,7 @@ def _validate_journal_contract(
         candidates,
         durable_plan=durable_plan,
         filesystem_before=filesystem_before,
+        cycle_context=observed_cycle,
     )
     if set(core) != set(expected) or core.get("transaction_id") != expected["transaction_id"]:
         raise RetentionApplyError("retention_apply_journal_invalid")
@@ -2455,6 +2854,21 @@ def _validate_journal_contract(
     return core
 
 
+def _is_exact_terminal_zero_plan(
+    plan: Mapping[str, Any],
+    candidates: Sequence[Mapping[str, Any]],
+) -> bool:
+    open_inventory = plan.get("open_inventory")
+    return (
+        not candidates
+        and plan.get("apply_authority") is False
+        and isinstance(open_inventory, Mapping)
+        and open_inventory.get("source") == "code_owned_no_delete_candidates_v1"
+        and not _has_deferred_batch_bound(plan)
+        and not _has_open_only_identity(plan)
+    )
+
+
 def _result_receipt(
     *,
     plan: Mapping[str, Any],
@@ -2489,9 +2903,34 @@ def _result_receipt(
         after["available_bytes"] - before["available_bytes"]
         for before, after in zip(filesystem_before, filesystem_after, strict=True)
     )
+    exact_terminal_zero = (
+        _is_exact_terminal_zero_plan(plan, candidates)
+        and not entries
+        and not filesystem_before
+        and not filesystem_after
+        and authenticated_bytes == 0
+        and authenticated_allocated_bytes == 0
+        and authenticated_inodes == 0
+        and statvfs_delta == 0
+    )
+    cycle = _cycle_context_from_record(journal)
     core = {
         "schema": APPLY_RECEIPT_SCHEMA,
         "status": "applied",
+        "admission_status": "release_admissible" if exact_terminal_zero else "nonterminal",
+        "admission_reason": (
+            "fresh_eligible_zero"
+            if exact_terminal_zero
+            else "effectful_applied"
+            if candidates
+            else "deferred_zero"
+        ),
+        "accepted_root_plan_sha256": cycle["accepted_root_plan_sha256"],
+        "batch_ordinal": cycle["batch_ordinal"],
+        "cycle_sha256": cycle["cycle_sha256"],
+        "previous_receipt_sha256": cycle["previous_receipt_sha256"],
+        "retention_epoch_sha256": cycle["retention_epoch_sha256"],
+        "reviewed_full_candidate_set_sha256": cycle["reviewed_full_candidate_set_sha256"],
         "plan_sha256": plan["plan_sha256"],
         "retention_scope_schema": plan["retention_scope"]["schema"],
         "retention_scope_sha256": plan["retention_scope"]["file_sha256"],
@@ -2591,7 +3030,7 @@ def _cleanup_completed_transaction_before_rollover(
     plan_sha256 = journal.get("plan_sha256")
     if not _is_hex64(plan_sha256) or journal.get("phase") != "applied":
         raise RetentionApplyError("retention_apply_journal_invalid")
-    reviewed, durable_plan, loaded, _inputs = _resume_plan_after_live_authority(
+    reviewed, durable_plan, loaded = _resume_plan_from_state(
         state_dir,
         expected_plan_sha256=str(plan_sha256),
         guard=guard,
@@ -2620,6 +3059,8 @@ def _cleanup_completed_transaction_before_rollover(
     )
     if core.get("receipt_sha256") != receipt["receipt_sha256"]:
         raise RetentionApplyError("retention_apply_journal_invalid")
+    if receipt.get("admission_status") != "release_admissible":
+        _live_authority_reauthenticate(reviewed, _plan_inputs(reviewed))
     _publish_receipt(state_dir, receipt, guard=guard)
     _cleanup_object_authorities(state_dir, entries, guard=guard)
 
@@ -2759,7 +3200,12 @@ def _resume_plan_after_live_authority(
     inputs = _plan_inputs(reviewed)
     _live_authority_reauthenticate(reviewed, inputs)
     if _journal.get("phase") != "applied" and not _candidate_records(reviewed):
-        fresh = retention.build_eligible_retention_plan(**inputs)
+        fresh = _fresh_plan_for_cycle(
+            reviewed=reviewed,
+            inputs=inputs,
+            state_dir=state_dir,
+            cycle_context=_cycle_context_from_record(_journal),
+        )
         if _authority_projection(fresh) != _authority_projection(reviewed):
             raise RetentionApplyError("retention_apply_plan_drift")
     reviewed, durable_plan, journal = _resume_plan_from_state(
@@ -2772,11 +3218,170 @@ def _resume_plan_after_live_authority(
     return reviewed, durable_plan, journal, inputs
 
 
+def _load_accepted_root_plan(
+    state_dir: Path,
+    cycle_context: Mapping[str, Any],
+) -> dict[str, Any]:
+    cycle = _normalize_cycle_context(cycle_context)
+    digest = str(cycle["accepted_root_plan_sha256"])
+    path = state_dir / APPLY_PLAN_DIRECTORY / f"plan-{digest}.json"
+    root = _read_reviewed_plan(path, expected_sha256=digest)
+    if _reviewed_candidate_set_sha256(root) != cycle["reviewed_full_candidate_set_sha256"]:
+        raise RetentionApplyError("retention_convergence_review_invalid")
+    return root
+
+
+def _build_reviewed_subset_plan(
+    *,
+    inputs: Mapping[str, Any],
+    accepted_root: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Build one fresh bounded batch solely from the accepted root identities."""
+
+    try:
+        scope = retention.load_retention_scope_authority(
+            activation_journal=inputs["activation_journal"],
+        )
+        bindings = retention.build_retention_authority_bindings(
+            activation_journal=inputs["activation_journal"],
+            unit_journal=inputs["unit_journal"],
+            canonical_evidence_roots=inputs["canonical_evidence_roots"],
+        )
+        seed = retention.plan_release_artifact_retention(
+            activation_journal=inputs["activation_journal"],
+            unit_journal=inputs["unit_journal"],
+            backup_root=scope.backup_root,
+            inventory_roots=scope.inventory_roots,
+            backup_inventory_roots=scope.backup_inventory_roots,
+            reviewed_scratch_targets=inputs["reviewed_scratch_targets"],
+            open_inventory=retention.OpenInventorySnapshot(
+                source="code_owned_candidate_scope_seed_v1",
+                complete=True,
+            ),
+            authority_bindings=bindings,
+            executable=True,
+            _scope_seed=True,  # noqa: SLF001
+            _retention_scope=scope.receipt,  # noqa: SLF001
+        )
+    except (KeyError, retention.RetentionPlanError) as exc:
+        raise RetentionApplyError("retention_apply_authority_failed") from exc
+    if seed.get("classification_status") != "scope_seed":
+        raise RetentionApplyError("retention_apply_authority_failed")
+
+    accepted_values = _reviewed_candidate_identities(accepted_root)
+    accepted_by_digest = {
+        hashlib.sha256(_canonical(item)).hexdigest(): _canonical(item) for item in accepted_values
+    }
+    if len(accepted_by_digest) != len(accepted_values):
+        raise RetentionApplyError("retention_convergence_review_invalid")
+
+    matching: list[tuple[str, Mapping[str, Any]]] = []
+    for collection in ("targets", "backup_targets"):
+        raw_records = seed.get(collection)
+        if not isinstance(raw_records, list):
+            raise RetentionApplyError("retention_apply_authority_failed")
+        for record in raw_records:
+            if not isinstance(record, Mapping) or (
+                record.get("decision") != "delete_candidate"
+                and record.get("reason") != "deferred_batch_bound"
+            ):
+                continue
+            normalized = _reviewed_identity(record, collection=collection)
+            digest = hashlib.sha256(_canonical(normalized)).hexdigest()
+            if accepted_by_digest.get(digest) == _canonical(normalized):
+                matching.append((str(record["path"]), record))
+
+    selected_paths: list[Path] = []
+    selected_objects = 0
+    for _path, record in sorted(matching, key=lambda item: item[0]):
+        objects = int(record["entry_count"])
+        if (
+            len(selected_paths) >= retention.MAX_DELETE_CANDIDATES_PER_PLAN
+            or selected_objects + objects > proc_probe.MAX_TARGET_OBJECTS
+        ):
+            continue
+        selected_paths.append(Path(str(record["path"])))
+        selected_objects += objects
+    target_paths = tuple(selected_paths)
+    try:
+        inventory = (
+            retention.build_complete_open_inventory(target_paths=target_paths)
+            if target_paths
+            else retention.OpenInventorySnapshot(
+                source="code_owned_no_delete_candidates_v1",
+                complete=True,
+                authority_sha256=str(seed["plan_sha256"]),
+            )
+        )
+        plan = retention.plan_release_artifact_retention(
+            activation_journal=inputs["activation_journal"],
+            unit_journal=inputs["unit_journal"],
+            backup_root=scope.backup_root,
+            inventory_roots=scope.inventory_roots,
+            backup_inventory_roots=scope.backup_inventory_roots,
+            reviewed_scratch_targets=inputs["reviewed_scratch_targets"],
+            open_inventory=inventory,
+            authority_bindings=bindings,
+            executable=True,
+            _candidate_scope_paths=frozenset(target_paths),  # noqa: SLF001
+            _retention_scope=scope.receipt,  # noqa: SLF001
+        )
+    except (KeyError, retention.RetentionPlanError) as exc:
+        raise RetentionApplyError("retention_apply_authority_failed") from exc
+    if plan.get("classification_status") != "eligible":
+        raise RetentionApplyError("retention_apply_authority_failed")
+    if _cycle_authority_projection(plan) != _cycle_authority_projection(accepted_root):
+        raise RetentionApplyError("retention_convergence_cycle_changed")
+    candidates = _candidate_records(plan)
+    candidate_identities = {
+        _reviewed_identity_sha256(
+            candidate,
+            collection=(
+                "targets"
+                if any(
+                    isinstance(item, Mapping) and item.get("path") == candidate.get("path")
+                    for item in plan["targets"]
+                )
+                else "backup_targets"
+            ),
+        )
+        for candidate in candidates
+    }
+    if not candidate_identities.issubset(accepted_by_digest):
+        raise RetentionApplyError("retention_convergence_candidate_outside_review")
+    if retention.load_retention_scope_authority(
+        activation_journal=inputs["activation_journal"]
+    ) != scope:
+        raise RetentionApplyError("retention_apply_retention_scope_changed")
+    return plan
+
+
+def _fresh_plan_for_cycle(
+    *,
+    reviewed: Mapping[str, Any],
+    inputs: Mapping[str, Any],
+    state_dir: Path,
+    cycle_context: Mapping[str, Any],
+) -> dict[str, Any]:
+    cycle = _normalize_cycle_context(cycle_context)
+    if (
+        cycle["batch_ordinal"] == 0
+        and reviewed.get("plan_sha256") == cycle["accepted_root_plan_sha256"]
+    ):
+        try:
+            return retention.build_eligible_retention_plan(**inputs)
+        except retention.RetentionPlanError as exc:
+            raise RetentionApplyError("retention_apply_authority_failed") from exc
+    accepted_root = _load_accepted_root_plan(state_dir, cycle)
+    return _build_reviewed_subset_plan(inputs=inputs, accepted_root=accepted_root)
+
+
 def apply_retention_plan(
     *,
     plan_path: Path | None,
     expected_plan_sha256: str,
     state_dir: Path | None = None,
+    _cycle_context: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     resume_from_state = state_dir is not None
     if resume_from_state:
@@ -2813,6 +3418,13 @@ def apply_retention_plan(
             lock.assert_held()
             existing = _load_journal(journal_path)
             if resume_from_state:
+                if existing is None:
+                    raise RetentionApplyError("retention_apply_resume_authority_missing")
+                cycle_context = _cycle_context_from_record(existing)
+                if _cycle_context is not None and cycle_context != _normalize_cycle_context(
+                    _cycle_context
+                ):
+                    raise RetentionApplyError("retention_apply_cycle_invalid")
                 reviewed, durable_plan, existing, inputs = _resume_plan_after_live_authority(
                     state_dir,
                     expected_plan_sha256=expected_plan_sha256,
@@ -2823,6 +3435,11 @@ def apply_retention_plan(
                 reviewed = _read_plan(source_plan_path, expected_sha256=expected_plan_sha256)
                 inputs = _plan_inputs(reviewed)
                 candidates = _candidate_records(reviewed)
+                cycle_context = (
+                    _normalize_cycle_context(_cycle_context)
+                    if _cycle_context is not None
+                    else _standalone_cycle_context(reviewed, accepted_path=source_plan_path)
+                )
                 source_lexical = Path(os.path.abspath(source_plan_path))
                 if any(
                     source_lexical == Path(str(candidate["path"])).parent
@@ -2838,6 +3455,8 @@ def apply_retention_plan(
                 ):
                     raise RetentionApplyError("retention_apply_in_progress")
                 if existing is not None and existing.get("plan_sha256") == expected_plan_sha256:
+                    if _cycle_context_from_record(existing) != cycle_context:
+                        raise RetentionApplyError("retention_apply_cycle_invalid")
                     reviewed, durable_plan, existing, inputs = _resume_plan_after_live_authority(
                         state_dir,
                         expected_plan_sha256=expected_plan_sha256,
@@ -2850,6 +3469,7 @@ def apply_retention_plan(
                         candidates,
                         durable_plan=(source_plan_path, 1, 1),
                         filesystem_before=(),
+                        cycle_context=cycle_context,
                     )
                     dry_entries = dry_run["entries"]
                     assert isinstance(dry_entries, list)
@@ -2859,7 +3479,12 @@ def apply_retention_plan(
                         candidates=candidates,
                         entries=dry_entries,
                     )
-                    fresh = retention.build_eligible_retention_plan(**inputs)
+                    fresh = _fresh_plan_for_cycle(
+                        reviewed=reviewed,
+                        inputs=inputs,
+                        state_dir=state_dir,
+                        cycle_context=cycle_context,
+                    )
                     if _authority_projection(fresh) != _authority_projection(reviewed):
                         raise RetentionApplyError("retention_apply_plan_drift")
                     if (
@@ -2897,6 +3522,7 @@ def apply_retention_plan(
                         candidates,
                         guard=lock.assert_held,
                     ),
+                    cycle_context=cycle_context,
                 )
                 raw_initial_entries = initial["entries"]
                 assert isinstance(raw_initial_entries, list)
@@ -2922,6 +3548,7 @@ def apply_retention_plan(
                 plan=reviewed,
                 candidates=candidates,
                 durable_plan=durable_plan,
+                cycle_context=cycle_context,
             )
             entries = core.get("entries")
             if (
@@ -3191,6 +3818,964 @@ def apply_retention_plan(
         raise RetentionApplyError("retention_apply_authority_failed") from exc
 
 
+def _validate_friday_home(home: Path) -> Path:
+    lexical = Path(os.path.abspath(home))
+    try:
+        status = os.lstat(home)
+        resolved = home.resolve(strict=True)
+    except OSError as exc:
+        raise RetentionApplyError("retention_admission_friday_home_invalid") from exc
+    if (
+        not home.is_absolute()
+        or home != lexical
+        or resolved != home
+        or not stat.S_ISDIR(status.st_mode)
+        or status.st_uid != os.geteuid()
+        or stat.S_IMODE(status.st_mode) & 0o077
+    ):
+        raise RetentionApplyError("retention_admission_friday_home_invalid")
+    return home
+
+
+def _canonical_friday_home() -> Path:
+    raw = os.environ.get("FRIDAY_HOME")
+    if not raw or any(character in raw for character in "\x00\r\n"):
+        raise RetentionApplyError("retention_admission_friday_home_invalid")
+    return _validate_friday_home(Path(raw))
+
+
+def _generation_candidate_sha256(candidate: Mapping[str, Any]) -> str:
+    try:
+        normalized = dr_index.normalize_generation_candidate(candidate)
+    except dr_index.DRGenerationIndexError as exc:
+        raise RetentionApplyError("retention_admission_dr_index_invalid") from exc
+    return hashlib.sha256(_canonical(normalized)).hexdigest()
+
+
+def _retention_epoch_locked(
+    *,
+    state_dir: Path,
+    activation_receipt: Path,
+    guard: Callable[[], None],
+) -> tuple[dict[str, Any], str]:
+    activation_journal = state_dir / "immutable-release-activation.v1.json"
+    backup_root = state_dir.parent / "backups"
+    index = dr_index.DurableDRGenerationIndex(state_dir)
+    guard()
+    first = dr_auth._authenticate_locked(  # noqa: SLF001
+        activation_journal=activation_journal,
+        activation_receipt=activation_receipt,
+        backup_root=backup_root,
+    )
+    guard()
+    state = index.load()
+    guard()
+    if state.get("phase") != "clear":
+        raise RetentionApplyError("retention_admission_dr_index_invalid")
+    current = index.current_generation_identity(
+        expected_journal_sha256=str(state.get("journal_sha256") or ""),
+    )
+    if current is None:
+        raise RetentionApplyError("retention_admission_dr_index_invalid")
+    try:
+        authentication_reference, _raw, _body = dr_index.validate_authentication_receipt(
+            first.authentication_receipt,
+            candidate=first.candidate,
+        )
+    except dr_index.DRGenerationIndexError as exc:
+        raise RetentionApplyError("retention_admission_dr_index_invalid") from exc
+    if (
+        current.candidate != first.candidate
+        or current.candidate_sha256 != _generation_candidate_sha256(first.candidate)
+        or current.authentication_receipt != authentication_reference
+    ):
+        raise RetentionApplyError("retention_admission_activation_mismatch")
+    snapshot = index.authority_snapshot()
+    guard()
+    second = dr_auth._authenticate_locked(  # noqa: SLF001
+        activation_journal=activation_journal,
+        activation_receipt=activation_receipt,
+        backup_root=backup_root,
+    )
+    state_after = index.load()
+    snapshot_after = index.authority_snapshot()
+    guard()
+    if second != first or state_after != state or snapshot_after != snapshot:
+        raise RetentionApplyError("retention_admission_source_changed")
+
+    pins = {pin.role: pin for pin in snapshot.pins}
+    current_pin = pins.get("current")
+    older_pin = pins.get("older")
+    current_ref = state.get("current")
+    older_ref = state.get("older")
+    if (
+        current_pin is None
+        or not isinstance(current_ref, Mapping)
+        or current_pin.generation_id != current_ref.get("generation_id")
+        or current_pin.receipt_sha256 != current_ref.get("receipt_sha256")
+        or (older_pin is None) != (older_ref is None)
+        or (
+            older_pin is not None
+            and (
+                not isinstance(older_ref, Mapping)
+                or older_pin.generation_id != older_ref.get("generation_id")
+                or older_pin.receipt_sha256 != older_ref.get("receipt_sha256")
+                or current_pin.generation_id == older_pin.generation_id
+            )
+        )
+    ):
+        raise RetentionApplyError("retention_admission_dr_topology_invalid")
+    current_v2 = current_pin.activation_receipt_file_sha256 is not None
+    older_v2 = older_pin is not None and older_pin.activation_receipt_file_sha256 is not None
+    anchor = state.get("preactivation_anchor")
+    first_v2 = (
+        current_v2
+        and not older_v2
+        and older_pin is not None
+        and isinstance(anchor, Mapping)
+        and dict(current_ref) == anchor.get("first_v2_generation")
+        and isinstance(older_ref, Mapping)
+        and dict(older_ref) == anchor.get("legacy_generation")
+    )
+    two_v2 = current_v2 and older_v2 and older_pin is not None and isinstance(anchor, Mapping)
+    topology = "first_v2" if first_v2 else "two_v2" if two_v2 else "pre_v2"
+    activation_file_sha256 = first.authentication_receipt.get("activation_receipt_file_sha256")
+    activation_sha256 = first.authentication_receipt.get("activation_receipt_sha256")
+    if (
+        not _is_hex64(activation_file_sha256)
+        or not _is_hex64(activation_sha256)
+        or (
+            current_v2
+            and current_pin.activation_receipt_file_sha256 != activation_file_sha256
+        )
+    ):
+        raise RetentionApplyError("retention_admission_activation_mismatch")
+    try:
+        scope = retention.load_retention_scope_authority(activation_journal=activation_journal)
+    except retention.RetentionPlanError as exc:
+        if topology == "two_v2":
+            raise RetentionApplyError("retention_admission_scope_required") from exc
+        # Bootstrap/pre-v2 admission never grants deletion authority.  It may
+        # therefore bridge the one-time first-v2 transition before scope
+        # provisioning, while two-v2 review always requires the exact scope.
+        scope = None
+    guard()
+    if scope is not None and retention.load_retention_scope_authority(
+        activation_journal=activation_journal
+    ) != scope:
+        raise RetentionApplyError("retention_admission_source_changed")
+    guard()
+    projection = {
+        "activation_receipt_file_sha256": activation_file_sha256,
+        "activation_receipt_sha256": activation_sha256,
+        "current_candidate_sha256": _generation_candidate_sha256(current_pin.candidate),
+        "current_generation_id": current_pin.generation_id,
+        "current_generation_receipt_sha256": current_pin.receipt_sha256,
+        "index_journal_sha256": state["journal_sha256"],
+        "index_revision": state["revision"],
+        "older_candidate_sha256": (
+            _generation_candidate_sha256(older_pin.candidate) if older_pin is not None else ""
+        ),
+        "older_generation_id": older_pin.generation_id if older_pin is not None else "",
+        "older_generation_receipt_sha256": (
+            older_pin.receipt_sha256 if older_pin is not None else ""
+        ),
+        "retention_scope_schema": scope.receipt["schema"] if scope is not None else "",
+        "retention_scope_sha256": scope.receipt["file_sha256"] if scope is not None else "",
+        "topology": topology,
+    }
+    return projection, hashlib.sha256(_canonical(projection)).hexdigest()
+
+
+def _retention_epoch(
+    *,
+    state_dir: Path,
+    activation_receipt: Path,
+) -> tuple[dict[str, Any], str]:
+    try:
+        canonical_state = retention._strict_private_directory(  # noqa: SLF001
+            state_dir,
+            code="retention_admission_friday_home_invalid",
+        )
+        with release_operator.OperatorTransactionLock(
+            canonical_state / "immutable-release-operator.v1.lock"
+        ) as transaction:
+            return _retention_epoch_locked(
+                state_dir=canonical_state,
+                activation_receipt=activation_receipt,
+                guard=transaction.assert_held,
+            )
+    except RetentionApplyError:
+        raise
+    except (
+        dr_auth.DRGenerationAuthenticationError,
+        dr_index.DRGenerationIndexError,
+        release_operator.ReleaseFailure,
+        retention.RetentionPlanError,
+    ) as exc:
+        raise RetentionApplyError("retention_admission_reauthentication_failed") from exc
+
+
+def _read_apply_receipt_path(path: Path) -> dict[str, Any]:
+    try:
+        raw = retention._stable_file_bytes(  # noqa: SLF001
+            path,
+            private=True,
+            code="retention_apply_receipt_invalid",
+            maximum_bytes=MAX_PLAN_BYTES,
+        )
+        value = retention._unique_json(raw, code="retention_apply_receipt_invalid")  # noqa: SLF001
+    except retention.RetentionPlanError as exc:
+        raise RetentionApplyError("retention_apply_receipt_invalid") from exc
+    if raw != _canonical(value) + b"\n":
+        raise RetentionApplyError("retention_apply_receipt_invalid")
+    return _validate_apply_receipt(value)
+
+
+def _read_apply_receipt(
+    state_dir: Path,
+    *,
+    transaction_id: str,
+) -> dict[str, Any]:
+    if not _is_hex64(transaction_id):
+        raise RetentionApplyError("retention_apply_receipt_invalid")
+    return _read_apply_receipt_path(
+        state_dir / APPLY_RECEIPT_DIRECTORY / f"receipt-{transaction_id}.json"
+    )
+
+
+def _find_apply_receipt_by_sha256(state_dir: Path, receipt_sha256: str) -> dict[str, Any]:
+    if not _is_hex64(receipt_sha256):
+        raise RetentionApplyError("retention_apply_receipt_invalid")
+    directory = state_dir / APPLY_RECEIPT_DIRECTORY
+    try:
+        names = sorted(
+            name
+            for name in os.listdir(directory)
+            if name.startswith("receipt-") and name.endswith(".json")
+        )
+    except OSError as exc:
+        raise RetentionApplyError("retention_apply_receipt_invalid") from exc
+    if len(names) > MAX_DELETE_ENTRIES:
+        raise RetentionApplyError("retention_apply_receipt_invalid")
+    matches: list[dict[str, Any]] = []
+    for name in names:
+        transaction = name.removeprefix("receipt-").removesuffix(".json")
+        if not _is_hex64(transaction):
+            raise RetentionApplyError("retention_apply_receipt_invalid")
+        receipt = _read_apply_receipt_path(directory / name)
+        if receipt["receipt_sha256"] == receipt_sha256:
+            matches.append(receipt)
+    if len(matches) != 1:
+        raise RetentionApplyError("retention_apply_receipt_invalid")
+    return matches[0]
+
+
+def _candidate_identity_digests(
+    plan: Mapping[str, Any],
+    candidates: Sequence[Mapping[str, Any]],
+) -> set[str]:
+    collections: dict[str, str] = {}
+    for collection in ("targets", "backup_targets"):
+        records = plan.get(collection)
+        if not isinstance(records, list):
+            raise RetentionApplyError("retention_apply_plan_invalid")
+        for record in records:
+            if isinstance(record, Mapping) and record.get("decision") == "delete_candidate":
+                path = str(record.get("path") or "")
+                if path in collections:
+                    raise RetentionApplyError("retention_apply_plan_invalid")
+                collections[path] = collection
+    return {
+        _reviewed_identity_sha256(candidate, collection=collections[str(candidate["path"])])
+        for candidate in candidates
+    }
+
+
+def _validate_apply_receipt_plan(
+    state_dir: Path,
+    receipt: Mapping[str, Any],
+) -> tuple[dict[str, Any], tuple[dict[str, Any], ...]]:
+    plan_sha256 = str(receipt.get("plan_sha256") or "")
+    plan = _read_plan(
+        state_dir / APPLY_PLAN_DIRECTORY / f"plan-{plan_sha256}.json",
+        expected_sha256=plan_sha256,
+    )
+    candidates = _candidate_records(plan)
+    candidate_sha256s = [candidate["candidate_sha256"] for candidate in candidates]
+    authority = plan.get("authority_bindings")
+    expected_transaction = hashlib.sha256(
+        _canonical(
+            {
+                "batch_ordinal": receipt["batch_ordinal"],
+                "cycle_sha256": receipt["cycle_sha256"],
+                "plan_sha256": plan_sha256,
+                "previous_receipt_sha256": receipt["previous_receipt_sha256"],
+                "schema": APPLY_JOURNAL_SCHEMA,
+            }
+        )
+    ).hexdigest()
+    authenticated_bytes = sum(int(candidate["recursive_bytes"]) for candidate in candidates)
+    authenticated_allocated = sum(int(candidate["allocated_bytes"]) for candidate in candidates)
+    authenticated_inodes = sum(int(candidate["entry_count"]) for candidate in candidates)
+    if (
+        receipt.get("transaction_id") != expected_transaction
+        or receipt.get("candidate_set_sha256")
+        != hashlib.sha256(_canonical(candidate_sha256s)).hexdigest()
+        or receipt.get("deleted_candidate_count") != len(candidates)
+        or receipt.get("pre_delete_authenticated_bytes") != authenticated_bytes
+        or receipt.get("actual_deleted_logical_bytes") != authenticated_bytes
+        or receipt.get("pre_delete_authenticated_allocated_bytes") != authenticated_allocated
+        or receipt.get("deleted_authenticated_allocated_bytes") != authenticated_allocated
+        or receipt.get("pre_delete_authenticated_inodes") != authenticated_inodes
+        or receipt.get("actual_deleted_inodes") != authenticated_inodes
+        or not isinstance(authority, Mapping)
+        or receipt.get("authority_bindings_sha256") != authority.get("bindings_sha256")
+        or receipt.get("retention_scope_schema") != plan["retention_scope"]["schema"]
+        or receipt.get("retention_scope_sha256") != plan["retention_scope"]["file_sha256"]
+        or (
+            receipt.get("admission_status") == "release_admissible"
+            and not _is_exact_terminal_zero_plan(plan, candidates)
+        )
+        or (
+            receipt.get("admission_status") == "nonterminal"
+            and bool(candidates) != (receipt.get("admission_reason") == "effectful_applied")
+        )
+    ):
+        raise RetentionApplyError("retention_apply_receipt_invalid")
+    return plan, candidates
+
+
+def _applied_cycle_identities(
+    state_dir: Path,
+    *,
+    latest_receipt: Mapping[str, Any],
+    accepted_root: Mapping[str, Any],
+    cycle_context: Mapping[str, Any],
+) -> set[str]:
+    cycle = _normalize_cycle_context(cycle_context)
+    accepted = {
+        hashlib.sha256(_canonical(item)).hexdigest()
+        for item in _reviewed_candidate_identities(accepted_root)
+    }
+    applied: set[str] = set()
+    receipt = dict(latest_receipt)
+    expected_ordinal = int(receipt.get("batch_ordinal", -1))
+    if expected_ordinal < 0:
+        raise RetentionApplyError("retention_convergence_chain_invalid")
+    while True:
+        plan, candidates = _validate_apply_receipt_plan(state_dir, receipt)
+        identities = _candidate_identity_digests(plan, candidates)
+        if (
+            receipt.get("cycle_sha256") != cycle["cycle_sha256"]
+            or receipt.get("accepted_root_plan_sha256") != cycle["accepted_root_plan_sha256"]
+            or receipt.get("reviewed_full_candidate_set_sha256")
+            != cycle["reviewed_full_candidate_set_sha256"]
+            or receipt.get("retention_epoch_sha256") != cycle["retention_epoch_sha256"]
+            or receipt.get("batch_ordinal") != expected_ordinal
+            or _cycle_authority_projection(plan) != _cycle_authority_projection(accepted_root)
+            or not identities.issubset(accepted)
+            or applied.intersection(identities)
+        ):
+            raise RetentionApplyError("retention_convergence_chain_invalid")
+        applied.update(identities)
+        previous = str(receipt["previous_receipt_sha256"])
+        if expected_ordinal == 0:
+            if previous != "":
+                raise RetentionApplyError("retention_convergence_chain_invalid")
+            return applied
+        receipt = _find_apply_receipt_by_sha256(state_dir, previous)
+        expected_ordinal -= 1
+
+
+def _applied_cycle_identities_locked(
+    state_dir: Path,
+    *,
+    latest_receipt: Mapping[str, Any],
+    accepted_root: Mapping[str, Any],
+    cycle_context: Mapping[str, Any],
+) -> set[str]:
+    try:
+        with release_operator.OperatorTransactionLock(
+            state_dir / "immutable-release-operator.v1.lock"
+        ) as transaction:
+            transaction.assert_held()
+            result = _applied_cycle_identities(
+                state_dir,
+                latest_receipt=latest_receipt,
+                accepted_root=accepted_root,
+                cycle_context=cycle_context,
+            )
+            transaction.assert_held()
+            return result
+    except release_operator.ReleaseFailure as exc:
+        raise RetentionApplyError("retention_apply_operator_lock_failed") from exc
+
+
+def _validated_terminal_chain(
+    state_dir: Path,
+    *,
+    retention_epoch_sha256: str,
+    guard: Callable[[], None],
+) -> dict[str, Any] | None:
+    journal = _load_journal(state_dir / APPLY_JOURNAL_NAME)
+    if journal is None:
+        return None
+    cycle = _cycle_context_from_record(journal)
+    plan_sha256 = str(journal.get("plan_sha256") or "")
+    reviewed, durable_plan, loaded = _resume_plan_from_state(
+        state_dir,
+        expected_plan_sha256=plan_sha256,
+        guard=guard,
+        repair_staged_publication=False,
+    )
+    candidates = _candidate_records(reviewed)
+    core = _validate_journal_contract(
+        loaded,
+        plan=reviewed,
+        candidates=candidates,
+        durable_plan=durable_plan,
+        cycle_context=cycle,
+    )
+    if core.get("phase") != "applied":
+        return None
+    authority = reviewed.get("authority_bindings")
+    if not isinstance(authority, Mapping) or not _is_hex64(authority.get("bindings_sha256")):
+        raise RetentionApplyError("retention_apply_journal_invalid")
+    expected = _result_receipt(
+        plan=reviewed,
+        journal=core,
+        candidates=candidates,
+        authority_bindings_sha256=str(authority["bindings_sha256"]),
+    )
+    terminal = _read_apply_receipt(
+        state_dir,
+        transaction_id=str(core["transaction_id"]),
+    )
+    if terminal != expected or core.get("receipt_sha256") != terminal["receipt_sha256"]:
+        raise RetentionApplyError("retention_apply_receipt_invalid")
+    if (
+        terminal.get("admission_status") != "release_admissible"
+        or terminal.get("retention_epoch_sha256") != retention_epoch_sha256
+    ):
+        return None
+
+    accepted_root = _load_accepted_root_plan(state_dir, cycle)
+    _preflight_reviewed_root(accepted_root)
+    accepted_identities = {
+        hashlib.sha256(_canonical(item)).hexdigest()
+        for item in _reviewed_candidate_identities(accepted_root)
+    }
+    applied_identities: set[str] = set()
+    receipt = terminal
+    expected_ordinal = int(terminal["batch_ordinal"])
+    while True:
+        guard()
+        plan, batch_candidates = _validate_apply_receipt_plan(state_dir, receipt)
+        if (
+            _cycle_authority_projection(plan) != _cycle_authority_projection(accepted_root)
+            or receipt.get("authority_bindings_sha256")
+            != accepted_root["authority_bindings"]["bindings_sha256"]
+            or receipt.get("retention_scope_sha256")
+            != accepted_root["retention_scope"]["file_sha256"]
+            or receipt.get("retention_scope_schema")
+            != accepted_root["retention_scope"]["schema"]
+            or
+            receipt.get("cycle_sha256") != cycle["cycle_sha256"]
+            or receipt.get("accepted_root_plan_sha256") != cycle["accepted_root_plan_sha256"]
+            or receipt.get("reviewed_full_candidate_set_sha256")
+            != cycle["reviewed_full_candidate_set_sha256"]
+            or receipt.get("retention_epoch_sha256") != cycle["retention_epoch_sha256"]
+            or receipt.get("batch_ordinal") != expected_ordinal
+        ):
+            raise RetentionApplyError("retention_convergence_chain_invalid")
+        identities = _candidate_identity_digests(plan, batch_candidates)
+        if not identities.issubset(accepted_identities) or applied_identities.intersection(identities):
+            raise RetentionApplyError("retention_convergence_chain_invalid")
+        applied_identities.update(identities)
+        previous = str(receipt["previous_receipt_sha256"])
+        if receipt.get("admission_status") != (
+            "release_admissible" if receipt is terminal else "nonterminal"
+        ):
+            raise RetentionApplyError("retention_convergence_chain_invalid")
+        if expected_ordinal == 0:
+            if previous != "":
+                raise RetentionApplyError("retention_convergence_chain_invalid")
+            break
+        receipt = _find_apply_receipt_by_sha256(state_dir, previous)
+        expected_ordinal -= 1
+    if applied_identities != accepted_identities:
+        raise RetentionApplyError("retention_convergence_chain_invalid")
+    return {
+        "accepted_root_plan_sha256": cycle["accepted_root_plan_sha256"],
+        "batch_ordinal": terminal["batch_ordinal"],
+        "cycle_sha256": cycle["cycle_sha256"],
+        "reviewed_full_candidate_set_sha256": cycle["reviewed_full_candidate_set_sha256"],
+        "terminal_apply_receipt_sha256": terminal["receipt_sha256"],
+    }
+
+
+_RETENTION_EPOCH_KEYS = frozenset(
+    {
+        "activation_receipt_file_sha256",
+        "activation_receipt_sha256",
+        "current_candidate_sha256",
+        "current_generation_id",
+        "current_generation_receipt_sha256",
+        "index_journal_sha256",
+        "index_revision",
+        "older_candidate_sha256",
+        "older_generation_id",
+        "older_generation_receipt_sha256",
+        "retention_scope_schema",
+        "retention_scope_sha256",
+        "topology",
+    }
+)
+
+
+def _validate_retention_epoch_projection(epoch: Mapping[str, Any]) -> dict[str, Any]:
+    if not isinstance(epoch, Mapping):
+        raise RetentionApplyError("retention_admission_status_invalid")
+    projection = dict(epoch)
+    topology = projection.get("topology")
+    scope_schema = projection.get("retention_scope_schema")
+    scope_sha256 = projection.get("retention_scope_sha256")
+    scope_absent = scope_schema == "" and scope_sha256 == ""
+    scope_present = (
+        scope_schema == retention.RETENTION_SCOPE_SCHEMA and _is_hex64(scope_sha256)
+    )
+    if (
+        set(projection) != _RETENTION_EPOCH_KEYS
+        or topology not in {"first_v2", "two_v2"}
+        or any(
+            not _is_hex64(projection.get(key))
+            for key in (
+                "activation_receipt_file_sha256",
+                "activation_receipt_sha256",
+                "current_candidate_sha256",
+                "current_generation_id",
+                "current_generation_receipt_sha256",
+                "index_journal_sha256",
+                "older_candidate_sha256",
+                "older_generation_id",
+                "older_generation_receipt_sha256",
+            )
+        )
+        or type(projection.get("index_revision")) is not int
+        or int(projection["index_revision"]) < 0
+        or (topology == "first_v2" and not (scope_absent or scope_present))
+        or (topology == "two_v2" and not scope_present)
+    ):
+        raise RetentionApplyError("retention_admission_status_invalid")
+    return projection
+
+
+def _convergence_receipt(
+    *,
+    epoch: Mapping[str, Any],
+    status: str,
+    terminal: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
+    if status not in {"converged", "first_v2_deferred", "in_progress", "review_required"}:
+        raise RetentionApplyError("retention_admission_status_invalid")
+    epoch = _validate_retention_epoch_projection(epoch)
+    if (status == "first_v2_deferred") != (epoch["topology"] == "first_v2"):
+        raise RetentionApplyError("retention_admission_status_invalid")
+    terminal_values = dict(terminal or {})
+    core = {
+        "accepted_root_plan_sha256": terminal_values.get("accepted_root_plan_sha256", ""),
+        "activation_receipt_file_sha256": epoch["activation_receipt_file_sha256"],
+        "activation_receipt_sha256": epoch["activation_receipt_sha256"],
+        "batch_ordinal": terminal_values.get("batch_ordinal", -1),
+        "current_candidate_sha256": epoch["current_candidate_sha256"],
+        "current_generation_id": epoch["current_generation_id"],
+        "current_generation_receipt_sha256": epoch["current_generation_receipt_sha256"],
+        "cycle_sha256": terminal_values.get("cycle_sha256", ""),
+        "index_journal_sha256": epoch["index_journal_sha256"],
+        "index_revision": epoch["index_revision"],
+        "older_candidate_sha256": epoch["older_candidate_sha256"],
+        "older_generation_id": epoch["older_generation_id"],
+        "older_generation_receipt_sha256": epoch["older_generation_receipt_sha256"],
+        "retention_scope_schema": epoch["retention_scope_schema"],
+        "retention_scope_sha256": epoch["retention_scope_sha256"],
+        "reviewed_full_candidate_set_sha256": terminal_values.get(
+            "reviewed_full_candidate_set_sha256", ""
+        ),
+        "schema": CONVERGENCE_RECEIPT_SCHEMA,
+        "status": status,
+        "terminal_apply_receipt_sha256": terminal_values.get(
+            "terminal_apply_receipt_sha256", ""
+        ),
+    }
+    if status in {"converged", "in_progress"}:
+        if (
+            epoch.get("topology") != "two_v2"
+            or not _is_hex64(core["accepted_root_plan_sha256"])
+            or type(core["batch_ordinal"]) is not int
+            or int(core["batch_ordinal"]) < (-1 if status == "in_progress" else 0)
+            or any(
+                not _is_hex64(core[key])
+                for key in (
+                    "cycle_sha256",
+                    "reviewed_full_candidate_set_sha256",
+                )
+            )
+            or (
+                status == "converged"
+                and not _is_hex64(core["terminal_apply_receipt_sha256"])
+            )
+            or (
+                status == "in_progress"
+                and core["terminal_apply_receipt_sha256"] != ""
+                and not _is_hex64(core["terminal_apply_receipt_sha256"])
+            )
+        ):
+            raise RetentionApplyError("retention_admission_status_invalid")
+    elif any(
+        (
+            core["accepted_root_plan_sha256"] != "",
+            core["batch_ordinal"] != -1,
+            core["cycle_sha256"] != "",
+            core["reviewed_full_candidate_set_sha256"] != "",
+            core["terminal_apply_receipt_sha256"] != "",
+        )
+    ):
+        raise RetentionApplyError("retention_admission_status_invalid")
+    return _receipt_with_digest(core)
+
+
+def retention_release_admission(*, activation_receipt: Path) -> dict[str, Any]:
+    """Derive the exact release admission from authenticated durable state."""
+
+    home = _canonical_friday_home()
+    try:
+        with release_operator.OperatorTransactionLock(
+            home / "data/state/immutable-release-operator.v1.lock"
+        ) as transaction:
+            return _retention_release_admission_locked(
+                activation_receipt=activation_receipt,
+                friday_home=home,
+                namespace_guard=transaction.assert_held,
+            )
+    except RetentionApplyError:
+        raise
+    except (
+        dr_auth.DRGenerationAuthenticationError,
+        dr_index.DRGenerationIndexError,
+        release_operator.ReleaseFailure,
+        retention.RetentionPlanError,
+    ) as exc:
+        raise RetentionApplyError("retention_admission_reauthentication_failed") from exc
+
+
+def _retention_release_admission_locked(
+    *,
+    activation_receipt: Path,
+    friday_home: Path,
+    namespace_guard: Callable[[], None],
+) -> dict[str, Any]:
+    """Locked adapter for install-units and other lock-owning release callers."""
+
+    home = _validate_friday_home(friday_home)
+    try:
+        state_dir = retention._strict_private_directory(  # noqa: SLF001
+            home / "data/state",
+            code="retention_admission_friday_home_invalid",
+        )
+        namespace_guard()
+        epoch, epoch_sha256 = _retention_epoch_locked(
+            state_dir=state_dir,
+            activation_receipt=activation_receipt,
+            guard=namespace_guard,
+        )
+        topology = epoch.get("topology")
+        if topology == "first_v2":
+            result = _convergence_receipt(epoch=epoch, status="first_v2_deferred")
+        elif topology == "two_v2":
+            terminal = _validated_terminal_chain(
+                state_dir,
+                retention_epoch_sha256=epoch_sha256,
+                guard=namespace_guard,
+            )
+            result = _convergence_receipt(
+                epoch=epoch,
+                status="converged" if terminal is not None else "review_required",
+                terminal=terminal,
+            )
+        else:
+            raise RetentionApplyError("retention_admission_dr_topology_invalid")
+        namespace_guard()
+        return result
+    except RetentionApplyError:
+        raise
+    except (
+        dr_auth.DRGenerationAuthenticationError,
+        dr_index.DRGenerationIndexError,
+        release_operator.ReleaseFailure,
+        retention.RetentionPlanError,
+    ) as exc:
+        raise RetentionApplyError("retention_admission_reauthentication_failed") from exc
+
+
+def _current_activation_receipt_path(state_dir: Path) -> Path:
+    try:
+        snapshot = dr_index.DurableDRGenerationIndex(state_dir).authority_snapshot()
+    except dr_index.DRGenerationIndexError as exc:
+        raise RetentionApplyError("retention_admission_dr_index_invalid") from exc
+    current = next((pin for pin in snapshot.pins if pin.role == "current"), None)
+    if current is None or current.activation_receipt_path is None:
+        raise RetentionApplyError("retention_convergence_v2_required")
+    return Path(current.activation_receipt_path)
+
+
+def _journal_apply_receipt(state_dir: Path, journal: Mapping[str, Any]) -> dict[str, Any]:
+    transaction = str(journal.get("transaction_id") or "")
+    receipt = _read_apply_receipt(state_dir, transaction_id=transaction)
+    if journal.get("receipt_sha256") != receipt.get("receipt_sha256"):
+        raise RetentionApplyError("retention_apply_receipt_invalid")
+    _validate_apply_receipt_plan(state_dir, receipt)
+    return receipt
+
+
+def _stage_generated_plan(state_dir: Path, plan: Mapping[str, Any]) -> Path:
+    lock_path = state_dir / "immutable-release-operator.v1.lock"
+    try:
+        with release_operator.OperatorTransactionLock(lock_path) as transaction:
+            durable = _persist_reviewed_plan(
+                state_dir,
+                plan,
+                guard=transaction.assert_held,
+                allow_incomplete_stage_repair=True,
+            )
+            return durable[0]
+    except release_operator.ReleaseFailure as exc:
+        raise RetentionApplyError("retention_apply_operator_lock_failed") from exc
+
+
+def _progress_values(
+    cycle_context: Mapping[str, Any],
+    *,
+    latest_receipt: Mapping[str, Any] | None,
+) -> dict[str, Any]:
+    cycle = _normalize_cycle_context(cycle_context)
+    return {
+        "accepted_root_plan_sha256": cycle["accepted_root_plan_sha256"],
+        "batch_ordinal": (
+            latest_receipt["batch_ordinal"] if latest_receipt is not None else -1
+        ),
+        "cycle_sha256": cycle["cycle_sha256"],
+        "reviewed_full_candidate_set_sha256": cycle["reviewed_full_candidate_set_sha256"],
+        "terminal_apply_receipt_sha256": (
+            latest_receipt["receipt_sha256"] if latest_receipt is not None else ""
+        ),
+    }
+
+
+def _converged_receipt_for_state(
+    *,
+    state_dir: Path,
+    activation_receipt: Path,
+) -> dict[str, Any]:
+    with release_operator.OperatorTransactionLock(
+        state_dir / "immutable-release-operator.v1.lock"
+    ) as transaction:
+        epoch, epoch_sha256 = _retention_epoch_locked(
+            state_dir=state_dir,
+            activation_receipt=activation_receipt,
+            guard=transaction.assert_held,
+        )
+        terminal = _validated_terminal_chain(
+            state_dir,
+            retention_epoch_sha256=epoch_sha256,
+            guard=transaction.assert_held,
+        )
+        if terminal is None:
+            raise RetentionApplyError("retention_convergence_terminal_invalid")
+        result = _convergence_receipt(epoch=epoch, status="converged", terminal=terminal)
+        transaction.assert_held()
+        return result
+
+
+def converge_retention_cycle(
+    *,
+    reviewed_plan_path: Path,
+    expected_reviewed_plan_sha256: str,
+    state_dir: Path | None = None,
+) -> dict[str, Any]:
+    """Apply at most sixteen reviewed effectful batches, then require fresh zero."""
+
+    if not _is_hex64(expected_reviewed_plan_sha256):
+        raise RetentionApplyError("retention_convergence_review_invalid")
+    accepted_path = Path(os.path.abspath(reviewed_plan_path))
+    if reviewed_plan_path != accepted_path:
+        raise RetentionApplyError("retention_convergence_review_invalid")
+    accepted_root = _read_reviewed_plan(
+        reviewed_plan_path,
+        expected_sha256=expected_reviewed_plan_sha256,
+    )
+    inputs = _plan_inputs(accepted_root)
+    plan_state_dir = Path(inputs["activation_journal"]).parent
+    if state_dir is not None:
+        try:
+            supplied_state = retention._strict_private_directory(  # noqa: SLF001
+                state_dir,
+                code="retention_convergence_state_invalid",
+            )
+        except retention.RetentionPlanError as exc:
+            raise RetentionApplyError("retention_convergence_state_invalid") from exc
+        if supplied_state != plan_state_dir:
+            raise RetentionApplyError("retention_convergence_state_invalid")
+    state_dir = plan_state_dir
+    activation_receipt = _current_activation_receipt_path(state_dir)
+    epoch, epoch_sha256 = _retention_epoch(
+        state_dir=state_dir,
+        activation_receipt=activation_receipt,
+    )
+    if epoch["topology"] == "first_v2":
+        raise RetentionApplyError("retention_convergence_first_v2_deferred")
+    if epoch["topology"] != "two_v2":
+        raise RetentionApplyError("retention_convergence_v2_required")
+    _preflight_reviewed_root(accepted_root)
+
+    reviewed_set_sha256 = _reviewed_candidate_set_sha256(accepted_root)
+    initial_context = _new_cycle_context(
+        accepted_root_plan_path=accepted_path,
+        accepted_root_plan_sha256=expected_reviewed_plan_sha256,
+        reviewed_full_candidate_set_sha256=reviewed_set_sha256,
+        retention_epoch_sha256=epoch_sha256,
+        batch_ordinal=0,
+        previous_receipt_sha256="",
+    )
+    journal_path = state_dir / APPLY_JOURNAL_NAME
+    existing = _load_journal(journal_path)
+    latest_receipt: dict[str, Any] | None = None
+    effectful_batches = 0
+    active_context = initial_context
+    if existing is not None:
+        existing_context = _cycle_context_from_record(existing)
+        if existing.get("phase") in {"prepared", "applying"}:
+            if not _same_cycle(existing_context, initial_context):
+                raise RetentionApplyError("retention_convergence_in_progress")
+            before_phase = str(existing["phase"])
+            latest_receipt = apply_retention_plan(
+                plan_path=None,
+                expected_plan_sha256=str(existing["plan_sha256"]),
+                state_dir=state_dir,
+                _cycle_context=existing_context,
+            )
+            if before_phase in {"prepared", "applying"} and latest_receipt[
+                "deleted_candidate_count"
+            ]:
+                effectful_batches += 1
+            active_context = existing_context
+        elif existing.get("phase") == "applied":
+            existing_receipt = _journal_apply_receipt(state_dir, existing)
+            if _same_cycle(existing_context, initial_context):
+                latest_receipt = apply_retention_plan(
+                    plan_path=None,
+                    expected_plan_sha256=str(existing["plan_sha256"]),
+                    state_dir=state_dir,
+                    _cycle_context=existing_context,
+                )
+                active_context = existing_context
+            elif existing_receipt.get("admission_status") != "release_admissible":
+                raise RetentionApplyError("retention_convergence_in_progress")
+        else:
+            raise RetentionApplyError("retention_apply_journal_invalid")
+
+    if latest_receipt is None:
+        latest_receipt = apply_retention_plan(
+            plan_path=reviewed_plan_path,
+            expected_plan_sha256=expected_reviewed_plan_sha256,
+            _cycle_context=initial_context,
+        )
+        active_context = initial_context
+        if latest_receipt["deleted_candidate_count"]:
+            effectful_batches += 1
+    if latest_receipt.get("admission_status") == "release_admissible":
+        return _converged_receipt_for_state(
+            state_dir=state_dir,
+            activation_receipt=activation_receipt,
+        )
+
+    accepted_root = _load_accepted_root_plan(state_dir, active_context)
+    accepted_identities = _reviewed_candidate_identities(accepted_root)
+    while True:
+        fresh = _build_reviewed_subset_plan(inputs=inputs, accepted_root=accepted_root)
+        candidates = _candidate_records(fresh)
+        exact_zero = _is_exact_terminal_zero_plan(fresh, candidates)
+        if exact_zero:
+            if _has_open_only_identity(accepted_root):
+                return _convergence_receipt(
+                    epoch=epoch,
+                    status="in_progress",
+                    terminal=_progress_values(active_context, latest_receipt=latest_receipt),
+                )
+            accepted_identity_sha256s = {
+                hashlib.sha256(_canonical(item)).hexdigest() for item in accepted_identities
+            }
+            applied_identity_sha256s = _applied_cycle_identities_locked(
+                state_dir,
+                latest_receipt=latest_receipt,
+                accepted_root=accepted_root,
+                cycle_context=active_context,
+            )
+            if applied_identity_sha256s != accepted_identity_sha256s:
+                return _convergence_receipt(
+                    epoch=epoch,
+                    status="in_progress",
+                    terminal=_progress_values(active_context, latest_receipt=latest_receipt),
+                )
+        if not candidates and not exact_zero and latest_receipt.get("admission_reason") == "deferred_zero":
+            return _convergence_receipt(
+                epoch=epoch,
+                status="in_progress",
+                terminal=_progress_values(active_context, latest_receipt=latest_receipt),
+            )
+        if candidates and effectful_batches >= MAX_EFFECTFUL_BATCHES_PER_INVOCATION:
+            return _convergence_receipt(
+                epoch=epoch,
+                status="in_progress",
+                terminal=_progress_values(active_context, latest_receipt=latest_receipt),
+            )
+        if not candidates and not exact_zero and not accepted_identities:
+            return _convergence_receipt(
+                epoch=epoch,
+                status="in_progress",
+                terminal=_progress_values(active_context, latest_receipt=latest_receipt),
+            )
+        next_ordinal = int(latest_receipt["batch_ordinal"]) + 1
+        next_context = _new_cycle_context(
+            accepted_root_plan_path=accepted_path,
+            accepted_root_plan_sha256=expected_reviewed_plan_sha256,
+            reviewed_full_candidate_set_sha256=reviewed_set_sha256,
+            retention_epoch_sha256=epoch_sha256,
+            batch_ordinal=next_ordinal,
+            previous_receipt_sha256=str(latest_receipt["receipt_sha256"]),
+        )
+        durable_path = _stage_generated_plan(state_dir, fresh)
+        latest_receipt = apply_retention_plan(
+            plan_path=durable_path,
+            expected_plan_sha256=str(fresh["plan_sha256"]),
+            _cycle_context=next_context,
+        )
+        active_context = next_context
+        if candidates:
+            effectful_batches += 1
+        if latest_receipt.get("admission_status") == "release_admissible":
+            return _converged_receipt_for_state(
+                state_dir=state_dir,
+                activation_receipt=activation_receipt,
+            )
+        if not candidates:
+            return _convergence_receipt(
+                epoch=epoch,
+                status="in_progress",
+                terminal=_progress_values(active_context, latest_receipt=latest_receipt),
+            )
+
+
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     subcommands = parser.add_subparsers(dest="command", required=True)
@@ -3199,19 +4784,36 @@ def _parser() -> argparse.ArgumentParser:
     source.add_argument("--plan", type=Path)
     source.add_argument("--state-dir", type=Path)
     apply.add_argument("--expected-plan-sha256", required=True)
+    converge = subcommands.add_parser("converge")
+    converge.add_argument("--reviewed-plan", required=True, type=Path)
+    converge.add_argument("--expected-reviewed-plan-sha256", required=True)
+    converge.add_argument("--state-dir", type=Path)
+    admission = subcommands.add_parser("admission")
+    admission.add_argument("--activation-receipt", required=True, type=Path)
     return parser
 
 
 def main(argv: Sequence[str] | None = None) -> int:
     try:
         args = _parser().parse_args(argv)
-        if args.command != "apply":
+        if args.command == "apply":
+            receipt = apply_retention_plan(
+                plan_path=args.plan,
+                expected_plan_sha256=args.expected_plan_sha256,
+                state_dir=args.state_dir,
+            )
+        elif args.command == "converge":
+            receipt = converge_retention_cycle(
+                reviewed_plan_path=args.reviewed_plan,
+                expected_reviewed_plan_sha256=args.expected_reviewed_plan_sha256,
+                state_dir=args.state_dir,
+            )
+        elif args.command == "admission":
+            receipt = retention_release_admission(
+                activation_receipt=args.activation_receipt,
+            )
+        else:
             raise RetentionApplyError("retention_apply_command_invalid")
-        receipt = apply_retention_plan(
-            plan_path=args.plan,
-            expected_plan_sha256=args.expected_plan_sha256,
-            state_dir=args.state_dir,
-        )
         sys.stdout.buffer.write(_canonical(receipt) + b"\n")
         sys.stdout.buffer.flush()
         return 0
@@ -3219,7 +4821,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         code = exc.code if isinstance(exc, RetentionApplyError) else None
         failure = {
             "failure_code": _body_free_code(code),
-            "schema": APPLY_RECEIPT_SCHEMA,
+            "schema": (
+                CONVERGENCE_RECEIPT_SCHEMA
+                if "args" in locals() and args.command in {"admission", "converge"}
+                else APPLY_RECEIPT_SCHEMA
+            ),
             "status": "failed_closed",
         }
         sys.stderr.buffer.write(_canonical(failure) + b"\n")
@@ -3234,6 +4840,11 @@ if __name__ == "__main__":
 __all__ = [
     "APPLY_JOURNAL_SCHEMA",
     "APPLY_RECEIPT_SCHEMA",
+    "CONVERGENCE_RECEIPT_SCHEMA",
+    "MAX_EFFECTFUL_BATCHES_PER_INVOCATION",
     "RetentionApplyError",
+    "_retention_release_admission_locked",
     "apply_retention_plan",
+    "converge_retention_cycle",
+    "retention_release_admission",
 ]

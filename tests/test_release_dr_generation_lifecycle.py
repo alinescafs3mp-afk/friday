@@ -82,7 +82,7 @@ def test_publish_blocks_on_unfinished_retention_apply(
 
     with pytest.raises(
         lifecycle.DRGenerationLifecycleError,
-        match="^unfinished_retention_apply_requires_recovery$",
+        match="^(unfinished_retention_apply_requires_recovery|retention_apply_journal_invalid)$",
     ):
         lifecycle.publish_or_recover_authenticated_generation(
             activation_receipt=activation_receipt,
@@ -532,6 +532,15 @@ def test_one_shot_stage_crash_retry_resumes_exact_durable_stage(
             False,
         ),
     )
+    monkeypatch.setattr(
+        retention_apply,
+        "retention_release_admission",
+        lambda **_kwargs: {
+            "receipt_sha256": "a" * 64,
+            "schema": retention_apply.CONVERGENCE_RECEIPT_SCHEMA,
+            "status": "first_v2_deferred",
+        },
+    )
     original_publish = lifecycle.publish_or_recover_authenticated_generation
     calls = 0
 
@@ -674,3 +683,111 @@ def test_cli_is_directly_executable_outside_repository(tmp_path: Path) -> None:
         "schema": lifecycle.LIFECYCLE_RECEIPT_SCHEMA,
         "status": "failed_closed",
     }
+
+
+def test_lifecycle_invokes_reviewed_convergence_only_after_publication(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    activation_receipt = tmp_path / "activation.json"
+    reviewed_plan = tmp_path / "reviewed.json"
+    events: list[str] = []
+    enrollment_receipt = {
+        "action": "already_current",
+        "intent": "rotate_current",
+        "published": True,
+        "receipt_sha256": "1" * 64,
+    }
+    publication = {
+        "action": "already_published",
+        "authentication_receipt_sha256": "2" * 64,
+        "candidate_sha256": "3" * 64,
+        "current_generation_id": "4" * 64,
+        "current_generation_receipt_sha256": "5" * 64,
+        "index_journal_sha256": "6" * 64,
+        "index_revision": 7,
+        "older_generation_id": "8" * 64,
+        "rehearsal_receipt_sha256": "9" * 64,
+    }
+    monkeypatch.setattr(
+        lifecycle.enrollment,
+        "enroll_terminal_activation_backup",
+        lambda **_kwargs: events.append("enroll") or enrollment_receipt,
+    )
+    monkeypatch.setattr(
+        lifecycle,
+        "publish_or_recover_authenticated_generation",
+        lambda **_kwargs: events.append("publish") or publication,
+    )
+    admissions = iter(
+        (
+            {"status": "review_required", "receipt_sha256": "a" * 64},
+            {"status": "review_required", "receipt_sha256": "b" * 64},
+        )
+    )
+    monkeypatch.setattr(
+        retention_apply,
+        "retention_release_admission",
+        lambda **_kwargs: events.append("admission") or next(admissions),
+    )
+
+    def converge(**kwargs: Any) -> dict[str, Any]:
+        events.append("converge")
+        assert kwargs == {
+            "reviewed_plan_path": reviewed_plan,
+            "expected_reviewed_plan_sha256": "c" * 64,
+        }
+        return {
+            "receipt_sha256": "d" * 64,
+            "schema": retention_apply.CONVERGENCE_RECEIPT_SCHEMA,
+            "status": "in_progress",
+        }
+
+    monkeypatch.setattr(retention_apply, "converge_retention_cycle", converge)
+
+    receipt = lifecycle.run_terminal_activation_lifecycle(
+        activation_receipt=activation_receipt,
+        reviewed_plan_path=reviewed_plan,
+        expected_reviewed_plan_sha256="c" * 64,
+    )
+
+    assert events == ["enroll", "publish", "admission", "converge", "admission"]
+    assert receipt["retention_status"] == "in_progress"
+    assert receipt["retention_admission_receipt_sha256"] == "b" * 64
+    assert receipt["retention_convergence_receipt_sha256"] == "d" * 64
+
+
+def test_lifecycle_rejects_unused_review_during_first_v2_defer(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        lifecycle.enrollment,
+        "enroll_terminal_activation_backup",
+        lambda **_kwargs: {"published": True},
+    )
+    monkeypatch.setattr(
+        lifecycle,
+        "publish_or_recover_authenticated_generation",
+        lambda **_kwargs: {},
+    )
+    monkeypatch.setattr(
+        retention_apply,
+        "retention_release_admission",
+        lambda **_kwargs: {"status": "first_v2_deferred", "receipt_sha256": "a" * 64},
+    )
+    monkeypatch.setattr(
+        retention_apply,
+        "converge_retention_cycle",
+        lambda **_kwargs: (_ for _ in ()).throw(AssertionError("must not converge")),
+    )
+
+    with pytest.raises(
+        lifecycle.DRGenerationLifecycleError,
+        match="^dr_lifecycle_retention_review_not_admissible$",
+    ):
+        lifecycle.run_terminal_activation_lifecycle(
+            activation_receipt=tmp_path / "activation.json",
+            reviewed_plan_path=tmp_path / "reviewed.json",
+            expected_reviewed_plan_sha256="b" * 64,
+        )

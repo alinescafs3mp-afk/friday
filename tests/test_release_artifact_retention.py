@@ -1645,6 +1645,46 @@ def _plan_file(plan: dict[str, Any], path: Path) -> Path:
     return path
 
 
+def _valid_zero_apply_receipt(
+    *,
+    accepted_root_plan_path: Path,
+    plan_sha256: str = "a" * 64,
+    transaction_id: str = "c" * 64,
+) -> dict[str, Any]:
+    scope_sha256 = "e" * 64
+    authority_bindings_sha256 = "f" * 64
+    plan = {
+        "apply_authority": False,
+        "authority_bindings": {"bindings_sha256": authority_bindings_sha256},
+        "backup_targets": [],
+        "open_inventory": {"source": "code_owned_no_delete_candidates_v1"},
+        "plan_sha256": plan_sha256,
+        "retention_scope": {
+            "file_sha256": scope_sha256,
+            "schema": retention.RETENTION_SCOPE_SCHEMA,
+        },
+        "targets": [],
+    }
+    cycle = retention_apply._standalone_cycle_context(  # noqa: SLF001
+        plan,
+        accepted_path=accepted_root_plan_path,
+    )
+    return retention_apply._result_receipt(  # noqa: SLF001
+        plan=plan,
+        journal={
+            **cycle,
+            "entries": [],
+            "filesystem_after": [],
+            "filesystem_before": [],
+            "retention_scope_schema": retention.RETENTION_SCOPE_SCHEMA,
+            "retention_scope_sha256": scope_sha256,
+            "transaction_id": transaction_id,
+        },
+        candidates=(),
+        authority_bindings_sha256=authority_bindings_sha256,
+    )
+
+
 @pytest.mark.parametrize(
     ("reader", "hardlinked"),
     (
@@ -1776,12 +1816,37 @@ transaction_id = "c" * 64
 plan_sha256 = "a" * 64
 plan = {"plan_sha256": plan_sha256, "value": 1}
 plan_raw = retention_apply._canonical(plan) + b"\n"
-receipt = retention_apply._receipt_with_digest(
-    {
-        "schema": retention_apply.APPLY_RECEIPT_SCHEMA,
-        "status": "applied",
+scope_sha256 = "e" * 64
+authority_bindings_sha256 = "f" * 64
+zero_plan = {
+    "apply_authority": False,
+    "authority_bindings": {"bindings_sha256": authority_bindings_sha256},
+    "backup_targets": [],
+    "open_inventory": {"source": "code_owned_no_delete_candidates_v1"},
+    "plan_sha256": plan_sha256,
+    "retention_scope": {
+        "file_sha256": scope_sha256,
+        "schema": retention.RETENTION_SCOPE_SCHEMA,
+    },
+    "targets": [],
+}
+cycle = retention_apply._standalone_cycle_context(
+    zero_plan,
+    accepted_path=root / "accepted-root.json",
+)
+receipt = retention_apply._result_receipt(
+    plan=zero_plan,
+    journal={
+        **cycle,
+        "entries": [],
+        "filesystem_after": [],
+        "filesystem_before": [],
+        "retention_scope_schema": retention.RETENTION_SCOPE_SCHEMA,
+        "retention_scope_sha256": scope_sha256,
         "transaction_id": transaction_id,
-    }
+    },
+    candidates=(),
+    authority_bindings_sha256=authority_bindings_sha256,
 )
 swap_state = {"required": False, "swapped": False, "reads": 0}
 rdwr_state = {"required": False, "observed": False}
@@ -3488,12 +3553,9 @@ def test_durable_plan_and_receipt_partial_stages_recover_without_weakening_bound
         )
     assert blocked_stage.read_bytes() == b"partial"
 
-    receipt_core = {
-        "schema": retention_apply.APPLY_RECEIPT_SCHEMA,
-        "status": "applied",
-        "transaction_id": "c" * 64,
-    }
-    receipt = retention_apply._receipt_with_digest(receipt_core)  # noqa: SLF001
+    receipt = _valid_zero_apply_receipt(
+        accepted_root_plan_path=state / "accepted-root.json",
+    )
     receipt_directory = _private_directory(state / retention_apply.APPLY_RECEIPT_DIRECTORY)
     receipt_stage = receipt_directory / f".receipt-{'c' * 64}.json.new"
     receipt_stage.write_bytes((_canonical(receipt) + b"\n")[:11])

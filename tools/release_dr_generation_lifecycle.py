@@ -23,12 +23,13 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from tools import immutable_release_operator as release_operator  # noqa: E402
+from tools import release_artifact_retention_operator as retention_apply  # noqa: E402
 from tools import release_dr_generation_authentication as dr_auth  # noqa: E402
 from tools import release_dr_generation_enrollment as enrollment  # noqa: E402
 from tools import release_dr_generation_index as dr_index  # noqa: E402
 from tools import release_dr_generation_rehearsal as rehearsal  # noqa: E402
 
-LIFECYCLE_RECEIPT_SCHEMA = "friday.immutable-release-dr-lifecycle-receipt.v1"
+LIFECYCLE_RECEIPT_SCHEMA = "friday.immutable-release-dr-lifecycle-receipt.v2"
 _FAILURE_CODE = re.compile(r"[a-z][a-z0-9_]{0,127}\Z")
 
 
@@ -64,6 +65,7 @@ def _safe_failure_code(error: BaseException) -> str:
             DRGenerationLifecycleError,
             enrollment.DRGenerationEnrollmentError,
             rehearsal.DRGenerationRehearsalError,
+            retention_apply.RetentionApplyError,
         ),
     ):
         code = error.code
@@ -267,6 +269,10 @@ def _lifecycle_receipt(
     *,
     admission: Mapping[str, Any],
     publication: Mapping[str, Any],
+    retention_admission: Mapping[str, Any],
+    retention_convergence: Mapping[str, Any] | None,
+    retention_status: str,
+    reviewed_plan_sha256: str,
 ) -> dict[str, Any]:
     core: dict[str, Any] = {
         "action": publication["action"],
@@ -281,16 +287,33 @@ def _lifecycle_receipt(
         "intent": admission["intent"],
         "older_generation_id": publication["older_generation_id"],
         "rehearsal_receipt_sha256": publication["rehearsal_receipt_sha256"],
+        "retention_admission_receipt_sha256": retention_admission["receipt_sha256"],
+        "retention_convergence_receipt_sha256": (
+            retention_convergence["receipt_sha256"] if retention_convergence is not None else ""
+        ),
+        "retention_status": retention_status,
+        "reviewed_retention_plan_sha256": reviewed_plan_sha256,
         "schema": LIFECYCLE_RECEIPT_SCHEMA,
         "status": "published",
     }
     return {**core, "receipt_sha256": _sha256(_canonical(core))}
 
 
-def run_terminal_activation_lifecycle(*, activation_receipt: Path) -> dict[str, Any]:
+def run_terminal_activation_lifecycle(
+    *,
+    activation_receipt: Path,
+    reviewed_plan_path: Path | None = None,
+    expected_reviewed_plan_sha256: str | None = None,
+) -> dict[str, Any]:
     """Run or resume admit -> rehearse -> publish for one exact activation."""
 
     try:
+        if (reviewed_plan_path is None) != (expected_reviewed_plan_sha256 is None):
+            raise DRGenerationLifecycleError("dr_lifecycle_retention_review_pair_required")
+        if expected_reviewed_plan_sha256 is not None and re.fullmatch(
+            r"[0-9a-f]{64}", expected_reviewed_plan_sha256
+        ) is None:
+            raise DRGenerationLifecycleError("dr_lifecycle_retention_review_digest_invalid")
         admission = enrollment.enroll_terminal_activation_backup(
             activation_receipt=activation_receipt,
         )
@@ -301,7 +324,44 @@ def run_terminal_activation_lifecycle(*, activation_receipt: Path) -> dict[str, 
         publication = publish_or_recover_authenticated_generation(
             activation_receipt=activation_receipt,
         )
-        return _lifecycle_receipt(admission=admission, publication=publication)
+        retention_admission = retention_apply.retention_release_admission(
+            activation_receipt=activation_receipt,
+        )
+        retention_convergence: dict[str, Any] | None = None
+        retention_status = str(retention_admission["status"])
+        if reviewed_plan_path is not None and retention_status != "review_required":
+            raise DRGenerationLifecycleError("dr_lifecycle_retention_review_not_admissible")
+        if (
+            retention_status == "review_required"
+            and reviewed_plan_path is not None
+            and expected_reviewed_plan_sha256 is not None
+        ):
+            retention_convergence = retention_apply.converge_retention_cycle(
+                reviewed_plan_path=reviewed_plan_path,
+                expected_reviewed_plan_sha256=expected_reviewed_plan_sha256,
+            )
+            retention_status = str(retention_convergence["status"])
+            retention_admission = retention_apply.retention_release_admission(
+                activation_receipt=activation_receipt,
+            )
+            expected_admission = "converged" if retention_status == "converged" else "review_required"
+            if retention_admission.get("status") != expected_admission:
+                raise DRGenerationLifecycleError("dr_lifecycle_retention_admission_mismatch")
+        if retention_status not in {
+            "converged",
+            "first_v2_deferred",
+            "in_progress",
+            "review_required",
+        }:
+            raise DRGenerationLifecycleError("dr_lifecycle_retention_admission_invalid")
+        return _lifecycle_receipt(
+            admission=admission,
+            publication=publication,
+            retention_admission=retention_admission,
+            retention_convergence=retention_convergence,
+            retention_status=retention_status,
+            reviewed_plan_sha256=expected_reviewed_plan_sha256 or "",
+        )
     except DRGenerationLifecycleError:
         raise
     except (
@@ -310,6 +370,7 @@ def run_terminal_activation_lifecycle(*, activation_receipt: Path) -> dict[str, 
         dr_auth.DRGenerationAuthenticationError,
         dr_index.DRGenerationIndexError,
         release_operator.ReleaseFailure,
+        retention_apply.RetentionApplyError,
     ) as exc:
         raise DRGenerationLifecycleError(_safe_failure_code(exc)) from exc
 
@@ -317,6 +378,8 @@ def run_terminal_activation_lifecycle(*, activation_receipt: Path) -> dict[str, 
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--activation-receipt", required=True, type=Path)
+    parser.add_argument("--reviewed-plan", type=Path)
+    parser.add_argument("--expected-reviewed-plan-sha256")
     return parser
 
 
@@ -325,6 +388,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     try:
         receipt = run_terminal_activation_lifecycle(
             activation_receipt=args.activation_receipt,
+            reviewed_plan_path=args.reviewed_plan,
+            expected_reviewed_plan_sha256=args.expected_reviewed_plan_sha256,
         )
     except Exception as exc:  # CLI never exposes arbitrary exception bodies.
         failure = {
