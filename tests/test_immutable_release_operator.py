@@ -10550,6 +10550,52 @@ def test_relocation_rebinds_discovered_entrypoints_and_metadata_across_atomic_pu
     assert target.is_dir()
 
 
+def test_release_tree_copy_verifies_against_its_authenticated_bind_mount_path(
+    tmp_path: Path,
+) -> None:
+    staging, target, _entrypoints, _record, pycache = _write_relocation_fixture(tmp_path)
+    operator._relocate_venv_generated_paths(staging, target)  # noqa: SLF001
+    _remove_fixture_pycache(pycache)
+    os.replace(staging, target)
+    artifacts = target / "artifacts"
+    artifacts.mkdir()
+    (artifacts / "immutable-release.json").write_bytes(b"{}\n")
+    operator._seal_release_tree(target)  # noqa: SLF001
+    artifacts.chmod(0o700)
+    manifest = artifacts / "release-tree.sha256"
+    manifest.write_text(
+        "\n".join(operator._manifest_entries(target, mode_overrides={"artifacts": 0o500}))  # noqa: SLF001
+        + "\n",
+        encoding="utf-8",
+    )
+    manifest.chmod(0o400)
+    artifacts.chmod(0o500)
+
+    copies = tmp_path / "copies"
+    copies.mkdir(mode=0o700)
+    copied_root = copies / "sealed-copy"
+    shutil.copytree(target, copied_root, symlinks=True, copy_function=shutil.copy2)
+    release = operator.ReleaseIdentity(
+        copied_root,
+        target.name,
+        "0.207.87",
+        hashlib.sha256(manifest.read_bytes()).hexdigest(),
+        50,
+        venv_relocation_contract=operator.VENV_RELOCATION_CONTRACT,
+    )
+
+    with pytest.raises(
+        operator.ReleaseFailure,
+        match="^release_venv_relocation_identity_mismatch$",
+    ):
+        operator.verify_release_tree(release)
+    operator._verify_release_tree(release, venv_bound_root=target)  # noqa: SLF001
+    operator._cleanup_staging_tree(copied_root)  # noqa: SLF001
+    operator._cleanup_staging_tree(target)  # noqa: SLF001
+    assert not copied_root.exists()
+    assert not target.exists()
+
+
 @pytest.mark.parametrize("kind", ["regular", "symlink"])
 def test_relocation_exhaustively_rejects_unknown_staging_path_leak(
     tmp_path: Path,

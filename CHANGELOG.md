@@ -1,3 +1,15 @@
+## 0.207.87 — 2026-08-31
+
+### Exact bind-mounted release-copy authentication
+
+- Authenticates every isolated DR release copy at its physical scratch root
+  while validating absolute-final venv bindings against the exact source path
+  used by the descriptor-pinned read-only bind mount.
+- Reauthenticates the full copied capability/profile identity before and after
+  executable use; ordinary release loading remains bound to its own commit root.
+- Supersedes unactivated `0.207.85` and `0.207.86`; SQLite remains at schema 50
+  with exact `0.207.84` as predecessor and fallback. Retention deletion remains disabled.
+
 ## 0.207.86 — 2026-08-31
 
 ### Exact hot-WAL DR verification

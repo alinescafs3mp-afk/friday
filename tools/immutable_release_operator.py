@@ -7527,7 +7527,11 @@ def _bootstrap_target_pip(target_python: Path, wheelhouse: Path) -> None:
         raise ReleaseFailure("release_pip_bootstrap_failed")
 
 
-def verify_release_tree(release: ReleaseIdentity) -> None:
+def _verify_release_tree(
+    release: ReleaseIdentity,
+    *,
+    venv_bound_root: Path | None = None,
+) -> None:
     root = release.root.resolve(strict=True)
     root_status = os.stat(root, follow_symlinks=False)
     if (
@@ -7571,13 +7575,23 @@ def verify_release_tree(release: ReleaseIdentity) -> None:
     if release.venv_relocation_contract:
         if release.venv_relocation_contract != VENV_RELOCATION_CONTRACT:
             raise ReleaseFailure("release_venv_relocation_contract_invalid")
-        if root.name != release.commit:
+        bound_root = root
+        if venv_bound_root is not None:
+            supplied_bound_root = Path(venv_bound_root)
+            bound_root = Path(os.path.abspath(supplied_bound_root))
+            if not supplied_bound_root.is_absolute() or supplied_bound_root != bound_root:
+                raise ReleaseFailure("release_venv_relocation_identity_mismatch")
+        if bound_root.name != release.commit:
             raise ReleaseFailure("release_venv_relocation_identity_mismatch")
         _verify_relocated_venv(
             root,
-            bound_root=root,
-            forbidden_staging_root=root.parent / f".{release.commit}.",
+            bound_root=bound_root,
+            forbidden_staging_root=bound_root.parent / f".{release.commit}.",
         )
+
+
+def verify_release_tree(release: ReleaseIdentity) -> None:
+    _verify_release_tree(release)
 
 
 def _seal_release_tree(root: Path) -> None:
@@ -18136,7 +18150,12 @@ print(json.dumps({'schema':SCHEMA_VERSION,'status':'clear'},sort_keys=True,separ
         return terminal_receipt
 
 
-def load_release_identity(root: Path, *, expected_tree_sha256: str) -> ReleaseIdentity:
+def _load_release_identity(
+    root: Path,
+    *,
+    expected_tree_sha256: str,
+    venv_bound_root: Path | None = None,
+) -> ReleaseIdentity:
     resolved = Path(os.path.abspath(root)).resolve(strict=True)
     metadata_path = _regular_file(
         resolved / "artifacts/immutable-release.json",
@@ -18326,7 +18345,7 @@ def load_release_identity(root: Path, *, expected_tree_sha256: str) -> ReleaseId
         release_retention_toolchain_contract=release_retention_toolchain_contract,
         release_retention_toolchain_manifest_sha256=(release_retention_toolchain_manifest_sha256),
     )
-    verify_release_tree(release)
+    _verify_release_tree(release, venv_bound_root=venv_bound_root)
     sealed_toolchain_manifest_sha256 = _sealed_release_retention_toolchain_manifest_sha256(resolved)
     lock_scope_present = bool(operator_transaction_lock_scope_contract)
     retention_receipt_present = bool(release_retention_toolchain_contract)
@@ -18348,6 +18367,25 @@ def load_release_identity(root: Path, *, expected_tree_sha256: str) -> ReleaseId
         release,
         build_receipt_profile=build_receipt_profile,
         sealed_release_retention_toolchain_manifest_sha256=(sealed_toolchain_manifest_sha256),
+    )
+
+
+def load_release_identity(root: Path, *, expected_tree_sha256: str) -> ReleaseIdentity:
+    return _load_release_identity(root, expected_tree_sha256=expected_tree_sha256)
+
+
+def _load_release_identity_at_bound_root(
+    root: Path,
+    *,
+    expected_tree_sha256: str,
+    venv_bound_root: Path,
+) -> ReleaseIdentity:
+    """Authenticate physical release bytes for one exact bind-mount path."""
+
+    return _load_release_identity(
+        root,
+        expected_tree_sha256=expected_tree_sha256,
+        venv_bound_root=venv_bound_root,
     )
 
 

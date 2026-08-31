@@ -25,7 +25,7 @@ import sys
 import time
 from collections.abc import Callable, Mapping, Sequence
 from contextlib import suppress
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from functools import partial
 from pathlib import Path
 from typing import Any
@@ -892,19 +892,24 @@ def _scratch_config(scratch: Path, *, obsidian_present: bool) -> release_operato
     )
 
 
-def _release_identity_projection(release: release_operator.ReleaseIdentity) -> tuple[object, ...]:
-    return (
-        release.commit,
-        release.version,
-        release.tree_manifest_sha256,
-        release.max_schema,
-        release.memory_vault_mode_contract,
-        release.venv_relocation_contract,
-        release.obsidian_cutover_contract,
-        release.secondary_product_runner_sha256,
-        release.engineer_command_lifecycle_contract,
-        release.operator_transaction_lock_scope_contract,
-        release.operator_transaction_lock_scope_sha256,
+def _release_identity_projection(
+    release: release_operator.ReleaseIdentity,
+) -> release_operator.ReleaseIdentity:
+    """Project every present and future identity field except physical root."""
+
+    return replace(release, root=Path("/"))
+
+
+def _load_sealed_release_copy_identity(
+    release: release_operator.ReleaseIdentity,
+    copied_root: Path,
+) -> release_operator.ReleaseIdentity:
+    """Authenticate copied bytes for the source path used by the bind mount."""
+
+    return release_operator._load_release_identity_at_bound_root(  # noqa: SLF001
+        copied_root,
+        expected_tree_sha256=release.tree_manifest_sha256,
+        venv_bound_root=release.root,
     )
 
 
@@ -928,10 +933,7 @@ def _materialize_exact_release_copy(
             symlinks=True,
             copy_function=shutil.copy2,
         )
-        copied = release_operator.load_release_identity(
-            destination,
-            expected_tree_sha256=release.tree_manifest_sha256,
-        )
+        copied = _load_sealed_release_copy_identity(release, destination)
         after = release_operator.load_release_identity(
             release.root,
             expected_tree_sha256=release.tree_manifest_sha256,
@@ -1338,10 +1340,7 @@ def _run_release_python(
             resource_check=check_resources,
         )
         _assert_scratch_budget(resource_fd)
-        copied_after = release_operator.load_release_identity(
-            sealed.root,
-            expected_tree_sha256=sealed.source.tree_manifest_sha256,
-        )
+        copied_after = _load_sealed_release_copy_identity(sealed.source, sealed.root)
         if (
             _release_identity_projection(copied_after) != _release_identity_projection(sealed.source)
             or (os.fstat(release_fd).st_dev, os.fstat(release_fd).st_ino)
@@ -1770,10 +1769,7 @@ class _IsolatedActivationPort:
         if release not in self.releases:
             raise release_operator.ReleaseFailure("dr_rehearsal_release_identity_invalid")
         sealed = self.sealed_releases[release]
-        observed = release_operator.load_release_identity(
-            sealed.root,
-            expected_tree_sha256=release.tree_manifest_sha256,
-        )
+        observed = _load_sealed_release_copy_identity(release, sealed.root)
         if _release_identity_projection(observed) != _release_identity_projection(release):
             raise release_operator.ReleaseFailure("dr_rehearsal_release_identity_changed")
 

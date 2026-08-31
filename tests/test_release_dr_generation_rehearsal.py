@@ -644,6 +644,11 @@ def test_isolated_rehearsal_runs_real_four_surface_rollback_without_systemctl(
     )
     monkeypatch.setattr(
         rehearsal,
+        "_load_sealed_release_copy_identity",
+        lambda release, _root: by_root[release.root],
+    )
+    monkeypatch.setattr(
+        rehearsal,
         "_materialize_exact_releases",
         lambda values, _root: {release: _sealed(release) for release in values},
     )
@@ -744,6 +749,7 @@ def test_exact_release_store_open_uses_closed_bounded_interpreter_invocation(
 
     monkeypatch.setattr(rehearsal, "_execute_bwrap", run)
     monkeypatch.setattr(release_operator, "load_release_identity", lambda *_args, **_kwargs: sealed.identity)
+    monkeypatch.setattr(rehearsal, "_load_sealed_release_copy_identity", lambda *_args: sealed.identity)
     monkeypatch.setenv("MUST_NOT_REACH_REHEARSAL_CHILD", "secret")
 
     assert rehearsal._run_release_store(sealed, config) == expected
@@ -876,6 +882,7 @@ def test_real_bwrap_hides_host_tools_cwd_tmp_and_network(
         "load_release_identity",
         lambda *_args, **_kwargs: sealed.identity,
     )
+    monkeypatch.setattr(rehearsal, "_load_sealed_release_copy_identity", lambda *_args: sealed.identity)
     host_tmp = Path("/tmp") / f"friday-host-marker-{os.getpid()}"
     host_tmp.write_bytes(b"host-only")
     host_tmp.chmod(0o600)
@@ -936,6 +943,7 @@ def test_exact_release_mount_rejects_post_launch_path_replacement(
         "load_release_identity",
         lambda *_args, **_kwargs: sealed.identity,
     )
+    monkeypatch.setattr(rehearsal, "_load_sealed_release_copy_identity", lambda *_args: sealed.identity)
 
     with pytest.raises(
         release_operator.ReleaseFailure,
@@ -977,6 +985,7 @@ def test_release_copy_reauthenticates_source_after_copy(
         return release if source_calls == 1 else changed
 
     monkeypatch.setattr(release_operator, "load_release_identity", load)
+    monkeypatch.setattr(release_operator, "_load_release_identity_at_bound_root", load)
 
     with pytest.raises(
         rehearsal.DRGenerationRehearsalError,
@@ -985,6 +994,39 @@ def test_release_copy_reauthenticates_source_after_copy(
         rehearsal._materialize_exact_release_copy(release, destination)
 
     assert source_calls == 2
+
+
+def test_release_copy_authenticates_venv_for_exact_source_bind_path(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    tmp_path.chmod(0o700)
+    source_root = _private(tmp_path / ("c" * 40))
+    source_file = source_root / "sealed"
+    source_file.write_bytes(b"exact")
+    source_file.chmod(0o400)
+    source_root.chmod(0o500)
+    destination_parent = _private(tmp_path / "copies")
+    destination = destination_parent / "copy"
+    release = _capable_release(source_root, "c")
+    copied = release_operator.ReleaseIdentity(**{**vars(release), "root": destination})
+    calls: list[tuple[Path, Path | None]] = []
+
+    def load(root: Path, **kwargs: Any) -> release_operator.ReleaseIdentity:
+        calls.append((root, kwargs.get("venv_bound_root")))
+        return copied if root == destination else release
+
+    monkeypatch.setattr(release_operator, "load_release_identity", load)
+    monkeypatch.setattr(release_operator, "_load_release_identity_at_bound_root", load)
+
+    sealed = rehearsal._materialize_exact_release_copy(release, destination)
+
+    assert sealed == rehearsal._SealedReleaseCopy(release, destination, copied)
+    assert calls == [
+        (source_root, None),
+        (destination, source_root),
+        (source_root, None),
+    ]
 
 
 @pytest.mark.parametrize("failure", ("stderr", "timeout", "wrong_receipt"))
@@ -1021,6 +1063,7 @@ def test_exact_release_store_open_fails_closed_without_stderr_body(
 
     monkeypatch.setattr(rehearsal, "_execute_bwrap", run)
     monkeypatch.setattr(release_operator, "load_release_identity", lambda *_args, **_kwargs: sealed.identity)
+    monkeypatch.setattr(rehearsal, "_load_sealed_release_copy_identity", lambda *_args: sealed.identity)
 
     with pytest.raises(release_operator.ReleaseFailure) as raised:
         rehearsal._run_release_store(sealed, config)
@@ -1172,6 +1215,11 @@ def test_isolated_port_rejects_each_tampered_sealed_release_identity_before_open
         release_operator,
         "load_release_identity",
         lambda *_args, **_kwargs: releases[(tampered_index + 1) % len(releases)],
+    )
+    monkeypatch.setattr(
+        rehearsal,
+        "_load_sealed_release_copy_identity",
+        lambda *_args: releases[(tampered_index + 1) % len(releases)],
     )
 
     with pytest.raises(
