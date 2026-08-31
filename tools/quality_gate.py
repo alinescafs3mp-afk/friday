@@ -93,6 +93,9 @@ _WHEEL_NAMESPACES = ("friday", "friday_host_agent", "friday_package_broker")
 _EXACT_CPU_FLOOR = 24
 _EXACT_SCRATCH_FREE_FLOOR = 32 * 1024 * 1024 * 1024
 _SYNCTHING_AMD64_SHA256 = "e8a08fdd8b25340aae0c0a00ab131b293830e4ea47504d4b83a82f31b52b96c4"
+_LEGACY_COMPARISON_WHEEL_EPOCH = "ff8c62926e7c7ea9cfcd53c460f9a0608d83621c"
+_LEGACY_COMPARISON_WHEEL_SHA256 = "954641e37fc8958a8b459f65f78e61225709be8d20e1b3979fcb22e378018aca"
+_LEGACY_COMPARISON_BUILD_PROFILE = "legacy-git-archive-umask-0002-v1"
 _MAX_COLLECTION_BYTES = 64 << 20
 _MAX_COLLECTION_NODES = 100_000
 _MAX_COLLECTION_NODE_BYTES = 256 << 10
@@ -121,6 +124,7 @@ class GateCommand:
     environment: Mapping[str, str] | None = field(default=None, repr=False, compare=False)
     cwd: Path = field(default=ROOT, repr=False, compare=False)
     timeout_s: int = field(default=3600, repr=False, compare=False)
+    child_umask: int | None = field(default=None, repr=False, compare=False)
 
 
 @dataclass(frozen=True)
@@ -655,11 +659,18 @@ def _kill_process_group(process: subprocess.Popen[bytes], name: str) -> bool:
 def run_command(command: GateCommand) -> int:
     print(f"\n[{command.name}]\n$ {_display_command(command.argv)}", flush=True)
     try:
+        if command.child_umask is not None and not 0 <= command.child_umask <= 0o777:
+            print(f"FAILED: {command.name} has an invalid child umask", file=sys.stderr)
+            return 126
+        if command.child_umask is not None and os.name == "nt":
+            print(f"FAILED: {command.name} requires a POSIX child umask", file=sys.stderr)
+            return 126
         process = subprocess.Popen(  # noqa: S603 - argv is the closed gate plan
             command.argv,
             cwd=command.cwd,
             env=dict(command.environment) if command.environment is not None else None,
             start_new_session=os.name != "nt",
+            umask=command.child_umask if command.child_umask is not None else -1,
         )
     except OSError as exc:
         print(f"FAILED: cannot execute {command.argv[0]}: {exc}", file=sys.stderr)
@@ -1147,6 +1158,28 @@ def _scratch_peak_sampler(root: Path, interval_s: float) -> Iterator[list[int]]:
 def _require_comparison_wheel(actual_sha256: str, expected_sha256: str | None) -> None:
     if expected_sha256 is not None and actual_sha256 != expected_sha256:
         raise RuntimeError("self-built wheel differs from comparison bytes")
+
+
+def _comparison_build_profile(epoch_sha: str, wheel_sha256: str) -> str:
+    if (epoch_sha, wheel_sha256) != (
+        _LEGACY_COMPARISON_WHEEL_EPOCH,
+        _LEGACY_COMPARISON_WHEEL_SHA256,
+    ):
+        raise RuntimeError("comparison wheel has no closed reconstruction profile")
+    return _LEGACY_COMPARISON_BUILD_PROFILE
+
+
+def _copy_legacy_comparison_file(source: str, destination: str) -> str:
+    source_path = Path(source)
+    details = source_path.lstat()
+    if not stat.S_ISREG(details.st_mode) or details.st_nlink != 1:
+        raise RuntimeError("legacy comparison projection contains an unsafe file")
+    target = Path(shutil.copy2(source_path, destination, follow_symlinks=False))
+    copied = target.lstat()
+    if not stat.S_ISREG(copied.st_mode) or copied.st_nlink != 1:
+        raise RuntimeError("legacy comparison copy produced an unsafe file")
+    target.chmod(0o775 if details.st_mode & 0o111 else 0o664)
+    return str(target)
 
 
 def _stat_identity(details: os.stat_result) -> tuple[int, ...]:
@@ -1650,11 +1683,30 @@ def _build_reusable_wheel(
     runner: Callable[[GateCommand], int],
     comparison_epoch_sha: str | None = None,
     comparison_sha256: str | None = None,
+    comparison_build_profile: str | None = None,
 ) -> tuple[Path, str, str | None, Path, str]:
-    def build_one(label: str, build_source: Path, epoch_sha: str) -> tuple[Path, str, dict[str, str]]:
+    def build_one(
+        label: str,
+        build_source: Path,
+        epoch_sha: str,
+        *,
+        build_profile: str | None = None,
+    ) -> tuple[Path, str, dict[str, str]]:
         project = scratch / f"{label}-project"
         dist = scratch / f"{label}-dist"
-        shutil.copytree(build_source, project, ignore=shutil.ignore_patterns(".git"))
+        if build_profile not in {None, _LEGACY_COMPARISON_BUILD_PROFILE}:
+            raise RuntimeError("comparison wheel build profile is unsupported")
+        copy_function = (
+            _copy_legacy_comparison_file
+            if build_profile == _LEGACY_COMPARISON_BUILD_PROFILE
+            else shutil.copy2
+        )
+        shutil.copytree(
+            build_source,
+            project,
+            ignore=shutil.ignore_patterns(".git"),
+            copy_function=copy_function,
+        )
         dist.mkdir(mode=0o700)
         build_environment = dict(environment)
         build_environment["SOURCE_DATE_EPOCH"] = _git_output(
@@ -1666,6 +1718,7 @@ def _build_reusable_wheel(
             build_environment,
             cwd=project,
             timeout_s=1200,
+            child_umask=0o002 if build_profile == _LEGACY_COMPARISON_BUILD_PROFILE else None,
         )
         if runner(build) != 0:
             raise RuntimeError(f"{label} wheel build failed")
@@ -1721,8 +1774,13 @@ def _build_reusable_wheel(
     installed_site, runtime_python = install_one("candidate", wheel, build_environment)
     comparison_observed: str | None = None
     if comparison_sha256 is not None:
-        if comparison_epoch_sha is None:
-            raise RuntimeError("comparison wheel requires an authenticated epoch commit")
+        if comparison_epoch_sha is None or comparison_build_profile is None:
+            raise RuntimeError("comparison wheel requires an authenticated reconstruction profile")
+        if comparison_build_profile != _comparison_build_profile(
+            comparison_epoch_sha,
+            comparison_sha256,
+        ):
+            raise RuntimeError("comparison wheel reconstruction profile is not exact")
         with _candidate_projection(
             comparison_epoch_sha,
             scratch,
@@ -1730,7 +1788,10 @@ def _build_reusable_wheel(
             name="comparison-source",
         ) as comparison_source:
             comparison_wheel, comparison_observed, comparison_environment = build_one(
-                "comparison", comparison_source, comparison_epoch_sha
+                "comparison",
+                comparison_source,
+                comparison_epoch_sha,
+                build_profile=comparison_build_profile,
             )
             _require_comparison_wheel(comparison_observed, comparison_sha256)
             installed_site, runtime_python = install_one(
@@ -1881,6 +1942,7 @@ def execute_tier(
     base_sha = args.base_sha
     comparison_wheel_sha256 = args.comparison_wheel_sha256
     comparison_wheel_epoch_sha = args.comparison_wheel_epoch_sha
+    comparison_build_profile: str | None = None
     measurement_only = comparison_wheel_sha256 is not None
     host_capacity: dict[str, Any] | None = None
     evidence_fd = -1
@@ -1941,6 +2003,11 @@ def execute_tier(
                 "--is-ancestor",
                 comparison_wheel_epoch_sha,
                 candidate_sha,
+            )
+            assert isinstance(comparison_wheel_sha256, str)
+            comparison_build_profile = _comparison_build_profile(
+                comparison_wheel_epoch_sha,
+                comparison_wheel_sha256,
             )
         evidence_dir = args.evidence_dir
         if evidence_dir is None or not evidence_dir.is_absolute() or evidence_dir.is_symlink():
@@ -2055,6 +2122,7 @@ def execute_tier(
                             runner=measured,
                             comparison_epoch_sha=comparison_wheel_epoch_sha,
                             comparison_sha256=comparison_wheel_sha256,
+                            comparison_build_profile=comparison_build_profile,
                         )
                         environment.update(
                             {
@@ -2214,6 +2282,7 @@ def execute_tier(
                 "epoch_commit": comparison_wheel_epoch_sha,
                 "expected_sha256": comparison_wheel_sha256,
                 "observed_sha256": comparison_observed_sha256,
+                "build_profile": comparison_build_profile,
             },
             "topology": {
                 "requested_non_ui_workers": args.workers,

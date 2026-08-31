@@ -160,6 +160,10 @@ wheel as the selected-test runtime for this comparison run. The comparison commi
 not the change-coverage `--base-sha` and must remain the S6 release commit shown above
 after integration or rebase. The normal candidate wheel digest may differ (README is
 wheel metadata); it remains covered by build, verifier and clean-install boundaries.
+This exact epoch/digest pair also selects the closed
+`legacy-git-archive-umask-0002-v1` reconstruction profile: only the comparison
+projection recreates the historical Git-archive modes and child build umask. The
+candidate and the gate process retain canonical `0022`; any unknown pair fails closed.
 Because selected tests use the S6 wheel, this second output has the distinct
 `friday.quality-gate-measurement.v1` schema, `result=measured` and
 `certification_eligible=false`; it cannot certify the candidate or replace the first

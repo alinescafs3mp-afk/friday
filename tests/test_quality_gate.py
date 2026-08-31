@@ -190,7 +190,28 @@ def test_run_command_passes_an_explicit_environment_to_the_child(
     assert captured["env"] == {"ONLY": "scratch"}
     assert captured["cwd"] == quality_gate.ROOT
     assert captured["start_new_session"] is (os.name != "nt")
+    assert captured["umask"] == -1
     assert captured["timeout"] == command.timeout_s
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX child umask boundary")
+def test_run_command_applies_child_umask_without_changing_parent() -> None:
+    original = os.umask(0o077)
+    try:
+        command = quality_gate.GateCommand(
+            "umask probe",
+            (
+                sys.executable,
+                "-I",
+                "-c",
+                "import os,sys;sys.exit(0 if os.umask(0o077)==0o002 else 1)",
+            ),
+            child_umask=0o002,
+        )
+        assert quality_gate.run_command(command) == 0
+        assert os.umask(0o077) == 0o077
+    finally:
+        os.umask(original)
 
 
 @pytest.mark.skipif(os.name == "nt", reason="POSIX process-group boundary")
@@ -1198,6 +1219,9 @@ def test_comparison_epoch_never_replaces_the_normal_candidate_wheel(
 
     source = tmp_path / "source"
     source.mkdir()
+    probe = source / "probe.py"
+    probe.write_text("pass\n", encoding="utf-8")
+    probe.chmod(0o644)
     accepted = tmp_path / "accepted"
     rejected = tmp_path / "rejected"
     accepted.mkdir()
@@ -1216,6 +1240,10 @@ def test_comparison_epoch_never_replaces_the_normal_candidate_wheel(
             assert command.environment is not None
             epoch = command.environment["SOURCE_DATE_EPOCH"]
             observed_epochs.append(epoch)
+            assert stat.S_IMODE((command.cwd / "probe.py").stat().st_mode) == (
+                0o664 if command.name == "comparison wheel build" else 0o644
+            )
+            assert command.child_umask == (0o002 if command.name == "comparison wheel build" else None)
             dist = Path(command.argv[-1])
             built_wheel = dist / "friday.whl"
             built_wheel.write_bytes(b"candidate-wheel" if epoch == "200" else baseline_bytes)
@@ -1223,6 +1251,11 @@ def test_comparison_epoch_never_replaces_the_normal_candidate_wheel(
         return 0
 
     monkeypatch.setattr(quality_gate, "_git_output", git_output)
+    monkeypatch.setattr(
+        quality_gate,
+        "_comparison_build_profile",
+        lambda *_args: quality_gate._LEGACY_COMPARISON_BUILD_PROFILE,
+    )
     monkeypatch.setattr(
         quality_gate,
         "_candidate_projection",
@@ -1261,6 +1294,7 @@ def test_comparison_epoch_never_replaces_the_normal_candidate_wheel(
         runner=runner,
         comparison_epoch_sha=baseline,
         comparison_sha256=expected,
+        comparison_build_profile=quality_gate._LEGACY_COMPARISON_BUILD_PROFILE,
     )
     assert hashlib.sha256(wheel.read_bytes()).hexdigest() == candidate_digest != expected
     assert stat.S_IMODE(wheel.stat().st_mode) == 0o600
@@ -1279,8 +1313,8 @@ def test_comparison_epoch_never_replaces_the_normal_candidate_wheel(
             runner=runner,
             comparison_epoch_sha=baseline,
             comparison_sha256="0" * 64,
+            comparison_build_profile=quality_gate._LEGACY_COMPARISON_BUILD_PROFILE,
         )
-
     oversized = tmp_path / "oversized.whl"
     with oversized.open("wb") as stream:
         stream.truncate(64 * 1024 * 1024 + 1)
@@ -1304,3 +1338,26 @@ def test_comparison_epoch_never_replaces_the_normal_candidate_wheel(
     with pytest.raises(RuntimeError, match="identity or contents changed"):
         quality_gate._require_evidence_directory(injected, injected_fd, ())
     os.close(injected_fd)
+
+
+def test_legacy_comparison_profile_is_exactly_bound_and_rejects_unsafe_files(tmp_path: Path) -> None:
+    assert (
+        quality_gate._comparison_build_profile(
+            quality_gate._LEGACY_COMPARISON_WHEEL_EPOCH,
+            quality_gate._LEGACY_COMPARISON_WHEEL_SHA256,
+        )
+        == quality_gate._LEGACY_COMPARISON_BUILD_PROFILE
+    )
+    with pytest.raises(RuntimeError, match="no closed reconstruction profile"):
+        quality_gate._comparison_build_profile("a" * 40, "b" * 64)
+
+    source = tmp_path / "source.py"
+    source.write_text("pass\n", encoding="utf-8")
+    source.chmod(0o644)
+    copied = Path(quality_gate._copy_legacy_comparison_file(str(source), str(tmp_path / "copy.py")))
+    assert stat.S_IMODE(copied.stat().st_mode) == 0o664
+
+    unsafe = tmp_path / "unsafe"
+    unsafe.symlink_to(source)
+    with pytest.raises(RuntimeError, match="unsafe file"):
+        quality_gate._copy_legacy_comparison_file(str(unsafe), str(tmp_path / "rejected"))
