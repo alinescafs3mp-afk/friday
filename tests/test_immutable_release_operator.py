@@ -9223,11 +9223,13 @@ def test_backend_acceptance_requires_the_exact_obsidian_health_attestation(
         def open(self, *_args: object, **_kwargs: object) -> Response:
             return Response()
 
-    monkeypatch.setattr(
-        operator.ssl,
-        "create_default_context",
-        lambda **_kwargs: SimpleNamespace(),
-    )
+    tls_context_inputs: list[dict[str, object]] = []
+
+    def create_default_context(**kwargs: object) -> SimpleNamespace:
+        tls_context_inputs.append(kwargs)
+        return SimpleNamespace()
+
+    monkeypatch.setattr(operator.ssl, "create_default_context", create_default_context)
     monkeypatch.setattr(operator.urllib.request, "build_opener", lambda *_handlers: Opener())
     monkeypatch.setattr(operator.time, "sleep", lambda _seconds: None)
     accepted: list[operator.ReleaseIdentity] = []
@@ -9266,6 +9268,10 @@ def test_backend_acceptance_requires_the_exact_obsidian_health_attestation(
     monkeypatch.setattr(operator.time, "monotonic", lambda: 0.0)
     port.accept_backend(legacy_previous)
     assert accepted == [schema35, legacy_previous]
+    assert tls_context_inputs
+    assert all(
+        value == {"cadata": port.config.health_ca.read_text(encoding="ascii")} for value in tls_context_inputs
+    )
 
 
 def test_release_mode_capability_not_semver_controls_legacy_acceptance(
@@ -13919,3 +13925,167 @@ def test_multiple_uploader_claims_are_applied_under_one_backup_and_publicly_aggr
         "writer_quiescence_sha256",
         "receipt_sha256",
     }
+
+
+@pytest.mark.parametrize(
+    "scenario",
+    (
+        "private_read",
+        "stable_read",
+        "streaming_hash",
+        "private_copy",
+        "obsidian_capture_swap",
+        "fsync_tree_swap",
+    ),
+)
+def test_mutable_regular_file_primitives_reject_fifo_substitution_bounded(
+    tmp_path: Path,
+    isolated_operator_transaction_domain: Path,
+    scenario: str,
+) -> None:
+    """Every mutable descriptor contour fails closed instead of opening a FIFO blocking."""
+
+    scenario_root = tmp_path / scenario
+    scenario_root.mkdir(mode=0o700)
+    source_root = Path(operator.__file__).resolve(strict=True).parents[1]
+    script = r"""
+import os
+import pathlib
+import stat
+import sys
+
+sys.path.insert(0, sys.argv[1])
+import tools.immutable_release_operator as operator
+
+scenario = sys.argv[2]
+root = pathlib.Path(sys.argv[3])
+operator.OperatorTransactionLock._RUNTIME_PARENT = pathlib.Path(sys.argv[4])
+source = root / "source"
+destination = root / "destination"
+state = root / "state"
+state.mkdir(mode=0o700)
+lock_path = state / "immutable-release-operator.v1.lock"
+original_read = operator.os.read
+
+def guarded_read(descriptor, size):
+    if stat.S_ISFIFO(os.fstat(descriptor).st_mode):
+        raise SystemExit("FIFO descriptor reached read")
+    return original_read(descriptor, size)
+
+operator.os.read = guarded_read
+
+def must_reject(action):
+    try:
+        with operator.OperatorTransactionLock(lock_path):
+            action()
+    except (OSError, operator.ReleaseFailure):
+        with operator.OperatorTransactionLock(lock_path):
+            pass
+        return
+    raise SystemExit("FIFO substitution was accepted")
+
+if scenario in {"private_read", "stable_read", "streaming_hash", "private_copy"}:
+    os.mkfifo(source, mode=0o600)
+    if scenario == "private_read":
+        must_reject(
+            lambda: operator._read_private_regular_file(
+                source,
+                maximum_bytes=1024,
+                code="private_fifo_accepted",
+            )
+        )
+    elif scenario == "stable_read":
+        must_reject(
+            lambda: operator._read_stable_regular_file(
+                source,
+                maximum_bytes=1024,
+                code="stable_fifo_accepted",
+            )
+        )
+    elif scenario == "streaming_hash":
+        must_reject(lambda: operator._sha256_file(source))
+    else:
+        must_reject(lambda: operator._copy_private(source, destination))
+        if destination.exists() or destination.is_symlink():
+            raise SystemExit("copy mutated its destination before source admission")
+elif scenario == "obsidian_capture_swap":
+    vault = root / "vault"
+    vault.mkdir(mode=0o700)
+    source = vault / "note.md"
+    source.write_bytes(b"stable note")
+    source.chmod(0o600)
+    displaced = vault / "note.displaced"
+    original_open = operator.os.open
+    swapped = False
+
+    def raced_open(path, flags, mode=0o777, *, dir_fd=None):
+        global swapped
+        if path == source.name and dir_fd is not None and not swapped:
+            source.rename(displaced)
+            os.mkfifo(source, mode=0o600)
+            swapped = True
+        return original_open(path, flags, mode, dir_fd=dir_fd)
+
+    operator.os.open = raced_open
+    must_reject(lambda: operator._capture_obsidian_tree(vault, destination=None))
+    if not swapped:
+        raise SystemExit("capture race was not injected")
+elif scenario == "fsync_tree_swap":
+    source.write_bytes(b"stable data")
+    source.chmod(0o600)
+    displaced = root / "source.displaced"
+    original_open = operator.os.open
+    original_fsync = operator.os.fsync
+    swapped = False
+
+    def raced_open(path, flags, mode=0o777, *, dir_fd=None):
+        global swapped
+        if pathlib.Path(path) == source and not swapped:
+            source.rename(displaced)
+            os.mkfifo(source, mode=0o600)
+            swapped = True
+        return original_open(path, flags, mode, dir_fd=dir_fd)
+
+    def guarded_fsync(descriptor):
+        if stat.S_ISFIFO(os.fstat(descriptor).st_mode):
+            raise SystemExit("FIFO descriptor reached fsync")
+        return original_fsync(descriptor)
+
+    operator.os.open = raced_open
+    operator.os.fsync = guarded_fsync
+    must_reject(lambda: operator._fsync_tree(root))
+    if not swapped:
+        raise SystemExit("fsync race was not injected")
+else:
+    raise SystemExit("unknown scenario")
+"""
+    try:
+        result = subprocess.run(  # noqa: S603
+            [
+                sys.executable,
+                "-I",
+                "-B",
+                "-c",
+                script,
+                str(source_root),
+                scenario,
+                str(scenario_root),
+                str(isolated_operator_transaction_domain),
+            ],
+            check=False,
+            capture_output=True,
+            cwd=scenario_root,
+            env={
+                "LANG": "C.UTF-8",
+                "LC_ALL": "C.UTF-8",
+                "PATH": os.defpath,
+                "PYTHONDONTWRITEBYTECODE": "1",
+                "PYTHONNOUSERSITE": "1",
+            },
+            timeout=5,
+        )
+        assert result.returncode == 0, (result.stdout, result.stderr)
+        assert result.stdout == b""
+        assert result.stderr == b""
+    finally:
+        shutil.rmtree(scenario_root)

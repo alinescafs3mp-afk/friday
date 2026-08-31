@@ -27,7 +27,6 @@ import math
 import os
 import re
 import shlex
-import shutil
 import sqlite3
 import ssl
 import stat
@@ -1510,12 +1509,60 @@ def _sha256_bytes(value: bytes) -> str:
     return hashlib.sha256(value).hexdigest()
 
 
+def _stable_file_identity(status: os.stat_result) -> tuple[int, int, int, int, int]:
+    return (
+        int(status.st_dev),
+        int(status.st_ino),
+        int(status.st_size),
+        int(status.st_mtime_ns),
+        int(status.st_ctime_ns),
+    )
+
+
 def _sha256_file(path: Path) -> str:
-    digest = hashlib.sha256()
-    with path.open("rb") as stream:
-        while chunk := stream.read(1 << 20):
+    """Hash one stable regular-file identity without blocking on a FIFO swap."""
+
+    lexical = Path(os.path.abspath(path))
+    descriptor = -1
+    try:
+        descriptor = os.open(
+            lexical,
+            os.O_RDONLY
+            | getattr(os, "O_CLOEXEC", 0)
+            | getattr(os, "O_NOFOLLOW", 0)
+            | getattr(os, "O_NONBLOCK", 0),
+        )
+        before = os.fstat(descriptor)
+        named_before = os.stat(lexical, follow_symlinks=False)
+        identity = _stable_file_identity(before)
+        if (
+            not stat.S_ISREG(before.st_mode)
+            or not stat.S_ISREG(named_before.st_mode)
+            or _stable_file_identity(named_before) != identity
+        ):
+            raise ReleaseFailure("file_digest_invalid")
+        digest = hashlib.sha256()
+        remaining = int(before.st_size)
+        while remaining:
+            chunk = os.read(descriptor, min(remaining, 1 << 20))
+            if not chunk:
+                raise ReleaseFailure("file_digest_invalid")
             digest.update(chunk)
-    return digest.hexdigest()
+            remaining -= len(chunk)
+        if os.read(descriptor, 1):
+            raise ReleaseFailure("file_digest_invalid")
+        after = os.fstat(descriptor)
+        named_after = os.stat(lexical, follow_symlinks=False)
+        if identity != _stable_file_identity(after) or identity != _stable_file_identity(named_after):
+            raise ReleaseFailure("file_digest_invalid")
+        return digest.hexdigest()
+    except ReleaseFailure:
+        raise
+    except OSError as exc:
+        raise ReleaseFailure("file_digest_invalid") from exc
+    finally:
+        if descriptor >= 0:
+            os.close(descriptor)
 
 
 def _release_binds_memory_vault_mode(release: ReleaseIdentity) -> bool:
@@ -1898,9 +1945,29 @@ def _fsync_tree(root: Path) -> None:
     for path in sorted(root.rglob("*"), key=lambda item: len(item.parts), reverse=True):
         status = os.lstat(path)
         if stat.S_ISREG(status.st_mode):
-            descriptor = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
+            descriptor = os.open(
+                path,
+                os.O_RDONLY
+                | getattr(os, "O_CLOEXEC", 0)
+                | getattr(os, "O_NOFOLLOW", 0)
+                | getattr(os, "O_NONBLOCK", 0),
+            )
             try:
+                opened = os.fstat(descriptor)
+                named = os.stat(path, follow_symlinks=False)
+                identity = _stable_file_identity(status)
+                if (
+                    not stat.S_ISREG(opened.st_mode)
+                    or not stat.S_ISREG(named.st_mode)
+                    or identity != _stable_file_identity(opened)
+                    or identity != _stable_file_identity(named)
+                ):
+                    raise ReleaseFailure("durable_tree_changed")
                 os.fsync(descriptor)
+                after = os.fstat(descriptor)
+                named_after = os.stat(path, follow_symlinks=False)
+                if identity != _stable_file_identity(after) or identity != _stable_file_identity(named_after):
+                    raise ReleaseFailure("durable_tree_changed")
             finally:
                 os.close(descriptor)
         elif stat.S_ISDIR(status.st_mode):
@@ -2130,7 +2197,10 @@ def _read_private_regular_file(
     try:
         descriptor = os.open(
             lexical,
-            os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0),
+            os.O_RDONLY
+            | getattr(os, "O_CLOEXEC", 0)
+            | getattr(os, "O_NOFOLLOW", 0)
+            | getattr(os, "O_NONBLOCK", 0),
         )
         before = os.fstat(descriptor)
         if (
@@ -2198,7 +2268,10 @@ def _read_stable_regular_file(path: Path, *, maximum_bytes: int, code: str) -> b
     try:
         descriptor = os.open(
             lexical,
-            os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0),
+            os.O_RDONLY
+            | getattr(os, "O_CLOEXEC", 0)
+            | getattr(os, "O_NOFOLLOW", 0)
+            | getattr(os, "O_NONBLOCK", 0),
         )
         before = os.fstat(descriptor)
         if (
@@ -9205,13 +9278,13 @@ class DurableActivationJournal:
         transition_fallback: ReleaseIdentity | None = None,
         transition_candidate: ReleaseIdentity | None = None,
     ) -> dict[str, Any]:
-        path = _private_regular_file(
+        raw = _read_private_regular_file(
             self.path,
             maximum_bytes=1 << 20,
             code="activation_journal_invalid",
         )
         try:
-            payload = _unique_json(path.read_text(encoding="ascii"))
+            payload = _unique_json(raw.decode("ascii"))
         except (UnicodeError, ValueError, json.JSONDecodeError) as exc:
             raise ReleaseFailure("activation_journal_invalid") from exc
         legacy_expected = {
@@ -9933,13 +10006,13 @@ class DurableActivationJournal:
             raw.get("inbox_receipt_sha256") or ""
         ):
             raise ReleaseFailure("activation_journal_backup_receipt_mismatch")
-        manifest_path = _private_regular_file(
+        manifest_raw = _read_private_regular_file(
             directory / "manifest.json",
             maximum_bytes=1 << 20,
             code="activation_journal_backup_invalid",
         )
         try:
-            manifest = _unique_json(manifest_path.read_text(encoding="ascii"))
+            manifest = _unique_json(manifest_raw.decode("ascii"))
         except (UnicodeError, ValueError, json.JSONDecodeError) as exc:
             raise ReleaseFailure("activation_journal_backup_invalid") from exc
         if manifest != {
@@ -10066,34 +10139,39 @@ def _copy_private(
     *,
     allow_contained_mode: bool = False,
 ) -> None:
-    source_flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0)
+    source_flags = (
+        os.O_RDONLY
+        | getattr(os, "O_CLOEXEC", 0)
+        | getattr(os, "O_NOFOLLOW", 0)
+        | getattr(os, "O_NONBLOCK", 0)
+    )
     destination_flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_CLOEXEC", 0)
     source_descriptor = os.open(source, source_flags)
     descriptor = -1
     try:
-        descriptor = os.open(destination, destination_flags, 0o600)
         source_status = os.fstat(source_descriptor)
-        identity = (
-            int(source_status.st_dev),
-            int(source_status.st_ino),
-            int(source_status.st_size),
-            int(source_status.st_mtime_ns),
-            int(source_status.st_ctime_ns),
-        )
+        identity = _stable_file_identity(source_status)
+        named_status = os.stat(source, follow_symlinks=False)
         if (
             not stat.S_ISREG(source_status.st_mode)
+            or not stat.S_ISREG(named_status.st_mode)
             or source_status.st_nlink != 1
             or source_status.st_uid != os.geteuid()
             or (not allow_contained_mode and stat.S_IMODE(source_status.st_mode) & 0o077)
+            or _stable_file_identity(named_status) != identity
         ):
             raise ReleaseFailure("backup_source_invalid")
-        with (
-            os.fdopen(source_descriptor, "rb", closefd=False) as reader,
-            os.fdopen(descriptor, "wb", closefd=False) as writer,
-        ):
-            shutil.copyfileobj(reader, writer, length=1 << 20)
-            writer.flush()
-            os.fsync(writer.fileno())
+        descriptor = os.open(destination, destination_flags, 0o600)
+        remaining = int(source_status.st_size)
+        while remaining:
+            chunk = os.read(source_descriptor, min(remaining, 1 << 20))
+            if not chunk:
+                raise ReleaseFailure("backup_source_changed")
+            _write_all(descriptor, chunk)
+            remaining -= len(chunk)
+        if os.read(source_descriptor, 1):
+            raise ReleaseFailure("backup_source_changed")
+        os.fsync(descriptor)
         after = os.fstat(source_descriptor)
         lexical = os.stat(source, follow_symlinks=False)
         if (
@@ -10195,24 +10273,25 @@ def _verify_sqlite_snapshot_copy(
 
 
 def _obsidian_entry_identity(status: os.stat_result) -> tuple[int, int, int, int, int]:
-    return (
-        int(status.st_dev),
-        int(status.st_ino),
-        int(status.st_size),
-        int(status.st_mtime_ns),
-        int(status.st_ctime_ns),
-    )
+    return _stable_file_identity(status)
 
 
-def _hash_descriptor(descriptor: int) -> str:
+def _hash_descriptor(descriptor: int, *, expected_size: int) -> str:
     digest = hashlib.sha256()
     os.lseek(descriptor, 0, os.SEEK_SET)
-    while chunk := os.read(descriptor, 1 << 20):
+    remaining = expected_size
+    while remaining:
+        chunk = os.read(descriptor, min(remaining, 1 << 20))
+        if not chunk:
+            raise ReleaseFailure("obsidian_backup_source_changed")
         digest.update(chunk)
+        remaining -= len(chunk)
+    if os.read(descriptor, 1):
+        raise ReleaseFailure("obsidian_backup_source_changed")
     return digest.hexdigest()
 
 
-def _copy_descriptor_private(source_descriptor: int, destination: Path) -> str:
+def _copy_descriptor_private(source_descriptor: int, destination: Path, *, expected_size: int) -> str:
     descriptor = os.open(
         destination,
         os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_CLOEXEC", 0),
@@ -10221,9 +10300,16 @@ def _copy_descriptor_private(source_descriptor: int, destination: Path) -> str:
     digest = hashlib.sha256()
     try:
         os.lseek(source_descriptor, 0, os.SEEK_SET)
-        while chunk := os.read(source_descriptor, 1 << 20):
+        remaining = expected_size
+        while remaining:
+            chunk = os.read(source_descriptor, min(remaining, 1 << 20))
+            if not chunk:
+                raise ReleaseFailure("obsidian_backup_source_changed")
             digest.update(chunk)
             _write_all(descriptor, chunk)
+            remaining -= len(chunk)
+        if os.read(source_descriptor, 1):
+            raise ReleaseFailure("obsidian_backup_source_changed")
         os.fchmod(descriptor, 0o600)
         os.fsync(descriptor)
     finally:
@@ -10368,7 +10454,12 @@ def _capture_obsidian_tree(
             total_bytes += int(status.st_size)
             if total_bytes > MAX_OBSIDIAN_BACKUP_BYTES:
                 raise ReleaseFailure("obsidian_backup_byte_bound_exceeded")
-            file_flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0)
+            file_flags = (
+                os.O_RDONLY
+                | getattr(os, "O_CLOEXEC", 0)
+                | getattr(os, "O_NOFOLLOW", 0)
+                | getattr(os, "O_NONBLOCK", 0)
+            )
             source_descriptor = os.open(entry.name, file_flags, dir_fd=descriptor)
             try:
                 opened = os.fstat(source_descriptor)
@@ -10380,9 +10471,13 @@ def _capture_obsidian_tree(
                 ):
                     raise ReleaseFailure("obsidian_backup_source_changed")
                 digest = (
-                    _copy_descriptor_private(source_descriptor, destination_directory / entry.name)
+                    _copy_descriptor_private(
+                        source_descriptor,
+                        destination_directory / entry.name,
+                        expected_size=int(opened.st_size),
+                    )
                     if destination_directory is not None
-                    else _hash_descriptor(source_descriptor)
+                    else _hash_descriptor(source_descriptor, expected_size=int(opened.st_size))
                 )
                 after = os.fstat(source_descriptor)
                 lexical_after = os.stat(entry.name, dir_fd=descriptor, follow_symlinks=False)
@@ -10567,12 +10662,11 @@ def _verify_obsidian_backup(
     directory: Path,
     descriptor: _ExactObsidianBackup,
 ) -> dict[str, Any]:
-    manifest_path = _private_regular_file(
+    raw = _read_private_regular_file(
         directory / "obsidian-manifest.json",
         maximum_bytes=MAX_EXACT_MANIFEST_BYTES,
         code="obsidian_backup_manifest_invalid",
     )
-    raw = manifest_path.read_bytes()
     if _sha256_bytes(raw) != _closed_hash(
         descriptor.manifest_sha256,
         "obsidian_backup_receipt_invalid",
@@ -11520,12 +11614,11 @@ def _verify_engineer_backup(
     *,
     verify_sqlite_integrity: bool = True,
 ) -> dict[str, Any]:
-    manifest_path = _private_regular_file(
+    raw = _read_private_regular_file(
         directory / "engineer-manifest.json",
         maximum_bytes=MAX_EXACT_MANIFEST_BYTES,
         code="engineer_store_backup_manifest_invalid",
     )
-    raw = manifest_path.read_bytes()
     if _sha256_bytes(raw) != descriptor.manifest_sha256:
         raise ReleaseFailure("engineer_store_backup_manifest_changed")
     manifest = _validated_engineer_manifest(raw, descriptor)
@@ -11703,12 +11796,11 @@ def _verify_exact_inbox_backup(config: SystemdConfig, backup: _ExactInboxBackup)
     directory = _private_directory(backup.directory)
     if directory.parent != backup_root or not directory.name.startswith("historical-album-inbox-"):
         raise ReleaseFailure("inbox_backup_identity_invalid")
-    manifest = _private_regular_file(
+    raw = _read_private_regular_file(
         directory / "manifest.json",
         maximum_bytes=1 << 20,
         code="inbox_backup_manifest_invalid",
     )
-    raw = manifest.read_bytes()
     if _sha256_bytes(raw) != _closed_hash(backup.receipt_sha256, "inbox_backup_receipt_invalid"):
         raise ReleaseFailure("inbox_backup_manifest_changed")
     try:
@@ -11800,13 +11892,13 @@ class DurableAlbumRecoveryJournal:
         self._state = dict(core)
 
     def _read(self) -> dict[str, Any]:
-        path = _private_regular_file(
+        raw = _read_private_regular_file(
             self.path,
             maximum_bytes=1 << 20,
             code="album_recovery_journal_invalid",
         )
         try:
-            payload = _unique_json(path.read_text(encoding="ascii"))
+            payload = _unique_json(raw.decode("ascii"))
         except (UnicodeError, ValueError, json.JSONDecodeError) as exc:
             raise ReleaseFailure("album_recovery_journal_invalid") from exc
         current_expected = {
@@ -14157,11 +14249,11 @@ def _rebind_fresh_engineer_anchor(
         raise ReleaseFailure("engineer_fresh_materialization_authority_invalid")
     store, key_path, state = _engineer_artifact_paths(config)
     database = store / "kernel.sqlite"
-    key = _private_regular_file(
+    key = _read_private_regular_file(
         key_path,
         maximum_bytes=32,
         code="engineer_fresh_materialization_authority_invalid",
-    ).read_bytes()
+    )
     if len(key) != 32:
         raise ReleaseFailure("engineer_fresh_materialization_authority_invalid")
     lifecycle = CommandStoreLifecycle(
@@ -14730,13 +14822,13 @@ class DurableUnitInstallJournal:
         self._state = dict(core)
 
     def _read(self) -> dict[str, Any]:
-        path = _private_regular_file(
+        raw = _read_private_regular_file(
             self.path,
             maximum_bytes=1 << 20,
             code="unit_install_journal_invalid",
         )
         try:
-            payload = _unique_json(path.read_text(encoding="ascii"))
+            payload = _unique_json(raw.decode("ascii"))
         except (UnicodeError, ValueError, json.JSONDecodeError) as exc:
             raise ReleaseFailure("unit_install_journal_invalid") from exc
         expected = {
@@ -14949,7 +15041,7 @@ def _read_owned_unit_surface_file(path: Path, *, code: str) -> bytes:
     status = os.stat(resolved, follow_symlinks=False)
     if status.st_uid != os.geteuid() or status.st_nlink != 1 or stat.S_IMODE(status.st_mode) & 0o022:
         raise ReleaseFailure(code)
-    return resolved.read_bytes()
+    return _read_stable_regular_file(resolved, maximum_bytes=1 << 20, code=code)
 
 
 def _database_dropin_path(content: bytes) -> Path:
@@ -15253,7 +15345,11 @@ def install_units(
             journal_port.record("transition_anchor_active")
             phase = "transition_anchor_active"
         for name in _RUNTIME_UNIT_NAMES:
-            current = (directory / name).read_bytes()
+            current = _read_stable_regular_file(
+                directory / name,
+                maximum_bytes=1 << 20,
+                code="installed_transition_unit_invalid",
+            )
             argv = _unit_exec_argv(current, code="installed_transition_unit_exec_invalid")
             if not _unit_effective_root_is(
                 argv,
@@ -15335,7 +15431,7 @@ def _verify_owned_static_file(path: Path, expected: bytes, *, code: str) -> None
         status.st_uid != os.geteuid()
         or status.st_nlink != 1
         or stat.S_IMODE(status.st_mode) & 0o022
-        or resolved.read_bytes() != expected
+        or _read_stable_regular_file(resolved, maximum_bytes=1 << 20, code=code) != expected
     ):
         raise ReleaseFailure(code)
 
@@ -17766,14 +17862,17 @@ print(json.dumps({'schema':SCHEMA_VERSION,'status':'clear'},sort_keys=True,separ
         return self._expected_semantic_effect_health()[0]
 
     def accept_backend(self, release: ReleaseIdentity) -> None:
-        ca = _private_regular_file(
+        ca = _read_private_regular_file(
             self.config.health_ca,
             maximum_bytes=1 << 20,
             code="health_ca_invalid",
         )
-        if _sha256_file(ca) != self.config.health_ca_sha256:
+        if _sha256_bytes(ca) != self.config.health_ca_sha256:
             raise ReleaseFailure("health_ca_changed")
-        context = ssl.create_default_context(cafile=str(ca))
+        try:
+            context = ssl.create_default_context(cadata=ca.decode("ascii"))
+        except (UnicodeError, ssl.SSLError) as exc:
+            raise ReleaseFailure("health_ca_invalid") from exc
         context.check_hostname = True
         context.verify_mode = ssl.CERT_REQUIRED
         opener = urllib.request.build_opener(
