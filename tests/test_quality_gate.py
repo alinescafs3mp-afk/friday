@@ -1038,7 +1038,7 @@ def test_comparison_epoch_never_replaces_the_normal_candidate_wheel(
         runner=runner,
     )
     assert ordinary_comparison is None and ordinary_site.name == "site-packages"
-    assert ordinary_python == Path("python")
+    assert ordinary_python == "python"
     assert quality_gate._tier_result_identity("exact-release", False)[2] is True
     assert quality_gate._tier_result_identity("change", False)[2] is False
     assert quality_gate._tier_result_identity("nightly", False) == (
@@ -1066,7 +1066,7 @@ def test_comparison_epoch_never_replaces_the_normal_candidate_wheel(
     assert comparison_digest == expected
     assert observed_epochs == ["200", "200", "100"]
     assert _site.name == "site-packages"
-    assert runtime_python == Path("python")
+    assert runtime_python == "python"
 
     with pytest.raises(RuntimeError, match="differs from comparison bytes"):
         quality_gate._build_reusable_wheel(

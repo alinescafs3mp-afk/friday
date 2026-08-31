@@ -1577,7 +1577,7 @@ def _build_reusable_wheel(
     runner: Callable[[GateCommand], int],
     comparison_epoch_sha: str | None = None,
     comparison_sha256: str | None = None,
-) -> tuple[Path, str, str | None, Path, Path]:
+) -> tuple[Path, str, str | None, Path, str]:
     def build_one(label: str, build_source: Path, epoch_sha: str) -> tuple[Path, str, dict[str, str]]:
         project = scratch / f"{label}-project"
         dist = scratch / f"{label}-dist"
@@ -1617,7 +1617,7 @@ def _build_reusable_wheel(
             raise RuntimeError(f"{label} wheel verifier failed")
         return wheel, digest, build_environment
 
-    def install_one(label: str, wheel: Path, build_environment: Mapping[str, str]) -> tuple[Path, Path]:
+    def install_one(label: str, wheel: Path, build_environment: Mapping[str, str]) -> tuple[Path, str]:
         runtime = scratch / f"{label}-runtime"
         installed_site = runtime / "site-packages"
         installed_site.mkdir(parents=True, mode=0o700)
@@ -1642,7 +1642,7 @@ def _build_reusable_wheel(
         )
         if runner(install) != 0:
             raise RuntimeError(f"{label} wheel clean install failed")
-        return installed_site, Path(python)
+        return installed_site, python
 
     wheel, wheel_sha256, build_environment = build_one("candidate", source, candidate_sha)
     installed_site, runtime_python = install_one("candidate", wheel, build_environment)
