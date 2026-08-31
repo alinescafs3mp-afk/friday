@@ -356,6 +356,19 @@ def test_eager_settings_import_derives_the_database_from_the_scratch_home(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
+    operator_home = tmp_path / "operator-home"
+    release_root = tmp_path / "sealed-release"
+    anchor_parent = operator_home / ".jericho"
+    anchor_parent.mkdir(parents=True)
+    release_root.mkdir()
+    (anchor_parent / "current-release").symlink_to(release_root, target_is_directory=True)
+    monkeypatch.delenv(quality_gate._GOLDEN_JOURNEY_RELEASE_ROOT_ENV, raising=False)
+    assert quality_gate._golden_journey_release_root({"HOME": str(operator_home)}) == release_root
+    with quality_gate._isolated_test_environment(
+        golden_journey_release_root=release_root,
+    ) as environment:
+        assert environment[quality_gate._GOLDEN_JOURNEY_RELEASE_ROOT_ENV] == str(release_root)
+
     candidate_site = tmp_path / "candidate-site"
     candidate_site.mkdir(mode=0o700)
     candidate_site.chmod(0o700)

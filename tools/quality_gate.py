@@ -89,6 +89,7 @@ _NODEID_PROPERTY = "friday_nodeid"
 _COLLECTION_OPTION = "--friday-collection-manifest"
 _SELECTION_OPTION = "--friday-tier-selection"
 _INSTALLED_SITE_ENV = "FRIDAY_QUALITY_GATE_INSTALLED_SITE"
+_GOLDEN_JOURNEY_RELEASE_ROOT_ENV = "GOLDEN_JOURNEY_RELEASE_ROOT"
 _WHEEL_NAMESPACES = ("friday", "friday_host_agent", "friday_package_broker")
 _EXACT_CPU_FLOOR = 24
 _EXACT_SCRATCH_FREE_FLOOR = 32 * 1024 * 1024 * 1024
@@ -503,6 +504,7 @@ def _isolated_test_environment(
     *,
     prepare_schema_backups: bool = True,
     source_root: Path = ROOT,
+    golden_journey_release_root: Path | None = None,
 ) -> Iterator[dict[str, str]]:
     """Yield one private, non-live environment for pytest collection and runs."""
 
@@ -589,7 +591,33 @@ def _isolated_test_environment(
         )
         if installed_site is not None:
             environment[_INSTALLED_SITE_ENV] = str(installed_site)
+        if golden_journey_release_root is not None:
+            environment[_GOLDEN_JOURNEY_RELEASE_ROOT_ENV] = str(golden_journey_release_root)
         yield environment
+
+
+def _golden_journey_release_root(environment: Mapping[str, str]) -> Path:
+    """Pin the exact live release used by clean golden-journey evidence."""
+
+    configured = environment.get(_GOLDEN_JOURNEY_RELEASE_ROOT_ENV)
+    if configured is None:
+        home = environment.get("HOME")
+        if not isinstance(home, str) or not home or home != home.strip():
+            raise RuntimeError("exact-release cannot derive the golden-journey release root")
+        candidate = Path(home) / ".jericho" / "current-release"
+    else:
+        if not configured or configured != configured.strip():
+            raise RuntimeError("golden-journey release root is not canonical")
+        candidate = Path(configured)
+    try:
+        if not candidate.is_absolute():
+            raise RuntimeError("golden-journey release root is not canonical")
+        resolved = candidate.resolve(strict=True)
+        if not resolved.is_dir():
+            raise RuntimeError("golden-journey release root is not a directory")
+    except OSError as exc:
+        raise RuntimeError("golden-journey release root is unavailable") from exc
+    return resolved
 
 
 def static_commands(python: str = sys.executable) -> tuple[GateCommand, ...]:
@@ -1945,6 +1973,7 @@ def execute_tier(
     comparison_build_profile: str | None = None
     measurement_only = comparison_wheel_sha256 is not None
     host_capacity: dict[str, Any] | None = None
+    golden_journey_release_root: Path | None = None
     evidence_fd = -1
     if args.phase or args.dry_run:
         print("FAILED: closed tiers do not accept legacy phase or dry-run modes", file=sys.stderr)
@@ -1967,6 +1996,7 @@ def execute_tier(
         _require_candidate_launcher(candidate_sha)
         load_inventory = _candidate_inventory_loader()
         if args.tier == "exact-release":
+            golden_journey_release_root = _golden_journey_release_root(os.environ)
             host_capacity = {**_exact_host_capacity(), "host_contour": _exact_host_evidence()}
         if args.tier != "nightly":
             if not isinstance(base_sha, str) or commit_pattern(base_sha) is None or base_sha == candidate_sha:
@@ -2101,6 +2131,7 @@ def execute_tier(
                     scratch,
                     prepare_schema_backups=False,
                     source_root=source,
+                    golden_journey_release_root=golden_journey_release_root,
                 ) as raw_environment:
                     environment = dict(raw_environment)
                     test_python = sys.executable
@@ -2173,6 +2204,7 @@ def execute_tier(
                             group_root,
                             prepare_schema_backups=False,
                             source_root=source,
+                            golden_journey_release_root=golden_journey_release_root,
                         ) as group_environment:
                             if _INSTALLED_SITE_ENV in environment:
                                 group_environment[_INSTALLED_SITE_ENV] = environment[_INSTALLED_SITE_ENV]
