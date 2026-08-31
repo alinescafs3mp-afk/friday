@@ -10,6 +10,7 @@ surfaces survive a bounded activation fault and rollback in an owner-private
 from __future__ import annotations
 
 import argparse
+import errno
 import hashlib
 import json
 import os
@@ -41,7 +42,9 @@ REHEARSAL_RECEIPT_SCHEMA = dr_index.REHEARSAL_RECEIPT_SCHEMA
 _SCRATCH_PARENT = Path("/var/tmp")
 _SCRATCH_PREFIX = "friday-dr-rehearsal-"
 _SCRATCH_REGISTRY = ".friday-dr-rehearsal-registry.v1"
-_SCRATCH_RECORD_SCHEMA = "friday.dr-rehearsal-scratch-record.v1"
+_SCRATCH_RECORD_SCHEMA = "friday.dr-rehearsal-scratch-record.v2"
+_SCRATCH_IDENTITY_XATTR = "user.friday.dr-rehearsal-scratch-identity.v1"
+_SCRATCH_IDENTITY_BYTES = 32
 _BWRAP = Path("/usr/bin/bwrap")
 _CHILD_TIMEOUT_SECONDS = 600
 _CHILD_KILL_GRACE_SECONDS = 5
@@ -62,6 +65,8 @@ _SCRATCH_FREE_RESERVE_BYTES = 2 << 30
 _RESOURCE_CHECK_INTERVAL_SECONDS = 5.0
 _HEX64 = frozenset("0123456789abcdef")
 _CHECKS = dr_index.DR_REHEARSAL_CHECKS
+
+_ScratchIdentity = tuple[int, int, int, int, str]
 
 
 class DRGenerationRehearsalError(RuntimeError):
@@ -94,7 +99,7 @@ class _ScratchLease:
     key: str
     transaction_id: str
     candidate_sha256: str
-    identity: tuple[int, int, int, int]
+    identity: _ScratchIdentity
 
 
 @dataclass(frozen=True)
@@ -209,17 +214,53 @@ def _private_directory(path: Path) -> Path:
             os.close(descriptor)
 
 
-def _scratch_identity(path: Path) -> tuple[int, int, int, int]:
-    try:
-        status = os.lstat(path)
-    except OSError as exc:
-        raise DRGenerationRehearsalError("dr_rehearsal_scratch_invalid") from exc
+def _scratch_stat_identity(status: os.stat_result) -> tuple[int, int, int, int]:
     return (
         int(status.st_dev),
         int(status.st_ino),
         int(status.st_uid),
         stat.S_IMODE(status.st_mode),
     )
+
+
+def _scratch_identity_from_fd(descriptor: int) -> _ScratchIdentity:
+    try:
+        status = os.fstat(descriptor)
+        token = os.getxattr(descriptor, _SCRATCH_IDENTITY_XATTR)
+    except OSError as exc:
+        raise DRGenerationRehearsalError("dr_rehearsal_scratch_cleanup_refused") from exc
+    if len(token) != _SCRATCH_IDENTITY_BYTES:
+        raise DRGenerationRehearsalError("dr_rehearsal_scratch_cleanup_refused")
+    return (*_scratch_stat_identity(status), _sha256(token))
+
+
+def _bind_scratch_identity(descriptor: int) -> _ScratchIdentity:
+    """Bind a durable nonce to one inode; unlike inode numbers it is not reused."""
+
+    try:
+        try:
+            token = os.getxattr(descriptor, _SCRATCH_IDENTITY_XATTR)
+        except OSError as exc:
+            missing_xattr = {errno.ENODATA}
+            if hasattr(errno, "ENOATTR"):
+                missing_xattr.add(errno.ENOATTR)
+            if exc.errno not in missing_xattr:
+                raise
+            token = os.urandom(_SCRATCH_IDENTITY_BYTES)
+            os.setxattr(
+                descriptor,
+                _SCRATCH_IDENTITY_XATTR,
+                token,
+                flags=os.XATTR_CREATE,
+            )
+            os.fsync(descriptor)
+        if len(token) != _SCRATCH_IDENTITY_BYTES:
+            raise DRGenerationRehearsalError("dr_rehearsal_scratch_cleanup_refused")
+        return (*_scratch_stat_identity(os.fstat(descriptor)), _sha256(token))
+    except DRGenerationRehearsalError:
+        raise
+    except OSError as exc:
+        raise DRGenerationRehearsalError("dr_rehearsal_scratch_cleanup_refused") from exc
 
 
 def _tree_usage_fd(directory_fd: int, *, depth: int = 0) -> tuple[int, int]:
@@ -320,7 +361,7 @@ def _scratch_record(
     candidate_sha256: str,
     scratch_name: str,
     phase: str,
-    identity: tuple[int, int, int, int] | None,
+    identity: _ScratchIdentity | None,
 ) -> bytes:
     core = {
         "candidate_sha256": candidate_sha256,
@@ -334,19 +375,13 @@ def _scratch_record(
     return _canonical({**core, "record_sha256": _sha256(_canonical(core))}) + b"\n"
 
 
-def _prepared_scratch_identity(registry_fd: int, name: str) -> tuple[int, int, int, int]:
+def _prepared_scratch_identity(registry_fd: int, name: str) -> _ScratchIdentity:
     flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_CLOEXEC", 0)
     flags |= getattr(os, "O_NOFOLLOW", 0)
     descriptor = os.open(name, flags, dir_fd=registry_fd)
     try:
         opened = os.fstat(descriptor)
         lexical = os.stat(name, dir_fd=registry_fd, follow_symlinks=False)
-        identity = (
-            int(opened.st_dev),
-            int(opened.st_ino),
-            int(opened.st_uid),
-            stat.S_IMODE(opened.st_mode),
-        )
         if (
             not stat.S_ISDIR(opened.st_mode)
             or stat.S_ISLNK(lexical.st_mode)
@@ -358,7 +393,7 @@ def _prepared_scratch_identity(registry_fd: int, name: str) -> tuple[int, int, i
         with os.scandir(descriptor) as entries:
             if next(entries, None) is not None:
                 raise DRGenerationRehearsalError("dr_rehearsal_scratch_cleanup_refused")
-        return identity
+        return _bind_scratch_identity(descriptor)
     finally:
         os.close(descriptor)
 
@@ -443,7 +478,7 @@ def _remove_registered_tree(
     registry: Path | int,
     scratch_name: str,
     *,
-    expected_identity: tuple[int, int, int, int] | None,
+    expected_identity: _ScratchIdentity | None,
     require_empty: bool = False,
 ) -> bool:
     """Remove only the exact pinned scratch inode via an unexposed quarantine."""
@@ -500,22 +535,11 @@ def _remove_registered_tree(
         flags |= getattr(os, "O_NOFOLLOW", 0)
         scratch_fd = os.open(target, flags, dir_fd=registry_fd)
         opened = os.fstat(scratch_fd)
-        observed = (
-            int(opened.st_dev),
-            int(opened.st_ino),
-            int(opened.st_uid),
-            stat.S_IMODE(opened.st_mode),
-        )
+        observed = _scratch_identity_from_fd(scratch_fd)
         if (
             not stat.S_ISDIR(opened.st_mode)
             or stat.S_ISLNK(lexical.st_mode)
-            or observed
-            != (
-                int(lexical.st_dev),
-                int(lexical.st_ino),
-                int(lexical.st_uid),
-                stat.S_IMODE(lexical.st_mode),
-            )
+            or observed[:4] != _scratch_stat_identity(lexical)
             or opened.st_uid != os.geteuid()
             or stat.S_IMODE(opened.st_mode) != 0o700
             or expected_identity is not None
@@ -549,7 +573,9 @@ def _remove_registered_tree(
         # or deleted; the final identity check below fails closed instead.
         _empty_pinned_scratch_directory(scratch_fd)
         final = os.stat(quarantine, dir_fd=registry_fd, follow_symlinks=False)
-        if (opened.st_dev, opened.st_ino) != (final.st_dev, final.st_ino):
+        if (opened.st_dev, opened.st_ino) != (final.st_dev, final.st_ino) or _scratch_identity_from_fd(
+            scratch_fd
+        ) != expected_identity:
             raise DRGenerationRehearsalError("dr_rehearsal_scratch_cleanup_refused")
         os.rmdir(quarantine, dir_fd=registry_fd)
         os.fsync(registry_fd)
@@ -682,18 +708,20 @@ def _new_scratch(*, transaction_id: str, candidate_sha256: str) -> _ScratchLease
                     "transaction_id",
                 }
                 identity_raw = existing.get("identity")
-                identity: tuple[int, int, int, int] | None = None
+                identity: _ScratchIdentity | None = None
                 identity_valid = identity_raw is None
                 if (
                     isinstance(identity_raw, list)
-                    and len(identity_raw) == 4
-                    and all(type(value) is int for value in identity_raw)
+                    and len(identity_raw) == 5
+                    and all(type(value) is int for value in identity_raw[:4])
+                    and _is_hex64(identity_raw[4])
                 ):
                     identity = (
                         identity_raw[0],
                         identity_raw[1],
                         identity_raw[2],
                         identity_raw[3],
+                        identity_raw[4],
                     )
                     identity_valid = True
                 if (
@@ -754,7 +782,7 @@ def _new_scratch(*, transaction_id: str, candidate_sha256: str) -> _ScratchLease
             os.mkdir(scratch_name, mode=0o700, dir_fd=registry_fd)
             os.fsync(registry_fd)
             root = registry / scratch_name
-            identity = _scratch_identity(root)
+            identity = _prepared_scratch_identity(registry_fd, scratch_name)
             active = _scratch_record(
                 key=key,
                 transaction_id=transaction_id,

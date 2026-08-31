@@ -1393,6 +1393,69 @@ def test_exact_transaction_reclaims_only_its_durable_sigkill_scratch(
     rehearsal._remove_current_scratch(second)
 
 
+def test_scratch_nonce_prevents_identity_reuse_with_identical_stat_projection(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    tmp_path.chmod(0o700)
+    monkeypatch.setattr(rehearsal, "_SCRATCH_PARENT", tmp_path)
+    fixed_stat_identity = (7, 11, os.geteuid(), 0o700)
+    monkeypatch.setattr(rehearsal, "_scratch_stat_identity", lambda _status: fixed_stat_identity)
+    nonces = iter((b"a" * 32, b"b" * 32))
+
+    def next_nonce(size: int) -> bytes:
+        assert size == rehearsal._SCRATCH_IDENTITY_BYTES
+        return next(nonces)
+
+    monkeypatch.setattr(os, "urandom", next_nonce)
+    first = rehearsal._new_scratch(transaction_id="a" * 64, candidate_sha256="b" * 64)
+    assert rehearsal._remove_registered_tree(  # noqa: SLF001
+        first.registry,
+        first.root.name,
+        expected_identity=first.identity,
+    )
+
+    second = rehearsal._new_scratch(transaction_id="a" * 64, candidate_sha256="b" * 64)
+
+    assert first.identity[:4] == second.identity[:4] == fixed_stat_identity
+    assert first.identity[4] == hashlib.sha256(b"a" * 32).hexdigest()
+    assert second.identity[4] == hashlib.sha256(b"b" * 32).hexdigest()
+    assert first.identity != second.identity
+    rehearsal._remove_current_scratch(second)
+
+
+def test_scratch_cleanup_refuses_bound_inode_with_changed_kernel_nonce(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    tmp_path.chmod(0o700)
+    monkeypatch.setattr(rehearsal, "_SCRATCH_PARENT", tmp_path)
+    scratch = rehearsal._new_scratch(transaction_id="a" * 64, candidate_sha256="b" * 64)
+    original = os.getxattr(scratch.root, rehearsal._SCRATCH_IDENTITY_XATTR)
+    os.setxattr(
+        scratch.root,
+        rehearsal._SCRATCH_IDENTITY_XATTR,
+        b"replacement-identity".ljust(rehearsal._SCRATCH_IDENTITY_BYTES, b"!"),
+        flags=os.XATTR_REPLACE,
+    )
+
+    with pytest.raises(
+        rehearsal.DRGenerationRehearsalError,
+        match="^dr_rehearsal_scratch_cleanup_refused$",
+    ):
+        rehearsal._remove_current_scratch(scratch)
+
+    assert scratch.root.is_dir()
+    assert scratch.record.is_file()
+    os.setxattr(
+        scratch.root,
+        rehearsal._SCRATCH_IDENTITY_XATTR,
+        original,
+        flags=os.XATTR_REPLACE,
+    )
+    rehearsal._remove_current_scratch(scratch)
+
+
 def test_cleanup_never_deletes_a_quarantine_path_replacement(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
