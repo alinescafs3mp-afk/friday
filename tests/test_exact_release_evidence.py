@@ -1019,6 +1019,8 @@ def test_closed_runner_uses_hermetic_plugins_and_exact_collection(
     manifest_refs = [refs]
     commands: list[tuple[str, ...]] = []
     environments: list[dict[str, str]] = []
+    candidate_site = tmp_path / "candidate-site"
+    candidate_site.mkdir(mode=0o700)
 
     @contextmanager
     def isolated_environment():
@@ -1026,6 +1028,7 @@ def test_closed_runner_uses_hermetic_plugins_and_exact_collection(
             "PYTEST_DISABLE_PLUGIN_AUTOLOAD": "0",
             "PYTEST_PLUGINS": "ambient.untrusted_plugin",
             "PYTHONPYCACHEPREFIX": "/ambient/cache",
+            quality_gate._INSTALLED_SITE_ENV: str(candidate_site),
             "SENTINEL": "preserved",
         }
 
@@ -1092,6 +1095,7 @@ def test_closed_runner_uses_hermetic_plugins_and_exact_collection(
         "-c",
         evidence._PYTEST_BOOTSTRAP,  # noqa: SLF001 - exact code-first launcher
         str(tmp_path),
+        str(candidate_site),
         "-q",
         "-o",
         "addopts=",
@@ -1110,16 +1114,18 @@ def test_closed_runner_uses_hermetic_plugins_and_exact_collection(
     )
     dynamic_options = command[len(expected_prefix) : -len(refs)]
     assert command[: len(expected_prefix)] == expected_prefix
-    assert "sys.path.insert(0,root)" in evidence._PYTEST_BOOTSTRAP  # noqa: SLF001
-    assert len(dynamic_options) == 3
-    assert dynamic_options[0].startswith("--junitxml=")
-    assert dynamic_options[1].startswith("--friday-collection-manifest=")
-    assert dynamic_options[2].startswith("--basetemp=")
+    assert "sys.path[:0]=[site,root]" in evidence._PYTEST_BOOTSTRAP  # noqa: SLF001
+    assert dynamic_options[:3] == ("-o", "pythonpath=", "--import-mode=importlib")
+    assert len(dynamic_options) == 6
+    assert dynamic_options[3].startswith("--junitxml=")
+    assert dynamic_options[4].startswith("--friday-collection-manifest=")
+    assert dynamic_options[5].startswith("--basetemp=")
     assert command[-len(refs) :] == refs
     assert environments == [
         {
             "PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1",
             "PYTHONPYCACHEPREFIX": str(python_cache),
+            quality_gate._INSTALLED_SITE_ENV: str(candidate_site),
             "SENTINEL": "preserved",
         }
     ]

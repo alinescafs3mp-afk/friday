@@ -166,7 +166,10 @@ _SEALED_CHILD_ENVIRONMENT_KEYS = frozenset(
 _PYTEST_BOOTSTRAP = (
     "import pathlib,sys; "
     "root=str(pathlib.Path(sys.argv.pop(1)).resolve(strict=True)); "
-    "sys.path.insert(0,root); import pytest; raise SystemExit(pytest.main(sys.argv[1:]))"
+    "site=sys.argv.pop(1); "
+    "site=str(pathlib.Path(site).resolve(strict=True)) if site!='-' else site; "
+    "sys.path[:0]=[site,root] if site!='-' else [root]; "
+    "import pytest; raise SystemExit(pytest.main(sys.argv[1:]))"
 )
 _ISOLATED_VALIDATION_BOOTSTRAP = r"""
 import _sha2,_signal,os,select,stat,sys
@@ -2916,9 +2919,9 @@ def _run_closed_pytest(
             collection = scratch / "collection.json"
             python_cache = scratch / "python-cache"
             origin_report = scratch / "artifact-origin.json"
-            bootstrap: tuple[str, ...]
+            bootstrap: tuple[str, ...] | None
             if runtime is None:
-                bootstrap = (_PYTEST_BOOTSTRAP, str(repo_root))
+                bootstrap = None
                 artifact_options: tuple[str, ...] = ()
                 tooling_site = None
                 tooling_projection: tuple[dict[str, object], ...] = ()
@@ -2959,9 +2962,18 @@ def _run_closed_pytest(
                         python_cache,
                     )
                 else:
+                    selected_site = gate._validated_installed_site(environment)  # noqa: SLF001
+                    bootstrap = (
+                        _PYTEST_BOOTSTRAP,
+                        str(repo_root),
+                        "-" if selected_site is None else str(selected_site),
+                    )
+                    if selected_site is not None:
+                        artifact_options = ("-o", "pythonpath=", "--import-mode=importlib")
                     environment.pop("PYTEST_PLUGINS", None)
                     environment["PYTEST_DISABLE_PLUGIN_AUTOLOAD"] = "1"
                     environment["PYTHONPYCACHEPREFIX"] = str(python_cache)
+                assert bootstrap is not None
                 result = subprocess.run(
                     (
                         executable,
