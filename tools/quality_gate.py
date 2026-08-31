@@ -12,6 +12,7 @@ from __future__ import annotations
 import argparse
 import gzip
 import hashlib
+import importlib
 import importlib.util
 import json
 import os
@@ -214,6 +215,8 @@ def _require_installed_wheel_imports(site: Path, modules: Mapping[str, object] |
                 f"{root} is not imported from the clean-installed wheel: "
                 f"expected {expected}, observed {origin}"
             )
+        if modules is None and root not in loaded:
+            importlib.import_module(root)
     for name, module in tuple(loaded.items()):
         module_file = getattr(module, "__file__", None)
         if module_file and any(name == root or name.startswith(f"{root}.") for root in _WHEEL_NAMESPACES):
@@ -339,7 +342,9 @@ def pytest_sessionfinish(session: Any, exitstatus: int) -> None:
             "deselected": len(_COLLECTION_DESELECTED),
             "origin_error": origin_error,
         }
-        if _COLLECTION_SKIPS or _COLLECTION_DESELECTED or origin_error:
+        if origin_error:
+            _fail_collection_session(session, "worker_runtime_origin_problem")
+        elif _COLLECTION_SKIPS or _COLLECTION_DESELECTED:
             _fail_collection_session(session, "worker_skip_or_deselect")
         return
     installed_site = os.environ.get(_INSTALLED_SITE_ENV, "").strip()

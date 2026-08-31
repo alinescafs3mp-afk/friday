@@ -546,7 +546,11 @@ def test_pytest_bootstrap_preloads_runner_authority_before_candidate_root(tmp_pa
             sys.executable,
             "--version",
         ),
-        env={**os.environ, "PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1"},
+        env={
+            **os.environ,
+            "PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1",
+            quality_gate._INSTALLED_SITE_ENV: str(site),
+        },
         capture_output=True,
         text=True,
         check=False,
@@ -557,13 +561,11 @@ def test_pytest_bootstrap_preloads_runner_authority_before_candidate_root(tmp_pa
         str(source),
     ]
 
-    plugin = source / "tools" / "probe.py"
-    plugin.parent.mkdir()
-    (plugin.parent / "__init__.py").write_text("", encoding="ascii")
-    plugin.write_text("", encoding="ascii")
     probe = source / "tests" / "test_probe.py"
     probe.parent.mkdir()
     probe.write_text(
+        "import pathlib, sys\n"
+        "sys.path.insert(0, str(pathlib.Path(__file__).parents[1]))\n"
         "import friday, friday_host_agent, friday_package_broker\n"
         "def test_installed_roots():\n"
         " assert friday.INSTALLED and friday_host_agent.INSTALLED "
@@ -577,7 +579,7 @@ def test_pytest_bootstrap_preloads_runner_authority_before_candidate_root(tmp_pa
             "-B",
             "-c",
             quality_gate._PYTEST_BOOTSTRAP,
-            str(source),
+            str(quality_gate.ROOT),
             str(site),
             sys.executable,
             "-q",
@@ -588,12 +590,19 @@ def test_pytest_bootstrap_preloads_runner_authority_before_candidate_root(tmp_pa
             "-p",
             "xdist.plugin",
             "-p",
-            "tools.probe",
+            "tools.quality_gate",
             "-n",
             "2",
+            f"--rootdir={source}",
+            f"{quality_gate._COLLECTION_OPTION}={tmp_path / 'xdist-collection.json'}",
+            f"--basetemp={tmp_path / 'xdist-pytest'}",
             str(probe),
         ),
-        env={**os.environ, "PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1"},
+        env={
+            **os.environ,
+            "PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1",
+            quality_gate._INSTALLED_SITE_ENV: str(site),
+        },
         capture_output=True,
         text=True,
         check=False,
