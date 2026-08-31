@@ -1184,6 +1184,7 @@ _PYTEST_BOOTSTRAP = (
     "root=str(pathlib.Path(sys.argv[1]).resolve(strict=True));"
     "site=sys.argv[2];sys.executable=sys.argv[3];"
     "sys.path[:0]=(([site] if site!='-' else [])+[root,str(pathlib.Path(root)/'tests')]);"
+    "xdist.plugin._sys_path[:]=sys.path;"
     "[importlib.import_module(name) for name in "
     "('friday','friday_host_agent','friday_package_broker')] if site!='-' else None;"
     "raise SystemExit(pytest.main(sys.argv[4:],plugins=plugins))"
@@ -1191,6 +1192,12 @@ _PYTEST_BOOTSTRAP = (
 _EXPLICIT_PYTEST_PLUGINS = (
     "-p",
     "no:cacheprovider",
+    "-p",
+    "xdist.plugin",
+    "-p",
+    "pytest_asyncio.plugin",
+    "-p",
+    "anyio.pytest_plugin",
     "-p",
     "tools.quality_gate",
 )
@@ -1672,6 +1679,12 @@ def _build_reusable_wheel(
     return wheel, wheel_sha256, comparison_observed, installed_site, runtime_python
 
 
+def _wheel_worker_pythonpath(installed_site: Path, source: Path) -> str:
+    """Keep shipped imports wheel-first while exposing the source-owned gate plugin to xdist."""
+
+    return os.pathsep.join((str(installed_site), str(source)))
+
+
 def selected_phases(requested: Sequence[str] | None) -> tuple[str, ...]:
     if not requested or "all" in requested:
         return PHASES
@@ -1984,7 +1997,10 @@ def execute_tier(
                             comparison_sha256=comparison_wheel_sha256,
                         )
                         environment.update(
-                            {_INSTALLED_SITE_ENV: str(installed_site), "PYTHONPATH": str(installed_site)}
+                            {
+                                _INSTALLED_SITE_ENV: str(installed_site),
+                                "PYTHONPATH": _wheel_worker_pythonpath(installed_site, source),
+                            }
                         )
 
                     full_collection = scratch / "all-tests.json"

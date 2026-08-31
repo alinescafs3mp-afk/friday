@@ -540,6 +540,53 @@ def test_pytest_bootstrap_preloads_runner_authority_before_candidate_root(tmp_pa
         check=False,
     )
     assert completed.returncode == 0, completed.stderr
+    assert quality_gate._wheel_worker_pythonpath(site, source).split(os.pathsep) == [
+        str(site),
+        str(source),
+    ]
+
+    plugin = source / "tools" / "probe.py"
+    plugin.parent.mkdir()
+    (plugin.parent / "__init__.py").write_text("", encoding="ascii")
+    plugin.write_text("", encoding="ascii")
+    probe = source / "tests" / "test_probe.py"
+    probe.parent.mkdir()
+    probe.write_text(
+        "import friday, friday_host_agent, friday_package_broker\n"
+        "def test_installed_roots():\n"
+        " assert friday.INSTALLED and friday_host_agent.INSTALLED "
+        "and friday_package_broker.INSTALLED\n",
+        encoding="ascii",
+    )
+    completed = subprocess.run(
+        (
+            sys.executable,
+            "-I",
+            "-B",
+            "-c",
+            quality_gate._PYTEST_BOOTSTRAP,
+            str(source),
+            str(site),
+            sys.executable,
+            "-q",
+            "-o",
+            "addopts=",
+            "-p",
+            "no:cacheprovider",
+            "-p",
+            "xdist.plugin",
+            "-p",
+            "tools.probe",
+            "-n",
+            "2",
+            str(probe),
+        ),
+        env={**os.environ, "PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1"},
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert completed.returncode == 0, completed.stdout + completed.stderr
 
 
 def test_nightly_asset_identity_is_body_free_rename_stable_and_drift_closed(
