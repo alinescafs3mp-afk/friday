@@ -10318,6 +10318,10 @@ def test_installed_surface_smoke_uses_one_hermetic_environment_and_cleans_it(
         "LANG": "C.UTF-8",
         "LC_ALL": "C.UTF-8",
         "TZ": "UTC",
+        "MKL_NUM_THREADS": "1",
+        "NUMEXPR_NUM_THREADS": "1",
+        "OMP_NUM_THREADS": "1",
+        "OPENBLAS_NUM_THREADS": "1",
         "PYTHONDONTWRITEBYTECODE": "1",
     }
     assert observed[0][0][:4] == [str(release.root / "venv/bin/python"), "-I", "-B", "-c"]

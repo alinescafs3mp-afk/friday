@@ -6357,6 +6357,10 @@ def _isolated_smoke_environment(release_root: Path) -> Iterator[tuple[Path, dict
             "LANG": "C.UTF-8",
             "LC_ALL": "C.UTF-8",
             "TZ": "UTC",
+            "MKL_NUM_THREADS": "1",
+            "NUMEXPR_NUM_THREADS": "1",
+            "OMP_NUM_THREADS": "1",
+            "OPENBLAS_NUM_THREADS": "1",
             "PYTHONDONTWRITEBYTECODE": "1",
         }
     except ReleaseFailure:
