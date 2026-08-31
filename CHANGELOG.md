@@ -1,3 +1,14 @@
+## 0.207.85 — 2026-08-31
+
+### Reader-first release retention precursor
+
+- Seals the complete retention and disaster-recovery reader toolchain into the
+  immutable release while preserving the historical build-receipt shape.
+- Authenticates the closed toolchain manifest and fails closed on partial,
+  unknown or mixed capability profiles; no retention deletion is enabled.
+- Keeps SQLite at schema 50; exact `0.207.84/schema50` is both predecessor and
+  immutable fallback.
+
 ## 0.207.84 — 2026-08-30
 
 ### Release-bound journey evidence

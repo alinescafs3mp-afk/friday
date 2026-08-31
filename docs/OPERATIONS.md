@@ -630,7 +630,9 @@ Python строит sealed wheel-only siblings; все последующие к
   --state-dir <STATE_DIR> \
   --secondary-product-runner \
   <EXACT_CLEAN_CANDIDATE_CHECKOUT>/deploy/secondary-brain/windows-sglang/scripts/live_failure_battery.py \
-  --secondary-product-runner-sha256 <RUNNER_SHA256>
+  --secondary-product-runner-sha256 <RUNNER_SHA256> \
+  --release-retention-toolchain-manifest-sha256 <INDEPENDENT_TOOLCHAIN_SHA256> \
+  --build-receipt-profile historical-v1-reader
 <CANDIDATE>/venv/bin/python -I -B \
   <CANDIDATE>/artifacts/immutable_release_operator.py install-units ...
 <CANDIDATE>/venv/bin/python -I -B \
@@ -643,9 +645,11 @@ Python строит sealed wheel-only siblings; все последующие к
 
 Все пути release-controller образуют один portable layout от exact absolute
 `<FRIDAY_HOME>`: `data/state`, `wheel-only-releases`, `current-release` и
-`.env.local`. `build` проверяет весь layout до lock/staging и связывает state
-digest с sealed release; совместная подмена home+state не создаёт второй lock
-для прежнего release root. `install-units` выводит home из `data/state`, а
+`.env.local`. `build` проверяет весь layout до lock/staging и сериализует его
+через canonical state lock; reader-first profile намеренно не публикует новый
+lock-scope metadata pair, чтобы exact `0.207.84` оставался допустимым fallback.
+Совместная подмена home+state не создаёт второй lock для прежнего release root.
+`install-units` выводит home из `data/state`, а
 runtime повторно связывает layout и sealed candidate units. Внешний `unit-dir`
 дополнительно сериализован общим semantic lock для exact backend/bridge unit
 pair, поэтому разные home или unit-dir не управляют этими units одновременно.
@@ -728,6 +732,8 @@ fallback.
 `0.207.82/schema50` служит одновременно previous и immutable fallback.
 `0.207.84/schema50` также не меняет DDL: exact stable
 `0.207.83/schema50` служит одновременно previous и immutable fallback.
+`0.207.85/schema50` также не меняет DDL: exact stable
+`0.207.84/schema50` служит одновременно previous и immutable fallback.
 
 0.206.4 использует SQLite schema 34; Obsidian-релиз 0.207.2 поднимает её до
 schema 35. Новое поле имени загрузки принадлежит
@@ -997,7 +1003,7 @@ process-owned result. Acquire одноразовый: отказ, timeout, drift
 attestation не разрешают повторный acquire на меньшем или новом tier.
 
 Во время probe `/api/health` ещё недоступен. Ждите до 420 секунд и дополнительно
-требуйте `status=ok` и `version=0.207.84`.
+требуйте `status=ok` и `version=0.207.85`.
 
 HTTP `status=ok` при `installed_mode=legacy` означает безопасную деградацию, но
 не успешный canary. В `canary`/`v12` Sentinel не реже раза в минуту
