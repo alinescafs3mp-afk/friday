@@ -1344,6 +1344,10 @@ def _eligible_plan(
             complete=True,
         ),
     )
+    # Exercise the downstream apply contour as if a future fully validated
+    # writer receipt pair were present.  The production v1 contract remains
+    # fail-closed and is covered independently below.
+    _enable_complete_delete_evidence(monkeypatch)
     return retention.build_eligible_retention_plan(
         activation_journal=fixture["activation_journal"],
         unit_journal=fixture["unit_journal"],
@@ -1360,10 +1364,155 @@ def _eligible_plan(
     )
 
 
+def _enable_complete_delete_evidence(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        retention,
+        "_full_rollback_release_evidence_complete",
+        lambda _authentication, _rehearsal: True,
+    )
+
+
+def test_legacy_v1_dr_evidence_never_grants_destructive_authority(
+    synthetic_inventory: dict[str, Any],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    probed = False
+
+    def unexpected_probe(**_kwargs: Any) -> retention.OpenInventorySnapshot:
+        nonlocal probed
+        probed = True
+        raise AssertionError("legacy v1 authority must fail before the open-file probe")
+
+    monkeypatch.setattr(retention, "build_complete_open_inventory", unexpected_probe)
+    scope = retention.load_retention_scope_authority(
+        activation_journal=synthetic_inventory["activation_journal"]
+    )
+    with pytest.raises(
+        retention.RetentionPlanError,
+        match="^dr_rollback_release_evidence_incomplete$",
+    ):
+        retention.build_eligible_retention_plan(
+            activation_journal=synthetic_inventory["activation_journal"],
+            unit_journal=synthetic_inventory["unit_journal"],
+            backup_root=synthetic_inventory["backup_root"],
+            inventory_roots=(synthetic_inventory["inventory"],),
+            backup_inventory_roots=(synthetic_inventory["backup_root"],),
+            canonical_evidence_roots=scope.canonical_evidence_roots,
+        )
+
+    read_only = _plan(synthetic_inventory)
+    assert read_only["classification_status"] == "eligible"
+    assert read_only["apply_authority"] is False
+    assert read_only["block_reason"] == ""
+    assert any(
+        item["decision"] == "delete_candidate"
+        for key in ("targets", "backup_targets")
+        for item in read_only[key]
+    )
+    assert probed is False
+
+
 def _plan_file(plan: dict[str, Any], path: Path) -> Path:
     path.write_bytes(_canonical(plan) + b"\n")
     path.chmod(0o600)
     return path
+
+
+def test_stale_v1_executable_plan_is_rejected_before_durable_apply_state(
+    synthetic_inventory: dict[str, Any],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    production_evidence_check = retention._full_rollback_release_evidence_complete  # noqa: SLF001
+    plan = _eligible_plan(synthetic_inventory, monkeypatch)
+    monkeypatch.setattr(
+        retention,
+        "_full_rollback_release_evidence_complete",
+        production_evidence_check,
+    )
+    plan_path = _plan_file(plan, tmp_path / "legacy-v1-plan.json")
+    state = synthetic_inventory["activation_journal"].parent
+    durable_plan_directory = state / retention_apply.APPLY_PLAN_DIRECTORY
+    journal = state / retention_apply.APPLY_JOURNAL_NAME
+
+    with pytest.raises(
+        retention_apply.RetentionApplyError,
+        match="^retention_apply_dr_rollback_release_evidence_incomplete$",
+    ):
+        retention_apply.apply_retention_plan(
+            plan_path=plan_path,
+            expected_plan_sha256=plan["plan_sha256"],
+        )
+
+    assert not durable_plan_directory.exists()
+    assert not journal.exists()
+    assert all(
+        Path(item["path"]).exists()
+        for key in ("targets", "backup_targets")
+        for item in plan[key]
+        if item["decision"] == "delete_candidate"
+    )
+
+
+def test_stale_v1_resume_does_not_repair_two_link_plan_before_rejection(
+    synthetic_inventory: dict[str, Any],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    production_evidence_check = retention._full_rollback_release_evidence_complete  # noqa: SLF001
+    plan = _eligible_plan(synthetic_inventory, monkeypatch)
+    state = synthetic_inventory["activation_journal"].parent
+    durable = retention_apply._persist_reviewed_plan(  # noqa: SLF001
+        state,
+        plan,
+        guard=lambda: None,
+        allow_incomplete_stage_repair=True,
+    )
+    candidates = retention_apply._candidate_records(plan)  # noqa: SLF001
+    journal_path = state / retention_apply.APPLY_JOURNAL_NAME
+    journal = retention_apply._new_journal(  # noqa: SLF001
+        plan,
+        candidates,
+        durable_plan=durable,
+        filesystem_before=retention_apply._filesystem_free_evidence(  # noqa: SLF001
+            candidates,
+            guard=lambda: None,
+        ),
+    )
+    retention_apply._write_journal(journal_path, journal, guard=lambda: None)  # noqa: SLF001
+    staged = durable[0].with_name(f".{durable[0].name}.new")
+    os.link(durable[0], staged)
+    plan_bytes = durable[0].read_bytes()
+    journal_bytes = journal_path.read_bytes()
+    target_snapshots = {
+        Path(str(candidate["path"])): retention._snapshot(Path(str(candidate["path"]))).records  # noqa: SLF001
+        for candidate in candidates
+    }
+    assert os.lstat(durable[0]).st_nlink == 2
+    monkeypatch.setattr(
+        retention,
+        "_full_rollback_release_evidence_complete",
+        production_evidence_check,
+    )
+
+    with pytest.raises(
+        retention_apply.RetentionApplyError,
+        match="^retention_apply_dr_rollback_release_evidence_incomplete$",
+    ):
+        retention_apply.apply_retention_plan(
+            plan_path=None,
+            expected_plan_sha256=plan["plan_sha256"],
+            state_dir=state,
+        )
+
+    assert durable[0].read_bytes() == plan_bytes
+    assert staged.read_bytes() == plan_bytes
+    assert os.path.samefile(durable[0], staged)
+    assert os.lstat(durable[0]).st_nlink == 2
+    assert journal_path.read_bytes() == journal_bytes
+    assert {
+        path: retention._snapshot(path).records  # noqa: SLF001
+        for path in target_snapshots
+    } == target_snapshots
 
 
 def _scope_body(fixture: dict[str, Any]) -> dict[str, Any]:
@@ -1669,6 +1818,7 @@ def test_explicit_reviewed_scratch_requires_exact_symlink_free_non_git_tree(
             complete=True,
         ),
     )
+    _enable_complete_delete_evidence(monkeypatch)
     plan = retention.build_eligible_retention_plan(
         activation_journal=synthetic_inventory["activation_journal"],
         unit_journal=synthetic_inventory["unit_journal"],
@@ -1799,6 +1949,7 @@ def test_reviewed_scratch_apply_resumes_after_rename_crash(
             complete=True,
         ),
     )
+    _enable_complete_delete_evidence(monkeypatch)
     plan = retention.build_eligible_retention_plan(
         activation_journal=synthetic_inventory["activation_journal"],
         unit_journal=synthetic_inventory["unit_journal"],

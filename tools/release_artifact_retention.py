@@ -77,6 +77,10 @@ _OPEN_SOURCES = frozenset(
     }
 )
 _SCRATCH_CONTOUR = "exact_owner_tree_without_git_v1"
+# Reader-first release: no currently accepted receipt schema binds the full
+# previous + fallback + exercised rollback release set needed for deletion.
+# The writer package may add a pair only together with exact validators.
+_DELETE_AUTHORITY_EVIDENCE_SCHEMA_PAIRS: frozenset[tuple[str, str]] = frozenset()
 _REASONS = frozenset(
     {
         "activation_journal_invalid",
@@ -94,6 +98,7 @@ _REASONS = frozenset(
         "dr_pending_backup",
         "dr_pins_invalid",
         "dr_pins_unavailable",
+        "dr_rollback_release_evidence_incomplete",
         "dr_restore_release",
         "deferred_batch_bound",
         "fallback_release",
@@ -277,6 +282,7 @@ class _AuthorityResult:
     dr_restore_release_records: Mapping[Path, Mapping[str, Any]]
     evidence_paths: frozenset[Path]
     reference_paths: frozenset[Path]
+    delete_authority_eligible: bool
     error: str
 
 
@@ -414,6 +420,7 @@ def _stable_file_bytes(
     private: bool,
     code: str,
     maximum_bytes: int = MAX_JOURNAL_BYTES,
+    allowed_nlinks: frozenset[int] = frozenset({1}),
 ) -> bytes:
     lexical = _absolute_lexical(path, code=code)
     if not lexical.name or lexical.name in {".", ".."}:
@@ -440,7 +447,7 @@ def _stable_file_bytes(
         raise RetentionPlanError(code) from exc
     if (
         not stat.S_ISREG(before.st_mode)
-        or before.st_nlink != 1
+        or before.st_nlink not in allowed_nlinks
         or before.st_uid != os.geteuid()
         or not 0 < before.st_size <= maximum_bytes
         or (private and stat.S_IMODE(before.st_mode) & 0o077)
@@ -1521,6 +1528,25 @@ def _reviewed_scratch_identity(
     }
 
 
+def _full_rollback_release_evidence_complete(
+    authentication_receipt: Mapping[str, Any],
+    rehearsal_receipt: Mapping[str, Any],
+) -> bool:
+    """Reject legacy evidence until the full-root writer contract exists.
+
+    The v1 pair authenticates the backup and one rollback tree, but does not
+    bind the complete previous, fallback, and exercised release identities.
+    Unknown future schemas also fail closed; the writer package must add one
+    exact, fully validated contract here before it can authorize deletion.
+    """
+
+    schemas = (
+        authentication_receipt.get("schema"),
+        rehearsal_receipt.get("schema"),
+    )
+    return schemas in _DELETE_AUTHORITY_EVIDENCE_SCHEMA_PAIRS
+
+
 def _normalize_authority_bindings(
     bindings: RetentionAuthorityBindings | None,
     *,
@@ -1547,6 +1573,7 @@ def _normalize_authority_bindings(
             dr_restore_release_records={},
             evidence_paths=frozenset(),
             reference_paths=frozenset(),
+            delete_authority_eligible=False,
             error="retention_authority_unbound",
         )
     if not isinstance(bindings, RetentionAuthorityBindings):
@@ -1620,6 +1647,8 @@ def _normalize_authority_bindings(
     receipt_paths: set[Path] = set()
     evidence_receipt_paths: set[Path] = set()
     reauthenticated_candidate_sha256s: set[str] = set()
+    complete_delete_evidence_roles: set[str] = set()
+    incomplete_delete_evidence = False
     for pin in actual_pins:
         if pin.role not in {"current", "older", "pending"}:
             raise RetentionPlanError("dr_pins_invalid")
@@ -1677,6 +1706,8 @@ def _normalize_authority_bindings(
         rehearsal_path: Path | None = None
         authentication_body: dict[str, Any] | None = None
         authentication_reference: dict[str, str] | None = None
+        rehearsal_body: dict[str, Any] | None = None
+        rehearsal_reference: dict[str, str] | None = None
         if pin.authentication_receipt_path is not None:
             if not _is_hex64(pin.authentication_receipt_sha256) or generation_index is None:
                 error = error or "dr_pins_invalid"
@@ -1771,6 +1802,19 @@ def _normalize_authority_bindings(
                     error = error or "dr_pins_invalid"
         elif pin.rehearsal_receipt_sha256 is not None or pin.rehearsal_binding is not None:
             error = error or "dr_pins_invalid"
+        if (
+            authentication_reference is not None
+            and rehearsal_reference is not None
+            and authentication_body is not None
+            and rehearsal_body is not None
+            and _full_rollback_release_evidence_complete(
+                authentication_body,
+                rehearsal_body,
+            )
+        ):
+            complete_delete_evidence_roles.add(pin.role)
+        else:
+            incomplete_delete_evidence = True
         if pin.role in {"current", "older"} and (
             authentication_path is None or rehearsal_path is None or pin.rehearsal_binding is None
         ):
@@ -1837,6 +1881,9 @@ def _normalize_authority_bindings(
         )
     if not {"current", "older"}.issubset(role_paths):
         error = error or "dr_pins_unavailable"
+    delete_authority_eligible = not incomplete_delete_evidence and {"current", "older"}.issubset(
+        complete_delete_evidence_roles
+    )
 
     evidence_paths: set[Path] = set()
     evidence_authority_paths: set[Path] = set()
@@ -1925,6 +1972,7 @@ def _normalize_authority_bindings(
                 *evidence_authority_paths,
             }
         ),
+        delete_authority_eligible=delete_authority_eligible,
         error=error,
     )
 
@@ -2817,6 +2865,8 @@ def plan_release_artifact_retention(
         state_directory=activation_path.parent,
     )
     blocker = blocker or authority.error
+    if executable and not authority.delete_authority_eligible:
+        blocker = blocker or "dr_rollback_release_evidence_incomplete"
 
     references: set[Path] = {
         activation_path,

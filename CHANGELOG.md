@@ -1,3 +1,19 @@
+## 0.207.89 — 2026-08-31
+
+### Legacy DR evidence deletion fence
+
+- Keeps authenticated v1 DR generations available for release protection and
+  read-only retention classification, but never lets their incomplete rollback
+  identity projection authorize a destructive plan.
+- Rejects stale pre-fence executable plans again under the live operator lock,
+  before durable apply state or target mutation; the future writer must add a
+  fully validated previous/fallback/exercised-root contract explicitly.
+- Rollout completes only the pre-activation v1 generation and leaves `older`
+  absent after activation; no post-activation v1 publication is allowed before
+  the full writer contract displaces legacy evidence.
+- Supersedes unactivated `0.207.85`–`0.207.88`; SQLite remains at schema 50
+  with exact `0.207.84` as predecessor and fallback. Retention deletion remains disabled.
+
 ## 0.207.88 — 2026-08-31
 
 ### Exact WAL-mode rollback preservation

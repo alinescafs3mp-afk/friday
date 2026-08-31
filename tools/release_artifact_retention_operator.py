@@ -109,7 +109,12 @@ def _body_free_code(value: object) -> str:
     return value
 
 
-def _read_plan(path: Path, *, expected_sha256: str) -> dict[str, Any]:
+def _read_plan(
+    path: Path,
+    *,
+    expected_sha256: str,
+    allow_recoverable_two_link: bool = False,
+) -> dict[str, Any]:
     if not _is_hex64(expected_sha256):
         raise RetentionApplyError("retention_apply_plan_digest_invalid")
     try:
@@ -118,6 +123,7 @@ def _read_plan(path: Path, *, expected_sha256: str) -> dict[str, Any]:
             private=True,
             code="retention_apply_plan_invalid",
             maximum_bytes=MAX_PLAN_BYTES,
+            allowed_nlinks=(frozenset({1, 2}) if allow_recoverable_two_link else frozenset({1})),
         )
         value = retention._unique_json(raw, code="retention_apply_plan_invalid")  # noqa: SLF001
     except retention.RetentionPlanError as exc:
@@ -799,6 +805,8 @@ def _live_authority_reauthenticate(plan: Mapping[str, Any], inputs: Mapping[str,
         or authority.receipt != plan["authority_bindings"]
     ):
         raise RetentionApplyError("retention_apply_live_authority_changed")
+    if not authority.delete_authority_eligible:
+        raise RetentionApplyError("retention_apply_dr_rollback_release_evidence_incomplete")
 
 
 def _resume_candidate_reauthenticate(
@@ -2550,7 +2558,7 @@ def _cleanup_completed_transaction_before_rollover(
     plan_sha256 = journal.get("plan_sha256")
     if not _is_hex64(plan_sha256) or journal.get("phase") != "applied":
         raise RetentionApplyError("retention_apply_journal_invalid")
-    reviewed, durable_plan, loaded = _resume_plan_from_state(
+    reviewed, durable_plan, loaded, _inputs = _resume_plan_after_live_authority(
         state_dir,
         expected_plan_sha256=str(plan_sha256),
         guard=guard,
@@ -2631,6 +2639,7 @@ def _resume_plan_from_state(
     *,
     expected_plan_sha256: str,
     guard: Callable[[], None],
+    repair_staged_publication: bool = True,
 ) -> tuple[dict[str, Any], tuple[Path, int, int], dict[str, Any]]:
     journal = _load_journal(state_dir / APPLY_JOURNAL_NAME)
     if journal is None or journal.get("plan_sha256") != expected_plan_sha256:
@@ -2652,6 +2661,7 @@ def _resume_plan_from_state(
         status = os.lstat(path)
     except OSError as exc:
         raise RetentionApplyError("retention_apply_resume_authority_missing") from exc
+    recoverable_two_link = False
     if status.st_nlink == 2:
         plan_fd = -1
         try:
@@ -2670,11 +2680,14 @@ def _resume_plan_from_state(
             staged = os.stat(staged_name, dir_fd=plan_fd, follow_symlinks=False)
             if (staged.st_dev, staged.st_ino) != (status.st_dev, status.st_ino):
                 raise RetentionApplyError("retention_apply_resume_authority_missing")
-            guard()
-            os.unlink(staged_name, dir_fd=plan_fd)
-            os.fsync(plan_fd)
-            guard()
-            status = os.lstat(path)
+            if repair_staged_publication:
+                guard()
+                os.unlink(staged_name, dir_fd=plan_fd)
+                os.fsync(plan_fd)
+                guard()
+                status = os.lstat(path)
+            else:
+                recoverable_two_link = True
         except OSError as exc:
             raise RetentionApplyError("retention_apply_resume_authority_missing") from exc
         finally:
@@ -2683,13 +2696,43 @@ def _resume_plan_from_state(
     if (
         not stat.S_ISREG(status.st_mode)
         or status.st_uid != os.geteuid()
-        or status.st_nlink != 1
+        or status.st_nlink not in ({1} if repair_staged_publication else {1, 2})
         or stat.S_IMODE(status.st_mode) != 0o400
         or (status.st_dev, status.st_ino) != (durable["device"], durable["inode"])
     ):
         raise RetentionApplyError("retention_apply_resume_authority_missing")
-    reviewed = _read_plan(path, expected_sha256=expected_plan_sha256)
+    reviewed = _read_plan(
+        path,
+        expected_sha256=expected_plan_sha256,
+        allow_recoverable_two_link=recoverable_two_link,
+    )
     return reviewed, (path, int(status.st_dev), int(status.st_ino)), journal
+
+
+def _resume_plan_after_live_authority(
+    state_dir: Path,
+    *,
+    expected_plan_sha256: str,
+    guard: Callable[[], None],
+) -> tuple[dict[str, Any], tuple[Path, int, int], dict[str, Any], dict[str, Any]]:
+    """Authenticate a durable plan before repairing its publication stage."""
+
+    reviewed, _durable_plan, _journal = _resume_plan_from_state(
+        state_dir,
+        expected_plan_sha256=expected_plan_sha256,
+        guard=guard,
+        repair_staged_publication=False,
+    )
+    inputs = _plan_inputs(reviewed)
+    _live_authority_reauthenticate(reviewed, inputs)
+    reviewed, durable_plan, journal = _resume_plan_from_state(
+        state_dir,
+        expected_plan_sha256=expected_plan_sha256,
+        guard=guard,
+    )
+    inputs = _plan_inputs(reviewed)
+    _live_authority_reauthenticate(reviewed, inputs)
+    return reviewed, durable_plan, journal, inputs
 
 
 def apply_retention_plan(
@@ -2731,6 +2774,10 @@ def apply_retention_plan(
         lock_context = release_operator.OperatorTransactionLock(lock_path)
         with lock_context as lock:
             lock.assert_held()
+            if reviewed is not None:
+                # Reject a pre-fence executable plan before publishing any
+                # durable plan or journal bytes.
+                _live_authority_reauthenticate(reviewed, inputs)
             existing = _load_journal(journal_path)
             if (
                 not resume_from_state
@@ -2744,17 +2791,17 @@ def apply_retention_plan(
                     guard=lock.assert_held,
                 )
             if resume_from_state:
-                reviewed, durable_plan, existing = _resume_plan_from_state(
+                reviewed, durable_plan, existing, inputs = _resume_plan_after_live_authority(
                     state_dir,
                     expected_plan_sha256=expected_plan_sha256,
                     guard=lock.assert_held,
                 )
-                inputs = _plan_inputs(reviewed)
                 candidates = _candidate_records(reviewed)
             else:
                 reviewed = _read_plan(source_plan_path, expected_sha256=expected_plan_sha256)
                 inputs = _plan_inputs(reviewed)
                 candidates = _candidate_records(reviewed)
+                _live_authority_reauthenticate(reviewed, inputs)
                 durable_plan = _persist_reviewed_plan(
                     state_dir,
                     reviewed,
