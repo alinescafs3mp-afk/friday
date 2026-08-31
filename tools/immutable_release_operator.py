@@ -64,6 +64,14 @@ ENGINEER_COMMAND_LIFECYCLE_MIN_SCHEMA = 46
 OPERATOR_TRANSACTION_LOCK_SCOPE_CONTRACT = "canonical-friday-home-state-v1"
 OPERATOR_TRANSACTION_LOCK_SCOPE_SCHEMA = "friday.immutable-release-operator-lock-scope.v1"
 OPERATOR_TRANSACTION_UNIT_PAIR_SCOPE_SCHEMA = "friday.immutable-release-operator-unit-pair-lock-scope.v1"
+RELEASE_RETENTION_TOOLCHAIN_CONTRACT = "sealed-release-retention-dr-v1"
+RELEASE_RETENTION_TOOLCHAIN_MANIFEST_SCHEMA = (
+    "friday.immutable-release-retention-toolchain-manifest.v1"
+)
+BUILD_RECEIPT_PROFILE_HISTORICAL_V1 = "historical-v1"
+BUILD_RECEIPT_PROFILE_HISTORICAL_V1_READER = "historical-v1-reader"
+BUILD_RECEIPT_PROFILE_P0H_RETENTION = "p0h-retention-v1"
+_BUILD_RECEIPT_BUILD_PROFILES = (BUILD_RECEIPT_PROFILE_HISTORICAL_V1_READER,)
 RUNTIME_CONFIG_SCHEMA_V1 = "friday.immutable-release-runtime-config.v1"
 RUNTIME_CONFIG_SCHEMA_V2 = "friday.immutable-release-runtime-config.v2"
 RUNTIME_CONFIG_SCHEMA_V3 = "friday.immutable-release-runtime-config.v3"
@@ -162,6 +170,26 @@ _SECONDARY_PRODUCT_RUNNER_SOURCE = Path(
     "deploy/secondary-brain/windows-sglang/scripts/live_failure_battery.py"
 )
 _SECONDARY_PRODUCT_RUNNER_ARTIFACT = Path("artifacts/secondary-product-witness-runner.py")
+_RELEASE_RETENTION_TOOLCHAIN_ROOT = Path("artifacts/release-retention-toolchain-v1")
+_RELEASE_RETENTION_TOOLCHAIN_MANIFEST = _RELEASE_RETENTION_TOOLCHAIN_ROOT / "manifest.json"
+_RELEASE_RETENTION_TOOLCHAIN_MODULES = (
+    "immutable_release_operator.py",
+    "release_artifact_proc_probe.py",
+    "release_artifact_retention.py",
+    "release_artifact_retention_operator.py",
+    "release_dr_generation_authentication.py",
+    "release_dr_generation_enrollment.py",
+    "release_dr_generation_index.py",
+    "release_dr_generation_rehearsal.py",
+    "release_dr_generation_lifecycle.py",
+)
+_RELEASE_RETENTION_TOOLCHAIN_PACKAGE_INIT = (
+    b'"""Sealed Friday release-retention and disaster-recovery toolchain."""\n'
+)
+_RELEASE_RETENTION_TOOLCHAIN_PACKAGE_FILES = (
+    "__init__.py",
+    *_RELEASE_RETENTION_TOOLCHAIN_MODULES,
+)
 _SECONDARY_ROLLOUT_RECEIPT_STAGE = {
     _SECONDARY_SHADOW_TO_PRIVATE_SHADOW_TRANSITION: "public-shadow",
     _SECONDARY_SHADOW_TO_ASSIST_TRANSITION: "private-shadow",
@@ -2217,6 +2245,199 @@ def _read_stable_regular_file(path: Path, *, maximum_bytes: int, code: str) -> b
     finally:
         if descriptor >= 0:
             os.close(descriptor)
+
+
+def _release_retention_toolchain_relative_path(module: str) -> Path:
+    return _RELEASE_RETENTION_TOOLCHAIN_ROOT / "tools" / module
+
+
+def _read_release_retention_toolchain_sources(operator_source: Path) -> dict[str, bytes]:
+    """Read the closed P0H source set from the exact checkout that owns the builder."""
+
+    source_tools = operator_source.parent
+    if operator_source.name != "immutable_release_operator.py" or source_tools.name != "tools":
+        raise ReleaseFailure("release_retention_toolchain_source_invalid")
+    sources: dict[str, bytes] = {
+        "__init__.py": _RELEASE_RETENTION_TOOLCHAIN_PACKAGE_INIT,
+    }
+    for module in _RELEASE_RETENTION_TOOLCHAIN_MODULES:
+        source = source_tools / module
+        sources[module] = _read_stable_regular_file(
+            source,
+            maximum_bytes=4 << 20,
+            code="release_retention_toolchain_source_invalid",
+        )
+    if sources["immutable_release_operator.py"] != _read_stable_regular_file(
+        operator_source,
+        maximum_bytes=4 << 20,
+        code="operator_source_invalid",
+    ):
+        raise ReleaseFailure("release_retention_toolchain_source_invalid")
+    return sources
+
+
+def _release_retention_toolchain_manifest_bytes(sources: Mapping[str, bytes]) -> bytes:
+    if tuple(sources) != _RELEASE_RETENTION_TOOLCHAIN_PACKAGE_FILES or any(
+        not isinstance(raw, bytes) or not raw for raw in sources.values()
+    ):
+        raise ReleaseFailure("release_retention_toolchain_source_invalid")
+    payload = {
+        "contract": RELEASE_RETENTION_TOOLCHAIN_CONTRACT,
+        "files": [
+            {
+                "path": _release_retention_toolchain_relative_path(module).as_posix(),
+                "sha256": _sha256_bytes(sources[module]),
+                "size": len(sources[module]),
+            }
+            for module in _RELEASE_RETENTION_TOOLCHAIN_PACKAGE_FILES
+        ],
+        "schema": RELEASE_RETENTION_TOOLCHAIN_MANIFEST_SCHEMA,
+    }
+    return _canonical_json(payload) + b"\n"
+
+
+def _release_retention_toolchain_receipt_identity(
+    metadata: Mapping[str, Any],
+) -> tuple[str, str]:
+    contract_key = "release_retention_toolchain_contract"
+    manifest_key = "release_retention_toolchain_manifest_sha256"
+    has_contract = contract_key in metadata
+    has_manifest = manifest_key in metadata
+    if not has_contract and not has_manifest:
+        return "", ""
+    contract = metadata.get(contract_key)
+    manifest_sha256 = metadata.get(manifest_key)
+    if (
+        has_contract != has_manifest
+        or contract != RELEASE_RETENTION_TOOLCHAIN_CONTRACT
+        or not isinstance(manifest_sha256, str)
+        or _HEX64.fullmatch(manifest_sha256) is None
+    ):
+        raise ReleaseFailure("release_metadata_invalid")
+    return RELEASE_RETENTION_TOOLCHAIN_CONTRACT, manifest_sha256
+
+
+def _validate_release_retention_toolchain(root: Path, expected_manifest_sha256: str) -> None:
+    """Authenticate the sealed bundle named by an admitted v1 build receipt."""
+
+    manifest_path = root / _RELEASE_RETENTION_TOOLCHAIN_MANIFEST
+    toolchain_root = root / _RELEASE_RETENTION_TOOLCHAIN_ROOT
+    toolchain_tools = toolchain_root / "tools"
+    try:
+        root_status = os.stat(toolchain_root, follow_symlinks=False)
+        tools_status = os.stat(toolchain_tools, follow_symlinks=False)
+        root_entries = {item.name for item in toolchain_root.iterdir()}
+        tool_entries = {item.name for item in toolchain_tools.iterdir()}
+    except OSError as exc:
+        raise ReleaseFailure("release_retention_toolchain_manifest_invalid") from exc
+    if (
+        not stat.S_ISDIR(root_status.st_mode)
+        or not stat.S_ISDIR(tools_status.st_mode)
+        or root_status.st_uid != os.geteuid()
+        or tools_status.st_uid != os.geteuid()
+        or stat.S_IMODE(root_status.st_mode) != 0o500
+        or stat.S_IMODE(tools_status.st_mode) != 0o500
+        or root_entries != {"manifest.json", "tools"}
+        or tool_entries != set(_RELEASE_RETENTION_TOOLCHAIN_PACKAGE_FILES)
+    ):
+        raise ReleaseFailure("release_retention_toolchain_manifest_invalid")
+    raw = _read_stable_regular_file(
+        manifest_path,
+        maximum_bytes=1 << 20,
+        code="release_retention_toolchain_manifest_invalid",
+    )
+    manifest_status = os.stat(manifest_path, follow_symlinks=False)
+    if (
+        manifest_status.st_uid != os.geteuid()
+        or manifest_status.st_nlink != 1
+        or stat.S_IMODE(manifest_status.st_mode) != 0o400
+        or _sha256_bytes(raw)
+        != _closed_hash(
+            expected_manifest_sha256,
+            "release_retention_toolchain_manifest_digest_invalid",
+        )
+    ):
+        raise ReleaseFailure("release_retention_toolchain_manifest_invalid")
+    try:
+        payload = _unique_json(raw.decode("ascii"))
+    except (UnicodeError, ValueError, json.JSONDecodeError) as exc:
+        raise ReleaseFailure("release_retention_toolchain_manifest_invalid") from exc
+    entries = payload.get("files")
+    if (
+        raw != _canonical_json(payload) + b"\n"
+        or set(payload) != {"contract", "files", "schema"}
+        or payload.get("contract") != RELEASE_RETENTION_TOOLCHAIN_CONTRACT
+        or payload.get("schema") != RELEASE_RETENTION_TOOLCHAIN_MANIFEST_SCHEMA
+        or not isinstance(entries, list)
+        or len(entries) != len(_RELEASE_RETENTION_TOOLCHAIN_PACKAGE_FILES)
+    ):
+        raise ReleaseFailure("release_retention_toolchain_manifest_invalid")
+    sealed: dict[str, bytes] = {}
+    for module, entry in zip(
+        _RELEASE_RETENTION_TOOLCHAIN_PACKAGE_FILES,
+        entries,
+        strict=True,
+    ):
+        expected_path = _release_retention_toolchain_relative_path(module).as_posix()
+        if (
+            not isinstance(entry, dict)
+            or set(entry) != {"path", "sha256", "size"}
+            or entry.get("path") != expected_path
+            or not isinstance(entry.get("sha256"), str)
+            or _HEX64.fullmatch(str(entry["sha256"])) is None
+            or type(entry.get("size")) is not int
+            or not 0 < int(entry["size"]) <= 4 << 20
+        ):
+            raise ReleaseFailure("release_retention_toolchain_manifest_invalid")
+        path = root / Path(expected_path)
+        content = _read_stable_regular_file(
+            path,
+            maximum_bytes=4 << 20,
+            code="release_retention_toolchain_file_invalid",
+        )
+        status = os.stat(path, follow_symlinks=False)
+        if (
+            status.st_uid != os.geteuid()
+            or status.st_nlink != 1
+            or stat.S_IMODE(status.st_mode) != 0o400
+            or len(content) != int(entry["size"])
+            or _sha256_bytes(content) != entry["sha256"]
+        ):
+            raise ReleaseFailure("release_retention_toolchain_file_invalid")
+        sealed[module] = content
+    operator_path = root / "artifacts/immutable_release_operator.py"
+    operator_copy = _read_stable_regular_file(
+        operator_path,
+        maximum_bytes=4 << 20,
+        code="release_retention_toolchain_file_invalid",
+    )
+    operator_status = os.stat(operator_path, follow_symlinks=False)
+    if (
+        operator_status.st_uid != os.geteuid()
+        or operator_status.st_nlink != 1
+        or stat.S_IMODE(operator_status.st_mode) != 0o400
+    ):
+        raise ReleaseFailure("release_retention_toolchain_file_invalid")
+    if sealed["__init__.py"] != _RELEASE_RETENTION_TOOLCHAIN_PACKAGE_INIT:
+        raise ReleaseFailure("release_retention_toolchain_package_invalid")
+    if sealed["immutable_release_operator.py"] != operator_copy:
+        raise ReleaseFailure("release_retention_toolchain_operator_mismatch")
+
+
+def _sealed_release_retention_toolchain_manifest_sha256(root: Path) -> str:
+    """Return the authenticated bundle identity, or empty for a historical tree."""
+
+    toolchain_root = root / _RELEASE_RETENTION_TOOLCHAIN_ROOT
+    if not toolchain_root.exists() and not toolchain_root.is_symlink():
+        return ""
+    raw = _read_stable_regular_file(
+        root / _RELEASE_RETENTION_TOOLCHAIN_MANIFEST,
+        maximum_bytes=1 << 20,
+        code="release_retention_toolchain_manifest_invalid",
+    )
+    manifest_sha256 = _sha256_bytes(raw)
+    _validate_release_retention_toolchain(root, manifest_sha256)
+    return manifest_sha256
 
 
 def _secondary_environment_parts(raw: bytes) -> tuple[dict[str, str], bytes, bytes]:
@@ -5951,6 +6172,8 @@ class BuildSpec:
     alias_dependency_sha256: str
     secondary_product_runner: Path
     secondary_product_runner_sha256: str
+    release_retention_toolchain_manifest_sha256: str
+    build_receipt_profile: str
     max_schema: int
 
 
@@ -5968,6 +6191,10 @@ class ReleaseIdentity:
     engineer_command_lifecycle_contract: str = ""
     operator_transaction_lock_scope_contract: str = ""
     operator_transaction_lock_scope_sha256: str = ""
+    release_retention_toolchain_contract: str = ""
+    release_retention_toolchain_manifest_sha256: str = ""
+    build_receipt_profile: str = ""
+    sealed_release_retention_toolchain_manifest_sha256: str = ""
 
 
 @dataclass(frozen=True)
@@ -7418,9 +7645,13 @@ def _build_release_locked(
         anchor=spec.anchor,
         env_file=spec.env_file,
     )
-    state_dir = _canonical_operator_state_dir(spec.friday_home, spec.state_dir)
-    lock_scope_sha256 = _operator_transaction_lock_scope_sha256(state_dir)
+    _canonical_operator_state_dir(spec.friday_home, spec.state_dir)
     commit = _closed_commit(spec.commit)
+    if (
+        spec.build_receipt_profile not in _BUILD_RECEIPT_BUILD_PROFILES
+        or spec.build_receipt_profile != BUILD_RECEIPT_PROFILE_HISTORICAL_V1_READER
+    ):
+        raise ReleaseFailure("release_build_receipt_profile_invalid")
     if _VERSION.fullmatch(spec.version) is None or type(spec.max_schema) is not int or spec.max_schema <= 0:
         raise ReleaseFailure("release_metadata_invalid")
     wheel = _regular_file(spec.wheel, maximum_bytes=MAX_WHEEL_BYTES, code="wheel_invalid")
@@ -7458,6 +7689,17 @@ def _build_release_locked(
         maximum_bytes=4 << 20,
         code="operator_source_invalid",
     )
+    retention_toolchain_sources = _read_release_retention_toolchain_sources(operator_source)
+    retention_toolchain_manifest = _release_retention_toolchain_manifest_bytes(
+        retention_toolchain_sources
+    )
+    retention_toolchain_manifest_sha256 = _sha256_bytes(retention_toolchain_manifest)
+    if retention_toolchain_manifest_sha256 != _closed_hash(
+        spec.release_retention_toolchain_manifest_sha256,
+        "release_retention_toolchain_manifest_digest_invalid",
+    ):
+        raise ReleaseFailure("release_retention_toolchain_manifest_digest_mismatch")
+    operator_bytes = retention_toolchain_sources["immutable_release_operator.py"]
     product_runner_source = spec.secondary_product_runner
     product_runner_lexical = Path(os.path.abspath(product_runner_source))
     source_parts = _SECONDARY_PRODUCT_RUNNER_SOURCE.parts
@@ -7542,13 +7784,21 @@ def _build_release_locked(
                 code="secondary_product_runner_source_invalid",
             )
             != product_runner_bytes
+            or _read_release_retention_toolchain_sources(operator_source)
+            != retention_toolchain_sources
         ):
             raise ReleaseFailure("release_build_input_changed")
         artifacts = staging / "artifacts"
         artifacts.mkdir(mode=0o700)
-        operator_bytes = operator_source.read_bytes()
         (artifacts / "immutable_release_operator.py").write_bytes(operator_bytes)
         (staging / _SECONDARY_PRODUCT_RUNNER_ARTIFACT).write_bytes(product_runner_bytes)
+        retention_toolchain_tools = staging / _RELEASE_RETENTION_TOOLCHAIN_ROOT / "tools"
+        retention_toolchain_tools.mkdir(parents=True, mode=0o700)
+        for module in _RELEASE_RETENTION_TOOLCHAIN_PACKAGE_FILES:
+            (retention_toolchain_tools / module).write_bytes(retention_toolchain_sources[module])
+        (staging / _RELEASE_RETENTION_TOOLCHAIN_MANIFEST).write_bytes(
+            retention_toolchain_manifest
+        )
         alias_tool = _regular_file(spec.alias_tool, maximum_bytes=4 << 20, code="alias_tool_invalid")
         alias_dependency = _regular_file(
             spec.alias_dependency,
@@ -7595,23 +7845,23 @@ def _build_release_locked(
             "obsidian_cutover_contract": OBSIDIAN_CUTOVER_CONTRACT,
             "venv_relocation_contract": VENV_RELOCATION_CONTRACT,
             "engineer_command_lifecycle_contract": ENGINEER_COMMAND_LIFECYCLE_CONTRACT,
-            "operator_transaction_lock_scope_contract": OPERATOR_TRANSACTION_LOCK_SCOPE_CONTRACT,
-            "operator_transaction_lock_scope_sha256": lock_scope_sha256,
         }
         (artifacts / "immutable-release.json").write_bytes(_canonical_json(metadata) + b"\n")
         provisional = ReleaseIdentity(
-            staging,
-            commit,
-            spec.version,
-            "0" * 64,
-            spec.max_schema,
-            MEMORY_VAULT_MODE_CONTRACT,
-            VENV_RELOCATION_CONTRACT,
-            OBSIDIAN_CUTOVER_CONTRACT,
-            product_runner_sha256,
-            ENGINEER_COMMAND_LIFECYCLE_CONTRACT,
-            OPERATOR_TRANSACTION_LOCK_SCOPE_CONTRACT,
-            lock_scope_sha256,
+            root=staging,
+            commit=commit,
+            version=spec.version,
+            tree_manifest_sha256="0" * 64,
+            max_schema=spec.max_schema,
+            memory_vault_mode_contract=MEMORY_VAULT_MODE_CONTRACT,
+            venv_relocation_contract=VENV_RELOCATION_CONTRACT,
+            obsidian_cutover_contract=OBSIDIAN_CUTOVER_CONTRACT,
+            secondary_product_runner_sha256=product_runner_sha256,
+            engineer_command_lifecycle_contract=ENGINEER_COMMAND_LIFECYCLE_CONTRACT,
+            build_receipt_profile=BUILD_RECEIPT_PROFILE_HISTORICAL_V1_READER,
+            sealed_release_retention_toolchain_manifest_sha256=(
+                retention_toolchain_manifest_sha256
+            ),
         )
         installed_surface_smoke(provisional)
         _relocate_venv_generated_paths(staging, target)
@@ -7653,18 +7903,20 @@ def _build_release_locked(
         _fsync_directory(root)
         guard()
         release = ReleaseIdentity(
-            target,
-            commit,
-            spec.version,
-            manifest_sha,
-            spec.max_schema,
-            MEMORY_VAULT_MODE_CONTRACT,
-            VENV_RELOCATION_CONTRACT,
-            OBSIDIAN_CUTOVER_CONTRACT,
-            product_runner_sha256,
-            ENGINEER_COMMAND_LIFECYCLE_CONTRACT,
-            OPERATOR_TRANSACTION_LOCK_SCOPE_CONTRACT,
-            lock_scope_sha256,
+            root=target,
+            commit=commit,
+            version=spec.version,
+            tree_manifest_sha256=manifest_sha,
+            max_schema=spec.max_schema,
+            memory_vault_mode_contract=MEMORY_VAULT_MODE_CONTRACT,
+            venv_relocation_contract=VENV_RELOCATION_CONTRACT,
+            obsidian_cutover_contract=OBSIDIAN_CUTOVER_CONTRACT,
+            secondary_product_runner_sha256=product_runner_sha256,
+            engineer_command_lifecycle_contract=ENGINEER_COMMAND_LIFECYCLE_CONTRACT,
+            build_receipt_profile=BUILD_RECEIPT_PROFILE_HISTORICAL_V1_READER,
+            sealed_release_retention_toolchain_manifest_sha256=(
+                retention_toolchain_manifest_sha256
+            ),
         )
         verify_release_tree(release)
         installed_surface_smoke(release)
@@ -17894,6 +18146,8 @@ def load_release_identity(root: Path, *, expected_tree_sha256: str) -> ReleaseId
         "engineer_command_lifecycle_contract",
         "operator_transaction_lock_scope_contract",
         "operator_transaction_lock_scope_sha256",
+        "release_retention_toolchain_contract",
+        "release_retention_toolchain_manifest_sha256",
     }
     memory_vault_mode_contract = (
         str(metadata.get("memory_vault_mode_contract") or "") if isinstance(metadata, dict) else ""
@@ -17919,6 +18173,14 @@ def load_release_identity(root: Path, *, expected_tree_sha256: str) -> ReleaseId
         str(metadata.get("operator_transaction_lock_scope_sha256") or "")
         if isinstance(metadata, dict)
         else ""
+    )
+    (
+        release_retention_toolchain_contract,
+        release_retention_toolchain_manifest_sha256,
+    ) = (
+        _release_retention_toolchain_receipt_identity(metadata)
+        if isinstance(metadata, dict)
+        else ("", "")
     )
     if (
         not isinstance(metadata, dict)
@@ -18037,9 +18299,39 @@ def load_release_identity(root: Path, *, expected_tree_sha256: str) -> ReleaseId
         engineer_command_lifecycle_contract=engineer_command_lifecycle_contract,
         operator_transaction_lock_scope_contract=operator_transaction_lock_scope_contract,
         operator_transaction_lock_scope_sha256=operator_transaction_lock_scope_sha256,
+        release_retention_toolchain_contract=release_retention_toolchain_contract,
+        release_retention_toolchain_manifest_sha256=(
+            release_retention_toolchain_manifest_sha256
+        ),
     )
     verify_release_tree(release)
-    return release
+    sealed_toolchain_manifest_sha256 = _sealed_release_retention_toolchain_manifest_sha256(
+        resolved
+    )
+    lock_scope_present = bool(operator_transaction_lock_scope_contract)
+    retention_receipt_present = bool(release_retention_toolchain_contract)
+    if retention_receipt_present:
+        if (
+            not sealed_toolchain_manifest_sha256
+            or release_retention_toolchain_manifest_sha256
+            != sealed_toolchain_manifest_sha256
+            or not lock_scope_present
+        ):
+            raise ReleaseFailure("release_metadata_invalid")
+        build_receipt_profile = BUILD_RECEIPT_PROFILE_P0H_RETENTION
+    elif sealed_toolchain_manifest_sha256:
+        if lock_scope_present:
+            raise ReleaseFailure("release_metadata_invalid")
+        build_receipt_profile = BUILD_RECEIPT_PROFILE_HISTORICAL_V1_READER
+    else:
+        build_receipt_profile = BUILD_RECEIPT_PROFILE_HISTORICAL_V1
+    return replace(
+        release,
+        build_receipt_profile=build_receipt_profile,
+        sealed_release_retention_toolchain_manifest_sha256=(
+            sealed_toolchain_manifest_sha256
+        ),
+    )
 
 
 def _load_candidate_alias_tool(release: ReleaseIdentity) -> Any:
@@ -18085,6 +18377,45 @@ def _require_release_operator_lock_scope(release: ReleaseIdentity, state_dir: Pa
         raise ReleaseFailure("operator_release_lock_scope_mismatch")
 
 
+def _require_release_retention_toolchain(release: ReleaseIdentity) -> None:
+    manifest_sha256 = release.release_retention_toolchain_manifest_sha256
+    if (
+        release.build_receipt_profile != BUILD_RECEIPT_PROFILE_P0H_RETENTION
+        or release.release_retention_toolchain_contract != RELEASE_RETENTION_TOOLCHAIN_CONTRACT
+        or not isinstance(manifest_sha256, str)
+        or _HEX64.fullmatch(manifest_sha256) is None
+        or release.sealed_release_retention_toolchain_manifest_sha256 != manifest_sha256
+    ):
+        raise ReleaseFailure("operator_release_retention_toolchain_missing")
+    _validate_release_retention_toolchain(release.root, manifest_sha256)
+
+
+def _require_reader_only_release_profile(release: ReleaseIdentity) -> None:
+    manifest_sha256 = release.sealed_release_retention_toolchain_manifest_sha256
+    if (
+        release.build_receipt_profile != BUILD_RECEIPT_PROFILE_HISTORICAL_V1_READER
+        or release.operator_transaction_lock_scope_contract
+        or release.operator_transaction_lock_scope_sha256
+        or release.release_retention_toolchain_contract
+        or release.release_retention_toolchain_manifest_sha256
+        or not isinstance(manifest_sha256, str)
+        or _HEX64.fullmatch(manifest_sha256) is None
+    ):
+        raise ReleaseFailure("operator_reader_only_release_profile_missing")
+    _validate_release_retention_toolchain(release.root, manifest_sha256)
+
+
+def _require_candidate_lock_scope(
+    release: ReleaseIdentity,
+    *,
+    state_dir: Path,
+) -> None:
+    if release.build_receipt_profile == BUILD_RECEIPT_PROFILE_HISTORICAL_V1_READER:
+        _require_reader_only_release_profile(release)
+        return
+    _require_release_operator_lock_scope(release, state_dir)
+
+
 def _require_candidate_bound_operator(
     release: ReleaseIdentity,
     *,
@@ -18102,7 +18433,7 @@ def _require_candidate_bound_operator(
     if require_lock_scope:
         if state_dir is None:
             raise ReleaseFailure("operator_release_lock_scope_missing")
-        _require_release_operator_lock_scope(release, state_dir)
+        _require_candidate_lock_scope(release, state_dir=state_dir)
     expected_script = release.root / "artifacts/immutable_release_operator.py"
     try:
         script_bound = Path(__file__).resolve(strict=True).samefile(expected_script)
@@ -18499,6 +18830,12 @@ def build_parser() -> argparse.ArgumentParser:
         help=("Exact deploy/secondary-brain/windows-sglang/scripts/live_failure_battery.py source artifact"),
     )
     build.add_argument("--secondary-product-runner-sha256", required=True)
+    build.add_argument("--release-retention-toolchain-manifest-sha256", required=True)
+    build.add_argument(
+        "--build-receipt-profile",
+        required=True,
+        choices=_BUILD_RECEIPT_BUILD_PROFILES,
+    )
     build.add_argument("--max-schema", required=True, type=int)
 
     install = commands.add_parser("install-units")
@@ -18591,6 +18928,10 @@ def _run_cli(args: argparse.Namespace) -> dict[str, Any]:
                 alias_dependency_sha256=args.alias_dependency_sha256,
                 secondary_product_runner=args.secondary_product_runner,
                 secondary_product_runner_sha256=args.secondary_product_runner_sha256,
+                release_retention_toolchain_manifest_sha256=(
+                    args.release_retention_toolchain_manifest_sha256
+                ),
+                build_receipt_profile=args.build_receipt_profile,
                 max_schema=args.max_schema,
             )
         )
@@ -18768,7 +19109,7 @@ def _run_cli(args: argparse.Namespace) -> dict[str, Any]:
                 create_backup_root=False,
             )
             candidate, _previous, fallback = journal.release_identities()
-            _require_release_operator_lock_scope(candidate, config.state_dir)
+            _require_candidate_lock_scope(candidate, state_dir=config.state_dir)
             _require_release_in_operator_layout(candidate, config.friday_home)
             executor = load_release_identity(
                 args.executor_release,
@@ -18852,6 +19193,9 @@ __all__ = [
     "ALBUM_RECOVERY_JOURNAL_SCHEMA",
     "ALBUM_RECOVERY_RECEIPT_SCHEMA",
     "BOOTSTRAP_WHEELS",
+    "BUILD_RECEIPT_PROFILE_HISTORICAL_V1",
+    "BUILD_RECEIPT_PROFILE_HISTORICAL_V1_READER",
+    "BUILD_RECEIPT_PROFILE_P0H_RETENTION",
     "BUILD_RECEIPT_SCHEMA",
     "ENGINEER_COMMAND_LIFECYCLE_CONTRACT",
     "ENGINEER_COMMAND_LIFECYCLE_MIN_SCHEMA",
@@ -18863,6 +19207,8 @@ __all__ = [
     "OPERATOR_TRANSACTION_LOCK_SCOPE_CONTRACT",
     "OPERATOR_TRANSACTION_LOCK_SCOPE_SCHEMA",
     "OPERATOR_TRANSACTION_UNIT_PAIR_SCOPE_SCHEMA",
+    "RELEASE_RETENTION_TOOLCHAIN_CONTRACT",
+    "RELEASE_RETENTION_TOOLCHAIN_MANIFEST_SCHEMA",
     "ActivationPort",
     "DurableAlbumRecoveryJournal",
     "DurableActivationJournal",

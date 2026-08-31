@@ -9805,7 +9805,7 @@ def test_health_redirect_handler_never_follows_location() -> None:
     assert handler.redirect_request(None, None, 302, "found", None, "https://example.invalid") is None
 
 
-def test_build_parser_binds_both_manifest_digests_into_build_spec(
+def test_build_parser_binds_all_manifest_digests_into_build_spec(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -9866,6 +9866,10 @@ def test_build_parser_binds_both_manifest_digests_into_build_spec(
             str(product_runner),
             "--secondary-product-runner-sha256",
             hashlib.sha256(product_runner.read_bytes()).hexdigest(),
+            "--release-retention-toolchain-manifest-sha256",
+            "7" * 64,
+            "--build-receipt-profile",
+            operator.BUILD_RECEIPT_PROFILE_HISTORICAL_V1_READER,
             "--max-schema",
             "34",
         ]
@@ -9879,6 +9883,11 @@ def test_build_parser_binds_both_manifest_digests_into_build_spec(
     assert captured[0].secondary_product_runner == product_runner
     assert (
         captured[0].secondary_product_runner_sha256 == hashlib.sha256(product_runner.read_bytes()).hexdigest()
+    )
+    assert captured[0].release_retention_toolchain_manifest_sha256 == "7" * 64
+    assert (
+        captured[0].build_receipt_profile
+        == operator.BUILD_RECEIPT_PROFILE_HISTORICAL_V1_READER
     )
 
 
@@ -9960,6 +9969,193 @@ def _remove_fixture_pycache(pycache: Path) -> None:
     pycache.rmdir()
 
 
+def _release_retention_toolchain_manifest_sha256() -> str:
+    sources = operator._read_release_retention_toolchain_sources(  # noqa: SLF001
+        Path(operator.__file__).resolve(strict=True)
+    )
+    manifest = operator._release_retention_toolchain_manifest_bytes(sources)  # noqa: SLF001
+    return hashlib.sha256(manifest).hexdigest()
+
+
+def test_release_retention_toolchain_receipt_pair_preserves_historical_v1() -> None:
+    assert operator._release_retention_toolchain_receipt_identity({}) == ("", "")  # noqa: SLF001
+    digest = "a" * 64
+    assert operator._release_retention_toolchain_receipt_identity(  # noqa: SLF001
+        {
+            "release_retention_toolchain_contract": (
+                operator.RELEASE_RETENTION_TOOLCHAIN_CONTRACT
+            ),
+            "release_retention_toolchain_manifest_sha256": digest,
+        }
+    ) == (operator.RELEASE_RETENTION_TOOLCHAIN_CONTRACT, digest)
+
+
+@pytest.mark.parametrize(
+    "metadata",
+    [
+        {"release_retention_toolchain_contract": operator.RELEASE_RETENTION_TOOLCHAIN_CONTRACT},
+        {"release_retention_toolchain_manifest_sha256": "a" * 64},
+        {
+            "release_retention_toolchain_contract": "unrecognized-retention-toolchain-v1",
+            "release_retention_toolchain_manifest_sha256": "a" * 64,
+        },
+        {
+            "release_retention_toolchain_contract": (
+                operator.RELEASE_RETENTION_TOOLCHAIN_CONTRACT
+            ),
+            "release_retention_toolchain_manifest_sha256": "not-a-digest",
+        },
+    ],
+    ids=["contract-only", "digest-only", "unknown-contract", "invalid-digest"],
+)
+def test_release_retention_toolchain_receipt_pair_fails_closed(
+    metadata: dict[str, str],
+) -> None:
+    with pytest.raises(operator.ReleaseFailure, match="^release_metadata_invalid$"):
+        operator._release_retention_toolchain_receipt_identity(metadata)  # noqa: SLF001
+
+
+def _synthetic_sealed_retention_toolchain(
+    tmp_path: Path,
+    *,
+    supplied_sources: Mapping[str, bytes] | None = None,
+) -> tuple[Path, str]:
+    root = tmp_path / "release"
+    artifacts = root / "artifacts"
+    tools = root / operator._RELEASE_RETENTION_TOOLCHAIN_ROOT / "tools"  # noqa: SLF001
+    tools.mkdir(parents=True)
+    sources = dict(supplied_sources or {})
+    if not sources:
+        sources = {
+            module: f"synthetic:{module}\n".encode("ascii")
+            for module in operator._RELEASE_RETENTION_TOOLCHAIN_PACKAGE_FILES  # noqa: SLF001
+        }
+        sources["__init__.py"] = operator._RELEASE_RETENTION_TOOLCHAIN_PACKAGE_INIT  # noqa: SLF001
+    for module, raw in sources.items():
+        path = tools / module
+        path.write_bytes(raw)
+        path.chmod(0o400)
+    operator_copy = artifacts / "immutable_release_operator.py"
+    operator_copy.write_bytes(sources["immutable_release_operator.py"])
+    operator_copy.chmod(0o400)
+    manifest_raw = operator._release_retention_toolchain_manifest_bytes(sources)  # noqa: SLF001
+    manifest = root / operator._RELEASE_RETENTION_TOOLCHAIN_MANIFEST  # noqa: SLF001
+    manifest.write_bytes(manifest_raw)
+    manifest.chmod(0o400)
+    tools.chmod(0o500)
+    tools.parent.chmod(0o500)
+    return root, hashlib.sha256(manifest_raw).hexdigest()
+
+
+def test_release_retention_toolchain_admission_revalidates_closed_bundle(tmp_path: Path) -> None:
+    root, manifest_sha256 = _synthetic_sealed_retention_toolchain(tmp_path)
+    release = operator.ReleaseIdentity(
+        root=root,
+        commit="a" * 40,
+        version="0.207.85",
+        tree_manifest_sha256="b" * 64,
+        max_schema=50,
+        release_retention_toolchain_contract=operator.RELEASE_RETENTION_TOOLCHAIN_CONTRACT,
+        release_retention_toolchain_manifest_sha256=manifest_sha256,
+        build_receipt_profile=operator.BUILD_RECEIPT_PROFILE_P0H_RETENTION,
+        sealed_release_retention_toolchain_manifest_sha256=manifest_sha256,
+    )
+    operator._require_release_retention_toolchain(release)  # noqa: SLF001
+
+    tools = root / operator._RELEASE_RETENTION_TOOLCHAIN_ROOT / "tools"  # noqa: SLF001
+    tools.chmod(0o700)
+    extra = tools / "unmanifested.py"
+    extra.write_text("# must fail closed\n", encoding="ascii")
+    extra.chmod(0o400)
+    tools.chmod(0o500)
+    with pytest.raises(
+        operator.ReleaseFailure,
+        match="^release_retention_toolchain_manifest_invalid$",
+    ):
+        operator._require_release_retention_toolchain(release)  # noqa: SLF001
+
+    with pytest.raises(
+        operator.ReleaseFailure,
+        match="^operator_release_retention_toolchain_missing$",
+    ):
+        operator._require_release_retention_toolchain(  # noqa: SLF001
+            replace(
+                release,
+                release_retention_toolchain_contract="",
+                release_retention_toolchain_manifest_sha256="",
+            )
+        )
+
+
+def test_reader_only_release_profile_revalidates_bundle_and_omits_receipt_pairs(
+    tmp_path: Path,
+) -> None:
+    root, manifest_sha256 = _synthetic_sealed_retention_toolchain(tmp_path)
+    release = operator.ReleaseIdentity(
+        root=root,
+        commit="a" * 40,
+        version="0.207.85",
+        tree_manifest_sha256="b" * 64,
+        max_schema=50,
+        build_receipt_profile=operator.BUILD_RECEIPT_PROFILE_HISTORICAL_V1_READER,
+        sealed_release_retention_toolchain_manifest_sha256=manifest_sha256,
+    )
+
+    operator._require_reader_only_release_profile(release)  # noqa: SLF001
+    with pytest.raises(
+        operator.ReleaseFailure,
+        match="^operator_release_retention_toolchain_missing$",
+    ):
+        operator._require_release_retention_toolchain(release)  # noqa: SLF001
+    with pytest.raises(
+        operator.ReleaseFailure,
+        match="^operator_reader_only_release_profile_missing$",
+    ):
+        operator._require_reader_only_release_profile(  # noqa: SLF001
+            replace(
+                release,
+                operator_transaction_lock_scope_contract=(
+                    operator.OPERATOR_TRANSACTION_LOCK_SCOPE_CONTRACT
+                ),
+                operator_transaction_lock_scope_sha256="c" * 64,
+            )
+        )
+
+
+def test_release_retention_toolchain_absolute_entrypoints_import_sealed_closure(
+    tmp_path: Path,
+) -> None:
+    sources = operator._read_release_retention_toolchain_sources(  # noqa: SLF001
+        Path(operator.__file__).resolve(strict=True)
+    )
+    root, _manifest_sha256 = _synthetic_sealed_retention_toolchain(
+        tmp_path,
+        supplied_sources=sources,
+    )
+    tools = root / operator._RELEASE_RETENTION_TOOLCHAIN_ROOT / "tools"  # noqa: SLF001
+    environment = {
+        "LANG": "C.UTF-8",
+        "LC_ALL": "C.UTF-8",
+        "PATH": os.defpath,
+        "PYTHONDONTWRITEBYTECODE": "1",
+        "PYTHONNOUSERSITE": "1",
+    }
+    for module in (
+        "release_dr_generation_lifecycle.py",
+        "release_artifact_retention_operator.py",
+    ):
+        result = subprocess.run(  # noqa: S603
+            [sys.executable, "-I", "-B", str(tools / module), "--help"],
+            check=False,
+            capture_output=True,
+            cwd=tmp_path,
+            env=environment,
+            timeout=30,
+        )
+        assert result.returncode == 0, (module, result.stderr)
+        assert result.stderr == b""
+
+
 def _synthetic_build_spec(tmp_path: Path) -> operator.BuildSpec:
     friday_home = tmp_path / "friday-home"
     releases_root = friday_home / "wheel-only-releases"
@@ -10003,6 +10199,10 @@ def _synthetic_build_spec(tmp_path: Path) -> operator.BuildSpec:
         alias_dependency_sha256=hashlib.sha256(alias_dependency.read_bytes()).hexdigest(),
         secondary_product_runner=product_runner,
         secondary_product_runner_sha256=hashlib.sha256(product_runner.read_bytes()).hexdigest(),
+        release_retention_toolchain_manifest_sha256=(
+            _release_retention_toolchain_manifest_sha256()
+        ),
+        build_receipt_profile=operator.BUILD_RECEIPT_PROFILE_HISTORICAL_V1_READER,
         max_schema=34,
     )
 
@@ -10018,6 +10218,59 @@ def test_build_uses_the_shared_release_operator_transaction_lock(
         pytest.raises(operator.ReleaseFailure, match="^operator_transaction_in_progress$"),
     ):
         operator.build_release(spec)
+
+
+def test_build_rejects_unadmitted_retention_toolchain_before_staging(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    isolated_operator_transaction_domain: Path,
+) -> None:
+    spec = replace(
+        _synthetic_build_spec(tmp_path),
+        release_retention_toolchain_manifest_sha256="f" * 64,
+    )
+    monkeypatch.setattr(operator, "_preflight_base_python", lambda _python: None)
+    staging_calls: list[object] = []
+    monkeypatch.setattr(
+        operator.tempfile,
+        "mkdtemp",
+        lambda *args, **kwargs: staging_calls.append((args, kwargs)),
+    )
+
+    with pytest.raises(
+        operator.ReleaseFailure,
+        match="^release_retention_toolchain_manifest_digest_mismatch$",
+    ):
+        operator.build_release(spec)
+
+    assert staging_calls == []
+    assert list(spec.releases_root.iterdir()) == []
+
+
+def test_build_rejects_unknown_receipt_profile_before_staging(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    isolated_operator_transaction_domain: Path,
+) -> None:
+    spec = replace(
+        _synthetic_build_spec(tmp_path),
+        build_receipt_profile="prompt-selected-compatibility",
+    )
+    staging_calls: list[object] = []
+    monkeypatch.setattr(
+        operator.tempfile,
+        "mkdtemp",
+        lambda *args, **kwargs: staging_calls.append((args, kwargs)),
+    )
+
+    with pytest.raises(
+        operator.ReleaseFailure,
+        match="^release_build_receipt_profile_invalid$",
+    ):
+        operator.build_release(spec)
+
+    assert staging_calls == []
+    assert list(spec.releases_root.iterdir()) == []
 
 
 def test_build_rejects_an_alternate_state_lock_scope_before_mutation(
@@ -10489,15 +10742,69 @@ def test_build_smoke_failure_cleans_only_prepublication_staging_and_quarantines_
     product_runner = target / operator._SECONDARY_PRODUCT_RUNNER_ARTIFACT  # noqa: SLF001
     assert product_runner.read_bytes() == spec.secondary_product_runner.read_bytes()
     assert stat.S_IMODE(os.lstat(product_runner).st_mode) == 0o400
+    toolchain_manifest = target / operator._RELEASE_RETENTION_TOOLCHAIN_MANIFEST  # noqa: SLF001
+    toolchain_manifest_raw = toolchain_manifest.read_bytes()
+    metadata = json.loads((target / "artifacts/immutable-release.json").read_text(encoding="ascii"))
+    assert set(metadata) == {
+        "alias_dependency_sha256",
+        "alias_tool_sha256",
+        "base_python_sha256",
+        "bootstrap_pins",
+        "bootstrap_wheel_sha256",
+        "commit",
+        "engineer_command_lifecycle_contract",
+        "max_schema",
+        "memory_vault_mode_contract",
+        "obsidian_cutover_contract",
+        "operator_sha256",
+        "runtime_lock_sha256",
+        "runtime_pin_count",
+        "schema",
+        "secondary_product_runner_sha256",
+        "venv_relocation_contract",
+        "version",
+        "wheel_sha256",
+        "wheelhouse_manifest_sha256",
+    }
+    assert hashlib.sha256(toolchain_manifest_raw).hexdigest() == (
+        spec.release_retention_toolchain_manifest_sha256
+    )
+    toolchain_payload = json.loads(toolchain_manifest_raw)
+    assert toolchain_payload["schema"] == operator.RELEASE_RETENTION_TOOLCHAIN_MANIFEST_SCHEMA
+    assert toolchain_payload["contract"] == operator.RELEASE_RETENTION_TOOLCHAIN_CONTRACT
+    expected_sources = operator._read_release_retention_toolchain_sources(  # noqa: SLF001
+        Path(operator.__file__).resolve(strict=True)
+    )
+    assert [item["path"] for item in toolchain_payload["files"]] == [
+        operator._release_retention_toolchain_relative_path(module).as_posix()  # noqa: SLF001
+        for module in operator._RELEASE_RETENTION_TOOLCHAIN_PACKAGE_FILES  # noqa: SLF001
+    ]
+    for item in toolchain_payload["files"]:
+        packaged = target / item["path"]
+        module = packaged.name
+        assert packaged.read_bytes() == expected_sources[module]
+        assert item["sha256"] == hashlib.sha256(expected_sources[module]).hexdigest()
+        assert item["size"] == len(expected_sources[module])
+        assert stat.S_IMODE(os.lstat(packaged).st_mode) == 0o400
     loaded = operator.load_release_identity(target, expected_tree_sha256=digest)
     assert loaded.secondary_product_runner_sha256 == spec.secondary_product_runner_sha256
+    assert loaded.release_retention_toolchain_contract == ""
+    assert loaded.release_retention_toolchain_manifest_sha256 == ""
+    assert loaded.build_receipt_profile == (
+        operator.BUILD_RECEIPT_PROFILE_HISTORICAL_V1_READER
+    )
+    assert loaded.sealed_release_retention_toolchain_manifest_sha256 == (
+        spec.release_retention_toolchain_manifest_sha256
+    )
+    operator._require_reader_only_release_profile(loaded)  # noqa: SLF001
+    with pytest.raises(
+        operator.ReleaseFailure,
+        match="^operator_release_retention_toolchain_missing$",
+    ):
+        operator._require_release_retention_toolchain(loaded)  # noqa: SLF001
     operator._require_release_in_operator_layout(loaded, spec.friday_home)  # noqa: SLF001
-    assert (
-        loaded.operator_transaction_lock_scope_contract == operator.OPERATOR_TRANSACTION_LOCK_SCOPE_CONTRACT
-    )
-    assert loaded.operator_transaction_lock_scope_sha256 == (
-        operator._operator_transaction_lock_scope_sha256(spec.state_dir)  # noqa: SLF001
-    )
+    assert loaded.operator_transaction_lock_scope_contract == ""
+    assert loaded.operator_transaction_lock_scope_sha256 == ""
     with pytest.raises(operator.ReleaseFailure, match="^release_target_exists$"):
         operator.build_release(spec)
     assert hashlib.sha256(manifest.read_bytes()).hexdigest() == digest
@@ -11044,6 +11351,10 @@ def test_missing_venv_fails_before_release_staging_or_target(
         alias_dependency_sha256=hashlib.sha256(alias_dependency.read_bytes()).hexdigest(),
         secondary_product_runner=product_runner,
         secondary_product_runner_sha256=hashlib.sha256(product_runner.read_bytes()).hexdigest(),
+        release_retention_toolchain_manifest_sha256=(
+            _release_retention_toolchain_manifest_sha256()
+        ),
+        build_receipt_profile=operator.BUILD_RECEIPT_PROFILE_HISTORICAL_V1_READER,
         max_schema=34,
     )
     with pytest.raises(operator.ReleaseFailure, match="^base_python_venv_unavailable$"):
@@ -11127,6 +11438,10 @@ def test_post_seal_failure_removes_staging_and_preserves_original_failure(
         alias_dependency_sha256=hashlib.sha256(alias_dependency.read_bytes()).hexdigest(),
         secondary_product_runner=product_runner,
         secondary_product_runner_sha256=hashlib.sha256(product_runner.read_bytes()).hexdigest(),
+        release_retention_toolchain_manifest_sha256=(
+            _release_retention_toolchain_manifest_sha256()
+        ),
+        build_receipt_profile=operator.BUILD_RECEIPT_PROFILE_HISTORICAL_V1_READER,
         max_schema=34,
     )
     with pytest.raises(operator.ReleaseFailure, match="^synthetic_post_seal_failure$"):
