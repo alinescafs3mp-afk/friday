@@ -3525,6 +3525,7 @@ def _write_atomic(path: Path, payload: bytes) -> None:
     parent = _absolute_lexical(lexical.parent, code="output_path_invalid")
     directory_fd, parent_parts, parent_identities = _open_absolute_directory_chain(parent)
     temporary = ""
+    descriptor = -1
     published = False
     published_identity: tuple[int, int] | None = None
     success = False
@@ -3541,15 +3542,16 @@ def _write_atomic(path: Path, payload: bytes) -> None:
             os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0)
         )
         descriptor = os.open(temporary, flags, 0o600, dir_fd=directory_fd)
-        try:
-            offset = 0
-            while offset < len(payload):
-                offset += os.write(descriptor, payload[offset:])
-            os.fsync(descriptor)
-        finally:
-            os.close(descriptor)
+        offset = 0
+        while offset < len(payload):
+            offset += os.write(descriptor, payload[offset:])
+        os.fsync(descriptor)
         _require_pinned_directory(directory_fd, parent_parts, parent_identities)
-        published_identity = _inode_identity(os.stat(temporary, dir_fd=directory_fd, follow_symlinks=False))
+        held_status = os.fstat(descriptor)
+        temporary_status = os.stat(temporary, dir_fd=directory_fd, follow_symlinks=False)
+        published_identity = _inode_identity(held_status)
+        if _inode_identity(temporary_status) != published_identity:
+            raise RetentionPlanError("output_publish_raced")
         try:
             os.link(
                 temporary,
@@ -3571,7 +3573,10 @@ def _write_atomic(path: Path, payload: bytes) -> None:
             final_status = os.stat(lexical.name, dir_fd=directory_fd, follow_symlinks=False)
         except OSError as exc:
             raise RetentionPlanError("output_publish_raced") from exc
-        if _inode_identity(final_status) != published_identity:
+        if (
+            _inode_identity(final_status) != published_identity
+            or _inode_identity(os.fstat(descriptor)) != published_identity
+        ):
             raise RetentionPlanError("output_publish_raced")
         success = True
     finally:
@@ -3586,6 +3591,8 @@ def _write_atomic(path: Path, payload: bytes) -> None:
         if temporary:
             with suppress(FileNotFoundError):
                 os.unlink(temporary, dir_fd=directory_fd)
+        if descriptor >= 0:
+            os.close(descriptor)
         os.close(directory_fd)
 
 
