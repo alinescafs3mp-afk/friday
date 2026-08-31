@@ -11,8 +11,9 @@
 - Rollout completes only the pre-activation v1 generation and leaves `older`
   absent after activation; no post-activation v1 publication is allowed before
   the full writer contract displaces legacy evidence.
-- Keeps metadata substitution reads bounded when a reviewed regular file is
-  raced into a FIFO, and makes exact-gate evidence-root propagation code-owned.
+- Keeps every mutable retention and pre-activation DR metadata read bounded
+  when a reviewed regular file is raced into a FIFO, rejects before read,
+  copy or fsync, and makes exact-gate evidence-root propagation code-owned.
 - Supersedes unactivated `0.207.85`–`0.207.89`; SQLite remains at schema 50
   with exact `0.207.84` as predecessor and fallback. Retention deletion remains disabled.
 
