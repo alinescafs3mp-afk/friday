@@ -60,8 +60,9 @@ selects eligible privacy-safe rows before
 its finite page, so current, exhausted or excluded rows cannot starve later
 work. S6-R3 exact journey evidence is live; P0G Gate Diet is included in the
 current release. P0H reader, pair-bearing writer and safe no-delete continuation
-remain live through `0.207.95`; P0H remains open only for a real
-boot-start/quiescence absence authority and reviewed bounded deletion. S4-R8
+remain live through `0.207.95`; the permanent `io_uring_disabled=2` R3 proposal
+is rejected, so P0H remains open only for a one-shot maintenance authority and
+reviewed bounded deletion that preserves the ordinary Engineer environment. S4-R8
 remains open for sole-facade parity; R8A deliberately preserves the released
 legacy routing surface while closing fail-open model-control parsing defects.
 Keep the released S3 path in shadow
@@ -163,6 +164,13 @@ Two independently authenticated v2 generations, durable fallback, exact scope
 and privileged no-delete probe are live. Because Linux still provides no
 boot-start/quiescence authority proving global open-reference absence, every
 candidate remains referenced and no retention apply or deletion is authorized.
+The reviewed R3 boot proposal is explicitly rejected and not merged: `/init`
+does not prove first userspace on every admitted kernel, its installer has an
+authenticated-source TOCTOU, its uninstall marker is not crash-atomic, and its
+persistent system-wide `kernel.io_uring_disabled=2` policy violates the ordinary
+installed-software contract of Engineer Mode. Any successor must be an explicit
+one-shot maintenance boot/transaction which returns the machine to its ordinary
+kernel profile before Friday or owner software resumes.
 
 Goal: replace the unbounded release polygon with a small recoverable set. The
 current inventory is roughly 54 GB of backup data, 29 GB of wheel-only releases
