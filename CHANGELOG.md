@@ -1,3 +1,14 @@
+## 0.207.97 — 2026-09-01
+
+### Authenticated production observation
+
+- Adds a hidden canonical-owner numeric-loopback route for one read-only,
+  schema-50 scheduled-work snapshot without exposing bodies or row identities.
+- Binds Release-Captain observation to the exact release, process epoch, trusted
+  health and fresh challenge, then publishes only a create-once private artifact.
+- SQLite remains at schema 50; exact `0.207.96` is the predecessor and
+  `0.207.90` remains the immutable fallback.
+
 ## 0.207.96 — 2026-09-01
 
 ### Dense document recall
