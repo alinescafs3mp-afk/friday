@@ -267,6 +267,102 @@ def test_linux_surface_readers_cover_fd_cwd_root_exe_and_complete_map_files(tmp_
     assert next(reference for reference in references if reference.source == "fd").mount_id == 81
 
 
+def test_privileged_io_uring_conservatively_references_every_target(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    first = probe.ProbeTarget(
+        "first",
+        (tmp_path / "first",),
+        (probe.ObjectKey(8, 11, stat.S_IFREG),),
+    )
+    second = probe.ProbeTarget(
+        "second",
+        (tmp_path / "second",),
+        (probe.ObjectKey(8, 12, stat.S_IFREG),),
+    )
+    index = probe.build_target_index((first, second))
+    process = tmp_path / "proc" / "123"
+    (process / "fd").mkdir(parents=True)
+    (process / "fdinfo").mkdir()
+    (process / "fd" / "7").write_bytes(b"")
+    (process / "fdinfo" / "7").write_bytes(b"mnt_id:\t81\n")
+    ring = probe._Reference(  # noqa: SLF001
+        "fd",
+        "7",
+        probe.ObjectKey(0, 99, stat.S_IFREG),
+        81,
+        b"anon_inode:[io_uring]",
+    )
+
+    conservative = probe._LinuxProcScanner(  # noqa: SLF001
+        Path("/proc"),
+        index,
+        conservatively_retain_opaque_file_references=True,
+    )
+    assert conservative.opaque_file_reference_target_ids == ("first", "second")
+    monkeypatch.setattr(conservative, "_reference", lambda *args, **kwargs: ring)
+    process_fd = os.open(process, os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        assert conservative._fd_references(process_fd, 123) == [ring]  # noqa: SLF001
+    finally:
+        os.close(process_fd)
+    assert conservative.opaque_file_reference_target_ids == ("first", "second")
+
+    diagnostic = probe._LinuxProcScanner(Path("/proc"), index)  # noqa: SLF001
+    monkeypatch.setattr(diagnostic, "_reference", lambda *args, **kwargs: ring)
+    process_fd = os.open(process, os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        with pytest.raises(probe._ProbeIssue, match="^proc_surface_unsupported$"):  # noqa: SLF001
+            diagnostic._fd_references(process_fd, 123)  # noqa: SLF001
+    finally:
+        os.close(process_fd)
+    assert diagnostic.opaque_file_reference_target_ids == ()
+
+    observation = _observation()
+
+    class OpaqueScanner:
+        def __init__(
+            self,
+            proc_root: Path,
+            target_index: probe.TargetIndex,
+            *,
+            conservatively_retain_opaque_file_references: bool,
+        ) -> None:
+            assert proc_root == Path("/proc")
+            assert target_index == index
+            assert conservatively_retain_opaque_file_references is True
+
+        def __enter__(self) -> OpaqueScanner:
+            return self
+
+        def __exit__(self, *args: object) -> None:
+            return None
+
+        def capture(self) -> probe._GlobalObservation:  # noqa: SLF001
+            return observation
+
+        @property
+        def opaque_file_reference_target_ids(self) -> tuple[str, ...]:
+            return ("first", "second")
+
+    monkeypatch.setattr(probe, "_LinuxProcScanner", OpaqueScanner)
+    monkeypatch.setattr(
+        probe,
+        "_kernel_target_references",
+        lambda target_index: ((), "a" * 64),
+    )
+
+    captured, referenced, kernel_epoch_sha256 = probe._capture_privileged_target_observation(  # noqa: SLF001
+        index
+    )
+
+    assert captured == observation
+    assert referenced == ("first", "second")
+    assert len(kernel_epoch_sha256) == 64
+    assert kernel_epoch_sha256 != "a" * 64
+
+
 def test_maps_without_one_exact_map_files_object_fail_closed(tmp_path: Path) -> None:
     target = tmp_path / "target"
     target.write_bytes(b"x")

@@ -46,7 +46,15 @@ RETENTION_SCOPE_NAME = "release-artifact-retention-scope.v1.json"
 BOUNDED_DELETE_CONTOUR = "sealed-localfs-proc-mount-kernel-lease-global-lock-v1"
 THREAT_BOUNDARY = "non_hostile_same_euid_and_root_admin_no_concurrent_open_attempts"
 PRIVILEGED_PROC_HELPER = Path("/usr/libexec/friday/release_artifact_proc_probe.py")
-PRIVILEGED_SCOPE_AUTHORITY = Path("/usr/libexec/friday/release_artifact_proc_scope.v1.json")
+_PRIVILEGED_SCOPE_AUTHORITY_BYTES = (
+    b'{"required_capabilities":["CAP_SYS_ADMIN","CAP_SYS_PTRACE"],'
+    b'"schema":"friday.release-artifact-proc-host-scope.v1",'
+    b'"scope":"initial_pid_namespace_and_proc_v1"}\n'
+)
+# The installed authority is deliberately root-only (0400).  Its exact body is
+# a protocol constant authenticated by the pinned root helper, so the
+# unprivileged planner verifies the returned digest without reading the file.
+PRIVILEGED_SCOPE_AUTHORITY_SHA256 = hashlib.sha256(_PRIVILEGED_SCOPE_AUTHORITY_BYTES).hexdigest()
 MAX_JOURNAL_BYTES = 1 << 20
 MAX_RETENTION_SCOPE_BYTES = 1 << 20
 MAX_RELEASE_MANIFEST_BYTES = 64 << 20
@@ -3016,7 +3024,7 @@ def _target_probe_index(
 
 def _run_privileged_target_probe(index: proc_probe.TargetIndex) -> tuple[dict[str, Any], str]:
     helper, helper_sha256 = _root_owned_file_sha256(PRIVILEGED_PROC_HELPER)
-    _scope_authority, scope_authority_sha256 = _root_owned_file_sha256(PRIVILEGED_SCOPE_AUTHORITY)
+    scope_authority_sha256 = PRIVILEGED_SCOPE_AUTHORITY_SHA256
     sudo, sudo_sha256 = _root_owned_file_sha256(Path("/usr/bin/sudo"), setuid=True)
     python, python_sha256 = _root_owned_file_sha256(Path("/usr/bin/python3"))
     command = [

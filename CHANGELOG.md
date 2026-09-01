@@ -8,6 +8,13 @@
 - Authenticates canonical gate evidence as its own protected contour outside
   disposable release and backup inventories, matching the one-time retention
   scope contract without ever adding evidence to deletion authority.
+- Binds the unprivileged planner to the exact code-owned digest of the
+  intentionally root-only `0400` host-scope authority; only the pinned root
+  helper reads and validates its bytes.
+- Without a boot-start `io_uring` absence authority, treats every indexed
+  artifact as potentially referenced. This permits a complete no-delete plan
+  without converting an invisible registered or asynchronous kernel reference
+  into false clearance.
 - Adds race-closed and provision-to-eligible regressions for the external
   evidence contour. SQLite remains at schema 50; exact `0.207.91` is the
   predecessor and `0.207.90` remains the immutable fallback.

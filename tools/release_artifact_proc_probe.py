@@ -1050,9 +1050,16 @@ def _parse_map_entry(name: str, *, pid: int) -> tuple[int, int]:
 
 
 class _LinuxProcScanner:
-    def __init__(self, proc_root: Path, target_index: TargetIndex) -> None:
+    def __init__(
+        self,
+        proc_root: Path,
+        target_index: TargetIndex,
+        *,
+        conservatively_retain_opaque_file_references: bool = False,
+    ) -> None:
         self.proc_root = proc_root
         self.target_index = target_index
+        self.conservatively_retain_opaque_file_references = conservatively_retain_opaque_file_references
         self.lookup = _target_lookup(target_index)
         self.identity_lookup: dict[tuple[int, int], tuple[ObjectKey, ...]] = {}
         for object_key in self.lookup:
@@ -1066,6 +1073,16 @@ class _LinuxProcScanner:
             tuple[int, int, str, int, int, int, int],
             tuple[tuple[_Reference, ...], str, int, bytes, ObjectKey, int],
         ] = {}
+
+    @property
+    def opaque_file_reference_target_ids(self) -> tuple[str, ...]:
+        if not self.conservatively_retain_opaque_file_references:
+            return ()
+        # A closed io_uring descriptor can leave asynchronous exit work and
+        # registered file objects alive after the ring disappears from proc.
+        # This observer has no boot-start absence authority, so its privileged
+        # retention contour must never infer clear from current visibility.
+        return tuple(target.target_id for target in self.target_index.targets)
 
     def __enter__(self) -> _LinuxProcScanner:
         if sys.platform != "linux" or self.proc_root != Path("/proc"):
@@ -1316,7 +1333,16 @@ class _LinuxProcScanner:
                     source="fd",
                     mount_id=_parse_fdinfo(info, pid=pid),
                 )
-                if reference.link_target == b"anon_inode:[io_uring]":
+                # io_uring may retain registered or in-flight file objects
+                # after their ordinary descriptor disappears.  Proc does not
+                # expose enough stable inode identity to map those objects back
+                # to individual targets.  The privileged retention observer
+                # therefore treats every target as referenced; the
+                # diagnostic-only observer reports the surface as unsupported.
+                if (
+                    reference.link_target == b"anon_inode:[io_uring]"
+                    and not self.conservatively_retain_opaque_file_references
+                ):
                     raise _ProbeIssue("proc_surface_unsupported", pid=pid, source="fdinfo")
                 if reference.link_target.startswith(b"mnt:[") and reference.link_target.endswith(b"]"):
                     # A mount namespace can outlive its last task through an
@@ -2310,7 +2336,11 @@ def _capture_privileged_target_observation(
 
     previous: tuple[_GlobalObservation, tuple[str, ...], str] | None = None
     try:
-        with _LinuxProcScanner(Path("/proc"), index) as scanner:
+        with _LinuxProcScanner(
+            Path("/proc"),
+            index,
+            conservatively_retain_opaque_file_references=True,
+        ) as scanner:
             for _attempt in range(6):
                 try:
                     kernel_before = _kernel_target_references(index)
@@ -2324,7 +2354,17 @@ def _capture_privileged_target_observation(
                 if kernel_before != kernel_after:
                     previous = None
                     continue
-                combined = (current, *kernel_after)
+                opaque_target_ids = scanner.opaque_file_reference_target_ids
+                referenced_target_ids = tuple(sorted(set(kernel_after[0]) | set(opaque_target_ids)))
+                kernel_epoch_sha256 = hashlib.sha256(
+                    _canonical_json(
+                        {
+                            "kernel_epoch_sha256": kernel_after[1],
+                            "opaque_file_reference_target_ids": list(opaque_target_ids),
+                        }
+                    )
+                ).hexdigest()
+                combined = (current, referenced_target_ids, kernel_epoch_sha256)
                 if previous is not None and (
                     previous[0].scope == current.scope
                     and previous[0].task_epoch_set_sha256 == current.task_epoch_set_sha256

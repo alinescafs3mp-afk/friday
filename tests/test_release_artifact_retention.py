@@ -2978,15 +2978,17 @@ def test_privileged_target_probe_marks_only_exact_referenced_target(
     (first / "body").write_bytes(b"first")
     (second / "body").write_bytes(b"second")
 
-    def observe(index: retention.proc_probe.TargetIndex) -> tuple[dict[str, Any], str]:
-        target_id = next(target.target_id for target in index.targets if target.roots == (second,))
+    def receipt_for(
+        index: retention.proc_probe.TargetIndex,
+        target_ids: list[str],
+    ) -> tuple[dict[str, Any], str]:
         core = {
             "authority": "code_owned_privileged_host_proc_v1",
             "implementation_sha256": "1" * 64,
             "observation_sha256": "2" * 64,
             "observer_euid": 0,
             "process_epoch_sha256": "3" * 64,
-            "referenced_target_ids": [target_id],
+            "referenced_target_ids": target_ids,
             "schema": retention.proc_probe.PRIVILEGED_RECEIPT_SCHEMA,
             "scope_identity_sha256": "4" * 64,
             "status": "referenced",
@@ -2998,6 +3000,10 @@ def test_privileged_target_probe_marks_only_exact_referenced_target(
         receipt = {**core, "receipt_sha256": hashlib.sha256(_canonical(core)).hexdigest()}
         return receipt, "5" * 64
 
+    def observe(index: retention.proc_probe.TargetIndex) -> tuple[dict[str, Any], str]:
+        target_id = next(target.target_id for target in index.targets if target.roots == (second,))
+        return receipt_for(index, [target_id])
+
     monkeypatch.setattr(retention, "_run_privileged_target_probe", observe)
     inventory = retention.build_complete_open_inventory(target_paths=(first, second))
 
@@ -3005,6 +3011,143 @@ def test_privileged_target_probe_marks_only_exact_referenced_target(
     assert inventory.open_paths == (second,)
     assert len(inventory.target_index_sha256) == 64
     assert len(inventory.authority_sha256) == 64
+
+    monkeypatch.setattr(
+        retention,
+        "_run_privileged_target_probe",
+        lambda index: receipt_for(index, sorted(target.target_id for target in index.targets)),
+    )
+    conservative = retention.build_complete_open_inventory(target_paths=(first, second))
+
+    assert set(conservative.open_paths) == {first, second}
+
+
+def test_privileged_probe_transport_uses_pinned_root_only_scope_digest_without_reading_it(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    target = tmp_path / "target"
+    target.mkdir()
+    index, _observations = retention._target_probe_index((target,))  # noqa: SLF001
+    helper_sha256 = _sha256_file(Path(retention.proc_probe.__file__))
+    observed_paths: list[Path] = []
+
+    def root_owned(path: Path, *, setuid: bool = False) -> tuple[Path, str]:
+        observed_paths.append(path)
+        if path == retention.PRIVILEGED_PROC_HELPER:
+            assert setuid is False
+            return path, helper_sha256
+        if path == Path("/usr/bin/sudo"):
+            assert setuid is True
+            return path, "1" * 64
+        if path == Path("/usr/bin/python3"):
+            assert setuid is False
+            return Path("/usr/bin/python3.14"), "2" * 64
+        raise AssertionError(f"unexpected unprivileged authority read: {path}")
+
+    core = {
+        "authority": "code_owned_privileged_bounded_proc_diagnostic_v1",
+        "host_scope_authority_sha256": retention.PRIVILEGED_SCOPE_AUTHORITY_SHA256,
+        "implementation_sha256": helper_sha256,
+        "kernel_epoch_sha256": "3" * 64,
+        "observation_sha256": "4" * 64,
+        "observer_euid": 0,
+        "process_epoch_sha256": "5" * 64,
+        "referenced_target_ids": [],
+        "schema": retention.proc_probe.PRIVILEGED_RECEIPT_SCHEMA,
+        "scope_identity_sha256": "6" * 64,
+        "status": "clear",
+        "target_count": len(index.targets),
+        "target_index_sha256": index.sha256,
+        "task_count": 1,
+        "tgid_count": 1,
+    }
+    receipt = {**core, "receipt_sha256": hashlib.sha256(_canonical(core)).hexdigest()}
+    expected_command = [
+        "/usr/bin/sudo",
+        "-n",
+        "--",
+        "/usr/bin/python3.14",
+        "-I",
+        "-B",
+        "-S",
+        str(retention.PRIVILEGED_PROC_HELPER),
+        "privileged-target-probe",
+    ]
+
+    def run(command: list[str], **kwargs: Any) -> subprocess.CompletedProcess[bytes]:
+        assert command == expected_command
+        assert kwargs == {
+            "input": retention.proc_probe.canonical_target_index_bytes(index),
+            "capture_output": True,
+            "check": False,
+            "timeout": 180,
+            "env": {"HOME": "/", "LANG": "C", "LC_ALL": "C", "PATH": "/usr/sbin:/usr/bin"},
+        }
+        return subprocess.CompletedProcess(command, 0, _canonical(receipt) + b"\n", b"")
+
+    monkeypatch.setattr(retention, "_root_owned_file_sha256", root_owned)
+    monkeypatch.setattr(retention.subprocess, "run", run)
+
+    observed, authority_sha256 = retention._run_privileged_target_probe(index)  # noqa: SLF001
+
+    assert observed == receipt
+    assert len(authority_sha256) == 64
+    assert observed_paths == [
+        retention.PRIVILEGED_PROC_HELPER,
+        Path("/usr/bin/sudo"),
+        Path("/usr/bin/python3"),
+    ]
+
+
+def test_privileged_probe_transport_rejects_a_self_consistent_wrong_scope_digest(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    target = tmp_path / "target"
+    target.mkdir()
+    index, _observations = retention._target_probe_index((target,))  # noqa: SLF001
+    helper_sha256 = _sha256_file(Path(retention.proc_probe.__file__))
+
+    def root_owned(path: Path, *, setuid: bool = False) -> tuple[Path, str]:
+        if path == retention.PRIVILEGED_PROC_HELPER:
+            return path, helper_sha256
+        if path == Path("/usr/bin/sudo"):
+            assert setuid is True
+            return path, "1" * 64
+        if path == Path("/usr/bin/python3"):
+            return Path("/usr/bin/python3.14"), "2" * 64
+        raise AssertionError(path)
+
+    core = {
+        "authority": "code_owned_privileged_bounded_proc_diagnostic_v1",
+        "host_scope_authority_sha256": "f" * 64,
+        "implementation_sha256": helper_sha256,
+        "kernel_epoch_sha256": "3" * 64,
+        "observation_sha256": "4" * 64,
+        "observer_euid": 0,
+        "process_epoch_sha256": "5" * 64,
+        "referenced_target_ids": [],
+        "schema": retention.proc_probe.PRIVILEGED_RECEIPT_SCHEMA,
+        "scope_identity_sha256": "6" * 64,
+        "status": "clear",
+        "target_count": len(index.targets),
+        "target_index_sha256": index.sha256,
+        "task_count": 1,
+        "tgid_count": 1,
+    }
+    receipt = {**core, "receipt_sha256": hashlib.sha256(_canonical(core)).hexdigest()}
+    monkeypatch.setattr(retention, "_root_owned_file_sha256", root_owned)
+    monkeypatch.setattr(
+        retention.subprocess,
+        "run",
+        lambda command, **kwargs: subprocess.CompletedProcess(  # noqa: ARG005
+            command, 0, _canonical(receipt) + b"\n", b""
+        ),
+    )
+
+    with pytest.raises(retention.RetentionPlanError, match="^open_state_ambiguous$"):
+        retention._run_privileged_target_probe(index)  # noqa: SLF001
 
 
 def test_candidate_probe_scope_does_not_index_more_than_a_million_retained_unknowns(

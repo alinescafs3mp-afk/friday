@@ -6,6 +6,8 @@ import pwd
 import subprocess
 from pathlib import Path
 
+from tools import release_artifact_retention as retention
+
 ROOT = Path(__file__).resolve().parents[1]
 INSTALLER = ROOT / "deploy/release-retention/install-privileged-proc-probe.sh"
 UNINSTALLER = ROOT / "deploy/release-retention/uninstall-privileged-proc-probe.sh"
@@ -62,10 +64,13 @@ def test_privileged_probe_installer_is_atomic_exact_and_rollback_safe(tmp_path: 
     assert installed.stdout == b"friday_retention_probe_installed\n"
 
     helper = fake_root / "usr/libexec/friday/release_artifact_proc_probe.py"
+    scope = fake_root / "usr/libexec/friday/release_artifact_proc_scope.v1.json"
     sudoers = fake_root / "etc/sudoers.d/friday-retention-probe"
     assert helper.read_bytes() == HELPER_SOURCE.read_bytes()
     assert helper.stat().st_uid == os.geteuid()
     assert helper.stat().st_mode & 0o7777 == 0o755
+    assert hashlib.sha256(scope.read_bytes()).hexdigest() == (retention.PRIVILEGED_SCOPE_AUTHORITY_SHA256)
+    assert scope.stat().st_mode & 0o7777 == 0o400
     assert sudoers.stat().st_uid == os.geteuid()
     assert sudoers.stat().st_mode & 0o7777 == 0o440
     python = Path("/usr/bin/python3").resolve(strict=True)
