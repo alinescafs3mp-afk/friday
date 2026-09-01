@@ -2521,6 +2521,97 @@ def binding_from_release_captain_artifact(
     return binding
 
 
+def binding_from_private_release_captain_artifact(
+    artifact: Path,
+    *,
+    expected_artifact_sha256: str,
+    expected_release: ReleaseIdentity,
+) -> AuthenticatedProductionObservationBinding:
+    """Load one Release Captain artifact from its create-only private custody.
+
+    The path is an external controller input, not published evidence.  Exact
+    owner, mode, link and stable-inode checks preserve the authority established
+    by ``production_read_only_observation_operator`` without putting a private
+    path into the canonical receipt or manifest.
+    """
+
+    concrete_path_type = type(Path())
+    descriptor = -1
+    try:
+        if (
+            type(artifact) is not concrete_path_type
+            or type(expected_artifact_sha256) is not str
+            or _SHA256.fullmatch(expected_artifact_sha256) is None
+            or set(expected_artifact_sha256) == {"0"}
+        ):
+            raise ExactReleaseEvidenceError("release_captain_observation_authority_invalid")
+        lexical = Path(os.path.abspath(artifact))
+        if (
+            not artifact.is_absolute()
+            or lexical != artifact
+            or artifact.name in {"", ".", ".."}
+            or artifact.is_relative_to(ROOT.resolve())
+        ):
+            raise ExactReleaseEvidenceError("release_captain_observation_authority_invalid")
+        parent = artifact.parent.resolve(strict=True)
+        parent_status = os.stat(artifact.parent, follow_symlinks=False)
+        if (
+            parent != artifact.parent
+            or not stat.S_ISDIR(parent_status.st_mode)
+            or parent_status.st_uid != os.geteuid()
+            or stat.S_IMODE(parent_status.st_mode) & 0o077
+        ):
+            raise ExactReleaseEvidenceError("release_captain_observation_authority_invalid")
+        descriptor = os.open(
+            artifact,
+            os.O_RDONLY
+            | getattr(os, "O_CLOEXEC", 0)
+            | getattr(os, "O_NOFOLLOW", 0)
+            | getattr(os, "O_NONBLOCK", 0),
+        )
+        before = os.fstat(descriptor)
+        if (
+            not stat.S_ISREG(before.st_mode)
+            or before.st_nlink != 1
+            or before.st_uid != os.geteuid()
+            or stat.S_IMODE(before.st_mode) != 0o400
+            or not 0 < before.st_size <= _RELEASE_CAPTAIN_ARTIFACT_MAX_BYTES
+        ):
+            raise ExactReleaseEvidenceError("release_captain_observation_authority_invalid")
+        chunks: list[bytes] = []
+        remaining = int(before.st_size)
+        while remaining:
+            chunk = os.read(descriptor, min(remaining, 1 << 20))
+            if not chunk:
+                raise ExactReleaseEvidenceError("release_captain_observation_authority_invalid")
+            chunks.append(chunk)
+            remaining -= len(chunk)
+        if os.read(descriptor, 1):
+            raise ExactReleaseEvidenceError("release_captain_observation_authority_invalid")
+        after = os.fstat(descriptor)
+        current = os.stat(artifact, follow_symlinks=False)
+        stable_fields = ("st_dev", "st_ino", "st_size", "st_mtime_ns", "st_ctime_ns")
+        if any(getattr(before, field_name) != getattr(after, field_name) for field_name in stable_fields) or (
+            current.st_dev,
+            current.st_ino,
+        ) != (before.st_dev, before.st_ino):
+            raise ExactReleaseEvidenceError("release_captain_observation_authority_invalid")
+        raw = b"".join(chunks)
+        if hashlib.sha256(raw).hexdigest() != expected_artifact_sha256:
+            raise ExactReleaseEvidenceError("release_captain_observation_authority_invalid")
+    except ExactReleaseEvidenceError:
+        raise
+    except OSError:
+        raise ExactReleaseEvidenceError("release_captain_observation_authority_invalid") from None
+    finally:
+        if descriptor >= 0:
+            os.close(descriptor)
+    return binding_from_release_captain_artifact(
+        raw,
+        expected_release=expected_release,
+    )
+
+
 def _require_neutralized_ignored_files(repo_root: Path) -> None:
     raw = _git(
         repo_root,

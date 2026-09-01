@@ -6,6 +6,7 @@ import dataclasses
 import hashlib
 import inspect
 import json
+import traceback
 from dataclasses import replace
 from pathlib import Path
 
@@ -228,6 +229,7 @@ def test_public_api_has_no_caller_result_or_hash_claims_and_no_owner_smoke_subst
     produce = inspect.signature(evidence.produce_production_observation_bundle)
     validate = inspect.signature(evidence.validate_production_observation_bundle)
     factory = inspect.signature(evidence.binding_from_release_captain_artifact)
+    private_factory = inspect.signature(evidence.binding_from_private_release_captain_artifact)
 
     assert set(produce.parameters) == {"authenticated_binding", "journey_id"}
     assert set(validate.parameters) == {
@@ -236,6 +238,11 @@ def test_public_api_has_no_caller_result_or_hash_claims_and_no_owner_smoke_subst
         "expected_journey_id",
     }
     assert set(factory.parameters) == {"raw", "expected_release"}
+    assert set(private_factory.parameters) == {
+        "artifact",
+        "expected_artifact_sha256",
+        "expected_release",
+    }
     assert not {
         "result",
         "outcome",
@@ -290,6 +297,84 @@ def test_public_api_has_no_caller_result_or_hash_claims_and_no_owner_smoke_subst
             match="production_observation_external_binding_required",
         ):
             call()
+
+
+def test_private_release_captain_artifact_requires_exact_custody_and_publisher_digest(
+    tmp_path: Path,
+) -> None:
+    authority_root = tmp_path / "release-captain"
+    authority_root.mkdir(mode=0o700)
+    authority_root.chmod(0o700)
+    raw = evidence.canonical_json_bytes(_artifact_payload())
+    artifact = authority_root / "production-observation.json"
+    artifact.write_bytes(raw)
+    artifact.chmod(0o400)
+    digest = hashlib.sha256(raw).hexdigest()
+
+    binding = evidence.binding_from_private_release_captain_artifact(
+        artifact,
+        expected_artifact_sha256=digest,
+        expected_release=_RELEASE,
+    )
+    assert binding == _binding()
+    with pytest.raises(
+        evidence.ExactReleaseEvidenceError,
+        match="release_captain_observation_authority_invalid",
+    ):
+        evidence.binding_from_private_release_captain_artifact(
+            artifact,
+            expected_artifact_sha256="9" * 64,
+            expected_release=_RELEASE,
+        )
+
+    private_sentinel = "never-log-private-observation-path"
+    with pytest.raises(
+        evidence.ExactReleaseEvidenceError,
+        match="release_captain_observation_authority_invalid",
+    ) as missing:
+        evidence.binding_from_private_release_captain_artifact(
+            authority_root / private_sentinel,
+            expected_artifact_sha256=digest,
+            expected_release=_RELEASE,
+        )
+    assert private_sentinel not in "".join(traceback.format_exception(missing.value))
+
+    alias = authority_root / "hardlink.json"
+    alias.hardlink_to(artifact)
+    with pytest.raises(
+        evidence.ExactReleaseEvidenceError,
+        match="release_captain_observation_authority_invalid",
+    ):
+        evidence.binding_from_private_release_captain_artifact(
+            artifact,
+            expected_artifact_sha256=digest,
+            expected_release=_RELEASE,
+        )
+    alias.unlink()
+
+    symlink = authority_root / "symlink.json"
+    symlink.symlink_to(artifact)
+    for invalid in (Path("relative.json"), symlink):
+        with pytest.raises(
+            evidence.ExactReleaseEvidenceError,
+            match="release_captain_observation_authority_invalid",
+        ):
+            evidence.binding_from_private_release_captain_artifact(
+                invalid,
+                expected_artifact_sha256=digest,
+                expected_release=_RELEASE,
+            )
+
+    artifact.chmod(0o600)
+    with pytest.raises(
+        evidence.ExactReleaseEvidenceError,
+        match="release_captain_observation_authority_invalid",
+    ):
+        evidence.binding_from_private_release_captain_artifact(
+            artifact,
+            expected_artifact_sha256=digest,
+            expected_release=_RELEASE,
+        )
 
 
 @pytest.mark.parametrize(

@@ -207,6 +207,9 @@ _OBSERVATION_FIELDS = frozenset(
 _MANIFEST_SCHEMA = "friday.golden-journey-evidence.v1"
 _LEGACY_SELF_DECLARED_RECEIPT_SCHEMA = "friday.golden-journey-sanitized-receipt.v1"
 _CLEAN_RELEASE_ROOT_ENV = "GOLDEN_JOURNEY_RELEASE_ROOT"
+_PRODUCTION_OBSERVATION_ARTIFACT_ENV = "GOLDEN_JOURNEY_PRODUCTION_OBSERVATION_ARTIFACT"
+_PRODUCTION_OBSERVATION_ARTIFACT_SHA256_ENV = "GOLDEN_JOURNEY_PRODUCTION_OBSERVATION_ARTIFACT_SHA256"
+_PRODUCTION_OBSERVATION_CLASS = "production read-only observation"
 _SHA256 = re.compile(r"[0-9a-f]{64}")
 _CHECK_ID = re.compile(r"[a-z0-9][a-z0-9_.:-]{0,127}")
 _JOURNEY_ID = re.compile(r"[a-z][a-z0-9_]{1,63}")
@@ -227,6 +230,15 @@ class ReleaseIdentity:
     tree_sha256: str
     wheel_sha256: str
     database_schema: int
+
+
+def _exact_release_identity(identity: ReleaseIdentity) -> exact_evidence.ReleaseIdentity:
+    return exact_evidence.ReleaseIdentity(
+        source_commit=identity.source_commit,
+        tree_sha256=identity.tree_sha256,
+        wheel_sha256=identity.wheel_sha256,
+        database_schema=identity.database_schema,
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -669,12 +681,7 @@ def _validate_sanitized_receipt(
         )
         receipt = validator(
             raw,
-            expected_release=exact_evidence.ReleaseIdentity(
-                source_commit=manifest_identity.source_commit,
-                tree_sha256=manifest_identity.tree_sha256,
-                wheel_sha256=manifest_identity.wheel_sha256,
-                database_schema=manifest_identity.database_schema,
-            ),
+            expected_release=_exact_release_identity(manifest_identity),
             expected_journey_id=journey_id,
             expected_evidence_class=evidence_class,
             repo_root=ROOT,
@@ -691,6 +698,86 @@ def _validate_sanitized_receipt(
         raise RegistryValidationError("sanitized receipt does not match the manifest's closed claim")
 
 
+def _validate_production_observation_manifest(
+    payload: object,
+    *,
+    manifest_ref: str,
+    journey_id: str,
+    current: ReleaseIdentity,
+    require_current: bool,
+    repo_root: Path,
+    expected_result: str,
+    authenticated_production_observation: (exact_evidence.AuthenticatedProductionObservationBinding | None),
+    production_observation_artifact: Path | None,
+    production_observation_artifact_sha256: str | None,
+) -> None:
+    if journey_id != "durable_scheduled_work" or expected_result != "VERIFIED":
+        raise RegistryValidationError("production observation scope is not a verified scheduled-work claim")
+    if not isinstance(payload, dict) or frozenset(payload) != _MANIFEST_FIELDS:
+        raise RegistryValidationError("production observation manifest is not closed")
+    release = payload.get("release")
+    if not isinstance(release, dict) or frozenset(release) != _RELEASE_FIELDS:
+        raise RegistryValidationError("production observation release binding is not closed")
+    raw_database_schema = release.get("database_schema")
+    manifest_identity = ReleaseIdentity(
+        source_commit=str(release.get("source_commit")),
+        tree_sha256=str(release.get("tree_sha256")),
+        wheel_sha256=str(release.get("wheel_sha256")),
+        database_schema=raw_database_schema if type(raw_database_schema) is int else -1,
+    )
+    try:
+        exact_identity = _exact_release_identity(manifest_identity)
+    except exact_evidence.ExactReleaseEvidenceError as exc:
+        raise RegistryValidationError("production observation release identity is malformed") from exc
+    if authenticated_production_observation is not None and (
+        production_observation_artifact is not None or production_observation_artifact_sha256 is not None
+    ):
+        raise RegistryValidationError("production observation authority is ambiguous")
+    try:
+        binding = authenticated_production_observation
+        if binding is None:
+            if production_observation_artifact is None or production_observation_artifact_sha256 is None:
+                raise RegistryValidationError(
+                    "production observation requires exact external Release Captain authority"
+                )
+            binding = exact_evidence.binding_from_private_release_captain_artifact(
+                production_observation_artifact,
+                expected_artifact_sha256=production_observation_artifact_sha256,
+                expected_release=exact_identity,
+            )
+        if (
+            type(binding) is not exact_evidence.AuthenticatedProductionObservationBinding
+            or binding.release != exact_identity
+        ):
+            raise RegistryValidationError(
+                "production observation requires exact external Release Captain authority"
+            )
+        expected = exact_evidence.produce_production_observation_bundle(
+            authenticated_binding=binding,
+            journey_id=journey_id,
+        )
+    except exact_evidence.ExactReleaseEvidenceError as exc:
+        raise RegistryValidationError(f"production observation authority is invalid: {exc}") from None
+    if require_current and manifest_identity != current:
+        raise RegistryValidationError("manifest is not bound to the current exact release")
+    try:
+        manifest = _canonical_json_bytes(payload)
+    except (TypeError, ValueError, UnicodeError) as exc:
+        raise RegistryValidationError("production observation manifest is not canonical JSON") from exc
+    if manifest_ref != expected.manifest_ref or manifest != expected.manifest:
+        raise RegistryValidationError(
+            "production observation manifest differs from external Release Captain authority"
+        )
+    receipt_path = _safe_repo_path(expected.receipt_ref, root=repo_root)
+    receipt = receipt_path.read_bytes()
+    if repo_root.resolve() == ROOT.resolve():
+        _require_committed_evidence(expected.receipt_ref, receipt)
+    if receipt != expected.receipt:
+        raise RegistryValidationError(
+            "production observation receipt differs from external Release Captain authority"
+        )
+
+
 def _validate_manifest_payload(
     payload: object,
     *,
@@ -702,6 +789,11 @@ def _validate_manifest_payload(
     repo_root: Path,
     expected_result: str = "VERIFIED",
     release_root: Path | None = None,
+    authenticated_production_observation: (
+        exact_evidence.AuthenticatedProductionObservationBinding | None
+    ) = None,
+    production_observation_artifact: Path | None = None,
+    production_observation_artifact_sha256: str | None = None,
 ) -> None:
     if (
         journey_id not in CURRENT_JOURNEYS
@@ -709,6 +801,29 @@ def _validate_manifest_payload(
         or expected_result not in {"VERIFIED", "FAILED"}
     ):
         raise RegistryValidationError("manifest identity is outside the closed journey registry")
+    if evidence_class == _PRODUCTION_OBSERVATION_CLASS:
+        _validate_production_observation_manifest(
+            payload,
+            manifest_ref=manifest_ref,
+            journey_id=journey_id,
+            current=current,
+            require_current=require_current,
+            repo_root=repo_root,
+            expected_result=expected_result,
+            authenticated_production_observation=authenticated_production_observation,
+            production_observation_artifact=production_observation_artifact,
+            production_observation_artifact_sha256=production_observation_artifact_sha256,
+        )
+        return
+    if any(
+        value is not None
+        for value in (
+            authenticated_production_observation,
+            production_observation_artifact,
+            production_observation_artifact_sha256,
+        )
+    ):
+        raise RegistryValidationError("production observation authority reached another evidence class")
     if not isinstance(payload, dict) or frozenset(payload) != _MANIFEST_FIELDS:
         raise RegistryValidationError("evidence manifest violates the top-level privacy allowlist")
     release = payload.get("release")
@@ -774,6 +889,12 @@ def _validate_claim(
     claim: EvidenceClaim,
     current: ReleaseIdentity,
     release_root: Path | None = None,
+    *,
+    authenticated_production_observation: (
+        exact_evidence.AuthenticatedProductionObservationBinding | None
+    ) = None,
+    production_observation_artifact: Path | None = None,
+    production_observation_artifact_sha256: str | None = None,
 ) -> None:
     if len({ref.label for ref in claim.refs}) != len(claim.refs):
         raise RegistryValidationError("journey evidence references must be unique")
@@ -815,6 +936,9 @@ def _validate_claim(
             repo_root=ROOT,
             expected_result="FAILED" if claim.state == "FAILED" else "VERIFIED",
             release_root=release_root,
+            authenticated_production_observation=authenticated_production_observation,
+            production_observation_artifact=production_observation_artifact,
+            production_observation_artifact_sha256=production_observation_artifact_sha256,
         )
 
 
@@ -836,6 +960,33 @@ def _clean_release_root_for_registry(rows: tuple[JourneyRow, ...]) -> Path | Non
             f"clean artifact manifests require authenticated release root via {_CLEAN_RELEASE_ROOT_ENV}"
         )
     return Path(raw)
+
+
+def _production_observation_authority_for_registry(
+    rows: tuple[JourneyRow, ...],
+) -> tuple[Path, str] | None:
+    required = any(
+        row.evidence[_PRODUCTION_OBSERVATION_CLASS].state in {"VERIFIED", "FAILED", "STALE"} for row in rows
+    )
+    raw = os.environ.get(_PRODUCTION_OBSERVATION_ARTIFACT_ENV)
+    artifact_sha256 = os.environ.get(_PRODUCTION_OBSERVATION_ARTIFACT_SHA256_ENV)
+    if not required:
+        return None
+    if (
+        raw is None
+        or not raw
+        or raw != raw.strip()
+        or artifact_sha256 is None
+        or _SHA256.fullmatch(artifact_sha256) is None
+        or set(artifact_sha256) == {"0"}
+    ):
+        raise RegistryValidationError(
+            "production observation requires an authenticated Release Captain artifact"
+        )
+    artifact = Path(raw)
+    if not artifact.is_absolute() or Path(os.path.abspath(artifact)) != artifact:
+        raise RegistryValidationError("production observation Release Captain artifact path is not canonical")
+    return artifact, artifact_sha256
 
 
 def _validate_applicability(row: JourneyRow) -> None:
@@ -1098,6 +1249,260 @@ def _clean_machine_manifest(
     return manifest, bundle.manifest_ref, raw
 
 
+def _production_observation_machine_manifest(
+    identity: ReleaseIdentity,
+    repo_root: Path,
+    *,
+    ready_missions: int = 3,
+) -> tuple[
+    dict[str, Any],
+    str,
+    exact_evidence.AuthenticatedProductionObservationBinding,
+    bytes,
+]:
+    exact_identity = _exact_release_identity(identity)
+    challenge_sha256 = "d" * 64
+    process_epoch_sha256 = "e" * 64
+    endpoint = {
+        "schema": exact_evidence.PRODUCTION_READ_ONLY_OBSERVATION_SCHEMA,
+        "challenge_sha256": challenge_sha256,
+        "backend_process_epoch_sha256": process_epoch_sha256,
+        "backend_lease_owned": True,
+        "database": {
+            "schema_version": 50,
+            "schema_attestation_sha256": (exact_evidence.PRODUCTION_SCHEDULED_WORK_SCHEMA_ATTESTATION_SHA256),
+            "integrity": "ok",
+            "foreign_key_violations": 0,
+        },
+        "scheduled_work": {
+            "missions": {
+                "proposed": 0,
+                "ready": ready_missions,
+                "running": 0,
+                "paused": 0,
+                "blocked": 0,
+                "completed": 0,
+                "failed": 0,
+                "cancelled": 0,
+            },
+            "mission_tasks": {
+                "pending": 0,
+                "running": 0,
+                "done": 0,
+                "failed": 0,
+                "skipped": 0,
+                "uncertain": 0,
+                "compensated": 0,
+            },
+            "reminders": {
+                "pending": 0,
+                "uncertain": 0,
+                "sent": 0,
+                "failed": 0,
+                "dismissed": 0,
+            },
+            "workers": {
+                "present": 1,
+                "missing": 1,
+                "health_states": {
+                    "scheduled": 0,
+                    "running": 0,
+                    "ok": 1,
+                    "error": 0,
+                    "timeout": 0,
+                    "skipped": 0,
+                    "unknown": 0,
+                },
+            },
+        },
+        "hard_contradictions": 0,
+    }
+    endpoint_raw = exact_evidence.canonical_json_bytes(endpoint)
+    release = exact_identity.payload()
+    artifact = {
+        "schema": exact_evidence.RELEASE_CAPTAIN_PRODUCTION_OBSERVATION_SCHEMA,
+        "release": release,
+        "release_binding_sha256": exact_evidence.release_binding_sha256(exact_identity),
+        "endpoint_response": endpoint,
+        "endpoint_response_sha256": hashlib.sha256(endpoint_raw).hexdigest(),
+        "challenge_sha256": challenge_sha256,
+        "backend_process_epoch_sha256": process_epoch_sha256,
+        "health_before_sha256": "f" * 64,
+        "health_after_sha256": "1" * 64,
+    }
+    artifact_raw = exact_evidence.canonical_json_bytes(artifact)
+    binding = exact_evidence.binding_from_release_captain_artifact(
+        artifact_raw,
+        expected_release=exact_identity,
+    )
+    bundle = exact_evidence.produce_production_observation_bundle(
+        authenticated_binding=binding,
+    )
+    receipt_path = repo_root / bundle.receipt_ref
+    receipt_path.parent.mkdir(parents=True, exist_ok=True)
+    receipt_path.write_bytes(bundle.receipt)
+    manifest = json.loads(bundle.manifest)
+    assert isinstance(manifest, dict)
+    return manifest, bundle.manifest_ref, binding, artifact_raw
+
+
+def test_production_observation_registry_uses_only_exact_external_authority(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    identity = ReleaseIdentity(_repository_head(), "a" * 64, "b" * 64, 50)
+    repo_root = tmp_path / "evidence-root"
+    repo_root.mkdir()
+    manifest, manifest_ref, binding, _artifact_raw = _production_observation_machine_manifest(
+        identity,
+        repo_root,
+    )
+
+    def reject_generic(*_args: object, **_kwargs: object) -> None:
+        raise AssertionError("production observation reached a generic evidence validator")
+
+    monkeypatch.setattr(exact_evidence, "validate_receipt", reject_generic)
+    monkeypatch.setattr(exact_evidence, "validate_receipt_via_native_controller", reject_generic)
+    _validate_manifest_payload(
+        manifest,
+        manifest_ref=manifest_ref,
+        journey_id="durable_scheduled_work",
+        evidence_class=_PRODUCTION_OBSERVATION_CLASS,
+        current=identity,
+        require_current=True,
+        repo_root=repo_root,
+        authenticated_production_observation=binding,
+    )
+
+    with pytest.raises(RegistryValidationError, match="external Release Captain authority"):
+        _validate_manifest_payload(
+            manifest,
+            manifest_ref=manifest_ref,
+            journey_id="durable_scheduled_work",
+            evidence_class=_PRODUCTION_OBSERVATION_CLASS,
+            current=identity,
+            require_current=True,
+            repo_root=repo_root,
+        )
+    with pytest.raises(RegistryValidationError, match="differs from external"):
+        _validate_manifest_payload(
+            {**manifest, "$schema": _MANIFEST_SCHEMA},
+            manifest_ref=manifest_ref,
+            journey_id="durable_scheduled_work",
+            evidence_class=_PRODUCTION_OBSERVATION_CLASS,
+            current=identity,
+            require_current=True,
+            repo_root=repo_root,
+            authenticated_production_observation=binding,
+        )
+    timestamped = json.loads(_canonical_json_bytes(manifest))
+    timestamped["observation"]["observed_at_utc"] = "2026-09-01T12:00:00Z"
+    with pytest.raises(RegistryValidationError, match="differs from external"):
+        _validate_manifest_payload(
+            timestamped,
+            manifest_ref=manifest_ref,
+            journey_id="durable_scheduled_work",
+            evidence_class=_PRODUCTION_OBSERVATION_CLASS,
+            current=identity,
+            require_current=True,
+            repo_root=repo_root,
+            authenticated_production_observation=binding,
+        )
+    drifted = replace(binding, health_after_sha256="2" * 64)
+    with pytest.raises(RegistryValidationError, match="differs from external"):
+        _validate_manifest_payload(
+            manifest,
+            manifest_ref=manifest_ref,
+            journey_id="durable_scheduled_work",
+            evidence_class=_PRODUCTION_OBSERVATION_CLASS,
+            current=identity,
+            require_current=True,
+            repo_root=repo_root,
+            authenticated_production_observation=drifted,
+        )
+
+
+def test_production_observation_registry_replays_private_artifact_and_publisher_digest(
+    tmp_path: Path,
+) -> None:
+    identity = ReleaseIdentity(_repository_head(), "a" * 64, "b" * 64, 50)
+    repo_root = tmp_path / "evidence-root"
+    repo_root.mkdir()
+    manifest, manifest_ref, _binding, artifact_raw = _production_observation_machine_manifest(
+        identity,
+        repo_root,
+    )
+    authority_root = tmp_path / "release-captain"
+    authority_root.mkdir(mode=0o700)
+    authority_root.chmod(0o700)
+    artifact_path = authority_root / "production-observation.json"
+    artifact_path.write_bytes(artifact_raw)
+    artifact_path.chmod(0o400)
+    artifact_sha256 = hashlib.sha256(artifact_raw).hexdigest()
+
+    _validate_manifest_payload(
+        manifest,
+        manifest_ref=manifest_ref,
+        journey_id="durable_scheduled_work",
+        evidence_class=_PRODUCTION_OBSERVATION_CLASS,
+        current=identity,
+        require_current=True,
+        repo_root=repo_root,
+        production_observation_artifact=artifact_path,
+        production_observation_artifact_sha256=artifact_sha256,
+    )
+    with pytest.raises(RegistryValidationError, match="authority is invalid"):
+        _validate_manifest_payload(
+            manifest,
+            manifest_ref=manifest_ref,
+            journey_id="durable_scheduled_work",
+            evidence_class=_PRODUCTION_OBSERVATION_CLASS,
+            current=identity,
+            require_current=True,
+            repo_root=repo_root,
+            production_observation_artifact=artifact_path,
+            production_observation_artifact_sha256="9" * 64,
+        )
+    artifact_path.chmod(0o600)
+    with pytest.raises(RegistryValidationError, match="authority is invalid"):
+        _validate_manifest_payload(
+            manifest,
+            manifest_ref=manifest_ref,
+            journey_id="durable_scheduled_work",
+            evidence_class=_PRODUCTION_OBSERVATION_CLASS,
+            current=identity,
+            require_current=True,
+            repo_root=repo_root,
+            production_observation_artifact=artifact_path,
+            production_observation_artifact_sha256=artifact_sha256,
+        )
+
+
+def test_production_observation_registry_rejects_coordinated_bundle_substitution(
+    tmp_path: Path,
+) -> None:
+    identity = ReleaseIdentity(_repository_head(), "a" * 64, "b" * 64, 50)
+    repo_root = tmp_path / "evidence-root"
+    repo_root.mkdir()
+    _manifest, _manifest_ref, original_binding, _artifact_raw = _production_observation_machine_manifest(
+        identity, repo_root
+    )
+    substituted_manifest, substituted_ref, _binding, _raw = _production_observation_machine_manifest(
+        identity, repo_root, ready_missions=4
+    )
+    with pytest.raises(RegistryValidationError, match="differs from external"):
+        _validate_manifest_payload(
+            substituted_manifest,
+            manifest_ref=substituted_ref,
+            journey_id="durable_scheduled_work",
+            evidence_class=_PRODUCTION_OBSERVATION_CLASS,
+            current=identity,
+            require_current=True,
+            repo_root=repo_root,
+            authenticated_production_observation=original_binding,
+        )
+
+
 def test_site_loaded_non_clean_registry_runs_the_real_direct_inventory(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -1353,9 +1758,11 @@ def test_canonical_golden_journey_registry_is_closed_current_and_privacy_safe(
     identity = _release_identity(markdown)
     rows = _registry_rows(markdown)
     clean_release_root = _clean_release_root_for_registry(rows)
+    production_observation_authority = _production_observation_authority_for_registry(rows)
 
     assert len(rows) == len(CURRENT_JOURNEYS) == 6
     assert clean_release_root == Path(os.environ[_CLEAN_RELEASE_ROOT_ENV])
+    assert production_observation_authority is None
     assert tuple(row.journey_id for row in rows) == tuple(CURRENT_JOURNEYS)
     assert {row.journey_id: (row.journey, row.readiness, row.limitations) for row in rows} == CURRENT_JOURNEYS
     assert sum(row.readiness == "READY" for row in rows) == 0
@@ -1375,6 +1782,22 @@ def test_canonical_golden_journey_registry_is_closed_current_and_privacy_safe(
                     if exact_evidence._requires_candidate_runtime(  # noqa: SLF001
                         row.journey_id,
                         evidence_class,
+                    )
+                    else None
+                ),
+                production_observation_artifact=(
+                    production_observation_authority[0]
+                    if (
+                        production_observation_authority is not None
+                        and evidence_class == _PRODUCTION_OBSERVATION_CLASS
+                    )
+                    else None
+                ),
+                production_observation_artifact_sha256=(
+                    production_observation_authority[1]
+                    if (
+                        production_observation_authority is not None
+                        and evidence_class == _PRODUCTION_OBSERVATION_CLASS
                     )
                     else None
                 ),
@@ -1452,6 +1875,27 @@ def test_canonical_golden_journey_registry_is_closed_current_and_privacy_safe(
         assert _clean_release_root_for_registry((future_fault_row,)) == future_release_root
     with quality_gate._isolated_test_environment() as gate_environment:  # noqa: SLF001
         assert gate_environment[_CLEAN_RELEASE_ROOT_ENV] == str(future_release_root)
+    durable = next(row for row in rows if row.journey_id == "durable_scheduled_work")
+    future_durable_evidence = dict(durable.evidence)
+    future_durable_evidence[_PRODUCTION_OBSERVATION_CLASS] = EvidenceClaim("VERIFIED", ())
+    future_durable = replace(durable, evidence=future_durable_evidence)
+    future_rows = tuple(future_durable if row is durable else row for row in rows)
+    monkeypatch.delenv(_PRODUCTION_OBSERVATION_ARTIFACT_ENV, raising=False)
+    monkeypatch.delenv(_PRODUCTION_OBSERVATION_ARTIFACT_SHA256_ENV, raising=False)
+    with pytest.raises(RegistryValidationError, match="authenticated Release Captain artifact"):
+        _production_observation_authority_for_registry(future_rows)
+    authority_path = tmp_path / "private" / "production-observation.json"
+    monkeypatch.setenv(_PRODUCTION_OBSERVATION_ARTIFACT_ENV, str(authority_path))
+    with pytest.raises(RegistryValidationError, match="authenticated Release Captain artifact"):
+        _production_observation_authority_for_registry(future_rows)
+    monkeypatch.setenv(_PRODUCTION_OBSERVATION_ARTIFACT_SHA256_ENV, "a" * 64)
+    assert _production_observation_authority_for_registry(future_rows) == (
+        authority_path,
+        "a" * 64,
+    )
+    with quality_gate._isolated_test_environment() as gate_environment:  # noqa: SLF001
+        assert gate_environment[_PRODUCTION_OBSERVATION_ARTIFACT_ENV] == str(authority_path)
+        assert gate_environment[_PRODUCTION_OBSERVATION_ARTIFACT_SHA256_ENV] == "a" * 64
     generic_operator = RepositoryLink(
         "tools/immutable_release_operator.py",
         "../tools/immutable_release_operator.py",
