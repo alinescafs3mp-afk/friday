@@ -1,3 +1,14 @@
+## 0.207.96 — 2026-09-01
+
+### Dense document recall
+
+- Adds a fail-soft dense passage lane to archive document search while keeping
+  lexical and message tails intact when vectors are absent, stale or unavailable.
+- Reauthorizes every dense candidate against the current principal, revision,
+  embedding identity and chunk provenance before publication.
+- SQLite remains at schema 50; exact `0.207.95` is the predecessor and
+  `0.207.90` remains the immutable fallback.
+
 ## 0.207.95 — 2026-09-01
 
 ### Model-control compatibility hardening
