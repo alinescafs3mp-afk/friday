@@ -21,9 +21,8 @@ _MAX_CALLS_PER_TURN = 8
 _ENVELOPE_DOMINANCE = 0.6
 _MAX_ARGUMENT_BYTES = 64_000
 _MAX_TOOL_NAME_LENGTH = 128
-_MAX_CONTROL_SCAN_CHARS = 64_000
 _TOOL_NAME_RE = re.compile(r"^[A-Za-z0-9_.:-]+$")
-_JSON_FENCE_PREFIX = "```json"
+_CODE_FENCE_PREFIX = "```"
 # A whole LINE that is nothing but «Call: something» — the shape a model emits
 # when it tries to invoke a tool in prose. Anchored end to end because the loose
 # version matched «Call: +7 495…» inside a sentence and threw the answer away.
@@ -291,9 +290,44 @@ def _has_dominant_malformed_tool_root(text: str) -> bool:
     inside ordinary prose therefore remain answers.
     """
 
-    scan_stop = min(len(text), _MAX_CONTROL_SCAN_CHARS)
+    quoted_spans: list[tuple[int, int]] = []
+    quote = ""
+    quote_start = -1
+    escaped = False
+    for index, character in enumerate(text):
+        word_apostrophe = bool(
+            character == "'"
+            and index > 0
+            and index + 1 < len(text)
+            and text[index - 1].isalnum()
+            and text[index + 1].isalnum()
+        )
+        if quote:
+            if escaped:
+                escaped = False
+            elif character == "\\":
+                escaped = True
+            elif character == quote and not word_apostrophe:
+                quoted_spans.append((quote_start, index + 1))
+                quote = ""
+                quote_start = -1
+            continue
+        if character == '"' or (character == "'" and (index == 0 or not text[index - 1].isalnum())):
+            quote = character
+            quote_start = index
+
+    scan_stop = len(text)
     position = 0
+    quoted_index = 0
     while position < scan_stop:
+        while quoted_index < len(quoted_spans) and quoted_spans[quoted_index][1] <= position:
+            quoted_index += 1
+        if (
+            quoted_index < len(quoted_spans)
+            and quoted_spans[quoted_index][0] <= position < quoted_spans[quoted_index][1]
+        ):
+            position = quoted_spans[quoted_index][1]
+            continue
         character = text[position]
         if character != "{":
             position += 1
@@ -306,7 +340,7 @@ def _has_dominant_malformed_tool_root(text: str) -> bool:
             position += 1
             continue
         root_start = position
-        root_stop = min(len(text), root_start + _MAX_CONTROL_SCAN_CHARS)
+        root_stop = len(text)
         depth = 0
         root_quote = ""
         root_escaped = False
@@ -462,19 +496,22 @@ def looks_like_a_code_style_call(content: str) -> bool:
 
 
 def _unwrap_full_json_fence(text: str) -> str | None:
-    """Return one exact JSON-owned fence body with deterministic linear work."""
+    """Return one released unlabelled or exact JSON-owned fence body."""
 
-    if len(text) < len(_JSON_FENCE_PREFIX) + 3:
+    if len(text) < len(_CODE_FENCE_PREFIX) * 2 or not text.startswith(_CODE_FENCE_PREFIX):
         return None
-    if text[: len(_JSON_FENCE_PREFIX)].casefold() != _JSON_FENCE_PREFIX:
+    if not text.endswith(_CODE_FENCE_PREFIX):
         return None
-    boundary = len(_JSON_FENCE_PREFIX)
-    if text[boundary] not in " \t\r\n[{":
+    raw_inner = text[len(_CODE_FENCE_PREFIX) : -len(_CODE_FENCE_PREFIX)]
+    if raw_inner[:4].casefold() == "json" and (
+        len(raw_inner) == 4 or raw_inner[4].isspace() or raw_inner[4] in "[{"
+    ):
+        inner = raw_inner[4:].strip()
+    else:
+        inner = raw_inner.strip()
+    if not inner.startswith(("{", "[")):
         return None
-    if not text.endswith("```"):
-        return None
-    body = text[boundary:-3].strip()
-    return body or None
+    return inner
 
 
 def classify_tool_turn(content: str) -> ToolTurn:

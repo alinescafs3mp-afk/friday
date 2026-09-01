@@ -79,6 +79,13 @@ def test_apostrophe_before_dominant_malformed_root_cannot_hide_it() -> None:
     assert classify_tool_turn(content).kind == "protocol_error"
 
 
+def test_dominant_malformed_root_after_the_old_scan_window_fails_closed() -> None:
+    content = ("p" * 64_001) + "{name memory_search arguments " + ("x" * 100_000)
+
+    assert contains_internal_tool_output(content) is True
+    assert classify_tool_turn(content).kind == "protocol_error"
+
+
 def test_short_closed_malformed_example_does_not_own_following_prose() -> None:
     examples = (
         "Example: {name demo arguments {}}. ",
@@ -102,6 +109,15 @@ def test_malformed_spelling_inside_ordinary_json_string_remains_data() -> None:
     for content in contents:
         assert contains_internal_tool_output(content) is False
         assert classify_tool_turn(content).kind == "answer"
+
+
+def test_quoted_malformed_syntax_in_prose_remains_an_answer() -> None:
+    content = (
+        'Documentation quotes "{name demo arguments ' + ("literal padding " * 200) + '" as malformed syntax.'
+    )
+
+    assert contains_internal_tool_output(content) is False
+    assert classify_tool_turn(content).kind == "answer"
 
 
 def test_repeated_unclosed_tag_names_remain_literal_documentation() -> None:
@@ -140,7 +156,7 @@ def test_unclosed_structural_tag_body_stays_fail_closed_when_padded() -> None:
     assert classify_tool_turn(late_code_style).kind == "protocol_error"
 
 
-@pytest.mark.parametrize("label", ["", "python", "bash", "text", "custom"])
+@pytest.mark.parametrize("label", ["python", "bash", "text", "custom"])
 def test_only_json_owned_fences_can_normalize_tool_calls(label: str) -> None:
     payload = '{"name":"memory_save","arguments":{"content":"x"}}'
 
@@ -149,9 +165,14 @@ def test_only_json_owned_fences_can_normalize_tool_calls(label: str) -> None:
     assert turn.kind == "protocol_error"
     assert turn.calls == ()
 
-    json_turn = classify_tool_turn(f"```json\n{payload}\n```")
-    assert json_turn.kind == "tool"
-    assert [(call.name, call.arguments) for call in json_turn.calls] == [("memory_save", {"content": "x"})]
+
+@pytest.mark.parametrize("label", ["", "json"])
+def test_released_json_fence_dialects_keep_exact_normalization(label: str) -> None:
+    payload = '{"name":"memory_save","arguments":{"content":"x"}}'
+
+    turn = classify_tool_turn(f"```{label}\n{payload}\n```")
+    assert turn.kind == "tool"
+    assert [(call.name, call.arguments) for call in turn.calls] == [("memory_save", {"content": "x"})]
 
 
 def test_canonical_textual_call_keeps_exact_normalization() -> None:
