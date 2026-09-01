@@ -747,7 +747,10 @@ read-only классификации, но кодово не может дать
 после успешной активации lifecycle публикует pair-bearing v2 generation и
 сохраняет pre-activation `0.207.84` отдельным permanent retain-only anchor.
 Activation не удаляет релизные артефакты: scope, reviewed dry-run, bounded
-apply и свежий terminal-zero convergence выполняются отдельными шагами.
+apply и свежий terminal-zero convergence выполняются отдельными шагами. Fresh
+`review_required` admission может пропустить следующий release только как
+scope-bound non-destructive defer: convergence-поля остаются пустыми, а delete
+authority не возникает.
 `0.207.92/schema50` DDL не меняет, принимает exact `0.207.91/schema50` как
 previous и сохраняет `0.207.90/schema50` immutable fallback. Canonical gate
 evidence аутентифицируется отдельным защищённым контуром вне disposable

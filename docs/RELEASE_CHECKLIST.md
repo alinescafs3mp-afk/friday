@@ -569,8 +569,10 @@ failed/error/skipped-тест в любой фазе делает гейт кр�
   activation body до очистки recovery state; произвольный или unfinished v1
   journal не мигрирует;
 - post-activation lifecycle сохраняет `0.207.84` как immutable retain-only
-  preactivation anchor, публикует pair-bearing v2 generation и не допускает
-  следующую установку без fresh exact terminal-zero convergence;
+  preactivation anchor и публикует pair-bearing v2 generation; следующая
+  установка требует fresh exact retention admission. `review_required`
+  разрешает только продолжение release-контура с пустыми convergence-полями и
+  exact scope binding, но не даёт destructive retention authority;
 - `0.207.92/schema50` принимает exact `0.207.91` как previous и сохраняет
   `0.207.90` immutable fallback; canonical gate evidence остаётся отдельным
   защищённым контуром вне disposable release/backup inventory;

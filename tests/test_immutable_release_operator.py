@@ -110,6 +110,7 @@ def _retention_admission_receipt(
     activation_receipt_sha256: str = "2" * 64,
 ) -> dict[str, object]:
     terminal = status == "converged"
+    scope_bound = status in {"converged", "review_required"}
     core: dict[str, object] = {
         "accepted_root_plan_sha256": "3" * 64 if terminal else "",
         "activation_receipt_file_sha256": activation_receipt_file_sha256,
@@ -124,8 +125,8 @@ def _retention_admission_receipt(
         "older_candidate_sha256": "9" * 64,
         "older_generation_id": "a" * 64,
         "older_generation_receipt_sha256": "b" * 64,
-        "retention_scope_schema": retention.RETENTION_SCOPE_SCHEMA if terminal else "",
-        "retention_scope_sha256": "c" * 64 if terminal else "",
+        "retention_scope_schema": retention.RETENTION_SCOPE_SCHEMA if scope_bound else "",
+        "retention_scope_sha256": "c" * 64 if scope_bound else "",
         "reviewed_full_candidate_set_sha256": "d" * 64 if terminal else "",
         "schema": operator._RETENTION_CONVERGENCE_RECEIPT_SCHEMA,  # noqa: SLF001
         "status": status,
@@ -10292,17 +10293,36 @@ def test_unit_journal_resume_rejects_full_identity_drift(tmp_path: Path) -> None
     state.mkdir(mode=0o700)
     candidate = operator.ReleaseIdentity(tmp_path / "candidate", "c" * 40, "0.207.91", "d" * 64, 50)
     previous = operator.ReleaseIdentity(tmp_path / "previous", "a" * 40, "0.207.90", "e" * 64, 50)
-    admission = _retention_admission_receipt()
+    admission = _retention_admission_receipt(status="review_required")
     journal = operator.DurableUnitInstallJournal(state / "immutable-release-unit-install.v1.json")
     hashes = {key: "1" * 64 for key in operator._UNIT_SURFACE_KEYS}  # noqa: SLF001
     transitions = {key: "2" * 64 for key in operator._RUNTIME_UNIT_NAMES}  # noqa: SLF001
-    journal.begin_or_resume(
+    prepared = journal.begin_or_resume(
         candidate=candidate,
         previous=previous,
         transition_root=tmp_path / "transition",
         candidate_unit_hashes=hashes,
         transition_unit_hashes=transitions,
         retention_admission=admission,
+    )
+    assert prepared["retention_admission"] == admission
+    assert prepared["retention_admission_receipt_sha256"] == admission["receipt_sha256"]
+    reloaded = operator.DurableUnitInstallJournal(journal.path)
+    assert reloaded.load()["retention_admission"] == admission
+    assert reloaded.retention_admission_for(candidate=candidate, previous=previous) == (
+        admission,
+        False,
+    )
+    assert (
+        reloaded.begin_or_resume(
+            candidate=candidate,
+            previous=previous,
+            transition_root=tmp_path / "transition",
+            candidate_unit_hashes=hashes,
+            transition_unit_hashes=transitions,
+            retention_admission=admission,
+        )
+        == prepared
     )
     drifted = dict(hashes)
     drifted["friday-backend.service.d/security.conf"] = "3" * 64
@@ -10315,6 +10335,38 @@ def test_unit_journal_resume_rejects_full_identity_drift(tmp_path: Path) -> None
             transition_unit_hashes=transitions,
             retention_admission=admission,
         )
+    binding_changes = (
+        ("activation_receipt_file_sha256", "f" * 64),
+        ("activation_receipt_sha256", "f" * 64),
+        ("current_candidate_sha256", "f" * 64),
+        ("current_generation_id", "f" * 64),
+        ("current_generation_receipt_sha256", "f" * 64),
+        ("index_journal_sha256", "f" * 64),
+        ("index_revision", 5),
+        ("older_candidate_sha256", "f" * 64),
+        ("older_generation_id", "f" * 64),
+        ("older_generation_receipt_sha256", "f" * 64),
+        ("retention_scope_sha256", "f" * 64),
+    )
+    for field, value in binding_changes:
+        changed = dict(admission)
+        changed[field] = value
+        changed_core = {key: value for key, value in changed.items() if key != "receipt_sha256"}
+        changed["receipt_sha256"] = hashlib.sha256(
+            operator._canonical_json(changed_core)  # noqa: SLF001
+        ).hexdigest()
+        with pytest.raises(
+            operator.ReleaseFailure,
+            match="^unit_install_retention_admission_changed$",
+        ):
+            operator.DurableUnitInstallJournal(journal.path).begin_or_resume(
+                candidate=candidate,
+                previous=previous,
+                transition_root=tmp_path / "transition",
+                candidate_unit_hashes=hashes,
+                transition_unit_hashes=transitions,
+                retention_admission=changed,
+            )
 
 
 def test_unit_journal_v2_rejects_resigned_runtime_only_hash_surface(tmp_path: Path) -> None:
@@ -10395,6 +10447,52 @@ def test_retention_admission_host_validation_rejects_resigned_forgery(
             expected_activation_receipt_sha256="2" * 64,
             allow_first_v2_deferred=False,
         )
+    if mutation != "status":
+        return
+
+    review = _retention_admission_receipt(status="review_required")
+    assert (
+        operator._validated_retention_release_admission(  # noqa: SLF001
+            review,
+            expected_activation_receipt_file_sha256="1" * 64,
+            expected_activation_receipt_sha256="2" * 64,
+            allow_first_v2_deferred=False,
+        )
+        == review
+    )
+    with pytest.raises(operator.ReleaseFailure, match="^retention_release_admission_invalid$"):
+        operator._validated_retention_release_admission(  # noqa: SLF001
+            review,
+            allow_first_v2_deferred=True,
+        )
+    invalid_review_changes: tuple[dict[str, object], ...] = (
+        {"status": "in_progress"},
+        {"retention_scope_schema": "", "retention_scope_sha256": ""},
+        {"retention_scope_schema": "wrong"},
+        {"retention_scope_sha256": "C" * 64},
+        {"retention_scope_sha256": int("1" * 64)},
+        {"batch_ordinal": 0},
+        {"batch_ordinal": -1.0},
+        {"index_revision": True},
+        {"current_candidate_sha256": int("4" * 64)},
+        {"accepted_root_plan_sha256": "3" * 64},
+        {"cycle_sha256": "4" * 64},
+        {"reviewed_full_candidate_set_sha256": "d" * 64},
+        {"terminal_apply_receipt_sha256": "e" * 64},
+    )
+    for changes in invalid_review_changes:
+        forged = {**review, **changes}
+        forged_core = {key: value for key, value in forged.items() if key != "receipt_sha256"}
+        forged["receipt_sha256"] = hashlib.sha256(
+            operator._canonical_json(forged_core)  # noqa: SLF001
+        ).hexdigest()
+        with pytest.raises(operator.ReleaseFailure, match="^retention_release_admission_invalid$"):
+            operator._validated_retention_release_admission(  # noqa: SLF001
+                forged,
+                expected_activation_receipt_file_sha256="1" * 64,
+                expected_activation_receipt_sha256="2" * 64,
+                allow_first_v2_deferred=False,
+            )
 
 
 def test_first_v2_admission_requires_exact_legacy_unit_bridge(tmp_path: Path) -> None:
@@ -10513,7 +10611,7 @@ def test_activation_freshly_rederives_and_rejects_unit_admission_drift_before_be
     state.mkdir(mode=0o700)
     candidate = operator.ReleaseIdentity(tmp_path / "candidate", "c" * 40, "0.207.91", "d" * 64, 50)
     previous = operator.ReleaseIdentity(tmp_path / "previous", "a" * 40, "0.207.90", "e" * 64, 50)
-    durable = _retention_admission_receipt()
+    durable = _retention_admission_receipt(status="review_required")
     unit_journal = operator.DurableUnitInstallJournal(state / "immutable-release-unit-install.v1.json")
     _complete_unit_install_journal(
         unit_journal,
@@ -10536,10 +10634,7 @@ def test_activation_freshly_rederives_and_rejects_unit_admission_drift_before_be
         "_bound_activation_receipt",
         lambda **_kwargs: ({"receipt_sha256": "2" * 64}, tmp_path / "activation.json"),
     )
-    fresh = dict(durable)
-    fresh["index_revision"] = int(fresh["index_revision"]) + 1
-    fresh_core = {key: value for key, value in fresh.items() if key != "receipt_sha256"}
-    fresh["receipt_sha256"] = hashlib.sha256(operator._canonical_json(fresh_core)).hexdigest()  # noqa: SLF001
+    fresh = _retention_admission_receipt(status="converged")
     candidate_admission = SimpleNamespace(retention_release_admission=lambda _path: fresh)
 
     with pytest.raises(
@@ -10554,6 +10649,13 @@ def test_activation_freshly_rederives_and_rejects_unit_admission_drift_before_be
             admission=candidate_admission,
         )
     assert unit_journal.load()["phase"] == "complete"
+    operator._require_fresh_unit_retention_admission(  # noqa: SLF001
+        activation_journal=activation_journal,
+        unit_journal=unit_journal,
+        candidate=candidate,
+        previous=previous,
+        admission=SimpleNamespace(retention_release_admission=lambda _path: durable),
+    )
 
 
 @pytest.mark.parametrize("phase", ("prepared", "migration_attempted", "clear"))

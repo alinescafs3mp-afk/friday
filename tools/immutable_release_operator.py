@@ -15053,12 +15053,12 @@ def _validated_retention_release_admission(
     if (
         set(receipt) != _RETENTION_ADMISSION_KEYS
         or receipt.get("schema") != _RETENTION_CONVERGENCE_RECEIPT_SCHEMA
-        or status not in {"converged", "first_v2_deferred"}
-        or (status == "first_v2_deferred" and not allow_first_v2_deferred)
+        or status not in {"converged", "first_v2_deferred", "review_required"}
+        or (status == "first_v2_deferred") != allow_first_v2_deferred
         or type(receipt.get("index_revision")) is not int
         or int(receipt["index_revision"]) < 0
         or any(
-            _HEX64.fullmatch(str(receipt.get(key) or "")) is None
+            type(receipt.get(key)) is not str or _HEX64.fullmatch(receipt[key]) is None
             for key in (
                 "activation_receipt_file_sha256",
                 "activation_receipt_sha256",
@@ -15101,23 +15101,32 @@ def _validated_retention_release_admission(
         if (
             type(batch_ordinal) is not int
             or int(batch_ordinal) < 0
-            or any(_HEX64.fullmatch(str(receipt.get(key) or "")) is None for key in convergence_fields)
+            or any(
+                type(receipt.get(key)) is not str or _HEX64.fullmatch(receipt[key]) is None
+                for key in convergence_fields
+            )
             or scope_schema != _RETENTION_SCOPE_SCHEMA
-            or _HEX64.fullmatch(str(scope_sha256 or "")) is None
+            or type(scope_sha256) is not str
+            or _HEX64.fullmatch(scope_sha256) is None
         ):
             raise ReleaseFailure("retention_release_admission_invalid")
-    elif (
-        batch_ordinal != -1
-        or any(receipt.get(key) != "" for key in convergence_fields)
-        or not (
-            (scope_schema == "" and scope_sha256 == "")
-            or (
-                scope_schema == _RETENTION_SCOPE_SCHEMA
-                and _HEX64.fullmatch(str(scope_sha256 or "")) is not None
-            )
+    else:
+        if (
+            type(batch_ordinal) is not int
+            or batch_ordinal != -1
+            or any(receipt.get(key) != "" for key in convergence_fields)
+        ):
+            raise ReleaseFailure("retention_release_admission_invalid")
+        exact_scope = (
+            scope_schema == _RETENTION_SCOPE_SCHEMA
+            and type(scope_sha256) is str
+            and _HEX64.fullmatch(scope_sha256) is not None
         )
-    ):
-        raise ReleaseFailure("retention_release_admission_invalid")
+        if status == "review_required":
+            if not exact_scope:
+                raise ReleaseFailure("retention_release_admission_invalid")
+        elif not ((scope_schema == "" and scope_sha256 == "") or exact_scope):
+            raise ReleaseFailure("retention_release_admission_invalid")
     return receipt
 
 

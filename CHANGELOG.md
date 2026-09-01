@@ -16,6 +16,10 @@
   without converting an invisible registered or asynchronous kernel reference
   or a detached mount namespace into false clearance. Privileged failures emit
   only an allowlisted body-free diagnostic class.
+- Allows a fresh two-generation `review_required` receipt to carry the next
+  immutable release through install and activation only as an exact
+  scope-bound, non-destructive defer. It cannot grant retention apply or delete
+  authority, and any admission drift before activation fails closed.
 - Adds race-closed and provision-to-eligible regressions for the external
   evidence contour. SQLite remains at schema 50; exact `0.207.91` is the
   predecessor and `0.207.90` remains the immutable fallback.
