@@ -22,7 +22,7 @@ import tempfile
 import xml.etree.ElementTree as ET
 from collections.abc import Iterator
 from contextlib import contextmanager, suppress
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path, PurePosixPath
 from typing import Any
@@ -40,6 +40,13 @@ if str(ROOT) not in sys.path:
 
 RECEIPT_SCHEMA = "friday.golden-journey-sanitized-receipt.v2"
 CLEAN_ARTIFACT_RECEIPT_SCHEMA = "friday.golden-journey-sanitized-receipt.v4"
+PRODUCTION_OBSERVATION_RECEIPT_SCHEMA = "friday.golden-journey-production-read-only-receipt.v1"
+PRODUCTION_OBSERVATION_MANIFEST_SCHEMA = "friday.golden-journey-production-read-only-evidence.v1"
+RELEASE_CAPTAIN_PRODUCTION_OBSERVATION_SCHEMA = "friday.production-read-only-release-captain-artifact.v1"
+PRODUCTION_READ_ONLY_OBSERVATION_SCHEMA = "friday.production-read-only-observation.v1"
+PRODUCTION_SCHEDULED_WORK_SCHEMA_ATTESTATION_SHA256 = (
+    "726ded0b802ee1c6bf82663fd0918efb7f3d509f382c0d2aaa3540d4a1790561"
+)
 MANIFEST_SCHEMA = "friday.golden-journey-evidence.v1"
 VALIDATION_ATTESTATION_SCHEMA = "friday.exact-release-receipt-validation.v1"
 PRODUCER_PATH = "tools/exact_release_evidence.py"
@@ -49,6 +56,11 @@ VALIDATION_TERMINATION_GRACE_SECONDS = 5.0
 _EVIDENCE_ROOT = PurePosixPath("evidence/golden_journeys")
 _CLEAN_ARTIFACT_CLASS = "clean artifact path"
 _RESTART_RECOVERY_CLASS = "restart and recovery evidence"
+_PRODUCTION_OBSERVATION_CLASS = "production read-only observation"
+_PRODUCTION_OBSERVATION_JOURNEY = "durable_scheduled_work"
+_PRODUCTION_OBSERVATION_MAX_BYTES = 32_768
+_RELEASE_CAPTAIN_ARTIFACT_MAX_BYTES = 65_536
+_MAX_PRODUCTION_AGGREGATE = (1 << 63) - 1
 _CANDIDATE_BOUND_FAULT_JOURNEYS = frozenset(
     {
         "durable_scheduled_work",
@@ -1531,6 +1543,103 @@ _ARTIFACT_IMPORT_FIELDS = frozenset(
         "tooling_snapshot_sha256",
     }
 )
+_PRODUCTION_OBSERVATION_RECEIPT_FIELDS = frozenset(
+    {
+        "$schema",
+        "journey_id",
+        "evidence_class",
+        "environment",
+        "check_ids",
+        "release",
+        "observation",
+        "checks",
+        "result",
+    }
+)
+_PRODUCTION_OBSERVATION_BINDING_FIELDS = frozenset(
+    {
+        "backend_process_epoch_sha256",
+        "challenge_sha256",
+        "endpoint_response_schema",
+        "endpoint_response_sha256",
+        "health_after_sha256",
+        "health_before_sha256",
+        "release_binding_sha256",
+    }
+)
+_PRODUCTION_OBSERVATION_CHECK_FIELDS = frozenset({"check_id", "outcome"})
+_PRODUCTION_OBSERVATION_MANIFEST_OBSERVATION_FIELDS = frozenset(
+    {
+        "environment",
+        "check_ids",
+        "artifact_ref",
+        "artifact_schema",
+        "artifact_sha256",
+    }
+)
+_RELEASE_CAPTAIN_ARTIFACT_FIELDS = frozenset(
+    {
+        "schema",
+        "release",
+        "release_binding_sha256",
+        "endpoint_response",
+        "endpoint_response_sha256",
+        "challenge_sha256",
+        "backend_process_epoch_sha256",
+        "health_before_sha256",
+        "health_after_sha256",
+    }
+)
+_PRODUCTION_RESPONSE_FIELDS = frozenset(
+    {
+        "schema",
+        "challenge_sha256",
+        "backend_process_epoch_sha256",
+        "backend_lease_owned",
+        "database",
+        "scheduled_work",
+        "hard_contradictions",
+    }
+)
+_PRODUCTION_DATABASE_FIELDS = frozenset(
+    {
+        "schema_version",
+        "schema_attestation_sha256",
+        "integrity",
+        "foreign_key_violations",
+    }
+)
+_PRODUCTION_SCHEDULED_WORK_FIELDS = frozenset({"missions", "mission_tasks", "reminders", "workers"})
+_PRODUCTION_MISSION_STATES = (
+    "proposed",
+    "ready",
+    "running",
+    "paused",
+    "blocked",
+    "completed",
+    "failed",
+    "cancelled",
+)
+_PRODUCTION_TASK_STATES = (
+    "pending",
+    "running",
+    "done",
+    "failed",
+    "skipped",
+    "uncertain",
+    "compensated",
+)
+_PRODUCTION_REMINDER_STATES = ("pending", "uncertain", "sent", "failed", "dismissed")
+_PRODUCTION_WORKER_STATES = (
+    "scheduled",
+    "running",
+    "ok",
+    "error",
+    "timeout",
+    "skipped",
+    "unknown",
+)
+_PRODUCTION_WORKER_FIELDS = frozenset({"present", "missing", "health_states"})
 
 
 class ExactReleaseEvidenceError(ValueError):
@@ -1633,6 +1742,30 @@ class AuthenticatedOwnerSmokeBinding:
         return payload
 
 
+@dataclass(frozen=True, slots=True)
+class AuthenticatedProductionObservationBinding:
+    """Exact expected values accepted by a separate Release Captain.
+
+    Constructing this immutable value is not authentication.  Production
+    evidence is valid only when its validator receives the same exact binding
+    independently, including the canonical endpoint bytes.  The endpoint body
+    is kept out of reprs and published evidence.
+    """
+
+    release: ReleaseIdentity
+    endpoint_response: bytes = field(repr=False)
+    challenge_sha256: str
+    backend_process_epoch_sha256: str
+    health_before_sha256: str
+    health_after_sha256: str
+
+    def __post_init__(self) -> None:
+        _production_binding_payload(self)
+
+    def payload(self) -> dict[str, str]:
+        return _production_binding_payload(self)
+
+
 def _release_payload(identity: ReleaseIdentity) -> dict[str, object]:
     if (
         type(identity) is not ReleaseIdentity
@@ -1691,6 +1824,10 @@ def receipt_schema(evidence_class: str, *, journey_id: str | None = None) -> str
         raise ExactReleaseEvidenceError("evidence_class_invalid")
     if journey_id is not None and type(journey_id) is not str:
         raise ExactReleaseEvidenceError("journey_id_invalid")
+    if evidence_class == _PRODUCTION_OBSERVATION_CLASS:
+        if journey_id not in {None, _PRODUCTION_OBSERVATION_JOURNEY}:
+            raise ExactReleaseEvidenceError("production_observation_scope_invalid")
+        return PRODUCTION_OBSERVATION_RECEIPT_SCHEMA
     candidate_runtime = (
         evidence_class == _CLEAN_ARTIFACT_CLASS
         if journey_id is None
@@ -1706,6 +1843,28 @@ def _closed_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
             raise ExactReleaseEvidenceError("receipt_json_invalid")
         result[key] = value
     return result
+
+
+def _load_canonical_object(
+    raw: bytes,
+    *,
+    maximum_bytes: int,
+    failure_code: str,
+) -> dict[str, Any]:
+    if type(raw) is not bytes or not raw or len(raw) > maximum_bytes:
+        raise ExactReleaseEvidenceError(failure_code)
+    try:
+        value = json.loads(
+            raw.decode("utf-8", errors="strict"),
+            object_pairs_hook=_closed_object,
+            parse_constant=lambda _value: (_ for _ in ()).throw(ExactReleaseEvidenceError(failure_code)),
+        )
+        canonical = canonical_json_bytes(value)
+    except (TypeError, UnicodeError, RuntimeError, ValueError, json.JSONDecodeError) as exc:
+        raise ExactReleaseEvidenceError(failure_code) from exc
+    if type(value) is not dict or raw != canonical:
+        raise ExactReleaseEvidenceError(failure_code)
+    return value
 
 
 def _load_canonical_receipt(raw: bytes) -> dict[str, Any]:
@@ -1770,7 +1929,11 @@ def _evidence_ref(
     result: str,
     kind: str,
 ) -> str:
-    proof_refs(journey_id, evidence_class)
+    if evidence_class == _PRODUCTION_OBSERVATION_CLASS:
+        if journey_id != _PRODUCTION_OBSERVATION_JOURNEY:
+            raise ExactReleaseEvidenceError("production_observation_scope_invalid")
+    else:
+        proof_refs(journey_id, evidence_class)
     if result not in {"VERIFIED", "FAILED"} or kind not in {"receipts", "manifests"}:
         raise ExactReleaseEvidenceError("evidence_ref_invalid")
     environment = ENVIRONMENT_BY_CLASS.get(evidence_class)
@@ -1780,6 +1943,120 @@ def _evidence_ref(
     return str(_EVIDENCE_ROOT / kind / filename)
 
 
+def _validate_production_observation_receipt_structure(
+    raw: bytes,
+    *,
+    expected_release: ReleaseIdentity,
+    expected_journey_id: str,
+) -> dict[str, Any]:
+    if expected_journey_id != _PRODUCTION_OBSERVATION_JOURNEY:
+        raise ExactReleaseEvidenceError("production_observation_scope_invalid")
+    expected_release_payload = _release_payload(expected_release)
+    if expected_release.database_schema != 50:
+        raise ExactReleaseEvidenceError("production_observation_release_invalid")
+    value = _load_canonical_receipt(raw)
+    observation = value.get("observation")
+    checks = value.get("checks")
+    check_ids = _check_ids(expected_journey_id, _PRODUCTION_OBSERVATION_CLASS)
+    if (
+        set(value) != _PRODUCTION_OBSERVATION_RECEIPT_FIELDS
+        or value.get("$schema") != PRODUCTION_OBSERVATION_RECEIPT_SCHEMA
+        or value.get("journey_id") != expected_journey_id
+        or value.get("evidence_class") != _PRODUCTION_OBSERVATION_CLASS
+        or value.get("environment") != ENVIRONMENT_BY_CLASS[_PRODUCTION_OBSERVATION_CLASS]
+        or value.get("check_ids") != check_ids
+        or value.get("release") != expected_release_payload
+        or value.get("result") != "VERIFIED"
+        or type(observation) is not dict
+        or set(observation) != _PRODUCTION_OBSERVATION_BINDING_FIELDS
+        or observation.get("endpoint_response_schema") != PRODUCTION_READ_ONLY_OBSERVATION_SCHEMA
+        or observation.get("release_binding_sha256") != release_binding_sha256(expected_release)
+        or type(checks) is not list
+        or len(checks) != len(check_ids)
+    ):
+        raise ExactReleaseEvidenceError("production_observation_receipt_invalid")
+    for key in (
+        "backend_process_epoch_sha256",
+        "challenge_sha256",
+        "endpoint_response_sha256",
+        "health_after_sha256",
+        "health_before_sha256",
+        "release_binding_sha256",
+    ):
+        _production_digest(
+            observation.get(key),
+            failure_code="production_observation_receipt_invalid",
+        )
+    derived_checks = [{"check_id": check_id, "outcome": "PASSED"} for check_id in check_ids]
+    if checks != derived_checks or any(
+        type(check) is not dict or set(check) != _PRODUCTION_OBSERVATION_CHECK_FIELDS for check in checks
+    ):
+        raise ExactReleaseEvidenceError("production_observation_result_not_machine_derived")
+    return value
+
+
+def _production_bundle_from_receipt(
+    raw: bytes,
+    *,
+    identity: ReleaseIdentity,
+    journey_id: str,
+) -> EvidenceBundle:
+    receipt = _validate_production_observation_receipt_structure(
+        raw,
+        expected_release=identity,
+        expected_journey_id=journey_id,
+    )
+    result = "VERIFIED"
+    receipt_ref = _evidence_ref(
+        identity=identity,
+        journey_id=journey_id,
+        evidence_class=_PRODUCTION_OBSERVATION_CLASS,
+        result=result,
+        kind="receipts",
+    )
+    receipt_sha256 = hashlib.sha256(raw).hexdigest()
+    manifest_ref = _evidence_ref(
+        identity=identity,
+        journey_id=journey_id,
+        evidence_class=_PRODUCTION_OBSERVATION_CLASS,
+        result=result,
+        kind="manifests",
+    )
+    manifest_value = {
+        "$schema": PRODUCTION_OBSERVATION_MANIFEST_SCHEMA,
+        "evidence_class": _PRODUCTION_OBSERVATION_CLASS,
+        "journey_id": journey_id,
+        "observation": {
+            "artifact_ref": receipt_ref,
+            "artifact_schema": PRODUCTION_OBSERVATION_RECEIPT_SCHEMA,
+            "artifact_sha256": receipt_sha256,
+            "check_ids": receipt["check_ids"],
+            "environment": receipt["environment"],
+        },
+        "release": _release_payload(identity),
+        "result": result,
+    }
+    manifest = canonical_json_bytes(manifest_value)
+    loaded_manifest = _load_canonical_manifest(manifest)
+    observation = loaded_manifest.get("observation")
+    if (
+        set(loaded_manifest) != _MANIFEST_FIELDS
+        or type(observation) is not dict
+        or set(observation) != _PRODUCTION_OBSERVATION_MANIFEST_OBSERVATION_FIELDS
+    ):
+        raise ExactReleaseEvidenceError("manifest_fields_invalid")
+    return EvidenceBundle(
+        receipt_ref=receipt_ref,
+        receipt=raw,
+        receipt_sha256=receipt_sha256,
+        manifest_ref=manifest_ref,
+        manifest=manifest,
+        manifest_sha256=hashlib.sha256(manifest).hexdigest(),
+        result=result,
+        authority=_EVIDENCE_BUNDLE_AUTHORITY,
+    )
+
+
 def _bundle_from_receipt(
     raw: bytes,
     *,
@@ -1787,6 +2064,12 @@ def _bundle_from_receipt(
     journey_id: str,
     evidence_class: str,
 ) -> EvidenceBundle:
+    if evidence_class == _PRODUCTION_OBSERVATION_CLASS:
+        return _production_bundle_from_receipt(
+            raw,
+            identity=identity,
+            journey_id=journey_id,
+        )
     receipt = _load_canonical_receipt(raw)
     expected_release = _release_payload(identity)
     result = receipt.get("result")
@@ -2032,6 +2315,210 @@ def _owner_smoke_payload(value: AuthenticatedOwnerSmokeBinding | None) -> dict[s
         "authority": value.authority,
         "schema": value.schema,
     }
+
+
+def _production_digest(value: object, *, failure_code: str) -> str:
+    if type(value) is not str or _SHA256.fullmatch(value) is None or set(value) == {"0"}:
+        raise ExactReleaseEvidenceError(failure_code)
+    return value
+
+
+def _production_count(value: object, *, failure_code: str) -> int:
+    if type(value) is not int or not 0 <= value <= _MAX_PRODUCTION_AGGREGATE:
+        raise ExactReleaseEvidenceError(failure_code)
+    return value
+
+
+def _production_counts(
+    value: object,
+    *,
+    names: tuple[str, ...],
+    failure_code: str,
+) -> dict[str, int]:
+    if type(value) is not dict or set(value) != set(names):
+        raise ExactReleaseEvidenceError(failure_code)
+    return {name: _production_count(value.get(name), failure_code=failure_code) for name in names}
+
+
+def _validate_production_endpoint_response(
+    raw: bytes,
+    *,
+    expected_release: ReleaseIdentity,
+    expected_challenge_sha256: str,
+    expected_process_epoch_sha256: str,
+) -> dict[str, Any]:
+    """Validate the exact body-free response without granting it authority."""
+
+    release = _release_payload(expected_release)
+    challenge = _production_digest(
+        expected_challenge_sha256,
+        failure_code="production_observation_challenge_invalid",
+    )
+    process_epoch = _production_digest(
+        expected_process_epoch_sha256,
+        failure_code="production_observation_process_epoch_invalid",
+    )
+    value = _load_canonical_object(
+        raw,
+        maximum_bytes=_PRODUCTION_OBSERVATION_MAX_BYTES,
+        failure_code="production_observation_response_invalid",
+    )
+    database = value.get("database")
+    scheduled_work = value.get("scheduled_work")
+    if (
+        set(value) != _PRODUCTION_RESPONSE_FIELDS
+        or value.get("schema") != PRODUCTION_READ_ONLY_OBSERVATION_SCHEMA
+        or value.get("challenge_sha256") != challenge
+        or value.get("backend_process_epoch_sha256") != process_epoch
+        or value.get("backend_lease_owned") is not True
+        or type(value.get("hard_contradictions")) is not int
+        or value.get("hard_contradictions") != 0
+        or type(database) is not dict
+        or set(database) != _PRODUCTION_DATABASE_FIELDS
+        or type(database.get("schema_version")) is not int
+        or database.get("schema_version") != release["database_schema"]
+        or database.get("schema_version") != 50
+        or database.get("integrity") != "ok"
+        or type(database.get("foreign_key_violations")) is not int
+        or database.get("foreign_key_violations") != 0
+        or type(scheduled_work) is not dict
+        or set(scheduled_work) != _PRODUCTION_SCHEDULED_WORK_FIELDS
+    ):
+        raise ExactReleaseEvidenceError("production_observation_response_invalid")
+    if (
+        _production_digest(
+            database.get("schema_attestation_sha256"),
+            failure_code="production_observation_schema_attestation_invalid",
+        )
+        != PRODUCTION_SCHEDULED_WORK_SCHEMA_ATTESTATION_SHA256
+    ):
+        raise ExactReleaseEvidenceError("production_observation_schema_attestation_invalid")
+    _production_counts(
+        scheduled_work.get("missions"),
+        names=_PRODUCTION_MISSION_STATES,
+        failure_code="production_observation_aggregate_invalid",
+    )
+    _production_counts(
+        scheduled_work.get("mission_tasks"),
+        names=_PRODUCTION_TASK_STATES,
+        failure_code="production_observation_aggregate_invalid",
+    )
+    _production_counts(
+        scheduled_work.get("reminders"),
+        names=_PRODUCTION_REMINDER_STATES,
+        failure_code="production_observation_aggregate_invalid",
+    )
+    workers = scheduled_work.get("workers")
+    if type(workers) is not dict or set(workers) != _PRODUCTION_WORKER_FIELDS:
+        raise ExactReleaseEvidenceError("production_observation_aggregate_invalid")
+    present = _production_count(
+        workers.get("present"),
+        failure_code="production_observation_aggregate_invalid",
+    )
+    missing = _production_count(
+        workers.get("missing"),
+        failure_code="production_observation_aggregate_invalid",
+    )
+    health_states = _production_counts(
+        workers.get("health_states"),
+        names=_PRODUCTION_WORKER_STATES,
+        failure_code="production_observation_aggregate_invalid",
+    )
+    if present + missing != 2 or sum(health_states.values()) != present:
+        raise ExactReleaseEvidenceError("production_observation_aggregate_invalid")
+    return value
+
+
+def _production_binding_payload(
+    value: AuthenticatedProductionObservationBinding,
+) -> dict[str, str]:
+    if type(value) is not AuthenticatedProductionObservationBinding:
+        raise ExactReleaseEvidenceError("production_observation_not_authenticated")
+    if type(value.release) is not ReleaseIdentity or type(value.endpoint_response) is not bytes:
+        raise ExactReleaseEvidenceError("production_observation_binding_invalid")
+    _validate_production_endpoint_response(
+        value.endpoint_response,
+        expected_release=value.release,
+        expected_challenge_sha256=value.challenge_sha256,
+        expected_process_epoch_sha256=value.backend_process_epoch_sha256,
+    )
+    health_before = _production_digest(
+        value.health_before_sha256,
+        failure_code="production_observation_health_invalid",
+    )
+    health_after = _production_digest(
+        value.health_after_sha256,
+        failure_code="production_observation_health_invalid",
+    )
+    return {
+        "backend_process_epoch_sha256": value.backend_process_epoch_sha256,
+        "challenge_sha256": value.challenge_sha256,
+        "endpoint_response_schema": PRODUCTION_READ_ONLY_OBSERVATION_SCHEMA,
+        "endpoint_response_sha256": hashlib.sha256(value.endpoint_response).hexdigest(),
+        "health_after_sha256": health_after,
+        "health_before_sha256": health_before,
+        "release_binding_sha256": release_binding_sha256(value.release),
+    }
+
+
+def binding_from_release_captain_artifact(
+    raw: bytes,
+    *,
+    expected_release: ReleaseIdentity,
+) -> AuthenticatedProductionObservationBinding:
+    """Decode one canonical Release Captain artifact into expected values.
+
+    This helper verifies transport integrity and exact release binding; it does
+    not turn construction or parsing into authentication.  Callers must first
+    establish the artifact's external Release Captain authority.
+    """
+
+    expected_release_payload = _release_payload(expected_release)
+    value = _load_canonical_object(
+        raw,
+        maximum_bytes=_RELEASE_CAPTAIN_ARTIFACT_MAX_BYTES,
+        failure_code="release_captain_observation_artifact_invalid",
+    )
+    response = value.get("endpoint_response")
+    if (
+        set(value) != _RELEASE_CAPTAIN_ARTIFACT_FIELDS
+        or value.get("schema") != RELEASE_CAPTAIN_PRODUCTION_OBSERVATION_SCHEMA
+        or value.get("release") != expected_release_payload
+        or value.get("release_binding_sha256") != release_binding_sha256(expected_release)
+        or type(response) is not dict
+    ):
+        raise ExactReleaseEvidenceError("release_captain_observation_artifact_invalid")
+    endpoint_response = canonical_json_bytes(response)
+    if value.get("endpoint_response_sha256") != hashlib.sha256(endpoint_response).hexdigest():
+        raise ExactReleaseEvidenceError("release_captain_observation_artifact_invalid")
+    challenge_sha256 = _production_digest(
+        value.get("challenge_sha256"),
+        failure_code="release_captain_observation_artifact_invalid",
+    )
+    process_epoch_sha256 = _production_digest(
+        value.get("backend_process_epoch_sha256"),
+        failure_code="release_captain_observation_artifact_invalid",
+    )
+    health_before_sha256 = _production_digest(
+        value.get("health_before_sha256"),
+        failure_code="release_captain_observation_artifact_invalid",
+    )
+    health_after_sha256 = _production_digest(
+        value.get("health_after_sha256"),
+        failure_code="release_captain_observation_artifact_invalid",
+    )
+    binding = AuthenticatedProductionObservationBinding(
+        release=expected_release,
+        endpoint_response=endpoint_response,
+        challenge_sha256=challenge_sha256,
+        backend_process_epoch_sha256=process_epoch_sha256,
+        health_before_sha256=health_before_sha256,
+        health_after_sha256=health_after_sha256,
+    )
+    expected = _production_binding_payload(binding)
+    if any(value.get(key) != item for key, item in expected.items() if key != "endpoint_response_schema"):
+        raise ExactReleaseEvidenceError("release_captain_observation_artifact_invalid")
+    return binding
 
 
 def _require_neutralized_ignored_files(repo_root: Path) -> None:
@@ -3112,6 +3599,8 @@ def _produce_for_identity(
 ) -> bytes:
     """Run the code-owned tests; callers cannot provide a result or runner."""
 
+    if evidence_class == _PRODUCTION_OBSERVATION_CLASS:
+        raise ExactReleaseEvidenceError("production_observation_external_binding_required")
     release_payload = _release_payload(identity)
     owner_smoke_payload = _owner_smoke_payload(owner_smoke)
     root = _resolve_directory(repo_root, "repo_root_invalid")
@@ -3201,6 +3690,8 @@ def _validate_receipt(
     never establishes owner authority.
     """
 
+    if expected_evidence_class == _PRODUCTION_OBSERVATION_CLASS:
+        raise ExactReleaseEvidenceError("production_observation_external_binding_required")
     expected_release_payload = _release_payload(expected_release)
     candidate_runtime_required = _requires_candidate_runtime(
         expected_journey_id,
@@ -3392,6 +3883,8 @@ def validate_receipt(
 ) -> dict[str, Any]:
     """Validate structure, then independently rerun the exact closed inventory."""
 
+    if expected_evidence_class == _PRODUCTION_OBSERVATION_CLASS:
+        raise ExactReleaseEvidenceError("production_observation_external_binding_required")
     candidate_runtime_required = _requires_candidate_runtime(
         expected_journey_id,
         expected_evidence_class,
@@ -4320,6 +4813,93 @@ def _reauthenticate_release_runtime(runtime: _AuthenticatedReleaseRuntime) -> No
         raise ExactReleaseEvidenceError("release_identity_changed")
 
 
+def validate_production_observation_receipt(
+    raw: bytes,
+    *,
+    authenticated_binding: AuthenticatedProductionObservationBinding,
+    expected_journey_id: str = _PRODUCTION_OBSERVATION_JOURNEY,
+) -> dict[str, Any]:
+    """Validate one production receipt against external expected authority.
+
+    The embedded hashes never authenticate themselves.  Validation requires
+    the exact canonical endpoint bytes and expected values supplied separately
+    by a Release Captain authenticator.
+    """
+
+    binding = _production_binding_payload(authenticated_binding)
+    value = _validate_production_observation_receipt_structure(
+        raw,
+        expected_release=authenticated_binding.release,
+        expected_journey_id=expected_journey_id,
+    )
+    if value.get("observation") != binding:
+        raise ExactReleaseEvidenceError("production_observation_not_authenticated")
+    return value
+
+
+def produce_production_observation_bundle(
+    *,
+    authenticated_binding: AuthenticatedProductionObservationBinding,
+    journey_id: str = _PRODUCTION_OBSERVATION_JOURNEY,
+) -> EvidenceBundle:
+    """Derive a timestamp-free bundle from one authenticated live response.
+
+    There is no result, check outcome, release hash, or response hash parameter:
+    all publication claims are derived from the exact expected-value binding.
+    """
+
+    if journey_id != _PRODUCTION_OBSERVATION_JOURNEY:
+        raise ExactReleaseEvidenceError("production_observation_scope_invalid")
+    observation = _production_binding_payload(authenticated_binding)
+    check_ids = _check_ids(journey_id, _PRODUCTION_OBSERVATION_CLASS)
+    receipt = {
+        "$schema": PRODUCTION_OBSERVATION_RECEIPT_SCHEMA,
+        "check_ids": check_ids,
+        "checks": [{"check_id": check_id, "outcome": "PASSED"} for check_id in check_ids],
+        "environment": ENVIRONMENT_BY_CLASS[_PRODUCTION_OBSERVATION_CLASS],
+        "evidence_class": _PRODUCTION_OBSERVATION_CLASS,
+        "journey_id": journey_id,
+        "observation": observation,
+        "release": _release_payload(authenticated_binding.release),
+        "result": "VERIFIED",
+    }
+    raw = canonical_json_bytes(receipt)
+    validate_production_observation_receipt(
+        raw,
+        authenticated_binding=authenticated_binding,
+        expected_journey_id=journey_id,
+    )
+    return _production_bundle_from_receipt(
+        raw,
+        identity=authenticated_binding.release,
+        journey_id=journey_id,
+    )
+
+
+def validate_production_observation_bundle(
+    bundle: EvidenceBundle,
+    *,
+    authenticated_binding: AuthenticatedProductionObservationBinding,
+    expected_journey_id: str = _PRODUCTION_OBSERVATION_JOURNEY,
+) -> dict[str, Any]:
+    """Revalidate a canonical bundle with separately supplied authority."""
+
+    exact = _require_evidence_bundle(bundle)
+    value = validate_production_observation_receipt(
+        exact.receipt,
+        authenticated_binding=authenticated_binding,
+        expected_journey_id=expected_journey_id,
+    )
+    expected = _production_bundle_from_receipt(
+        exact.receipt,
+        identity=authenticated_binding.release,
+        journey_id=expected_journey_id,
+    )
+    if exact != expected:
+        raise ExactReleaseEvidenceError("production_observation_bundle_invalid")
+    return value
+
+
 def produce_receipt(
     *,
     repo_root: Path,
@@ -4335,6 +4915,8 @@ def produce_receipt(
     consumers must independently supply that same expected token to validation.
     """
 
+    if evidence_class == _PRODUCTION_OBSERVATION_CLASS:
+        raise ExactReleaseEvidenceError("production_observation_external_binding_required")
     if _requires_candidate_runtime(journey_id, evidence_class):
         raise ExactReleaseEvidenceError("clean_artifact_bundle_required")
     identity = derive_release_identity(release_root)
@@ -4362,6 +4944,8 @@ def manifest_from_receipt(
 ) -> EvidenceBundle:
     """Revalidate machine evidence and derive its only canonical manifest."""
 
+    if expected_evidence_class == _PRODUCTION_OBSERVATION_CLASS:
+        raise ExactReleaseEvidenceError("production_observation_external_binding_required")
     validate_receipt(
         raw,
         expected_release=expected_release,
@@ -4389,6 +4973,8 @@ def produce_evidence_bundle(
 ) -> EvidenceBundle:
     """Run the closed verifier and derive receipt plus manifest without caller claims."""
 
+    if evidence_class == _PRODUCTION_OBSERVATION_CLASS:
+        raise ExactReleaseEvidenceError("production_observation_external_binding_required")
     if _requires_candidate_runtime(journey_id, evidence_class):
         runtime = _authenticate_release_runtime(release_root)
         identity = runtime.identity
@@ -4522,6 +5108,8 @@ def write_receipt_exclusive(path: Path, raw: bytes) -> str:
     """Write one complete canonical receipt without replacing an existing name."""
 
     receipt = _load_canonical_receipt(raw)
+    if receipt.get("$schema") == PRODUCTION_OBSERVATION_RECEIPT_SCHEMA:
+        raise ExactReleaseEvidenceError("production_observation_bundle_required")
     if receipt.get("$schema") == CLEAN_ARTIFACT_RECEIPT_SCHEMA or _requires_candidate_runtime(
         receipt.get("journey_id"),
         receipt.get("evidence_class"),
@@ -4550,10 +5138,20 @@ def _require_evidence_bundle(value: object) -> EvidenceBundle:
     manifest = _load_canonical_manifest(value.manifest)
     observation = manifest.get("observation")
     release = receipt.get("release")
+    production_observation = receipt.get("$schema") == PRODUCTION_OBSERVATION_RECEIPT_SCHEMA
+    expected_manifest_schema = (
+        PRODUCTION_OBSERVATION_MANIFEST_SCHEMA if production_observation else MANIFEST_SCHEMA
+    )
+    expected_observation_fields = (
+        _PRODUCTION_OBSERVATION_MANIFEST_OBSERVATION_FIELDS
+        if production_observation
+        else _MANIFEST_OBSERVATION_FIELDS
+    )
     if (
         set(manifest) != _MANIFEST_FIELDS
+        or manifest.get("$schema") != expected_manifest_schema
         or type(observation) is not dict
-        or set(observation) != _MANIFEST_OBSERVATION_FIELDS
+        or set(observation) != expected_observation_fields
         or type(release) is not dict
         or set(release) != {"database_schema", "source_commit", "tree_sha256", "wheel_sha256"}
         or manifest.get("result") != value.result
@@ -5219,8 +5817,8 @@ def _recover_existing_observation_bundle_at(
         current = _load_canonical_receipt(fresh.receipt)
         existing_projection = dict(existing)
         current_projection = dict(current)
-        existing_projection.pop("observed_at_utc")
-        current_projection.pop("observed_at_utc")
+        existing_projection.pop("observed_at_utc", None)
+        current_projection.pop("observed_at_utc", None)
         if existing_projection != current_projection:
             return fresh
         release = current["release"]
