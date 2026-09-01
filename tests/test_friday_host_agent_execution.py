@@ -1295,7 +1295,7 @@ def test_host_agent_broker_facade_binds_continuation_approval_and_unknown(tmp_pa
     assert denied["result"]["error_code"] == "approval_required"
     assert package_client.executions == []
 
-    def proof_payload() -> dict[str, Any]:
+    def proof_payload(bound_plan: Any) -> dict[str, Any]:
         now = int(time.time())
         return (
             PackageApprovalSigner(b"A" * 32)
@@ -1304,11 +1304,11 @@ def test_host_agent_broker_facade_binds_continuation_approval_and_unknown(tmp_pa
                 approval_receipt_id="approval:exact",
                 approval_payload_digest="d" * 64,
                 plan_id="aptplan_0123456789abcdef",
-                plan_digest=plan.digest,
-                actor_user_id=plan.actor_user_id,
-                actor_own_id=plan.actor_own_id,
+                plan_digest=bound_plan.digest,
+                actor_user_id=bound_plan.actor_user_id,
+                actor_own_id=bound_plan.actor_own_id,
                 continuation_work_item_id=_JOB_ID,
-                execution_idempotency_key=plan.idempotency_key,
+                execution_idempotency_key=bound_plan.idempotency_key,
                 issued_at=now,
                 expires_at=now + 30,
             )
@@ -1323,7 +1323,7 @@ def test_host_agent_broker_facade_binds_continuation_approval_and_unknown(tmp_pa
             "PackageExecuteInstall",
             sequence=3,
             body={
-                "approval_proof": proof_payload(),
+                "approval_proof": proof_payload(plan),
                 "plan_id": "aptplan_0123456789abcdef",
             },
             approval_receipt_id="approval:exact",
@@ -1348,7 +1348,7 @@ def test_host_agent_broker_facade_binds_continuation_approval_and_unknown(tmp_pa
             "PackageExecuteInstall",
             sequence=4,
             body={
-                "approval_proof": proof_payload(),
+                "approval_proof": proof_payload(uncertain_plan),
                 "plan_id": "aptplan_0123456789abcdef",
             },
             approval_receipt_id="approval:exact",
