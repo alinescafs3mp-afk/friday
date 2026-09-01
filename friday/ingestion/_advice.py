@@ -68,6 +68,17 @@ _MAX_SUGGESTIONS = 30
 _MAX_SUGGESTIONS_PER_METHOD = 8
 
 
+def _inbox_advice_model_aliases(llm: Any, secondary: Any) -> tuple[str, ...]:
+    """Return the exact current model identities accepted for advice replay."""
+
+    primary = str(getattr(llm, "model", "local-model") or "local-model")[:200]
+    aliases = [primary]
+    secondary_alias = str(getattr(secondary, "served_model_alias", "") or "")[:200]
+    if secondary_alias and secondary_alias != primary:
+        aliases.append(secondary_alias)
+    return tuple(aliases)
+
+
 def _capped_per_method(
     ordered: list[dict[str, Any]],
     *,
@@ -186,12 +197,9 @@ class AdviceMixin(PipelineShared):
 
         current = _json_dict(item.get("suggestions_json"))
         previous_advice = _json_dict(current.get("model_advice"))
-        primary_model_name = str(getattr(llm, "model", "local-model") or "local-model")[:200]
         secondary = getattr(self, "secondary_brain", None)
-        advice_model_names = {primary_model_name}
-        secondary_alias = str(getattr(secondary, "served_model_alias", "") or "")[:200]
-        if secondary_alias:
-            advice_model_names.add(secondary_alias)
+        advice_model_names = _inbox_advice_model_aliases(llm, secondary)
+        primary_model_name = advice_model_names[0]
         if (
             not force
             and previous_advice.get("policy_version") == _PROMOTION_POLICY_VERSION

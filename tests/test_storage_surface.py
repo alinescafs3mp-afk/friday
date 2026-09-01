@@ -195,7 +195,9 @@ def test_no_method_is_defined_twice_across_the_class_hierarchy() -> None:
 # 431 → 433: schema-49 conversation passages add one bounded restart-safe
 # owner backfill surface plus one atomic owner-selection/writer tick; the
 # authenticated reader remains transaction-private.
-EXPECTED_MEMBER_COUNT = 433
+# 433 → 434: Inbox advice selects only still-eligible privacy-safe rows before
+# its finite worker page, without a durable or process-local scan cursor.
+EXPECTED_MEMBER_COUNT = 434
 EXPECTED_SIGNATURES: dict[str, str] = {
     "_begin_database_restore_open": "(self) -> 'bool'",
     "_end_database_restore_open": "(self, previous: 'bool') -> 'None'",
@@ -392,6 +394,7 @@ EXPECTED_SIGNATURES: dict[str, str] = {
     "list_relation_changes_in_range": "(self, user_id: 'str', *, start: 'str | None' = None, end: 'str | None' = None, limit: 'int' = 200) -> 'list[dict[str, Any]]'",
     "list_inbox": "(self, user_id: 'str', status: 'InboxStatus | None' = None, *, limit: 'int' = 50, offset: 'int' = 0) -> 'list[dict[str, Any]]'",
     "list_inbox_detailed": "(self, user_id: 'str', status: 'InboxStatus | None' = None, *, limit: 'int' = 50, offset: 'int' = 0) -> 'list[dict[str, Any]]'",
+    "list_inbox_advice_candidates": "(self, user_id: 'str', *, policy_version: 'str', accepted_model_aliases: 'Sequence[str]', attempt_cap: 'int' = 3, limit: 'int' = 50) -> 'list[dict[str, Any]]'",
     "list_knowledge_conflicts": "(self, user_id: 'str', *, status: 'str | None' = 'suggested', limit: 'int' = 200, offset: 'int' = 0) -> 'list[dict[str, Any]]'",
     "list_knowledge_entity_links_for": "(self, knowledge_ids: 'Sequence[str]') -> 'dict[str, list[str]]'",
     "list_knowledge_entity_links": "(self, user_id: 'str', *, entity_id: 'str | None' = None, knowledge_object_id: 'str | None' = None, status: 'str | None' = 'accepted', limit: 'int' = 100) -> 'list[dict[str, Any]]'",

@@ -39,6 +39,8 @@ from friday.document_catalog.worker_state import (
     encode_document_catalog_worker_state,
     load_document_catalog_worker_namespace_key,
 )
+from friday.ingestion._advice import _inbox_advice_model_aliases
+from friday.ingestion._base import _PROMOTION_POLICY_VERSION
 from friday.retrieval import (
     chunk_scheme,
     knowledge_chunk_units,
@@ -46,7 +48,6 @@ from friday.retrieval import (
     pack_vector,
     unpack_vector,
 )
-from friday.storage.models import InboxStatus
 from friday.workers._blocking import current_task, in_flight, run_blocking
 
 LOGGER = logging.getLogger(__name__)
@@ -83,6 +84,7 @@ _ADVICE_ENDPOINT_DOWN_AFTER = 3
 # машинного совета. Отметка живёт в `suggestions_json` рядом с самим советом и
 # обнуляется, как только совет получился.
 _ADVICE_ITEM_ATTEMPTS = 3
+_ADVICE_CANDIDATE_LIMIT = 50
 
 
 def _advice_attempts(item: dict[str, Any]) -> int:
@@ -95,9 +97,18 @@ def _advice_attempts(item: dict[str, Any]) -> int:
             return 0
     if not isinstance(raw, dict):
         return 0
+    value = raw.get("model_advice_failures") or 0
+    if type(value) is str:
+        # This is the exact text grammar implemented by the storage selector:
+        # ASCII decimal digits with one optional leading sign, no whitespace,
+        # underscores or Unicode digit aliases. Non-canonical legacy values are
+        # retryable zero, never a poison row selected by SQL and skipped here.
+        digits = value[1:] if value[:1] in {"+", "-"} else value
+        if not digits or any(character < "0" or character > "9" for character in digits):
+            return 0
     try:
-        return int(raw.get("model_advice_failures") or 0)
-    except (TypeError, ValueError):
+        return int(value)
+    except (OverflowError, TypeError, ValueError):
         return 0
 
 
@@ -1648,17 +1659,21 @@ class WorkersManager:
         processed = 0
         failures = 0
         consecutive_failures = 0
-        pending = await run_blocking(
-            self.storage.list_inbox_detailed,
+        candidates = await run_blocking(
+            self.storage.list_inbox_advice_candidates,
             user_id,
-            InboxStatus.PENDING,
-            limit=50,
+            policy_version=_PROMOTION_POLICY_VERSION,
+            accepted_model_aliases=_inbox_advice_model_aliases(
+                self.llm,
+                getattr(self.ingestion, "secondary_brain", None),
+            ),
+            attempt_cap=_ADVICE_ITEM_ATTEMPTS,
+            limit=_ADVICE_CANDIDATE_LIMIT,
         )
-        for item in pending:
+        for item in candidates:
+            # The SQL predicate owns selection, while this fresh check protects
+            # against a concurrent failure mark written after the read snapshot.
             if _advice_attempts(item) >= _ADVICE_ITEM_ATTEMPTS:
-                # Объект, на котором совет не выходит раз за разом, пропускается —
-                # см. `_ADVICE_ITEM_ATTEMPTS`. Он остаётся в очереди человека, просто
-                # без машинного совета.
                 continue
             try:
                 result = await self.ingestion.advise_inbox_item(

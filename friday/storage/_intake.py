@@ -3327,6 +3327,102 @@ class IntakeMixin(StorageShared):
         rows = self.execute(query, tuple(params)).fetchall()
         return [dict(row) for row in rows]
 
+    def list_inbox_advice_candidates(
+        self,
+        user_id: str,
+        *,
+        policy_version: str,
+        accepted_model_aliases: Sequence[str],
+        attempt_cap: int = 3,
+        limit: int = 50,
+    ) -> list[dict[str, Any]]:
+        """Select a fair, privacy-safe page that still needs model advice.
+
+        Current advice and exhausted attempts are excluded before ``LIMIT``.
+        Oldest-first ordering is immutable for the lifetime of an Inbox row, so
+        score changes and a stream of newly-arriving high-score rows cannot
+        starve an existing eligible item.
+        """
+
+        tenant = validate_user_id(user_id)
+        policy = str(policy_version or "")
+        if not policy or len(policy) > 200:
+            raise ValueError("Inbox advice policy identity is invalid")
+        if isinstance(accepted_model_aliases, (str, bytes)):
+            raise ValueError("Inbox advice model aliases are invalid")
+        aliases: list[str] = []
+        for value in accepted_model_aliases:
+            if not isinstance(value, str) or not value or len(value) > 200:
+                raise ValueError("Inbox advice model alias is invalid")
+            if value not in aliases:
+                aliases.append(value)
+        if not 1 <= len(aliases) <= 2:
+            raise ValueError("Inbox advice requires one or two exact model aliases")
+        if type(attempt_cap) is not int or not 1 <= attempt_cap <= 100:
+            raise ValueError("Inbox advice attempt cap is invalid")
+        if type(limit) is not int or not 1 <= limit <= 100:
+            raise ValueError("Inbox advice candidate limit is invalid")
+
+        model_slots = ",".join("?" for _alias in aliases)
+        safe_suggestions = (
+            "(CASE WHEN json_valid(i.suggestions_json) "
+            "THEN i.suggestions_json ELSE '{}' END)"
+        )
+        failure_type = f"json_type({safe_suggestions},'$.model_advice_failures')"
+        failure_value = f"json_extract({safe_suggestions},'$.model_advice_failures')"
+        # Keep this exact grammar in lockstep with workers._advice_attempts:
+        # optional ASCII sign plus one or more ASCII decimal digits.
+        failure_text = f"CAST({failure_value} AS TEXT)"
+        failure_attempts = f"""CASE
+            WHEN {failure_type} IN ('integer','real')
+                THEN CAST({failure_value} AS INTEGER)
+            WHEN {failure_type}='true' THEN 1
+            WHEN {failure_type}='false' THEN 0
+            WHEN {failure_type}='text'
+                 AND length({failure_text})>0
+                 AND (
+                     {failure_text} NOT GLOB '*[^0-9]*'
+                     OR (
+                         substr({failure_text},1,1) IN ('+','-')
+                         AND length({failure_text})>1
+                         AND substr({failure_text},2) NOT GLOB '*[^0-9]*'
+                     )
+                 )
+                THEN CAST({failure_text} AS INTEGER)
+            ELSE 0
+        END"""
+        query = f"""SELECT i.id, i.suggestions_json
+                FROM inbox i
+                JOIN raw_objects r ON r.id=i.raw_object_id AND r.user_id=i.user_id
+                WHERE i.user_id=? AND i.status='pending'
+                  AND {_not_private_inbox_dependency("i")}
+                  AND {_not_private_raw_dependency("r")}
+                  AND {_not_secondary_product_witness_dependency("r")}
+                  AND ({failure_attempts}) < ?
+                  AND CASE WHEN (
+                      json_type({safe_suggestions},'$.model_advice')='object'
+                      AND json_type(
+                          {safe_suggestions},'$.model_advice.policy_version'
+                      )='text'
+                      AND json_extract(
+                          {safe_suggestions},'$.model_advice.policy_version'
+                      )=?
+                      AND json_type(
+                          {safe_suggestions},'$.model_advice.model'
+                      )='text'
+                      AND json_extract(
+                          {safe_suggestions},'$.model_advice.model'
+                      )
+                          IN ({model_slots})
+                  ) THEN 0 ELSE 1 END=1
+                ORDER BY i.created_at ASC, i.id ASC
+                LIMIT ?"""  # nosec B608 - fixed predicates and placeholder count only
+        rows = self.execute(
+            query,
+            (tenant, attempt_cap, policy, *aliases, limit),
+        ).fetchall()
+        return [dict(row) for row in rows]
+
     def update_inbox_status(
         self,
         inbox_id: str,
