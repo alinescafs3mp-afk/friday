@@ -1,3 +1,22 @@
+## 0.207.93 — 2026-09-01
+
+### Search-facade and measured-recall convergence
+
+- Makes `archive_search` the sole dialogue-facing private-search facade while
+  retaining message, source and memory search only as code-owned internal
+  adapters with fresh execution and final-publication authorization.
+- Adds one bounded rowid-keyset refill when the first global conversation FTS
+  window is sentinel-capped but cannot fill the authorized page. The complete
+  legacy message-history lane remains the sole absence authority.
+- Measures five deterministic document-recall contours and closes reproduced
+  filename, alias, MIME-format, legacy calendar-date and bounded truncation
+  gaps without reviving raw metadata as an authoritative search index.
+- Terminates stale, malformed or ambiguous model-authored tool envelopes in one
+  source-free round. They cannot dispatch a hidden legacy adapter, open a later
+  effect, or leak raw control syntax to the user.
+- SQLite remains at schema 50; exact `0.207.92` is the predecessor and
+  `0.207.90` remains the immutable fallback.
+
 ## 0.207.92 — 2026-09-01
 
 ### Sealed DR receipt and retention evidence hotfix

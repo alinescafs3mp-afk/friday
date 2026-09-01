@@ -2,7 +2,7 @@
 
 **Friday** (по-русски — **Пятница**; ex codename Jericho) — локальная многопользовательская Knowledge Operating System: она принимает текст и документы, сохраняет первоисточник, строит граф знаний, ищет по личной базе и отвечает через Telegram или HTTP API. Веб-панель предназначена для администрирования, разбора Inbox, работы с сущностями, правами, резервными копиями и диагностикой.
 
-Текущая версия: **0.207.92**; immutable fallback — **0.207.90**. Owner-only
+Текущая версия: **0.207.93**; immutable fallback — **0.207.90**. Owner-only
 Engineer Mode теперь является автономной консолью Пятницы внутри её основной
 VM: модель сама выбирает и
 последовательно запускает установленное ПО от пользователя службы, работает с
@@ -16,7 +16,10 @@ healthy heartbeat. Авторизованный read-only `archive_search`
 источниками, покрытием и финальной повторной проверкой прав. Его внутренний
 bounded tail теперь сохраняет разрешённые источники за первой страницей, а
 сообщения сначала распределяют места между разными беседами и только потом
-добавляют соседние совпадения из той же беседы. Schema 44
+добавляют соседние совпадения из той же беседы. Только `archive_search`
+показывается диалоговой модели; прежние частные поиски остались внутренними
+code-owned адаптерами, а их stale/malformed вызовы завершаются source-free без
+второго effect-round. Schema 44
 добавила fixed WorkGraph ровно для сравнения текущего файла с текущим вебом:
 два body-free read-шага, primary synthesis и CAS/restart state, один
 review-admitted web recovery, exact full/terminal publication receipts и
@@ -402,7 +405,7 @@ fan-out одной задачи. Иерархическое чтение док�
 `/v1/models`, bounded `/metrics`, `/server_info` и per-process deployment
 witness с code-owned identities и launch graph. Любой drift, неполный
 witness или незамкнутый same-origin proxy оставляют routes в `legacy`.
-Приёмка 0.207.92 должна показать в `/api/health` его точную версию,
+Приёмка 0.207.93 должна показать в `/api/health` его точную версию,
 profile id, `canary_ready`, `live_attestation_clear`,
 `verified_context_tokens=40960` и оба зарегистрированных route; простого HTTP
 `status=ok` недостаточно.
