@@ -1,3 +1,16 @@
+## 0.207.98 — 2026-09-01
+
+### Internal retrieval authorization
+
+- Adds a code-owned internal execution lane for message, source and memory
+  retrieval without exposing that lane to model-selected tools.
+- Reauthorizes private message evidence at final publication and rejects
+  malformed model-selected search output before it reaches the transcript.
+- Keeps the three legacy search tools visible until archive search gains their
+  valid-time, transaction-time, graph and exact-window semantics.
+- SQLite remains at schema 50; exact `0.207.97` is the predecessor and
+  `0.207.90` remains the immutable fallback.
+
 ## 0.207.97 — 2026-09-01
 
 ### Authenticated production observation
