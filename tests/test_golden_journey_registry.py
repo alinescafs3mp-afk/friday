@@ -55,16 +55,13 @@ CURRENT_JOURNEYS = {
     ),
     "durable_scheduled_work": (
         "Durable scheduled work",
-        "UNVERIFIED",
-        ("production_read_only_observation_missing",),
+        "DEGRADED",
+        ("journey_specific_rollback_backup_evidence_missing",),
     ),
     "honest_degradation": (
         "Honest degradation",
         "DEGRADED",
-        (
-            "product_multi_lane_coverage_missing",
-            "candidate_bound_fault_continuation_evidence_missing",
-        ),
+        ("product_multi_lane_coverage_missing",),
     ),
     "current_file_web_comparison": (
         "Current file and web comparison",
@@ -1778,7 +1775,10 @@ def test_canonical_golden_journey_registry_is_closed_current_and_privacy_safe(
 
     assert len(rows) == len(CURRENT_JOURNEYS) == 6
     assert clean_release_root == Path(os.environ[_CLEAN_RELEASE_ROOT_ENV])
-    assert production_observation_authority is None
+    assert production_observation_authority == (
+        Path(os.environ[_PRODUCTION_OBSERVATION_ARTIFACT_ENV]),
+        os.environ[_PRODUCTION_OBSERVATION_ARTIFACT_SHA256_ENV],
+    )
     assert tuple(row.journey_id for row in rows) == tuple(CURRENT_JOURNEYS)
     assert {row.journey_id: (row.journey, row.readiness, row.limitations) for row in rows} == CURRENT_JOURNEYS
     assert sum(row.readiness == "READY" for row in rows) == 0
@@ -1832,6 +1832,11 @@ def test_canonical_golden_journey_registry_is_closed_current_and_privacy_safe(
         "honest_degradation": "VERIFIED",
         "current_file_web_comparison": "MISSING",
     }
+    durable = next(row for row in rows if row.journey_id == "durable_scheduled_work")
+    honest = next(row for row in rows if row.journey_id == "honest_degradation")
+    assert durable.evidence["production read-only observation"].state == "VERIFIED"
+    assert durable.evidence["restart and recovery evidence"].state == "VERIFIED"
+    assert honest.evidence["restart and recovery evidence"].state == "VERIFIED"
     document = next(row for row in rows if row.journey_id == "document_recall_answer")
     assert document.evidence["restart and recovery evidence"].state == "AVAILABLE"
     restart_proof = (
@@ -1891,7 +1896,6 @@ def test_canonical_golden_journey_registry_is_closed_current_and_privacy_safe(
         assert _clean_release_root_for_registry((future_fault_row,)) == future_release_root
     with quality_gate._isolated_test_environment() as gate_environment:  # noqa: SLF001
         assert gate_environment[_CLEAN_RELEASE_ROOT_ENV] == str(future_release_root)
-    durable = next(row for row in rows if row.journey_id == "durable_scheduled_work")
     future_durable_evidence = dict(durable.evidence)
     future_durable_evidence[_PRODUCTION_OBSERVATION_CLASS] = EvidenceClaim("VERIFIED", ())
     future_durable = replace(durable, evidence=future_durable_evidence)
