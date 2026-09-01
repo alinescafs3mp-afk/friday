@@ -11,22 +11,56 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import importlib.util
 import json
 import os
 import re
 import shlex
 import ssl
 import stat
+import sys
 import urllib.error
 import urllib.request
 from collections.abc import Callable, Mapping
 from pathlib import Path
-from typing import Any, NoReturn, Protocol
+from typing import TYPE_CHECKING, Any, NoReturn, Protocol
 
-from friday.diagnostics.production_observation import (
-    PRODUCTION_SCHEDULED_WORK_SCHEMA_ATTESTATION_SHA256,
-)
-from tools import immutable_release_operator as release_operator
+if TYPE_CHECKING:
+    from tools.immutable_release_operator import ReleaseIdentity as ReleaseIdentityT
+    from tools.immutable_release_operator import SystemdConfig as SystemdConfigT
+else:
+    ReleaseIdentityT = Any
+    SystemdConfigT = Any
+
+
+def _load_sibling_release_operator() -> Any:
+    source = Path(__file__).resolve(strict=True).with_name("immutable_release_operator.py")
+    status = source.stat()
+    if not stat.S_ISREG(status.st_mode) or status.st_uid != os.geteuid() or status.st_nlink != 1:
+        raise ImportError("release_operator_origin_invalid")
+    name = "_friday_production_observation_release_operator"
+    existing = sys.modules.get(name)
+    if existing is not None:
+        if Path(str(getattr(existing, "__file__", ""))).resolve(strict=True) != source:
+            raise ImportError("release_operator_origin_invalid")
+        return existing
+    spec = importlib.util.spec_from_file_location(name, source)
+    if spec is None or spec.loader is None:
+        raise ImportError("release_operator_origin_invalid")
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[name] = module
+    try:
+        spec.loader.exec_module(module)
+    except BaseException:
+        sys.modules.pop(name, None)
+        raise
+    if Path(str(getattr(module, "__file__", ""))).resolve(strict=True) != source:
+        sys.modules.pop(name, None)
+        raise ImportError("release_operator_origin_invalid")
+    return module
+
+
+release_operator = _load_sibling_release_operator()
 
 ARTIFACT_SCHEMA = "friday.production-read-only-release-captain-artifact.v1"
 OBSERVATION_SCHEMA = "friday.production-read-only-observation.v1"
@@ -36,6 +70,9 @@ MAX_RESPONSE_BYTES = 65_536
 MAX_OBSERVATION_BYTES = 32_768
 MAX_ARTIFACT_BYTES = 65_536
 MAX_COUNT = (1 << 63) - 1
+PRODUCTION_SCHEDULED_WORK_SCHEMA_ATTESTATION_SHA256 = (
+    "726ded0b802ee1c6bf82663fd0918efb7f3d509f382c0d2aaa3540d4a1790561"
+)
 
 _HEX40 = re.compile(r"[0-9a-f]{40}\Z")
 _HEX64 = re.compile(r"[0-9a-f]{64}\Z")
@@ -66,6 +103,7 @@ _ARTIFACT_FIELDS = frozenset(
     {
         "schema",
         "release",
+        "production_observation_operator_sha256",
         "endpoint_response",
         "endpoint_response_sha256",
         "release_binding_sha256",
@@ -85,6 +123,8 @@ class _ReleaseCaptainRuntime(Protocol):
     """Effect-free factors required by the controller."""
 
     def authenticate_release(self) -> Mapping[str, object]: ...
+
+    def production_observation_operator_sha256(self) -> str: ...
 
     def process_epoch_sha256(self) -> str: ...
 
@@ -282,6 +322,7 @@ def validate_release_captain_artifact(raw: bytes) -> dict[str, Any]:
     for field_name in (
         "endpoint_response_sha256",
         "release_binding_sha256",
+        "production_observation_operator_sha256",
         "health_before_sha256",
         "health_after_sha256",
     ):
@@ -313,6 +354,10 @@ def _build_release_captain_artifact(
     if not callable(random_bytes):
         raise ProductionObservationOperatorError("challenge_source_invalid")
     release_before = _release_payload(runtime.authenticate_release())
+    operator_before = _digest(
+        runtime.production_observation_operator_sha256(),
+        code="production_observation_operator_invalid",
+    )
     epoch_before = _digest(runtime.process_epoch_sha256(), code="process_epoch_invalid")
     health_before = runtime.accepted_health_bytes()
     if type(health_before) is not bytes or not health_before or len(health_before) > MAX_RESPONSE_BYTES:
@@ -332,16 +377,21 @@ def _build_release_captain_artifact(
         raise ProductionObservationOperatorError("health_response_invalid")
     try:
         release_after = _release_payload(runtime.authenticate_release())
+        operator_after = _digest(
+            runtime.production_observation_operator_sha256(),
+            code="production_observation_operator_invalid",
+        )
         epoch_after = _digest(runtime.process_epoch_sha256(), code="process_epoch_invalid")
     except ProductionObservationOperatorError as exc:
         raise ProductionObservationOperatorError("observation_authority_drifted") from exc
-    if epoch_after != epoch_before or release_after != release_before:
+    if epoch_after != epoch_before or release_after != release_before or operator_after != operator_before:
         raise ProductionObservationOperatorError("observation_authority_drifted")
 
     release_binding_sha256 = hashlib.sha256(canonical_json_bytes(release_before)).hexdigest()
     artifact = {
         "schema": ARTIFACT_SCHEMA,
         "release": release_before,
+        "production_observation_operator_sha256": operator_before,
         "endpoint_response": response,
         "endpoint_response_sha256": hashlib.sha256(response_raw).hexdigest(),
         "release_binding_sha256": release_binding_sha256,
@@ -408,12 +458,13 @@ class SystemdReleaseCaptainRuntime:
 
     def __init__(
         self,
-        release: release_operator.ReleaseIdentity,
-        config: release_operator.SystemdConfig,
+        release: ReleaseIdentityT,
+        config: SystemdConfigT,
     ) -> None:
         if (
             type(release) is not release_operator.ReleaseIdentity
             or type(config) is not release_operator.SystemdConfig
+            or _HEX64.fullmatch(release.production_observation_operator_sha256) is None
         ):
             raise ProductionObservationOperatorError("runtime_boundary_invalid")
         if config.next_env_file is not None or config.next_env_file_sha256 or config.staged_config_transition:
@@ -475,6 +526,24 @@ class SystemdReleaseCaptainRuntime:
             "tree_sha256": self.release.tree_manifest_sha256,
             "wheel_sha256": wheel,
         }
+
+    def production_observation_operator_sha256(self) -> str:
+        expected = _digest(
+            self.release.production_observation_operator_sha256,
+            code="production_observation_operator_invalid",
+        )
+        try:
+            raw = release_operator._read_private_regular_file(  # noqa: SLF001
+                Path(__file__),
+                maximum_bytes=4 << 20,
+                code="production_observation_operator_invalid",
+                allowed_modes=frozenset({0o400}),
+            )
+        except release_operator.ReleaseFailure as exc:
+            raise ProductionObservationOperatorError("production_observation_operator_invalid") from exc
+        if hashlib.sha256(raw).hexdigest() != expected:
+            raise ProductionObservationOperatorError("production_observation_operator_invalid")
+        return expected
 
     def _require_active_unit(self) -> None:
         try:
@@ -762,8 +831,8 @@ class SystemdReleaseCaptainRuntime:
 
 
 def publish_authenticated_release_captain_artifact(
-    release: release_operator.ReleaseIdentity,
-    config: release_operator.SystemdConfig,
+    release: ReleaseIdentityT,
+    config: SystemdConfigT,
     output: Path,
 ) -> dict[str, str]:
     """Observe and publish only through the concrete authenticated runtime.
@@ -791,7 +860,6 @@ def publish_authenticated_release_captain_artifact(
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--release", required=True, type=Path)
     parser.add_argument("--release-tree-sha256", required=True)
     parser.add_argument("--output", required=True, type=Path)
     release_operator._add_systemd_arguments(parser)  # noqa: SLF001
@@ -800,11 +868,51 @@ def build_parser() -> argparse.ArgumentParser:
 
 def execute(args: argparse.Namespace) -> dict[str, object]:
     try:
-        config = release_operator._systemd_config(args)  # noqa: SLF001
+        script = Path(__file__)
+        lexical_script = Path(os.path.abspath(script))
+        if (
+            not script.is_absolute()
+            or lexical_script != script
+            or script.parent.name != "artifacts"
+            or script.name != "production_read_only_observation_operator.py"
+        ):
+            raise ProductionObservationOperatorError("sealed_entrypoint_invalid")
+        release_root = script.parent.parent
         release = release_operator.load_release_identity(
-            args.release,
+            release_root,
             expected_tree_sha256=args.release_tree_sha256,
         )
+        expected_script = release.root / "artifacts/production_read_only_observation_operator.py"
+        expected_operator = release.root / "artifacts/immutable_release_operator.py"
+        running_operator = Path(str(getattr(release_operator, "__file__", "")))
+        expected_python = release.root / "venv/bin/python"
+        if (
+            sys.flags.isolated != 1
+            or sys.flags.dont_write_bytecode != 1
+            or Path(os.path.abspath(sys.executable)) != expected_python
+            or script.resolve(strict=True) != expected_script
+            or running_operator.resolve(strict=True) != expected_operator
+            or release.production_observation_operator_sha256
+            != hashlib.sha256(
+                release_operator._read_private_regular_file(  # noqa: SLF001
+                    expected_script,
+                    maximum_bytes=4 << 20,
+                    code="production_observation_operator_invalid",
+                    allowed_modes=frozenset({0o400}),
+                )
+            ).hexdigest()
+        ):
+            raise ProductionObservationOperatorError("sealed_entrypoint_invalid")
+        for path in (expected_script, expected_operator):
+            status = path.stat()
+            if (
+                not stat.S_ISREG(status.st_mode)
+                or status.st_uid != os.geteuid()
+                or status.st_nlink != 1
+                or stat.S_IMODE(status.st_mode) != 0o400
+            ):
+                raise ProductionObservationOperatorError("sealed_entrypoint_invalid")
+        config = release_operator._systemd_config(args)  # noqa: SLF001
         published = publish_authenticated_release_captain_artifact(release, config, args.output)
     except release_operator.ReleaseFailure as exc:
         raise ProductionObservationOperatorError("release_authentication_failed") from exc

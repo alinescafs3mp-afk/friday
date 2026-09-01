@@ -173,6 +173,12 @@ _SECONDARY_PRODUCT_RUNNER_SOURCE = Path(
     "deploy/secondary-brain/windows-sglang/scripts/live_failure_battery.py"
 )
 _SECONDARY_PRODUCT_RUNNER_ARTIFACT = Path("artifacts/secondary-product-witness-runner.py")
+_PRODUCTION_OBSERVATION_OPERATOR_SOURCE = "production_read_only_observation_operator.py"
+_PRODUCTION_OBSERVATION_OPERATOR_ARTIFACT = Path("artifacts/production_read_only_observation_operator.py")
+_PRODUCTION_OBSERVATION_OPERATOR_BINDING_ARTIFACT = Path(
+    "artifacts/production-observation-operator-binding.json"
+)
+_PRODUCTION_OBSERVATION_OPERATOR_BINDING_SCHEMA = "friday.production-observation-operator-binding.v1"
 _RELEASE_RETENTION_TOOLCHAIN_ROOT = Path("artifacts/release-retention-toolchain-v1")
 _RELEASE_RETENTION_TOOLCHAIN_MANIFEST = _RELEASE_RETENTION_TOOLCHAIN_ROOT / "manifest.json"
 _RELEASE_RETENTION_TOOLCHAIN_MODULES = (
@@ -2418,6 +2424,76 @@ def _read_release_retention_toolchain_sources(operator_source: Path) -> dict[str
     ):
         raise ReleaseFailure("release_retention_toolchain_source_invalid")
     return sources
+
+
+def _read_production_observation_operator_source(operator_source: Path) -> bytes:
+    """Stable-read the code-owned observer beside the exact release builder."""
+
+    if operator_source.name != "immutable_release_operator.py" or operator_source.parent.name != "tools":
+        raise ReleaseFailure("production_observation_operator_source_invalid")
+    return _read_stable_regular_file(
+        operator_source.with_name(_PRODUCTION_OBSERVATION_OPERATOR_SOURCE),
+        maximum_bytes=4 << 20,
+        code="production_observation_operator_source_invalid",
+    )
+
+
+def _sealed_production_observation_operator_sha256(root: Path) -> str:
+    """Authenticate the optional successor observer without changing legacy metadata."""
+
+    observation_operator = root / _PRODUCTION_OBSERVATION_OPERATOR_ARTIFACT
+    observation_binding = root / _PRODUCTION_OBSERVATION_OPERATOR_BINDING_ARTIFACT
+    operator_present = observation_operator.exists() or observation_operator.is_symlink()
+    binding_present = observation_binding.exists() or observation_binding.is_symlink()
+    if operator_present != binding_present:
+        raise ReleaseFailure("release_production_observation_operator_invalid")
+    if not operator_present:
+        return ""
+    binding = _regular_file(
+        observation_binding,
+        maximum_bytes=1 << 20,
+        code="release_production_observation_operator_binding_invalid",
+    )
+    binding_status = os.stat(binding, follow_symlinks=False)
+    try:
+        binding_raw = _read_stable_regular_file(
+            binding,
+            maximum_bytes=1 << 20,
+            code="release_production_observation_operator_binding_invalid",
+        )
+        if not binding_raw.endswith(b"\n"):
+            raise ReleaseFailure("release_production_observation_operator_binding_invalid")
+        binding_value = _unique_json(binding_raw[:-1].decode("ascii", errors="strict"))
+    except (UnicodeError, ValueError, json.JSONDecodeError) as exc:
+        raise ReleaseFailure("release_production_observation_operator_binding_invalid") from exc
+    if (
+        binding_status.st_uid != os.geteuid()
+        or binding_status.st_nlink != 1
+        or stat.S_IMODE(binding_status.st_mode) != 0o400
+        or type(binding_value) is not dict
+        or set(binding_value) != {"git_blob_sha256", "schema"}
+        or binding_value.get("schema") != _PRODUCTION_OBSERVATION_OPERATOR_BINDING_SCHEMA
+        or _canonical_json(binding_value) + b"\n" != binding_raw
+    ):
+        raise ReleaseFailure("release_production_observation_operator_binding_invalid")
+    expected = _closed_hash(
+        str(binding_value.get("git_blob_sha256") or ""),
+        "release_production_observation_operator_digest_invalid",
+    )
+    observation_operator = _regular_file(
+        observation_operator,
+        maximum_bytes=4 << 20,
+        code="release_production_observation_operator_invalid",
+    )
+    operator_status = os.stat(observation_operator, follow_symlinks=False)
+    if (
+        operator_status.st_uid != os.geteuid()
+        or operator_status.st_nlink != 1
+        or stat.S_IMODE(operator_status.st_mode) != 0o400
+        or _sha256_file(observation_operator) != expected
+    ):
+        raise ReleaseFailure("release_production_observation_operator_digest_mismatch")
+    return expected
 
 
 def _release_retention_toolchain_manifest_bytes(sources: Mapping[str, bytes]) -> bytes:
@@ -6316,6 +6392,7 @@ class BuildSpec:
     alias_dependency_sha256: str
     secondary_product_runner: Path
     secondary_product_runner_sha256: str
+    production_observation_operator_sha256: str
     release_retention_toolchain_manifest_sha256: str
     build_receipt_profile: str
     max_schema: int
@@ -6332,6 +6409,7 @@ class ReleaseIdentity:
     venv_relocation_contract: str = ""
     obsidian_cutover_contract: str = ""
     secondary_product_runner_sha256: str = ""
+    production_observation_operator_sha256: str = ""
     engineer_command_lifecycle_contract: str = ""
     operator_transaction_lock_scope_contract: str = ""
     operator_transaction_lock_scope_sha256: str = ""
@@ -7188,6 +7266,24 @@ def installed_surface_smoke(release: ReleaseIdentity) -> str:
             "status": "clear",
         }:
             raise ReleaseFailure("installed_surface_smoke_invalid")
+        observation_operator = release.root / _PRODUCTION_OBSERVATION_OPERATOR_ARTIFACT
+        if observation_operator.exists() or observation_operator.is_symlink():
+            _regular_file(
+                observation_operator,
+                maximum_bytes=4 << 20,
+                code="production_observation_operator_invalid",
+            )
+            observation_help = subprocess.run(  # noqa: S603
+                [str(python), "-I", "-B", str(observation_operator), "--help"],
+                check=False,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.PIPE,
+                timeout=30,
+                cwd=scratch,
+                env=environment,
+            )
+            if observation_help.returncode != 0 or observation_help.stderr:
+                raise ReleaseFailure("production_observation_operator_smoke_failed")
         if release.venv_relocation_contract == VENV_RELOCATION_CONTRACT:
             _direct_console_smoke(release, scratch=scratch, environment=environment)
             _activation_smoke(
@@ -7859,6 +7955,13 @@ def _build_release_locked(
     ):
         raise ReleaseFailure("release_retention_toolchain_manifest_digest_mismatch")
     operator_bytes = retention_toolchain_sources["immutable_release_operator.py"]
+    observation_operator_bytes = _read_production_observation_operator_source(operator_source)
+    observation_operator_sha256 = _sha256_bytes(observation_operator_bytes)
+    if observation_operator_sha256 != _closed_hash(
+        spec.production_observation_operator_sha256,
+        "production_observation_operator_digest_invalid",
+    ):
+        raise ReleaseFailure("production_observation_operator_digest_mismatch")
     product_runner_source = spec.secondary_product_runner
     product_runner_lexical = Path(os.path.abspath(product_runner_source))
     source_parts = _SECONDARY_PRODUCT_RUNNER_SOURCE.parts
@@ -7944,11 +8047,22 @@ def _build_release_locked(
             )
             != product_runner_bytes
             or _read_release_retention_toolchain_sources(operator_source) != retention_toolchain_sources
+            or _read_production_observation_operator_source(operator_source) != observation_operator_bytes
         ):
             raise ReleaseFailure("release_build_input_changed")
         artifacts = staging / "artifacts"
         artifacts.mkdir(mode=0o700)
         (artifacts / "immutable_release_operator.py").write_bytes(operator_bytes)
+        (staging / _PRODUCTION_OBSERVATION_OPERATOR_ARTIFACT).write_bytes(observation_operator_bytes)
+        (staging / _PRODUCTION_OBSERVATION_OPERATOR_BINDING_ARTIFACT).write_bytes(
+            _canonical_json(
+                {
+                    "git_blob_sha256": observation_operator_sha256,
+                    "schema": _PRODUCTION_OBSERVATION_OPERATOR_BINDING_SCHEMA,
+                }
+            )
+            + b"\n"
+        )
         (staging / _SECONDARY_PRODUCT_RUNNER_ARTIFACT).write_bytes(product_runner_bytes)
         retention_toolchain_tools = staging / _RELEASE_RETENTION_TOOLCHAIN_ROOT / "tools"
         retention_toolchain_tools.mkdir(parents=True, mode=0o700)
@@ -8022,6 +8136,7 @@ def _build_release_locked(
             venv_relocation_contract=VENV_RELOCATION_CONTRACT,
             obsidian_cutover_contract=OBSIDIAN_CUTOVER_CONTRACT,
             secondary_product_runner_sha256=product_runner_sha256,
+            production_observation_operator_sha256=observation_operator_sha256,
             engineer_command_lifecycle_contract=ENGINEER_COMMAND_LIFECYCLE_CONTRACT,
             operator_transaction_lock_scope_contract=(
                 OPERATOR_TRANSACTION_LOCK_SCOPE_CONTRACT if pair_bearing_receipt else ""
@@ -8085,6 +8200,7 @@ def _build_release_locked(
             venv_relocation_contract=VENV_RELOCATION_CONTRACT,
             obsidian_cutover_contract=OBSIDIAN_CUTOVER_CONTRACT,
             secondary_product_runner_sha256=product_runner_sha256,
+            production_observation_operator_sha256=observation_operator_sha256,
             engineer_command_lifecycle_contract=ENGINEER_COMMAND_LIFECYCLE_CONTRACT,
             operator_transaction_lock_scope_contract=(
                 OPERATOR_TRANSACTION_LOCK_SCOPE_CONTRACT if pair_bearing_receipt else ""
@@ -19317,6 +19433,7 @@ def _load_release_identity(
             or _sha256_file(product_runner) != secondary_product_runner_sha256
         ):
             raise ReleaseFailure("release_secondary_product_runner_digest_mismatch")
+    production_observation_operator_sha256 = _sealed_production_observation_operator_sha256(resolved)
     for relative, metadata_key, code in (
         (
             Path("tools/backfill_file_alias_filenames.py"),
@@ -19348,6 +19465,7 @@ def _load_release_identity(
         venv_relocation_contract=venv_relocation_contract,
         obsidian_cutover_contract=obsidian_cutover_contract,
         secondary_product_runner_sha256=secondary_product_runner_sha256,
+        production_observation_operator_sha256=(production_observation_operator_sha256),
         engineer_command_lifecycle_contract=engineer_command_lifecycle_contract,
         operator_transaction_lock_scope_contract=operator_transaction_lock_scope_contract,
         operator_transaction_lock_scope_sha256=operator_transaction_lock_scope_sha256,
@@ -20487,6 +20605,7 @@ def build_parser() -> argparse.ArgumentParser:
         help=("Exact deploy/secondary-brain/windows-sglang/scripts/live_failure_battery.py source artifact"),
     )
     build.add_argument("--secondary-product-runner-sha256", required=True)
+    build.add_argument("--production-observation-operator-sha256", required=True)
     build.add_argument("--release-retention-toolchain-manifest-sha256", required=True)
     build.add_argument(
         "--build-receipt-profile",
@@ -20585,6 +20704,7 @@ def _run_cli(args: argparse.Namespace) -> dict[str, Any]:
                 alias_dependency_sha256=args.alias_dependency_sha256,
                 secondary_product_runner=args.secondary_product_runner,
                 secondary_product_runner_sha256=args.secondary_product_runner_sha256,
+                production_observation_operator_sha256=(args.production_observation_operator_sha256),
                 release_retention_toolchain_manifest_sha256=(
                     args.release_retention_toolchain_manifest_sha256
                 ),

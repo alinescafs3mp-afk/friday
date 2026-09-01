@@ -726,8 +726,9 @@ Wheel, построенный из чисто распакованного ZIP, 
   --secondary-product-runner \
   <EXACT_CLEAN_CANDIDATE_CHECKOUT>/deploy/secondary-brain/windows-sglang/scripts/live_failure_battery.py \
   --secondary-product-runner-sha256 <RUNNER_SHA256> \
+  --production-observation-operator-sha256 <EXACT_GIT_BLOB_SHA256> \
   --release-retention-toolchain-manifest-sha256 <INDEPENDENT_TOOLCHAIN_SHA256> \
-  --build-receipt-profile historical-v1-reader
+  --build-receipt-profile p0h-retention-v1
 <CANDIDATE>/venv/bin/python -I -B \
   <CANDIDATE>/artifacts/immutable_release_operator.py install-units ...
 <CANDIDATE>/venv/bin/python -I -B \
@@ -737,6 +738,15 @@ Wheel, построенный из чисто распакованного ZIP, 
 <CANDIDATE>/venv/bin/python -I -B \
   <CANDIDATE>/artifacts/immutable_release_operator.py recover-historical-album ...
 ```
+
+После owner smoke sealed
+`artifacts/production_read_only_observation_operator.py` запускается через
+`<CANDIDATE>/venv/bin/python -I -B` с exact tree digest и create-only private
+output. Затем exact-clean candidate checkout через `<SOURCE_PYTHON> -I -S -B`
+запускает `tools/exact_release_evidence.py production-bundle` с independently
+recorded artifact SHA-256 и exact commit/tree/wheel/schema. Private artifact
+сохраняется в режиме `0400` до проверки и атомарной публикации обоих файлов
+bundle; в canonical evidence не переносятся private path или response body.
 
 Все release-команды используют один portable exact layout от absolute
 `<FRIDAY_HOME>`: `data/state`, `wheel-only-releases`, `current-release` и

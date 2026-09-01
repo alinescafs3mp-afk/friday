@@ -11027,6 +11027,9 @@ def test_build_parser_binds_all_manifest_digests_into_build_spec(
     product_runner = (
         Path(__file__).parents[1] / "deploy/secondary-brain/windows-sglang/scripts/live_failure_battery.py"
     )
+    observation_operator_sha256 = hashlib.sha256(
+        (Path(operator.__file__).with_name("production_read_only_observation_operator.py")).read_bytes()
+    ).hexdigest()
 
     def build(spec: operator.BuildSpec) -> operator.ReleaseIdentity:
         captured.append(spec)
@@ -11080,6 +11083,8 @@ def test_build_parser_binds_all_manifest_digests_into_build_spec(
             str(product_runner),
             "--secondary-product-runner-sha256",
             hashlib.sha256(product_runner.read_bytes()).hexdigest(),
+            "--production-observation-operator-sha256",
+            observation_operator_sha256,
             "--release-retention-toolchain-manifest-sha256",
             "7" * 64,
             "--build-receipt-profile",
@@ -11098,6 +11103,7 @@ def test_build_parser_binds_all_manifest_digests_into_build_spec(
     assert (
         captured[0].secondary_product_runner_sha256 == hashlib.sha256(product_runner.read_bytes()).hexdigest()
     )
+    assert captured[0].production_observation_operator_sha256 == observation_operator_sha256
     assert captured[0].release_retention_toolchain_manifest_sha256 == "7" * 64
     assert captured[0].build_receipt_profile == build_receipt_profile
 
@@ -11372,6 +11378,7 @@ def test_build_release_blocks_on_unfinished_retention_apply(
         alias_dependency_sha256="6" * 64,
         secondary_product_runner=tmp_path / "live_failure_battery.py",
         secondary_product_runner_sha256="7" * 64,
+        production_observation_operator_sha256="9" * 64,
         release_retention_toolchain_manifest_sha256="8" * 64,
         build_receipt_profile=operator.BUILD_RECEIPT_PROFILE_P0H_RETENTION,
         max_schema=50,
@@ -11534,6 +11541,21 @@ def _release_retention_toolchain_manifest_sha256() -> str:
 
 
 def test_release_retention_toolchain_receipt_pair_preserves_historical_v1() -> None:
+    assert operator._RELEASE_RETENTION_TOOLCHAIN_PACKAGE_FILES == (  # noqa: SLF001
+        "__init__.py",
+        "immutable_release_operator.py",
+        "release_artifact_proc_probe.py",
+        "release_artifact_retention.py",
+        "release_artifact_retention_operator.py",
+        "release_dr_generation_authentication.py",
+        "release_dr_generation_enrollment.py",
+        "release_dr_generation_index.py",
+        "release_dr_generation_rehearsal.py",
+        "release_dr_generation_lifecycle.py",
+    )
+    assert "production_read_only_observation_operator.py" not in (
+        operator._RELEASE_RETENTION_TOOLCHAIN_PACKAGE_FILES  # noqa: SLF001
+    )
     assert operator._release_retention_toolchain_receipt_identity({}) == ("", "")  # noqa: SLF001
     digest = "a" * 64
     assert operator._release_retention_toolchain_receipt_identity(  # noqa: SLF001
@@ -11576,6 +11598,26 @@ def _synthetic_sealed_retention_toolchain(
     artifacts = root / "artifacts"
     tools = root / operator._RELEASE_RETENTION_TOOLCHAIN_ROOT / "tools"  # noqa: SLF001
     tools.mkdir(parents=True)
+    observation_entrypoint = root / operator._PRODUCTION_OBSERVATION_OPERATOR_ARTIFACT  # noqa: SLF001
+    observation_entrypoint.write_bytes(
+        operator._read_production_observation_operator_source(  # noqa: SLF001
+            Path(operator.__file__).resolve(strict=True)
+        )
+    )
+    observation_entrypoint.chmod(0o400)
+    observation_binding = (
+        root / operator._PRODUCTION_OBSERVATION_OPERATOR_BINDING_ARTIFACT  # noqa: SLF001
+    )
+    observation_binding.write_bytes(
+        operator._canonical_json(  # noqa: SLF001
+            {
+                "git_blob_sha256": hashlib.sha256(observation_entrypoint.read_bytes()).hexdigest(),
+                "schema": operator._PRODUCTION_OBSERVATION_OPERATOR_BINDING_SCHEMA,  # noqa: SLF001
+            }
+        )
+        + b"\n"
+    )
+    observation_binding.chmod(0o400)
     sources = dict(supplied_sources or {})
     if not sources:
         sources = {
@@ -11790,6 +11832,7 @@ def test_release_retention_toolchain_absolute_entrypoints_import_sealed_closure(
         supplied_sources=sources,
     )
     tools = root / operator._RELEASE_RETENTION_TOOLCHAIN_ROOT / "tools"  # noqa: SLF001
+    observation_entrypoint = root / operator._PRODUCTION_OBSERVATION_OPERATOR_ARTIFACT  # noqa: SLF001
     environment = {
         "LANG": "C.UTF-8",
         "LC_ALL": "C.UTF-8",
@@ -11797,20 +11840,47 @@ def test_release_retention_toolchain_absolute_entrypoints_import_sealed_closure(
         "PYTHONDONTWRITEBYTECODE": "1",
         "PYTHONNOUSERSITE": "1",
     }
-    for module in (
-        "release_dr_generation_lifecycle.py",
-        "release_artifact_retention_operator.py",
+    for entrypoint in (
+        tools / "release_dr_generation_lifecycle.py",
+        tools / "release_artifact_retention_operator.py",
+        observation_entrypoint,
     ):
         result = subprocess.run(  # noqa: S603
-            [sys.executable, "-I", "-B", str(tools / module), "--help"],
+            [sys.executable, "-I", "-B", str(entrypoint), "--help"],
             check=False,
             capture_output=True,
             cwd=tmp_path,
             env=environment,
             timeout=30,
         )
-        assert result.returncode == 0, (module, result.stderr)
+        assert result.returncode == 0, (entrypoint.name, result.stderr)
         assert result.stderr == b""
+    expected_observer_sha256 = hashlib.sha256(observation_entrypoint.read_bytes()).hexdigest()
+    assert (
+        operator._sealed_production_observation_operator_sha256(root)  # noqa: SLF001
+        == expected_observer_sha256
+    )
+    binding = root / operator._PRODUCTION_OBSERVATION_OPERATOR_BINDING_ARTIFACT  # noqa: SLF001
+    binding_raw = binding.read_bytes()
+    binding.unlink()
+    with pytest.raises(
+        operator.ReleaseFailure,
+        match="^release_production_observation_operator_invalid$",
+    ):
+        operator._sealed_production_observation_operator_sha256(root)  # noqa: SLF001
+    binding.write_bytes(binding_raw)
+    binding.chmod(0o400)
+    alias = root / "binding-hardlink"
+    alias.hardlink_to(binding)
+    with pytest.raises(
+        operator.ReleaseFailure,
+        match="^release_production_observation_operator_binding_invalid$",
+    ):
+        operator._sealed_production_observation_operator_sha256(root)  # noqa: SLF001
+    alias.unlink()
+    legacy = tmp_path / "legacy-release"
+    (legacy / "artifacts").mkdir(parents=True)
+    assert operator._sealed_production_observation_operator_sha256(legacy) == ""  # noqa: SLF001
 
 
 def _synthetic_build_spec(tmp_path: Path) -> operator.BuildSpec:
@@ -11856,6 +11926,11 @@ def _synthetic_build_spec(tmp_path: Path) -> operator.BuildSpec:
         alias_dependency_sha256=hashlib.sha256(alias_dependency.read_bytes()).hexdigest(),
         secondary_product_runner=product_runner,
         secondary_product_runner_sha256=hashlib.sha256(product_runner.read_bytes()).hexdigest(),
+        production_observation_operator_sha256=hashlib.sha256(
+            operator._read_production_observation_operator_source(  # noqa: SLF001
+                Path(operator.__file__).resolve(strict=True)
+            )
+        ).hexdigest(),
         release_retention_toolchain_manifest_sha256=(_release_retention_toolchain_manifest_sha256()),
         build_receipt_profile=operator.BUILD_RECEIPT_PROFILE_HISTORICAL_V1_READER,
         max_schema=34,
@@ -12453,6 +12528,19 @@ def test_build_smoke_failure_cleans_only_prepublication_staging_and_quarantines_
     product_runner = target / operator._SECONDARY_PRODUCT_RUNNER_ARTIFACT  # noqa: SLF001
     assert product_runner.read_bytes() == spec.secondary_product_runner.read_bytes()
     assert stat.S_IMODE(os.lstat(product_runner).st_mode) == 0o400
+    observation_operator = target / operator._PRODUCTION_OBSERVATION_OPERATOR_ARTIFACT  # noqa: SLF001
+    assert observation_operator.read_bytes() == operator._read_production_observation_operator_source(  # noqa: SLF001
+        Path(operator.__file__).resolve(strict=True)
+    )
+    assert stat.S_IMODE(os.lstat(observation_operator).st_mode) == 0o400
+    observation_binding = (
+        target / operator._PRODUCTION_OBSERVATION_OPERATOR_BINDING_ARTIFACT  # noqa: SLF001
+    )
+    assert stat.S_IMODE(os.lstat(observation_binding).st_mode) == 0o400
+    assert json.loads(observation_binding.read_text(encoding="ascii")) == {
+        "git_blob_sha256": spec.production_observation_operator_sha256,
+        "schema": operator._PRODUCTION_OBSERVATION_OPERATOR_BINDING_SCHEMA,  # noqa: SLF001
+    }
     toolchain_manifest = target / operator._RELEASE_RETENTION_TOOLCHAIN_MANIFEST  # noqa: SLF001
     toolchain_manifest_raw = toolchain_manifest.read_bytes()
     metadata = json.loads((target / "artifacts/immutable-release.json").read_text(encoding="ascii"))
@@ -12521,6 +12609,7 @@ def test_build_smoke_failure_cleans_only_prepublication_staging_and_quarantines_
         assert stat.S_IMODE(os.lstat(packaged).st_mode) == 0o400
     loaded = operator.load_release_identity(target, expected_tree_sha256=digest)
     assert loaded.secondary_product_runner_sha256 == spec.secondary_product_runner_sha256
+    assert loaded.production_observation_operator_sha256 == spec.production_observation_operator_sha256
     assert loaded.sealed_release_retention_toolchain_manifest_sha256 == (
         spec.release_retention_toolchain_manifest_sha256
     )
@@ -13096,6 +13185,11 @@ def test_missing_venv_fails_before_release_staging_or_target(
         alias_dependency_sha256=hashlib.sha256(alias_dependency.read_bytes()).hexdigest(),
         secondary_product_runner=product_runner,
         secondary_product_runner_sha256=hashlib.sha256(product_runner.read_bytes()).hexdigest(),
+        production_observation_operator_sha256=hashlib.sha256(
+            operator._read_production_observation_operator_source(  # noqa: SLF001
+                Path(operator.__file__).resolve(strict=True)
+            )
+        ).hexdigest(),
         release_retention_toolchain_manifest_sha256=(_release_retention_toolchain_manifest_sha256()),
         build_receipt_profile=operator.BUILD_RECEIPT_PROFILE_HISTORICAL_V1_READER,
         max_schema=34,
@@ -13181,6 +13275,11 @@ def test_post_seal_failure_removes_staging_and_preserves_original_failure(
         alias_dependency_sha256=hashlib.sha256(alias_dependency.read_bytes()).hexdigest(),
         secondary_product_runner=product_runner,
         secondary_product_runner_sha256=hashlib.sha256(product_runner.read_bytes()).hexdigest(),
+        production_observation_operator_sha256=hashlib.sha256(
+            operator._read_production_observation_operator_source(  # noqa: SLF001
+                Path(operator.__file__).resolve(strict=True)
+            )
+        ).hexdigest(),
         release_retention_toolchain_manifest_sha256=(_release_retention_toolchain_manifest_sha256()),
         build_receipt_profile=operator.BUILD_RECEIPT_PROFILE_HISTORICAL_V1_READER,
         max_schema=34,

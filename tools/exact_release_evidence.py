@@ -50,6 +50,7 @@ PRODUCTION_SCHEDULED_WORK_SCHEMA_ATTESTATION_SHA256 = (
 MANIFEST_SCHEMA = "friday.golden-journey-evidence.v1"
 VALIDATION_ATTESTATION_SCHEMA = "friday.exact-release-receipt-validation.v1"
 PRODUCER_PATH = "tools/exact_release_evidence.py"
+PRODUCTION_OBSERVATION_OPERATOR_PATH = "tools/production_read_only_observation_operator.py"
 PYTEST_TIMEOUT_SECONDS = 900
 VALIDATION_TIMEOUT_SECONDS = PYTEST_TIMEOUT_SECONDS + 60
 VALIDATION_TERMINATION_GRACE_SECONDS = 5.0
@@ -1564,6 +1565,7 @@ _PRODUCTION_OBSERVATION_BINDING_FIELDS = frozenset(
         "endpoint_response_sha256",
         "health_after_sha256",
         "health_before_sha256",
+        "production_observation_operator_sha256",
         "release_binding_sha256",
     }
 )
@@ -1588,6 +1590,7 @@ _RELEASE_CAPTAIN_ARTIFACT_FIELDS = frozenset(
         "backend_process_epoch_sha256",
         "health_before_sha256",
         "health_after_sha256",
+        "production_observation_operator_sha256",
     }
 )
 _PRODUCTION_RESPONSE_FIELDS = frozenset(
@@ -1758,6 +1761,7 @@ class AuthenticatedProductionObservationBinding:
     backend_process_epoch_sha256: str
     health_before_sha256: str
     health_after_sha256: str
+    production_observation_operator_sha256: str
 
     def __post_init__(self) -> None:
         _production_binding_payload(self)
@@ -2457,6 +2461,10 @@ def _production_binding_payload(
         "endpoint_response_sha256": hashlib.sha256(value.endpoint_response).hexdigest(),
         "health_after_sha256": health_after,
         "health_before_sha256": health_before,
+        "production_observation_operator_sha256": _production_digest(
+            value.production_observation_operator_sha256,
+            failure_code="production_observation_operator_invalid",
+        ),
         "release_binding_sha256": release_binding_sha256(value.release),
     }
 
@@ -2465,6 +2473,7 @@ def binding_from_release_captain_artifact(
     raw: bytes,
     *,
     expected_release: ReleaseIdentity,
+    expected_production_observation_operator_sha256: str,
 ) -> AuthenticatedProductionObservationBinding:
     """Decode one canonical Release Captain artifact into expected values.
 
@@ -2480,11 +2489,16 @@ def binding_from_release_captain_artifact(
         failure_code="release_captain_observation_artifact_invalid",
     )
     response = value.get("endpoint_response")
+    expected_operator_sha256 = _production_digest(
+        expected_production_observation_operator_sha256,
+        failure_code="release_captain_observation_artifact_invalid",
+    )
     if (
         set(value) != _RELEASE_CAPTAIN_ARTIFACT_FIELDS
         or value.get("schema") != RELEASE_CAPTAIN_PRODUCTION_OBSERVATION_SCHEMA
         or value.get("release") != expected_release_payload
         or value.get("release_binding_sha256") != release_binding_sha256(expected_release)
+        or value.get("production_observation_operator_sha256") != expected_operator_sha256
         or type(response) is not dict
     ):
         raise ExactReleaseEvidenceError("release_captain_observation_artifact_invalid")
@@ -2514,6 +2528,7 @@ def binding_from_release_captain_artifact(
         backend_process_epoch_sha256=process_epoch_sha256,
         health_before_sha256=health_before_sha256,
         health_after_sha256=health_after_sha256,
+        production_observation_operator_sha256=expected_operator_sha256,
     )
     expected = _production_binding_payload(binding)
     if any(value.get(key) != item for key, item in expected.items() if key != "endpoint_response_schema"):
@@ -2526,6 +2541,7 @@ def binding_from_private_release_captain_artifact(
     *,
     expected_artifact_sha256: str,
     expected_release: ReleaseIdentity,
+    expected_production_observation_operator_sha256: str,
 ) -> AuthenticatedProductionObservationBinding:
     """Load one Release Captain artifact from its create-only private custody.
 
@@ -2609,6 +2625,7 @@ def binding_from_private_release_captain_artifact(
     return binding_from_release_captain_artifact(
         raw,
         expected_release=expected_release,
+        expected_production_observation_operator_sha256=(expected_production_observation_operator_sha256),
     )
 
 
@@ -6086,6 +6103,14 @@ def build_parser() -> argparse.ArgumentParser:
         choices=sorted({evidence_class for _journey_id, evidence_class in candidate_runtime_pairs}),
     )
     bundle.add_argument("--output-root", required=True, type=Path)
+    production_bundle = commands.add_parser("production-bundle")
+    production_bundle.add_argument("--artifact", required=True, type=Path)
+    production_bundle.add_argument("--expected-artifact-sha256", required=True)
+    production_bundle.add_argument("--expected-source-commit", required=True)
+    production_bundle.add_argument("--expected-tree-sha256", required=True)
+    production_bundle.add_argument("--expected-wheel-sha256", required=True)
+    production_bundle.add_argument("--expected-database-schema", required=True, type=int)
+    production_bundle.add_argument("--output-root", required=True, type=Path)
     return parser
 
 
@@ -6093,6 +6118,54 @@ def main(argv: list[str] | None = None) -> int:
     try:
         _require_producer_process_authority()
         args = build_parser().parse_args(argv)
+        if args.command == "production-bundle":
+            producer_root, producer_head = _running_exact_checkout()
+            observer_git_blob_sha256 = hashlib.sha256(
+                _exact_git_blob(
+                    producer_root,
+                    producer_head,
+                    PRODUCTION_OBSERVATION_OPERATOR_PATH,
+                )
+            ).hexdigest()
+            expected_release = ReleaseIdentity(
+                source_commit=args.expected_source_commit,
+                tree_sha256=args.expected_tree_sha256,
+                wheel_sha256=args.expected_wheel_sha256,
+                database_schema=args.expected_database_schema,
+            )
+            if producer_head != expected_release.source_commit:
+                raise ExactReleaseEvidenceError("production_observation_release_invalid")
+            binding = binding_from_private_release_captain_artifact(
+                args.artifact,
+                expected_artifact_sha256=args.expected_artifact_sha256,
+                expected_release=expected_release,
+                expected_production_observation_operator_sha256=(observer_git_blob_sha256),
+            )
+            bundle = produce_production_observation_bundle(
+                authenticated_binding=binding,
+            )
+            validate_production_observation_bundle(
+                bundle,
+                authenticated_binding=binding,
+            )
+            confirmed_root, confirmed_head = _running_exact_checkout()
+            if (confirmed_root, confirmed_head) != (producer_root, producer_head):
+                raise ExactReleaseEvidenceError("producer_source_invalid")
+            if (
+                hashlib.sha256(
+                    _exact_git_blob(
+                        confirmed_root,
+                        confirmed_head,
+                        PRODUCTION_OBSERVATION_OPERATOR_PATH,
+                    )
+                ).hexdigest()
+                != observer_git_blob_sha256
+            ):
+                raise ExactReleaseEvidenceError("producer_source_invalid")
+            output_root = _external_bundle_output_root(producer_root, args.output_root)
+            published = write_evidence_bundle_exclusive(output_root, bundle)
+            print(canonical_json_bytes(published).decode())
+            return 0 if published["result"] == "VERIFIED" else 1
         if args.command == "validate":
             if (
                 not _requires_candidate_runtime(args.journey_id, args.evidence_class)

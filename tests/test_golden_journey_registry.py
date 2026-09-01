@@ -729,6 +729,12 @@ def _validate_production_observation_manifest(
         exact_identity = _exact_release_identity(manifest_identity)
     except exact_evidence.ExactReleaseEvidenceError as exc:
         raise RegistryValidationError("production observation release identity is malformed") from exc
+    observer_git_blob_sha256 = hashlib.sha256(
+        _exact_git_blob(
+            manifest_identity.source_commit,
+            exact_evidence.PRODUCTION_OBSERVATION_OPERATOR_PATH,
+        )
+    ).hexdigest()
     if authenticated_production_observation is not None and (
         production_observation_artifact is not None or production_observation_artifact_sha256 is not None
     ):
@@ -744,10 +750,12 @@ def _validate_production_observation_manifest(
                 production_observation_artifact,
                 expected_artifact_sha256=production_observation_artifact_sha256,
                 expected_release=exact_identity,
+                expected_production_observation_operator_sha256=(observer_git_blob_sha256),
             )
         if (
             type(binding) is not exact_evidence.AuthenticatedProductionObservationBinding
             or binding.release != exact_identity
+            or binding.production_observation_operator_sha256 != observer_git_blob_sha256
         ):
             raise RegistryValidationError(
                 "production observation requires exact external Release Captain authority"
@@ -1261,6 +1269,12 @@ def _production_observation_machine_manifest(
     bytes,
 ]:
     exact_identity = _exact_release_identity(identity)
+    observer_git_blob_sha256 = hashlib.sha256(
+        _exact_git_blob(
+            identity.source_commit,
+            exact_evidence.PRODUCTION_OBSERVATION_OPERATOR_PATH,
+        )
+    ).hexdigest()
     challenge_sha256 = "d" * 64
     process_epoch_sha256 = "e" * 64
     endpoint = {
@@ -1322,6 +1336,7 @@ def _production_observation_machine_manifest(
     artifact = {
         "schema": exact_evidence.RELEASE_CAPTAIN_PRODUCTION_OBSERVATION_SCHEMA,
         "release": release,
+        "production_observation_operator_sha256": observer_git_blob_sha256,
         "release_binding_sha256": exact_evidence.release_binding_sha256(exact_identity),
         "endpoint_response": endpoint,
         "endpoint_response_sha256": hashlib.sha256(endpoint_raw).hexdigest(),
@@ -1334,6 +1349,7 @@ def _production_observation_machine_manifest(
     binding = exact_evidence.binding_from_release_captain_artifact(
         artifact_raw,
         expected_release=exact_identity,
+        expected_production_observation_operator_sha256=(observer_git_blob_sha256),
     )
     bundle = exact_evidence.produce_production_observation_bundle(
         authenticated_binding=binding,

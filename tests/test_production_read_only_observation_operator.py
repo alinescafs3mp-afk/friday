@@ -5,7 +5,11 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import shutil
 import stat
+import subprocess
+import sys
+import textwrap
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -20,6 +24,7 @@ _RELEASE = {
     "wheel_sha256": "c" * 64,
 }
 _EPOCH = "d" * 64
+_OBSERVER_SHA256 = "e" * 64
 
 
 def _zero(names: tuple[str, ...]) -> dict[str, int]:
@@ -101,9 +106,11 @@ class _Runtime:
         self.release_calls = 0
         self.epoch_calls = 0
         self.health_calls = 0
+        self.observer_calls = 0
         self.challenge = ""
         self.release_after = dict(_RELEASE)
         self.epoch_after = _EPOCH
+        self.observer_after = _OBSERVER_SHA256
         self.observation_mutator = lambda value: value
 
     def authenticate_release(self) -> dict[str, object]:
@@ -113,6 +120,10 @@ class _Runtime:
     def process_epoch_sha256(self) -> str:
         self.epoch_calls += 1
         return _EPOCH if self.epoch_calls == 1 else self.epoch_after
+
+    def production_observation_operator_sha256(self) -> str:
+        self.observer_calls += 1
+        return _OBSERVER_SHA256 if self.observer_calls == 1 else self.observer_after
 
     def accepted_health_bytes(self) -> bytes:
         self.health_calls += 1
@@ -139,11 +150,12 @@ def test_release_captain_derives_one_canonical_private_body_free_artifact() -> N
     challenge = hashlib.sha256(b"x" * 32).hexdigest()
 
     assert runtime.challenge == challenge
-    assert runtime.release_calls == runtime.epoch_calls == runtime.health_calls == 2
+    assert runtime.release_calls == runtime.epoch_calls == runtime.health_calls == runtime.observer_calls == 2
     assert value == json.loads(raw)
     assert value["challenge_sha256"] == challenge
     assert value["backend_process_epoch_sha256"] == _EPOCH
     assert value["release"] == _RELEASE
+    assert value["production_observation_operator_sha256"] == _OBSERVER_SHA256
     assert value["endpoint_response"] == _observation(challenge)
     assert (
         value["endpoint_response_sha256"]
@@ -154,6 +166,13 @@ def test_release_captain_derives_one_canonical_private_body_free_artifact() -> N
     )
     assert value["health_before_sha256"] != value["health_after_sha256"]
     assert raw == operator.canonical_json_bytes(value)
+    drifted_operator = _Runtime()
+    drifted_operator.observer_after = "0" * 64
+    with pytest.raises(
+        operator.ProductionObservationOperatorError,
+        match="observation_authority_drifted",
+    ):
+        _artifact(drifted_operator)
 
     rendered = raw.decode("ascii").casefold()
     for forbidden in (
@@ -262,7 +281,11 @@ def test_artifact_validator_recomputes_response_and_release_hashes() -> None:
     raw, _runtime = _artifact()
     value = json.loads(raw)
 
-    for field in ("endpoint_response_sha256", "release_binding_sha256"):
+    for field in (
+        "endpoint_response_sha256",
+        "release_binding_sha256",
+        "production_observation_operator_sha256",
+    ):
         forged = {**value, field: "0" * 64}
         with pytest.raises(operator.ProductionObservationOperatorError, match="artifact_invalid"):
             operator.validate_release_captain_artifact(operator.canonical_json_bytes(forged))
@@ -303,6 +326,131 @@ def test_create_only_publication_rejects_symlink_and_nonprivate_parent(tmp_path:
 
 def test_authoritative_publication_rejects_injectable_runtime_and_raw_writer(tmp_path: Path) -> None:
     target = tmp_path / "must-not-exist.json"
+    with pytest.raises(
+        operator.ProductionObservationOperatorError,
+        match="sealed_entrypoint_invalid",
+    ):
+        operator.execute(
+            SimpleNamespace(
+                release_tree_sha256="b" * 64,
+                output=target,
+            )
+        )
+
+    release_root = tmp_path / "sealed-release"
+    artifacts = release_root / "artifacts"
+    interpreter = release_root / "venv/bin/python"
+    artifacts.mkdir(parents=True)
+    interpreter.parent.mkdir(parents=True)
+    shutil.copyfile(sys.executable, interpreter)
+    interpreter.chmod(0o500)
+    sealed_observer = artifacts / "production_read_only_observation_operator.py"
+    sealed_release_operator = artifacts / "immutable_release_operator.py"
+    sealed_observer.write_bytes(Path(operator.__file__).read_bytes())
+    sealed_release_operator.write_bytes(Path(operator.release_operator.__file__).read_bytes())
+    sealed_observer.chmod(0o400)
+    sealed_release_operator.chmod(0o400)
+    artifacts.chmod(0o500)
+    interpreter.parent.chmod(0o500)
+    interpreter.parent.parent.chmod(0o500)
+    release_root.chmod(0o500)
+    foreign_cwd = tmp_path / "foreign-cwd"
+    foreign_cwd.mkdir()
+    harness = textwrap.dedent(
+        """
+        import hashlib
+        import importlib.util
+        import json
+        import pathlib
+        import sys
+        import types
+
+        script = pathlib.Path(sys.argv[1])
+        output = pathlib.Path(sys.argv[2])
+        spec = importlib.util.spec_from_file_location("sealed_observer", script)
+        assert spec is not None and spec.loader is not None
+        module = importlib.util.module_from_spec(spec)
+        sys.modules[spec.name] = module
+        spec.loader.exec_module(module)
+        release_root = script.parent.parent
+        events = []
+        release = module.release_operator.ReleaseIdentity(
+            root=release_root,
+            commit="a" * 40,
+            version="0.207.97",
+            tree_manifest_sha256="b" * 64,
+            max_schema=50,
+            production_observation_operator_sha256=(
+                hashlib.sha256(script.read_bytes()).hexdigest()
+            ),
+        )
+
+        def load_release(root, *, expected_tree_sha256):
+            assert root == release_root
+            assert expected_tree_sha256 == "b" * 64
+            events.append("load")
+            return release
+
+        def systemd_config(args):
+            assert args.output == output
+            events.append("config")
+            return object()
+
+        def publish(actual_release, config, actual_output):
+            assert actual_release is release
+            assert config is not None
+            assert actual_output == output
+            events.append("publish")
+            return {
+                "artifact_sha256": "c" * 64,
+                "endpoint_response_sha256": "d" * 64,
+                "release_binding_sha256": "e" * 64,
+            }
+
+        module.release_operator.load_release_identity = load_release
+        module.release_operator._systemd_config = systemd_config
+        module.publish_authenticated_release_captain_artifact = publish
+        receipt = module.execute(
+            types.SimpleNamespace(release_tree_sha256="b" * 64, output=output)
+        )
+        print(json.dumps({"events": events, "receipt": receipt}, sort_keys=True))
+        """
+    )
+    completed = subprocess.run(  # noqa: S603
+        [
+            str(interpreter),
+            "-I",
+            "-B",
+            "-c",
+            harness,
+            str(sealed_observer),
+            str(target),
+        ],
+        cwd=foreign_cwd,
+        env={
+            "LANG": "C.UTF-8",
+            "LC_ALL": "C.UTF-8",
+            "PATH": os.defpath,
+            "PYTHONDONTWRITEBYTECODE": "1",
+        },
+        check=False,
+        capture_output=True,
+        timeout=30,
+    )
+    assert completed.returncode == 0, completed.stderr.decode("utf-8", "replace")
+    assert completed.stderr == b""
+    positive = json.loads(completed.stdout)
+    assert positive["events"] == ["load", "config", "publish"]
+    assert positive["receipt"] == {
+        "artifact_sha256": "c" * 64,
+        "endpoint_response_sha256": "d" * 64,
+        "release_binding_sha256": "e" * 64,
+        "schema": operator.ARTIFACT_SCHEMA,
+        "status": "clear",
+    }
+    assert not target.exists()
+    assert not tuple(release_root.rglob("__pycache__"))
+
     forged = object.__new__(operator.SystemdReleaseCaptainRuntime)
     forged.authenticate_release = lambda: dict(_RELEASE)
     forged.process_epoch_sha256 = lambda: _EPOCH
@@ -329,7 +477,7 @@ def test_authoritative_publication_rejects_injectable_runtime_and_raw_writer(tmp
 def test_concrete_health_digest_bytes_receive_the_full_immutable_health_validation(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from tools import immutable_release_operator as release_operator
+    release_operator = operator.release_operator
 
     raw = b'{"private":"PRIVATE-HEALTH-BODY","status":"ok","version":"0.207.95"}'
     release = release_operator.ReleaseIdentity(

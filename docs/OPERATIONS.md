@@ -631,8 +631,9 @@ Python строит sealed wheel-only siblings; все последующие к
   --secondary-product-runner \
   <EXACT_CLEAN_CANDIDATE_CHECKOUT>/deploy/secondary-brain/windows-sglang/scripts/live_failure_battery.py \
   --secondary-product-runner-sha256 <RUNNER_SHA256> \
+  --production-observation-operator-sha256 <EXACT_GIT_BLOB_SHA256> \
   --release-retention-toolchain-manifest-sha256 <INDEPENDENT_TOOLCHAIN_SHA256> \
-  --build-receipt-profile historical-v1-reader
+  --build-receipt-profile p0h-retention-v1
 <CANDIDATE>/venv/bin/python -I -B \
   <CANDIDATE>/artifacts/immutable_release_operator.py install-units ...
 <CANDIDATE>/venv/bin/python -I -B \
@@ -641,6 +642,27 @@ Python строит sealed wheel-only siblings; все последующие к
   <EXECUTOR>/artifacts/immutable_release_operator.py recover-activation ...
 <CANDIDATE>/venv/bin/python -I -B \
   <CANDIDATE>/artifacts/immutable_release_operator.py recover-historical-album ...
+```
+
+После owner smoke production-наблюдение запускается только sealed interpreter
+и tree-bound observer кандидата. Private artifact остаётся `0400`, а его digest
+фиксируется отдельно до успешной атомарной публикации bundle:
+
+```text
+<CANDIDATE>/venv/bin/python -I -B \
+  <CANDIDATE>/artifacts/production_read_only_observation_operator.py \
+  --release-tree-sha256 <TREE_SHA256> \
+  --output <OWNER_PRIVATE_CREATE_ONLY_ARTIFACT> ...
+<SOURCE_PYTHON> -I -S -B \
+  <EXACT_CLEAN_CANDIDATE_CHECKOUT>/tools/exact_release_evidence.py \
+  production-bundle \
+  --artifact <OWNER_PRIVATE_CREATE_ONLY_ARTIFACT> \
+  --expected-artifact-sha256 <PUBLISHER_RECORDED_SHA256> \
+  --expected-source-commit <COMMIT> \
+  --expected-tree-sha256 <TREE_SHA256> \
+  --expected-wheel-sha256 <WHEEL_SHA256> \
+  --expected-database-schema <SCHEMA> \
+  --output-root <EXTERNAL_PRIVATE_BUNDLE_ROOT>
 ```
 
 Все пути release-controller образуют один portable layout от exact absolute
