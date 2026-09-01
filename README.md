@@ -16,10 +16,7 @@ healthy heartbeat. Авторизованный read-only `archive_search`
 источниками, покрытием и финальной повторной проверкой прав. Его внутренний
 bounded tail теперь сохраняет разрешённые источники за первой страницей, а
 сообщения сначала распределяют места между разными беседами и только потом
-добавляют соседние совпадения из той же беседы. Только `archive_search`
-показывается диалоговой модели; прежние частные поиски остались внутренними
-code-owned адаптерами, а их stale/malformed вызовы завершаются source-free без
-второго effect-round. Schema 44
+добавляют соседние совпадения из той же беседы. Schema 44
 добавила fixed WorkGraph ровно для сравнения текущего файла с текущим вебом:
 два body-free read-шага, primary synthesis и CAS/restart state, один
 review-admitted web recovery, exact full/terminal publication receipts и

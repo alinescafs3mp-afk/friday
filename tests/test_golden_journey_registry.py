@@ -1356,11 +1356,11 @@ def test_canonical_golden_journey_registry_is_closed_current_and_privacy_safe(
         for evidence_class in _CURRENT_SNAPSHOT_MISSING_CLASSES
     )
     assert {row.journey_id: row.evidence["clean artifact path"].state for row in rows} == {
-        "conversation_recall": "STALE",
-        "document_recall_answer": "STALE",
+        "conversation_recall": "VERIFIED",
+        "document_recall_answer": "VERIFIED",
         "obsidian_write_sync": "MISSING",
-        "durable_scheduled_work": "STALE",
-        "honest_degradation": "STALE",
+        "durable_scheduled_work": "VERIFIED",
+        "honest_degradation": "VERIFIED",
         "current_file_web_comparison": "MISSING",
     }
     document = next(row for row in rows if row.journey_id == "document_recall_answer")
