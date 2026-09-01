@@ -120,6 +120,21 @@ def test_quoted_malformed_syntax_in_prose_remains_an_answer() -> None:
     assert classify_tool_turn(content).kind == "answer"
 
 
+@pytest.mark.parametrize(("opening", "closing"), [("\u00ab", "\u00bb"), ("\u201c", "\u201d")])
+def test_typographic_quoted_malformed_syntax_in_prose_remains_an_answer(
+    opening: str,
+    closing: str,
+) -> None:
+    content = (
+        f"Documentation quotes {opening}{{name demo arguments "
+        + ("literal padding " * 200)
+        + f"{closing} as malformed syntax."
+    )
+
+    assert contains_internal_tool_output(content) is False
+    assert classify_tool_turn(content).kind == "answer"
+
+
 def test_repeated_unclosed_tag_names_remain_literal_documentation() -> None:
     content = (
         "Documentation says <tool_call> opens a block; it also repeats <tool_call> as the literal spelling."

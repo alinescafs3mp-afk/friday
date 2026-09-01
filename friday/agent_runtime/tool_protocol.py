@@ -23,6 +23,10 @@ _MAX_ARGUMENT_BYTES = 64_000
 _MAX_TOOL_NAME_LENGTH = 128
 _TOOL_NAME_RE = re.compile(r"^[A-Za-z0-9_.:-]+$")
 _CODE_FENCE_PREFIX = "```"
+_PAIRED_PROSE_QUOTES = {
+    "\u00ab": "\u00bb",
+    "\u201c": "\u201d",
+}
 # A whole LINE that is nothing but «Call: something» — the shape a model emits
 # when it tries to invoke a tool in prose. Anchored end to end because the loose
 # version matched «Call: +7 495…» inside a sentence and threw the answer away.
@@ -291,7 +295,7 @@ def _has_dominant_malformed_tool_root(text: str) -> bool:
     """
 
     quoted_spans: list[tuple[int, int]] = []
-    quote = ""
+    quote_close = ""
     quote_start = -1
     escaped = False
     for index, character in enumerate(text):
@@ -302,18 +306,21 @@ def _has_dominant_malformed_tool_root(text: str) -> bool:
             and text[index - 1].isalnum()
             and text[index + 1].isalnum()
         )
-        if quote:
+        if quote_close:
             if escaped:
                 escaped = False
             elif character == "\\":
                 escaped = True
-            elif character == quote and not word_apostrophe:
+            elif character == quote_close and not word_apostrophe:
                 quoted_spans.append((quote_start, index + 1))
-                quote = ""
+                quote_close = ""
                 quote_start = -1
             continue
         if character == '"' or (character == "'" and (index == 0 or not text[index - 1].isalnum())):
-            quote = character
+            quote_close = character
+            quote_start = index
+        elif character in _PAIRED_PROSE_QUOTES:
+            quote_close = _PAIRED_PROSE_QUOTES[character]
             quote_start = index
 
     scan_stop = len(text)
