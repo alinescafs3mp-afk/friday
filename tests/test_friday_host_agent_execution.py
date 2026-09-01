@@ -1158,14 +1158,14 @@ def test_terminal_result_survives_agent_restart_without_reexecution(tmp_path: Pa
     jobs.close()
 
     second_runner = _Runner()
-    restarted, restarted_auth, restarted_jobs, restarted_plan = _daemon(
+    restarted, restarted_auth, restarted_jobs, _restarted_plan = _daemon(
         tmp_path,
         second_runner,
         database=database,
     )
     observed = _call(
         restarted,
-        _request(restarted_auth, restarted_plan, "RunAction", sequence=3),
+        _request(restarted_auth, plan, "RunAction", sequence=3),
     )
     assert observed["result"] == expected
     assert second_runner.calls == 0
