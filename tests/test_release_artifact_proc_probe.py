@@ -309,6 +309,20 @@ def test_privileged_io_uring_conservatively_references_every_target(
         os.close(process_fd)
     assert conservative.opaque_file_reference_target_ids == ("first", "second")
 
+    namespace = probe._Reference(  # noqa: SLF001
+        "fd",
+        "7",
+        probe.ObjectKey(0, 100, stat.S_IFREG),
+        81,
+        b"mnt:[4026531840]",
+    )
+    monkeypatch.setattr(conservative, "_reference", lambda *args, **kwargs: namespace)
+    process_fd = os.open(process, os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        assert conservative._fd_references(process_fd, 123) == [namespace]  # noqa: SLF001
+    finally:
+        os.close(process_fd)
+
     diagnostic = probe._LinuxProcScanner(Path("/proc"), index)  # noqa: SLF001
     monkeypatch.setattr(diagnostic, "_reference", lambda *args, **kwargs: ring)
     process_fd = os.open(process, os.O_RDONLY | os.O_DIRECTORY)
@@ -891,11 +905,28 @@ def test_privileged_helper_cli_is_import_safe_and_body_free_outside_repo(tmp_pat
     assert result.returncode == 2
     assert result.stdout == b""
     assert json.loads(result.stderr) == {
+        "failure_code": "privileged_probe_authority_invalid",
         "schema": probe.PRIVILEGED_RECEIPT_SCHEMA,
+        "source": "proc",
         "status": "failed_closed",
     }
     assert b"Traceback" not in result.stderr
     assert str(tmp_path).encode() not in result.stderr
+
+    outer = probe.ProcProbeInputError("privileged_probe_incomplete")
+    outer.__cause__ = probe._ProbeIssue(  # noqa: SLF001
+        "proc_surface_unsupported",
+        pid=123,
+        source="fdinfo",
+    )
+    assert probe._privileged_failure_projection(outer) == (  # noqa: SLF001
+        "proc_surface_unsupported",
+        "fdinfo",
+    )
+    assert probe._privileged_failure_projection(ValueError(str(tmp_path))) == (  # noqa: SLF001
+        "privileged_probe_failed_closed",
+        "proc",
+    )
 
 
 def test_repeated_mount_cache_hits_do_not_leak_task_root_descriptors(

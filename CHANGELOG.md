@@ -14,7 +14,8 @@
 - Without a boot-start `io_uring` absence authority, treats every indexed
   artifact as potentially referenced. This permits a complete no-delete plan
   without converting an invisible registered or asynchronous kernel reference
-  into false clearance.
+  or a detached mount namespace into false clearance. Privileged failures emit
+  only an allowlisted body-free diagnostic class.
 - Adds race-closed and provision-to-eligible regressions for the external
   evidence contour. SQLite remains at schema 50; exact `0.207.91` is the
   predecessor and `0.207.90` remains the immutable fallback.

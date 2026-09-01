@@ -57,6 +57,7 @@ MAX_RECEIPT_BYTES = 2 << 20
 MAX_PRIVILEGED_INPUT_BYTES = MAX_TARGET_INDEX_BYTES + (1 << 20)
 
 _TARGET_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,127}\Z")
+_PRIVILEGED_FAILURE_CODE = re.compile(r"(?:privileged_probe|target_index|proc)_[a-z0-9_]{1,63}\Z")
 _BOOT_ID = re.compile(rb"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\n?\Z")
 _MAP_LINE = re.compile(
     rb"([0-9a-f]+)-([0-9a-f]+) "
@@ -1344,10 +1345,16 @@ class _LinuxProcScanner:
                     and not self.conservatively_retain_opaque_file_references
                 ):
                     raise _ProbeIssue("proc_surface_unsupported", pid=pid, source="fdinfo")
-                if reference.link_target.startswith(b"mnt:[") and reference.link_target.endswith(b"]"):
+                if (
+                    reference.link_target.startswith(b"mnt:[")
+                    and reference.link_target.endswith(b"]")
+                    and not self.conservatively_retain_opaque_file_references
+                ):
                     # A mount namespace can outlive its last task through an
                     # nsfs descriptor.  Its bind aliases are not represented by
-                    # any task mountinfo, so this bounded observer must stop.
+                    # any task mountinfo.  Only the privileged no-delete
+                    # contour can continue because it already retains every
+                    # target without claiming that the namespace is clear.
                     raise _ProbeIssue("proc_surface_unsupported", pid=pid, source="fdinfo")
                 references.append(reference)
                 if reference.link_target in {
@@ -2588,6 +2595,24 @@ def _is_hex_digest(value: object) -> bool:
     return isinstance(value, str) and _HEX64.fullmatch(value) is not None
 
 
+def _privileged_failure_projection(error: BaseException) -> tuple[str, str]:
+    fallback: tuple[str, str] | None = None
+    current: BaseException | None = error
+    seen: set[int] = set()
+    for _depth in range(8):
+        if current is None or id(current) in seen:
+            break
+        seen.add(id(current))
+        if isinstance(current, _ProbeIssue):
+            return current.code, current.source
+        if type(current) is ProcProbeInputError and len(current.args) == 1:
+            value = current.args[0]
+            if isinstance(value, str) and _PRIVILEGED_FAILURE_CODE.fullmatch(value):
+                fallback = fallback or (value, "proc")
+        current = current.__cause__
+    return fallback or ("privileged_probe_failed_closed", "proc")
+
+
 def _privileged_main() -> int:
     lock_fd = -1
     try:
@@ -2627,9 +2652,12 @@ def _privileged_main() -> int:
         )
         sys.stdout.buffer.flush()
         return 0
-    except Exception:
+    except Exception as exc:
+        failure_code, source = _privileged_failure_projection(exc)
         failure = {
+            "failure_code": failure_code,
             "schema": PRIVILEGED_RECEIPT_SCHEMA,
+            "source": source,
             "status": "failed_closed",
         }
         sys.stderr.buffer.write(_canonical_json(failure) + b"\n")
