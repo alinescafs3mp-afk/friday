@@ -3968,6 +3968,8 @@ def build_eligible_retention_plan(
         raise RetentionPlanError("open_state_ambiguous")
     if load_retention_scope_authority(activation_journal=activation_journal) != scope:
         raise RetentionPlanError("retention_scope_changed")
+    if inventory.source == "code_owned_privileged_all_targets_no_delete_v1":
+        raise RetentionPlanError("global_open_absence_authority_unavailable")
     return plan
 
 

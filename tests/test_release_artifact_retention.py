@@ -2790,27 +2790,20 @@ def test_privileged_retain_all_plan_is_deferred_and_operator_rejects_it(
     synthetic_inventory: dict[str, Any],
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
     _enable_complete_delete_evidence(monkeypatch)
-    monkeypatch.setattr(
-        retention,
-        "build_complete_open_inventory",
-        lambda *, target_paths: _privileged_no_delete_open_inventory(target_paths=tuple(target_paths)),
-    )
-
-    plan = retention.build_eligible_retention_plan(
+    target_paths = (synthetic_inventory["old"].identity.root,)
+    plan = retention.plan_release_artifact_retention(
         activation_journal=synthetic_inventory["activation_journal"],
         unit_journal=synthetic_inventory["unit_journal"],
         backup_root=synthetic_inventory["backup_root"],
         inventory_roots=(synthetic_inventory["inventory"],),
         backup_inventory_roots=(synthetic_inventory["backup_root"],),
-        canonical_evidence_roots=(
-            retention.CanonicalEvidenceRoot(
-                path=synthetic_inventory["evidence_root"],
-                authority_path=synthetic_inventory["evidence_authority"],
-                authority_sha256=_sha256_file(synthetic_inventory["evidence_authority"]),
-            ),
-        ),
+        open_inventory=_privileged_no_delete_open_inventory(target_paths=target_paths),
+        authority_bindings=_bindings(synthetic_inventory),
+        executable=True,
+        _candidate_scope_paths=frozenset(target_paths),  # noqa: SLF001
     )
 
     assert plan["mode"] == "read_only_classification"
@@ -2838,6 +2831,59 @@ def test_privileged_retain_all_plan_is_deferred_and_operator_rejects_it(
     assert not (
         synthetic_inventory["activation_journal"].parent / retention_apply.APPLY_JOURNAL_NAME
     ).exists()
+
+    monkeypatch.setattr(
+        retention,
+        "build_complete_open_inventory",
+        lambda *, target_paths: _privileged_no_delete_open_inventory(target_paths=tuple(target_paths)),
+    )
+    evidence = retention.CanonicalEvidenceRoot(
+        path=synthetic_inventory["evidence_root"],
+        authority_path=synthetic_inventory["evidence_authority"],
+        authority_sha256=_sha256_file(synthetic_inventory["evidence_authority"]),
+    )
+    with pytest.raises(
+        retention.RetentionPlanError,
+        match="^global_open_absence_authority_unavailable$",
+    ):
+        retention.build_eligible_retention_plan(
+            activation_journal=synthetic_inventory["activation_journal"],
+            unit_journal=synthetic_inventory["unit_journal"],
+            backup_root=synthetic_inventory["backup_root"],
+            inventory_roots=(synthetic_inventory["inventory"],),
+            backup_inventory_roots=(synthetic_inventory["backup_root"],),
+            canonical_evidence_roots=(evidence,),
+        )
+    output = tmp_path / "blocked-eligible-plan.json"
+    argv = [
+        "--activation-journal",
+        str(synthetic_inventory["activation_journal"]),
+        "--unit-journal",
+        str(synthetic_inventory["unit_journal"]),
+        "--backup-root",
+        str(synthetic_inventory["backup_root"]),
+        "--inventory-root",
+        str(synthetic_inventory["inventory"]),
+        "--backup-inventory-root",
+        str(synthetic_inventory["backup_root"]),
+        "--eligible",
+        "--evidence-authority",
+        str(synthetic_inventory["evidence_root"]),
+        str(synthetic_inventory["evidence_authority"]),
+        _sha256_file(synthetic_inventory["evidence_authority"]),
+        "--output",
+        str(output),
+    ]
+    assert retention.main(argv) == 2
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert json.loads(captured.err) == {
+        "failure_code": "global_open_absence_authority_unavailable",
+        "schema": retention.PLAN_SCHEMA,
+        "status": "failed_closed",
+    }
+    assert str(synthetic_inventory["old"].identity.root) not in captured.err
+    assert not output.exists()
 
 
 @pytest.mark.parametrize(
