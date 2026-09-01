@@ -1,6 +1,6 @@
 # Friday: canonical project backlog
 
-Updated: 2026-08-31
+Updated: 2026-09-01
 
 This is the project's only backlog and mutable status register. It owns the
 current production identity, execution order, acceptance gaps and owner actions.
@@ -14,18 +14,22 @@ either merged here or discarded before that source is removed.
 ## Current production identity
 
 - Branch: `main`
-- Deployed implementation head: `7abb3c5e3fb29bdc7c53bf923f8b218fa26f07e9`.
-- Live: Friday `0.207.90` / `7abb3c5e3fb29bdc7c53bf923f8b218fa26f07e9`;
-  tree `c1c29331db489ad1c56080d70a8c37d4051b4752f1309dba9c0a012099ebcae5`;
-  wheel `75cd6e5d5d29edde061894948f316a8328ae82cf8767fb80bd1155ab78ba003f`.
-- Immediate runtime predecessor and schema-capable fallback: Friday `0.207.84` /
-  `ff8c62926e7c7ea9cfcd53c460f9a0608d83621c`; tree
-  `e93ddd133ebefec5ec0f9f8525d96123c822f411494c04951724f0e73be388a1`.
+- Deployed implementation head: `6804eaea940e804dc800a95aff712525bba9b694`.
+- Live: Friday `0.207.92` / `6804eaea940e804dc800a95aff712525bba9b694`;
+  tree `637fad39989f74cf9a983c43fc462e8c3082d2fc3b593ea47e99af35d97399fd`;
+  wheel `68a4a49b880270c76f1343516e892e2974274782b6b6ede05b52e1f2d4a7cec7`.
+- Immediate runtime predecessor: Friday `0.207.91` /
+  `7bf2cfb6f9cbab6f5901aa8cc6413f1f54afa1a0`; tree
+  `6f4f717747e5ff74f10fabc22def0c4e950b83d98da91cc50e565c43f872254a`.
+  Schema-capable fallback: Friday `0.207.90` /
+  `7abb3c5e3fb29bdc7c53bf923f8b218fa26f07e9`; tree
+  `c1c29331db489ad1c56080d70a8c37d4051b4752f1309dba9c0a012099ebcae5`.
 - Database schema: 50 in deployed production and the fallback.
 - Production: immutable activation `clear`; backend and Telegram bridge active;
-  trusted-CA health `200`; signed private-owner chat returned exact `OK`. The
-  pre-activation `0.207.84` DR generation is authenticated and rehearsed at
-  index revision 4; `current` is published, `older` and `pending` are empty.
+  trusted-CA health `200`. The post-activation DR lifecycle is published at
+  index revision 16 with `0.207.92` current, `0.207.91` older and the
+  pre-activation anchor retained; retention admission is honestly
+  `review_required` and grants no apply/delete authority.
   V12
   `canary_ready` with verified, installation and effective context all exactly
   `40960`; complete S2 authenticated turn
@@ -52,8 +56,9 @@ either merged here or discarded before that source is removed.
 
 S4-R5 measured conversation recall and bounded matched-message excerpt retention
 are live. S6-R3 exact journey evidence is live; P0G Gate Diet is included in the
-current release. P0H reader-first retention is live in `0.207.90`; its
-pair-bearing writer is now the active Mainline package before S4-R6.
+current release. P0H reader, pair-bearing writer and safe no-delete continuation
+are live in `0.207.92`; P0H remains open only for a real boot-start/quiescence
+absence authority and reviewed bounded deletion. S4-R6 is next for integration.
 Keep the released S3 path in shadow
 until its genuine production witness exists; then promote only the
 current-file-plus-current-public-web journey through the already released
@@ -146,12 +151,13 @@ invariant map proves equivalent coverage.
 
 ### P0H — bounded release-artifact retention
 
-Status: reader-first precursor deployed in `0.207.90`; pair-bearing writer is
-active next. Exact-release gate passed 24,634 nodes with evidence SHA-256
-`14e96975577f00f1f1c3b8d818235b3a01a80e6be033f6bc6e092424c17381bb`.
-No retention apply or deletion is authorized until the writer has published two
-complete independently authenticated generations under its full schema and the
-durable fallback, scope, privileged probe and exact dry-run evidence are clear.
+Status: reader and pair-bearing writer deployed through `0.207.92`. Exact-release
+gate passed 24,729 nodes with evidence SHA-256
+`518ad092aadf2ffe1b350754bd3388df5e0a19de56322ab98ef791415659942e`.
+Two independently authenticated v2 generations, durable fallback, exact scope
+and privileged no-delete probe are live. Because Linux still provides no
+boot-start/quiescence authority proving global open-reference absence, every
+candidate remains referenced and no retention apply or deletion is authorized.
 
 Goal: replace the unbounded release polygon with a small recoverable set. The
 current inventory is roughly 54 GB of backup data, 29 GB of wheel-only releases
