@@ -85,6 +85,7 @@ from friday.document_metadata_codec import (
 from friday.documents import office_document_candidate
 from friday.engineer_source_binding import ENGINEER_SOURCE_MAX_CALL_ORDINAL
 from friday.execution_kernel import (
+    INTERNAL_SEARCH_ADAPTER_TOOLS,
     ExecutionKernel,
     ToolResult,
     _machine_zone,
@@ -2394,6 +2395,145 @@ def _project_private_source_tool_schemas(
         )
         == "local"
     ]
+
+
+def _project_model_message_search_result(
+    data: object,
+    arguments: Mapping[str, Any],
+) -> dict[str, Any] | None:
+    """Admit only the two bounded public ``message_search`` result shapes."""
+
+    if type(data) is not dict:
+        return None
+    query = arguments.get("query")
+    if not isinstance(query, str) or data.get("query") != query:
+        return None
+    raw_limit = arguments.get("limit", 10)
+    if type(raw_limit) is not int:
+        return None
+    window = "since" in arguments or "until" in arguments
+    if window and not (isinstance(arguments.get("since"), str) and isinstance(arguments.get("until"), str)):
+        return None
+    limit = max(1, min(raw_limit, 100 if window else 50))
+    rows = data.get("results")
+    count = data.get("count")
+    if type(rows) is not list or type(count) is not int or not 0 <= count <= limit or count != len(rows):
+        return None
+
+    if not window:
+        if set(data) != {"query", "count", "results"}:
+            return None
+        projected_rows: list[dict[str, Any]] = []
+        for row in rows:
+            if type(row) is not dict or set(row) != {
+                "id",
+                "conversation_id",
+                "role",
+                "created_at",
+                "excerpt",
+            }:
+                return None
+            message_id = row.get("id")
+            conversation_id = row.get("conversation_id")
+            role = row.get("role")
+            created_at = row.get("created_at")
+            excerpt = row.get("excerpt")
+            if (
+                not isinstance(message_id, str)
+                or re.fullmatch(r"msg_[0-9a-f]{16}", message_id) is None
+                or not isinstance(conversation_id, str)
+                or re.fullmatch(r"conv_[0-9a-f]{16}", conversation_id) is None
+                or role not in {"user", "assistant"}
+                or not isinstance(created_at, str)
+                or len(created_at) > 80
+                or not isinstance(excerpt, str)
+                or len(excerpt) > 640
+            ):
+                return None
+            projected_rows.append(dict(row))
+        return {"query": query, "count": count, "results": projected_rows}
+
+    expected_keys = {
+        "query",
+        "results",
+        "count",
+        "total",
+        "shown",
+        "complete",
+        "next_offset",
+        "offset",
+        "since_local",
+        "until_local",
+        "timezone",
+        "role",
+        "content_complete",
+        "truncated_rows",
+        "content_chars",
+        "full_content",
+    }
+    if set(data) != expected_keys:
+        return None
+    total = data.get("total")
+    shown = data.get("shown")
+    offset = data.get("offset")
+    complete = data.get("complete")
+    next_offset = data.get("next_offset")
+    truncated_rows = data.get("truncated_rows")
+    content_chars = data.get("content_chars")
+    expected_offset = arguments.get("offset", 0)
+    requested_role = arguments.get("role")
+    if (
+        type(total) is not int
+        or type(shown) is not int
+        or type(offset) is not int
+        or type(expected_offset) is not int
+        or type(complete) is not bool
+        or type(truncated_rows) is not int
+        or type(content_chars) is not int
+        or total < 0
+        or shown != count
+        or offset != expected_offset
+        or offset < 0
+        or offset + shown > total
+        or not 0 <= truncated_rows <= shown
+        or data.get("content_complete") is not (truncated_rows == 0)
+        or data.get("full_content") is not False
+        or data.get("role") != requested_role
+        or not isinstance(data.get("since_local"), str)
+        or len(data["since_local"]) > 80
+        or not isinstance(data.get("until_local"), str)
+        or len(data["until_local"]) > 80
+        or not isinstance(data.get("timezone"), str)
+        or len(data["timezone"]) > 128
+    ):
+        return None
+    if complete:
+        if next_offset is not None or offset + shown != total:
+            return None
+    elif type(next_offset) is not int or next_offset != offset + shown or next_offset >= total:
+        return None
+
+    projected_window_rows: list[dict[str, Any]] = []
+    measured_chars = 0
+    for row in rows:
+        if type(row) is not dict or set(row) != {"role", "at", "text"}:
+            return None
+        role = row.get("role")
+        stamp = row.get("at")
+        text = row.get("text")
+        if (
+            role not in {"user", "assistant"}
+            or not isinstance(stamp, str)
+            or len(stamp) > 80
+            or not isinstance(text, str)
+            or len(text) > 640
+        ):
+            return None
+        measured_chars += len(text)
+        projected_window_rows.append(dict(row))
+    if content_chars != measured_chars:
+        return None
+    return {**data, "results": projected_window_rows}
 
 
 _MODE_TOOL_BUDGETS = {
@@ -37162,6 +37302,10 @@ class AgentContext:
     #: attachment marker above are both true.
     message_locate_evidence_ready: bool = False
     message_locate_evidence_payload: str = ""
+    #: A successful code-owned message adapter page influenced this turn.
+    #: This process-private bit forces fresh search/conversation authority in
+    #: the same transaction that commits the assistant publication.
+    message_search_used: bool = False
     #: A model-selected cross-account activity read returned transport success
     #: but did not resolve exactly one account.  This is a code-owned UNKNOWN,
     #: not evidence for a zero count; the marker prevents both model prose and
@@ -37844,6 +37988,24 @@ class AgentRuntime:
         # otherwise run every tool without capability checks (and a kernel
         # without authorization now denies everything by design).
         self.kernel = kernel or ExecutionKernel(AuthorizationService(storage), settings=settings)
+
+    def _internal_search_adapter_available(
+        self,
+        name: str,
+        actor: ActorContext,
+    ) -> bool:
+        """Check a code-owned legacy read without projecting a model schema."""
+
+        if name not in INTERNAL_SEARCH_ADAPTER_TOOLS:
+            return False
+        available = getattr(self.kernel, "internal_search_adapter_available", None)
+        if not callable(available):
+            return False
+        try:
+            return available(name, actor) is True
+        except Exception as exc:  # noqa: BLE001 - unavailable proof denies the internal read
+            LOGGER.warning("internal search adapter preflight failed (%s)", type(exc).__name__)
+            return False
 
     @staticmethod
     def _comparison_public_response(
@@ -41699,6 +41861,40 @@ class AgentRuntime:
                 return False
         return True
 
+    def _message_search_publication_authorized(
+        self,
+        conn: Any,
+        *,
+        actor: ActorContext,
+        context: AgentContext,
+    ) -> bool:
+        """Re-authorize a code-owned chat-history read at assistant commit."""
+
+        get_tool = getattr(self.kernel, "get_tool", None)
+        tool_spec = get_tool("message_search") if callable(get_tool) else None
+        authorization = getattr(self.kernel, "authorization", None)
+        authorize = getattr(authorization, "authorize_in_transaction", None)
+        scopes = frozenset(getattr(tool_spec, "allowed_execution_scopes", ()) or ())
+        if (
+            str(getattr(tool_spec, "name", "") or "") != "message_search"
+            or str(getattr(tool_spec, "security_id", "") or "") != "search.use"
+            or str(getattr(tool_spec, "risk", "") or "") != "observe"
+            or scopes != frozenset({"dialogue", "internal", "mission"})
+            or not callable(getattr(tool_spec, "handler", None))
+            or not callable(authorize)
+            or context.user_id != actor.user_id
+            or (context.person_id or actor.own_id) != actor.own_id
+        ):
+            return False
+        try:
+            return bool(
+                authorize(conn, actor, "search.use").allowed
+                and authorize(conn, actor, "conversations.read").allowed
+            )
+        except Exception as exc:  # noqa: BLE001 - broken authority denies publication
+            LOGGER.warning("message-search: publication recheck failed (%s)", type(exc).__name__)
+            return False
+
     def _obsidian_publication_authorized(
         self,
         conn: Any,
@@ -42622,6 +42818,7 @@ class AgentRuntime:
             or context.source_effect_authority is not None
             or context.source_effect_reauth_required
             or context.source_search_used
+            or context.message_search_used
             or context.message_locate_source_request
             or context.message_locate_dependency_resolved
             or context.message_locate_evidence_ready
@@ -42703,6 +42900,7 @@ class AgentRuntime:
         context.message_locate_dependency_resolved = False
         context.message_locate_evidence_ready = False
         context.message_locate_evidence_payload = ""
+        context.message_search_used = False
         context.person_activity_resolution_failed = False
 
         context.source_search_used = False
@@ -42980,7 +43178,8 @@ class AgentRuntime:
             str(getattr(tool_spec, "name", "") or "") != "message_search"
             or str(getattr(tool_spec, "security_id", "") or "") != "search.use"
             or str(getattr(tool_spec, "risk", "") or "") != "observe"
-            or "dialogue" not in set(getattr(tool_spec, "allowed_execution_scopes", ()) or ())
+            or frozenset(getattr(tool_spec, "allowed_execution_scopes", ()) or ())
+            != frozenset({"dialogue", "internal", "mission"})
             or not callable(getattr(tool_spec, "handler", None))
         ):
             return "unavailable"
@@ -44625,6 +44824,7 @@ class AgentRuntime:
                             **({"role": role} if role is not None else {}),
                         },
                         actor=actor,
+                        execution_scope="internal",
                     ),
                     turn_deadline,
                     expired="turn deadline expired during exact message-window read",
@@ -44958,7 +45158,7 @@ class AgentRuntime:
                 fallback_person_id=authority.fallback_person_id,
             ):
                 return False
-        return bool(
+        source_search_authorized = bool(
             not context.source_search_used
             or self._source_search_publication_authorized(
                 conn,
@@ -44968,6 +45168,15 @@ class AgentRuntime:
                 expected_count=context.source_search_result_expected_count,
             )
         )
+        message_search_authorized = bool(
+            not context.message_search_used
+            or self._message_search_publication_authorized(
+                conn,
+                actor=actor,
+                context=context,
+            )
+        )
+        return bool(source_search_authorized and message_search_authorized)
 
     async def _final_voice_can_start(
         self,
@@ -53739,34 +53948,26 @@ class AgentRuntime:
             and not synthetic_document_notice
             and not answer_with_voice
         )
+        ordinary_tool_surface_enabled = bool(
+            enable_tools
+            and not model_owned_unverified_confirmation_turn
+            and not _is_small_talk(clean_message)
+            and not foreign_private_request
+            and not dangerous_instruction_request
+            and not fabricated_outside_deed_request
+            and not private_web_search_blocked
+            and not document_metadata_owned
+            and (not pure_file_read_turn or bool(host_json_attachment_raw_id))
+            and not (
+                context.structural_answer and context.remainder_known and not context.open_remainder.strip()
+            )
+            and (not synthetic_document_notice or message_locate_flow)
+        )
         visible_tools = (
             self.kernel.get_tool_definitions(actor, topic="архив")
             if archive_search_requested_for_turn and enable_tools
             else self.kernel.get_tool_definitions(actor, topic=topic)
-            if (
-                enable_tools
-                and not model_owned_unverified_confirmation_turn
-                and not _is_small_talk(clean_message)
-                and not foreign_private_request
-                and not dangerous_instruction_request
-                and not fabricated_outside_deed_request
-                and not private_web_search_blocked
-                and not document_metadata_owned
-                # A verified current JSON attachment has one reviewed local
-                # action even though the ordinary text-only file route is
-                # otherwise settled without model-visible tools.
-                and (not pure_file_read_turn or bool(host_json_attachment_raw_id))
-                and not (
-                    context.structural_answer
-                    and context.remainder_known
-                    and not context.open_remainder.strip()
-                )
-                # A backend-authored bare-upload notice grants no authority to
-                # call a tool; its filename is untrusted data.  A real caption
-                # keeps authorised local tools even when archive retrieval was
-                # skipped for this current-file turn.
-                and (not synthetic_document_notice or message_locate_flow)
-            )
+            if ordinary_tool_surface_enabled and not _is_small_talk(clean_message)
             else []
         )
         if interaction_mode == "engineer":
@@ -53814,18 +54015,16 @@ class AgentRuntime:
             # informational consent may carry the immediately preceding prose
             # offer, but model-authored offers are not effect authority.
             visible_tools = []
-        # This is an internal preflight authority bit, captured before the local
-        # file capability projection intentionally removes source_search from the
-        # model-visible list.  The helper below clears every schema before it
-        # executes the read, and ExecutionKernel independently repeats the real
-        # knowledge.read authorization/audit check.
+        # This code-owned preflight is independent of the dialogue catalog.
+        # ExecutionKernel repeats fresh authority inside the internal scope.
         source_search_preflight_authorized = bool(
             archived_source_lookup_turn
-            and any(
-                str((tool.get("function") or {}).get("name") or tool.get("name") or "") == "source_search"
-                for tool in visible_tools
-                if isinstance(tool, Mapping)
-            )
+            and ordinary_tool_surface_enabled
+            and interaction_mode != "engineer"
+            and not archive_search_requested_for_turn
+            and not context.terse_request
+            and topic != "быт"
+            and self._internal_search_adapter_available("source_search", actor)
         )
         if not archive_search_requested_for_turn:
             visible_tools = _file_turn_capability_tools(visible_tools, file_turn)
@@ -54534,6 +54733,15 @@ class AgentRuntime:
             settled = ""
             asked_of_model = clean_message
             workspace_authority_message = ""
+        message_search_preflight_authorized = bool(
+            not autonomous_engineer
+            and ordinary_tool_surface_enabled
+            and interaction_mode != "engineer"
+            and not archive_search_requested_for_turn
+            and not context.terse_request
+            and topic != "быт"
+            and self._internal_search_adapter_available("message_search", actor)
+        )
         response: dict[str, Any]
         if autonomous_engineer:
             response = await self._agentic_loop(
@@ -54792,8 +55000,10 @@ class AgentRuntime:
                     "outbound_allowed": not outbound_blocked,
                     "outbound_tool_allowlist": outbound_tool_allowlist,
                 }
-                if source_search_preflight_authorized:
-                    ordinary_agentic_kwargs["source_search_authorized"] = True
+                if archived_source_lookup_turn:
+                    ordinary_agentic_kwargs["source_search_authorized"] = source_search_preflight_authorized
+                if message_locate_route or message_locate_flow:
+                    ordinary_agentic_kwargs["message_search_authorized"] = message_search_preflight_authorized
                 response = await self._agentic_loop(
                     context,
                     asked_of_model,
@@ -54951,6 +55161,7 @@ class AgentRuntime:
         private_context_lineage = bool(
             private_context_lineage
             or context.source_search_used
+            or context.message_search_used
             or context.archive_search_isolated_turn
             or response.get("_obsidian_private_lineage_owned") is True
         )
@@ -58504,6 +58715,9 @@ class AgentRuntime:
             # voice has its own non-consuming precheck, no archive-derived
             # bytes may enter the irreversible TTS provider ahead of it.
             or context.archive_search_isolated_turn
+            # Chat-history text cannot enter an irreversible TTS provider: its
+            # read authority cannot be held atomically across synthesis.
+            or context.message_search_used
             or adjacent_overview_unresolved_terminal
             or _turn_deadline_expired(context.turn_deadline)
         ):
@@ -58588,6 +58802,7 @@ class AgentRuntime:
         # Even a valid zero-hit page is a source-derived conclusion. A late
         # knowledge.read revocation must therefore close it before publication.
         source_search_publication_reauth_required = bool(context.source_search_used)
+        message_search_publication_reauth_required = bool(context.message_search_used)
         archive_search_publication_reauth_required = bool(
             context.archive_search_used or context.archive_prepared_searches
         )
@@ -58668,6 +58883,7 @@ class AgentRuntime:
         publication_reauth_required = bool(
             attachment_publication_reauth_required
             or source_search_publication_reauth_required
+            or message_search_publication_reauth_required
             or archive_search_publication_reauth_required
             or obsidian_owned_response
             or simple_public_news_publication_reauth_required
@@ -58733,6 +58949,14 @@ class AgentRuntime:
                     raw_ids=context.source_search_result_raw_ids,
                     source_identities=context.source_search_result_identities,
                     expected_count=context.source_search_result_expected_count,
+                )
+            )
+            message_search_publication_authorized = bool(
+                not message_search_publication_reauth_required
+                or self._message_search_publication_authorized(
+                    publication_conn,
+                    actor=actor,
+                    context=context,
                 )
             )
             archive_search_publication_authorized = not archive_search_publication_reauth_required
@@ -58901,6 +59125,7 @@ class AgentRuntime:
                 not publication_reauth_required
                 or attachment_publication_authorized
                 and source_search_publication_authorized
+                and message_search_publication_authorized
                 and archive_search_publication_authorized
                 and obsidian_publication_authorized
                 and simple_public_news_publication_authorized
@@ -58926,6 +59151,9 @@ class AgentRuntime:
             )
             source_search_authority_changed_before_publication = bool(
                 source_search_publication_reauth_required and not source_search_publication_authorized
+            )
+            message_search_authority_changed_before_publication = bool(
+                message_search_publication_reauth_required and not message_search_publication_authorized
             )
             archive_search_authority_changed_before_publication = bool(
                 archive_search_publication_reauth_required and not archive_search_publication_authorized
@@ -58970,6 +59198,10 @@ class AgentRuntime:
                         (
                             "source_search_authority_changed_before_publication",
                             source_search_authority_changed_before_publication,
+                        ),
+                        (
+                            "message_search_authority_changed_before_publication",
+                            message_search_authority_changed_before_publication,
                         ),
                         (
                             "archive_search_authority_changed_before_publication",
@@ -59023,6 +59255,10 @@ class AgentRuntime:
                         else "Напоминание было сохранено; автоматическая доставка сейчас недоступна."
                     )
                 authority_changed_notice = _ATTACHMENT_AUTHORITY_CHANGED_BEFORE_PUBLICATION
+                if message_search_authority_changed_before_publication:
+                    authority_changed_notice = (
+                        "Доступ к переписке изменился до публикации; найденные данные не публикую."
+                    )
                 if archive_search_authority_changed_before_publication:
                     authority_changed_notice = _ARCHIVE_SEARCH_AUTHORITY_CHANGED_BEFORE_PUBLICATION
                 if simple_public_news_authority_changed_before_publication:
@@ -59071,6 +59307,37 @@ class AgentRuntime:
                     response["_attachment_authority_changed_owned"] = True
                 if source_search_authority_changed_before_publication:
                     response["_source_search_authority_changed_owned"] = True
+                if message_search_authority_changed_before_publication:
+                    response["_message_search_authority_changed_owned"] = True
+                    response["tools_used"] = []
+                    response["tool_evidence"] = []
+                    response["llm_failed"] = False
+                    response.pop("_model_output_truncated", None)
+                    context.trace_tool_outcomes = [
+                        item for item in context.trace_tool_outcomes if item[0] != "message_search"
+                    ]
+                    context.message_search_used = False
+                    context.message_locate_pending_action = ""
+                    context.message_locate_source_request = ""
+                    context.message_locate_source_user_message_id = ""
+                    context.message_locate_search_boundary_id = ""
+                    context.message_locate_dependency_resolved = False
+                    context.message_locate_evidence_ready = False
+                    context.message_locate_evidence_payload = ""
+                    assistant_metadata["tools_used"] = []
+                    assistant_metadata["model_output_truncated"] = False
+                    assistant_metadata.pop(_MESSAGE_LOCATE_PENDING_ACTION, None)
+                    assistant_metadata.pop(_MESSAGE_LOCATE_SOURCE_USER_MESSAGE_ID, None)
+                    if context.filename_pending_origin == _FILENAME_PENDING_ORIGIN_MESSAGE_LOCATE:
+                        context.filename_pending_action = ""
+                        context.filename_pending_origin = ""
+                        context.filename_pending_message_source_user_message_id = ""
+                        assistant_metadata.pop(_FILENAME_RESULT_PENDING_ACTION, None)
+                        assistant_metadata.pop(_FILENAME_RESULT_PENDING_ORIGIN, None)
+                        assistant_metadata.pop(
+                            _FILENAME_RESULT_PENDING_MESSAGE_SOURCE_USER_MESSAGE_ID,
+                            None,
+                        )
                 if archive_search_authority_changed_before_publication:
                     response["_archive_search_authority_changed_owned"] = True
                     # Once phase-2 denies publication, page count, result shape,
@@ -59153,7 +59420,10 @@ class AgentRuntime:
                 structural_metadata.pop("filename_result_set", None)
                 structural_metadata["answer_present"] = True
                 structural_metadata["model_spoke"] = False
-                if archive_search_authority_changed_before_publication:
+                if (
+                    archive_search_authority_changed_before_publication
+                    or message_search_authority_changed_before_publication
+                ):
                     structural_metadata["llm_failed"] = False
                 output_guards = dict(structural_metadata.get("output_guards") or {})
                 for publication_issue in publication_authority_issues:
@@ -59334,7 +59604,9 @@ class AgentRuntime:
             trace_structural = assistant_metadata.get("structural")
             trace_structural = trace_structural if isinstance(trace_structural, Mapping) else {}
             trace_continuation = (
-                ContinuationKind.CORRECTION
+                ContinuationKind.NONE
+                if message_search_authority_changed_before_publication
+                else ContinuationKind.CORRECTION
                 if replay_source_message_id
                 else ContinuationKind.RESUME
                 if message_locate_resume_attempt
@@ -59349,10 +59621,13 @@ class AgentRuntime:
                 else ContinuationKind.NONE
             )
             trace_state_restored = bool(
-                replay_source_message_id
-                or message_locate_resume_attempt
-                or filename_result_continuation_requested
-                or restored_history_attachment_count > 0
+                not message_search_authority_changed_before_publication
+                and (
+                    replay_source_message_id
+                    or message_locate_resume_attempt
+                    or filename_result_continuation_requested
+                    or restored_history_attachment_count > 0
+                )
             )
             raw_trace_tools = response.get("tools_used")
             trace_tool_names = {
@@ -59477,12 +59752,15 @@ class AgentRuntime:
                 else CapabilityStatus.INACTIVE
             )
             trace_message_structural_status = (
-                CapabilityStatus.SUCCEEDED
+                CapabilityStatus.INACTIVE
+                if message_search_authority_changed_before_publication
+                else CapabilityStatus.SUCCEEDED
                 if context.message_locate_evidence_ready
                 else CapabilityStatus.PARTIAL
                 if trace_message_ambiguity
                 else CapabilityStatus.EMPTY
-                if message_locate_flow
+                if not message_search_authority_changed_before_publication
+                and message_locate_flow
                 and not trace_message_tool_attempted
                 and not trace_message_tool_succeeded
                 else CapabilityStatus.INACTIVE
@@ -59955,6 +60233,7 @@ class AgentRuntime:
         publication_authority_changed_before_publication = bool(
             attachment_authority_changed_before_publication
             or source_search_authority_changed_before_publication
+            or message_search_authority_changed_before_publication
             or archive_search_authority_changed_before_publication
             or obsidian_authority_changed_before_publication
             or simple_public_news_authority_changed_before_publication
@@ -59993,6 +60272,9 @@ class AgentRuntime:
             ),
             "source_search_authority_changed_before_publication": (
                 source_search_authority_changed_before_publication
+            ),
+            "message_search_authority_changed_before_publication": (
+                message_search_authority_changed_before_publication
             ),
             "archive_search_authority_changed_before_publication": (
                 archive_search_authority_changed_before_publication
@@ -63567,6 +63849,7 @@ class AgentRuntime:
         source_effect_authority: _AttachmentEffectAuthority | None = None,
         source_effect_reauth_required: bool = False,
         source_search_authorized: bool | None = None,
+        message_search_authorized: bool | None = None,
     ) -> dict[str, Any]:
         source_effect_authority = source_effect_authority or context.source_effect_authority
         source_effect_reauth_required = bool(
@@ -64352,7 +64635,10 @@ class AgentRuntime:
                         if isinstance(tool, Mapping)
                     )
                     if source_search_authorized is None
-                    else source_search_authorized
+                    else bool(
+                        source_search_authorized
+                        and self._internal_search_adapter_available("source_search", actor)
+                    )
                 ),
             )
         if source_lookup_owned and context.structural_answer and context.remainder_known:
@@ -64619,6 +64905,7 @@ class AgentRuntime:
                 tools_used,
                 tool_evidence,
                 context,
+                internal_search_adapters_enabled=message_search_authorized,
             )
             close_boundary_after_private_prefetch()
         if context.message_locate_dependency_resolved and not context.message_locate_evidence_ready:
@@ -65029,6 +65316,11 @@ class AgentRuntime:
                 "Не удалось однозначно определить одно безопасное имя текстового файла "
                 "для MCP outbox. Файл не создан."
             )
+        if context.message_search_used and not autonomous_engineer:
+            # Successful chat-history bytes may reach one bounded synthesis
+            # call, but can never authorize a model-selected tool or output
+            # carrier. Final publication separately rechecks the private read.
+            tools.clear()
         current_tool_names = {
             str((tool.get("function") or {}).get("name") or tool.get("name") or "")
             for tool in tools
@@ -66401,6 +66693,38 @@ class AgentRuntime:
                                 ensure_ascii=False,
                                 sort_keys=True,
                             )
+                if call.name == "message_search" and tool_result.success:
+                    # The legacy dialogue schema remains visible during R8B,
+                    # so a model-selected call must cross the same publication
+                    # boundary as the code-owned prefetch.  Once any accepted
+                    # history result enters the transcript, synthesis is the
+                    # only remaining model step: no sibling effect or carrier
+                    # may consume those private bytes.
+                    message_projection = (
+                        _project_model_message_search_result(tool_result.data, call_arguments)
+                        if type(tool_result) is ToolResult
+                        and tool_result.tool_name == call.name
+                        and tool_result.success is True
+                        else None
+                    )
+                    if message_projection is None:
+                        tool_result.success = False
+                        tool_result.error = "Поиск по переписке вернул непроверяемый результат"
+                        tool_result.data = None
+                        if not autonomous_engineer:
+                            tools[:] = [
+                                offered
+                                for offered in tools
+                                if str(
+                                    (offered.get("function") or {}).get("name") or offered.get("name") or ""
+                                )
+                                != "message_search"
+                            ]
+                    else:
+                        tool_result.data = message_projection
+                        context.message_search_used = True
+                        if not autonomous_engineer:
+                            tools.clear()
                 if (
                     not autonomous_engineer
                     and tool_result.success
@@ -69014,6 +69338,7 @@ class AgentRuntime:
                         "source_search",
                         {"query": query, "focus": focus, "limit": _SOURCE_SEARCH_PAGE_SIZE},
                         actor=actor,
+                        execution_scope="internal",
                     ),
                     turn_deadline,
                     expired="turn deadline expired during archived source search",
@@ -69162,6 +69487,8 @@ class AgentRuntime:
         tools_used: list[str],
         tool_evidence: list[dict[str, str]],
         context: AgentContext | None = None,
+        *,
+        internal_search_adapters_enabled: bool | None = None,
     ) -> bool:
         """«Что писал JBL?» — вопрос о ЧЕЛОВЕКЕ, и отвечать надо инструментом.
 
@@ -69221,6 +69548,7 @@ class AgentRuntime:
                 tool_evidence,
                 context=context,
                 turn_deadline=getattr(context, "turn_deadline", None),
+                authorized=internal_search_adapters_enabled,
                 expired="turn deadline expired during own-message window read",
             )
         self_document_inventory = bool(
@@ -69714,6 +70042,7 @@ class AgentRuntime:
         *,
         context: AgentContext | None = None,
         turn_deadline: float | None = None,
+        authorized: bool | None = None,
     ) -> bool:
         """«О чём мы вчера говорили?» — ответ лежит в переписке, а не в документах.
 
@@ -69872,7 +70201,12 @@ class AgentRuntime:
         available = {
             str((tool.get("function") or {}).get("name") or tool.get("name") or "") for tool in tools
         }
-        if "message_search" not in available:
+        adapter_authorized = "message_search" in available if authorized is None else authorized
+        if authorized is not None:
+            adapter_authorized = bool(
+                adapter_authorized and self._internal_search_adapter_available("message_search", actor)
+            )
+        if not adapter_authorized:
             LOGGER.info("own-messages-prefetch: инструмента нет среди доступных")
             return settle_unknown(
                 "Поиск по вашей переписке недоступен для этого хода; "
@@ -69986,10 +70320,23 @@ class AgentRuntime:
                     "message_search",
                     params,
                     actor=actor,
+                    execution_scope="internal",
                 ),
                 turn_deadline,
                 expired="turn deadline expired during own-message search",
             )
+            if not result.success:
+                tools_used.append("message_search")
+                record_message_search_outcome(_trace_tool_result_status("message_search", result))
+                return settle_unknown(
+                    "Подтверждённого результата не нашёл: не удалось проверить вашу "
+                    "переписку по точной теме; результат неизвестен."
+                )
+            if context is not None:
+                # Any accepted page influences coverage/error semantics even if
+                # a later page fails. Bind final publication reauthorization at
+                # the first successful read.
+                context.message_search_used = True
             if history_window is not None:
                 accumulated: list[Mapping[str, Any]] = []
                 expected_offset = 0
@@ -70086,6 +70433,7 @@ class AgentRuntime:
                             "message_search",
                             {**params, "offset": expected_offset},
                             actor=actor,
+                            execution_scope="internal",
                         ),
                         turn_deadline,
                         expired="turn deadline expired during own-message pagination",

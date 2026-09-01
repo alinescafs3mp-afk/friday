@@ -14,6 +14,7 @@ import pytest
 
 from friday.execution_kernel import (
     EXECUTION_SCOPES,
+    INTERNAL_SEARCH_ADAPTER_TOOLS,
     MISSION_EXECUTION_TOOLS,
     ExecutionKernel,
     ToolSpec,
@@ -147,12 +148,15 @@ async def test_executive_mission_model_receives_and_executes_released_recall_too
 def test_execution_scope_declarations_are_closed_and_fail_closed(settings, storage):
     kernel = ExecutionKernel(AuthorizationService(storage), settings)
 
-    assert {"dialogue", "mission"} == EXECUTION_SCOPES
+    assert {"dialogue", "mission", "internal"} == EXECUTION_SCOPES
     by_scope = {
         name: tool.allowed_execution_scopes
         for name, tool in kernel._tools.items()  # noqa: SLF001 - registry invariant
     }
     assert {name for name, scopes in by_scope.items() if "mission" in scopes} == MISSION_EXECUTION_TOOLS
+    assert {
+        name for name, scopes in by_scope.items() if "internal" in scopes
+    } == INTERNAL_SEARCH_ADAPTER_TOOLS
     assert all(scopes and scopes <= EXECUTION_SCOPES for scopes in by_scope.values())
 
     with pytest.raises(ValueError, match="execution scope"):

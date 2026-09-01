@@ -284,9 +284,17 @@ async def test_broken_quote_never_promotes_tail_to_model_action(
             arguments: dict[str, Any],
             *,
             actor: Any,
+            execution_scope: str = "dialogue",
         ) -> Any:
+            if name in {"message_search", "source_search"}:
+                assert execution_scope == "internal"
             calls.append((name, dict(arguments)))
-            return await original_execute(name, arguments, actor=actor)
+            return await original_execute(
+                name,
+                arguments,
+                actor=actor,
+                execution_scope=execution_scope,
+            )
 
         kernel.execute = observed_execute  # type: ignore[method-assign]
         result = await runtime.chat(
@@ -347,9 +355,17 @@ async def test_action_word_after_noun_suffix_is_not_promoted_without_separator(
             arguments: dict[str, Any],
             *,
             actor: Any,
+            execution_scope: str = "dialogue",
         ) -> Any:
+            if name in {"message_search", "source_search"}:
+                assert execution_scope == "internal"
             calls.append((name, dict(arguments)))
-            return await original_execute(name, arguments, actor=actor)
+            return await original_execute(
+                name,
+                arguments,
+                actor=actor,
+                execution_scope=execution_scope,
+            )
 
         kernel.execute = observed_execute  # type: ignore[method-assign]
         result = await runtime.chat(
@@ -409,9 +425,17 @@ async def test_compound_message_locate_keeps_exact_remainder_out_of_search(
             arguments: dict[str, Any],
             *,
             actor: Any,
+            execution_scope: str = "dialogue",
         ) -> Any:
+            if name in {"message_search", "source_search"}:
+                assert execution_scope == "internal"
             calls.append((name, dict(arguments)))
-            return await original_execute(name, arguments, actor=actor)
+            return await original_execute(
+                name,
+                arguments,
+                actor=actor,
+                execution_scope=execution_scope,
+            )
 
         kernel.execute = observed_execute  # type: ignore[method-assign]
         result = await runtime.chat(
@@ -489,9 +513,17 @@ async def test_compound_message_named_file_is_reauthorized_before_exact_action_p
             arguments: dict[str, Any],
             *,
             actor: Any,
+            execution_scope: str = "dialogue",
         ) -> Any:
+            if name in {"message_search", "source_search"}:
+                assert execution_scope == "internal"
             calls.append((name, dict(arguments)))
-            return await original_execute(name, arguments, actor=actor)
+            return await original_execute(
+                name,
+                arguments,
+                actor=actor,
+                execution_scope=execution_scope,
+            )
 
         kernel.execute = observed_execute  # type: ignore[method-assign]
         result = await runtime.chat(
@@ -572,9 +604,17 @@ async def test_thematic_comparison_admits_complete_long_message_tail(
             arguments: dict[str, Any],
             *,
             actor: Any,
+            execution_scope: str = "dialogue",
         ) -> Any:
+            if name in {"message_search", "source_search"}:
+                assert execution_scope == "internal"
             calls.append((name, dict(arguments)))
-            return await original_execute(name, arguments, actor=actor)
+            return await original_execute(
+                name,
+                arguments,
+                actor=actor,
+                execution_scope=execution_scope,
+            )
 
         kernel.execute = observed_execute  # type: ignore[method-assign]
         result = await runtime.chat(
@@ -641,9 +681,17 @@ async def test_thematic_comparison_refuses_incomplete_message_evidence(
             arguments: dict[str, Any],
             *,
             actor: Any,
+            execution_scope: str = "dialogue",
         ) -> Any:
+            if name in {"message_search", "source_search"}:
+                assert execution_scope == "internal"
             calls.append((name, dict(arguments)))
-            return await original_execute(name, arguments, actor=actor)
+            return await original_execute(
+                name,
+                arguments,
+                actor=actor,
+                execution_scope=execution_scope,
+            )
 
         kernel.execute = observed_execute  # type: ignore[method-assign]
         result = await runtime.chat(
@@ -710,9 +758,17 @@ async def test_resolved_two_source_comparison_is_synthesis_only(
             arguments: dict[str, Any],
             *,
             actor: Any,
+            execution_scope: str = "dialogue",
         ) -> Any:
+            if name in {"message_search", "source_search"}:
+                assert execution_scope == "internal"
             calls.append((name, dict(arguments)))
-            return await original_execute(name, arguments, actor=actor)
+            return await original_execute(
+                name,
+                arguments,
+                actor=actor,
+                execution_scope=execution_scope,
+            )
 
         kernel.execute = observed_execute  # type: ignore[method-assign]
         result = await runtime.chat(
@@ -762,9 +818,17 @@ async def test_compound_message_locate_keeps_unselected_document_comparison_pend
             arguments: dict[str, Any],
             *,
             actor: Any,
+            execution_scope: str = "dialogue",
         ) -> Any:
+            if name in {"message_search", "source_search"}:
+                assert execution_scope == "internal"
             calls.append((name, dict(arguments)))
-            return await original_execute(name, arguments, actor=actor)
+            return await original_execute(
+                name,
+                arguments,
+                actor=actor,
+                execution_scope=execution_scope,
+            )
 
         kernel.execute = observed_execute  # type: ignore[method-assign]
         result = await runtime.chat(
@@ -841,9 +905,17 @@ async def test_any_unresolved_file_comparison_remains_pending_without_model_clai
             arguments: dict[str, Any],
             *,
             actor: Any,
+            execution_scope: str = "dialogue",
         ) -> Any:
+            if name in {"message_search", "source_search"}:
+                assert execution_scope == "internal"
             calls.append((name, dict(arguments)))
-            return await original_execute(name, arguments, actor=actor)
+            return await original_execute(
+                name,
+                arguments,
+                actor=actor,
+                execution_scope=execution_scope,
+            )
 
         kernel.execute = observed_execute  # type: ignore[method-assign]
         result = await runtime.chat(
@@ -903,9 +975,17 @@ async def test_pending_message_comparison_resumes_on_exact_current_attachment_wi
             arguments: dict[str, Any],
             *,
             actor: Any,
+            execution_scope: str = "dialogue",
         ) -> Any:
+            if name in {"message_search", "source_search"}:
+                assert execution_scope == "internal"
             calls.append((name, dict(arguments)))
-            return await original_execute(name, arguments, actor=actor)
+            return await original_execute(
+                name,
+                arguments,
+                actor=actor,
+                execution_scope=execution_scope,
+            )
 
         kernel.execute = observed_execute  # type: ignore[method-assign]
         pending = await runtime.chat(
@@ -1006,9 +1086,17 @@ async def test_pending_message_comparison_resumes_on_quote_only_exact_filename(
             arguments: dict[str, Any],
             *,
             actor: Any,
+            execution_scope: str = "dialogue",
         ) -> Any:
+            if name in {"message_search", "source_search"}:
+                assert execution_scope == "internal"
             calls.append((name, dict(arguments)))
-            return await original_execute(name, arguments, actor=actor)
+            return await original_execute(
+                name,
+                arguments,
+                actor=actor,
+                execution_scope=execution_scope,
+            )
 
         kernel.execute = observed_execute  # type: ignore[method-assign]
         pending = await runtime.chat(
@@ -1104,9 +1192,17 @@ async def test_complete_day_window_comparison_admits_both_exact_sources(
             arguments: dict[str, Any],
             *,
             actor: Any,
+            execution_scope: str = "dialogue",
         ) -> Any:
+            if name in {"message_search", "source_search"}:
+                assert execution_scope == "internal"
             calls.append((name, dict(arguments)))
-            return await original_execute(name, arguments, actor=actor)
+            return await original_execute(
+                name,
+                arguments,
+                actor=actor,
+                execution_scope=execution_scope,
+            )
 
         kernel.execute = observed_execute  # type: ignore[method-assign]
         result = await runtime.chat(
@@ -1184,9 +1280,17 @@ async def test_pending_message_comparison_resumes_after_filename_ordinal_reauth(
             arguments: dict[str, Any],
             *,
             actor: Any,
+            execution_scope: str = "dialogue",
         ) -> Any:
+            if name in {"message_search", "source_search"}:
+                assert execution_scope == "internal"
             calls.append((name, dict(arguments)))
-            return await original_execute(name, arguments, actor=actor)
+            return await original_execute(
+                name,
+                arguments,
+                actor=actor,
+                execution_scope=execution_scope,
+            )
 
         kernel.execute = observed_execute  # type: ignore[method-assign]
         pending = await runtime.chat(
@@ -1309,9 +1413,17 @@ async def test_message_comparison_filename_sidecar_requires_exact_source_chain(
             arguments: dict[str, Any],
             *,
             actor: Any,
+            execution_scope: str = "dialogue",
         ) -> Any:
+            if name in {"message_search", "source_search"}:
+                assert execution_scope == "internal"
             calls.append((name, dict(arguments)))
-            return await original_execute(name, arguments, actor=actor)
+            return await original_execute(
+                name,
+                arguments,
+                actor=actor,
+                execution_scope=execution_scope,
+            )
 
         kernel.execute = observed_execute  # type: ignore[method-assign]
         pending = await runtime.chat(
@@ -1402,9 +1514,17 @@ async def test_stale_message_pending_pointer_does_not_resume_on_new_attachment(
             arguments: dict[str, Any],
             *,
             actor: Any,
+            execution_scope: str = "dialogue",
         ) -> Any:
+            if name in {"message_search", "source_search"}:
+                assert execution_scope == "internal"
             calls.append((name, dict(arguments)))
-            return await original_execute(name, arguments, actor=actor)
+            return await original_execute(
+                name,
+                arguments,
+                actor=actor,
+                execution_scope=execution_scope,
+            )
 
         kernel.execute = observed_execute  # type: ignore[method-assign]
         pending = await runtime.chat(
@@ -1475,9 +1595,17 @@ async def test_unclosed_code_literal_in_message_locate_fails_before_search_or_ho
             arguments: dict[str, Any],
             *,
             actor: Any,
+            execution_scope: str = "dialogue",
         ) -> Any:
+            if name in {"message_search", "source_search"}:
+                assert execution_scope == "internal"
             calls.append((name, dict(arguments)))
-            return await original_execute(name, arguments, actor=actor)
+            return await original_execute(
+                name,
+                arguments,
+                actor=actor,
+                execution_scope=execution_scope,
+            )
 
         kernel.execute = observed_execute  # type: ignore[method-assign]
         result = await runtime.chat(
@@ -1536,9 +1664,17 @@ async def test_person_followup_arbiter_outage_is_unknown_without_web_or_archive(
             arguments: dict[str, Any],
             *,
             actor: Any,
+            execution_scope: str = "dialogue",
         ) -> Any:
+            if name in {"message_search", "source_search"}:
+                assert execution_scope == "internal"
             calls.append((name, dict(arguments)))
-            return await original_execute(name, arguments, actor=actor)
+            return await original_execute(
+                name,
+                arguments,
+                actor=actor,
+                execution_scope=execution_scope,
+            )
 
         kernel.execute = observed_execute  # type: ignore[method-assign]
         result = await runtime.chat(

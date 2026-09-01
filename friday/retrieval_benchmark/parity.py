@@ -996,7 +996,16 @@ async def _adapter_identities(
     arguments: dict[str, Any] = {"query": probe.request.query, "limit": 20}
     if probe.adapter == "message_search":
         arguments["before_message_id"] = _BOUNDARY_MESSAGE_ID
-    result = await kernel.execute(probe.adapter, arguments, actor=actor)
+    # The legacy adapters remain dialogue-visible until measured cutover, but
+    # parity is a code-owned caller and must exercise their durable internal
+    # surface explicitly.  Relying on the dialogue default would let a later
+    # catalog-only retirement silently break the benchmark.
+    result = await kernel.execute(
+        probe.adapter,
+        arguments,
+        actor=actor,
+        execution_scope="internal",
+    )
     payload = _tool_data(result, adapter=probe.adapter)
     if probe.adapter == "source_search":
         snapshots = source_search_page_snapshots(result.data)

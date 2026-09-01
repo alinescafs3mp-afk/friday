@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from dataclasses import replace
 from typing import Any
 
@@ -167,12 +168,25 @@ async def test_visible_message_search_still_serves_code_owned_owner_history_pref
         kernel=kernel,
     )
     calls: list[dict[str, Any]] = []
+    execution_scopes: list[str] = []
     original_execute = kernel.execute
 
-    async def recording_execute(name, arguments, *, actor=None):  # noqa: ANN001, ANN202
+    async def recording_execute(  # noqa: ANN001, ANN202
+        name,
+        arguments,
+        *,
+        actor=None,
+        execution_scope="dialogue",
+    ):
         if name == "message_search":
             calls.append(dict(arguments))
-        return await original_execute(name, arguments, actor=actor)
+            execution_scopes.append(execution_scope)
+        return await original_execute(
+            name,
+            arguments,
+            actor=actor,
+            execution_scope=execution_scope,
+        )
 
     kernel.execute = recording_execute  # type: ignore[method-assign]
 
@@ -189,6 +203,7 @@ async def test_visible_message_search_still_serves_code_owned_owner_history_pref
     }
     assert "message_search" in offered
     assert len(calls) == 1
+    assert execution_scopes == ["internal"]
     boundary_id = str(calls[0].pop("before_message_id", ""))
     boundary = storage.get_message(boundary_id, "archive-facade-owner")
     assert boundary is not None
@@ -226,6 +241,7 @@ async def test_code_owned_message_search_reauthorizes_before_the_storage_read(
     )
     original_execute = kernel.execute
     executions = 0
+    execution_scopes: list[str] = []
 
     def forbidden_storage_read(*args: Any, **kwargs: Any) -> None:
         del args, kwargs
@@ -234,15 +250,27 @@ async def test_code_owned_message_search_reauthorizes_before_the_storage_read(
     monkeypatch.setattr(storage, "search_messages", forbidden_storage_read)
     monkeypatch.setattr(storage, "list_messages_window", forbidden_storage_read)
 
-    async def revoke_after_preflight(name, arguments, *, actor=None):  # noqa: ANN001, ANN202
+    async def revoke_after_preflight(  # noqa: ANN001, ANN202
+        name,
+        arguments,
+        *,
+        actor=None,
+        execution_scope="dialogue",
+    ):
         nonlocal executions
         if name == "message_search":
             executions += 1
+            execution_scopes.append(execution_scope)
             kernel.authorization.deny_permission(
                 "archive-facade-owner",
                 "conversations.read",
             )
-        return await original_execute(name, arguments, actor=actor)
+        return await original_execute(
+            name,
+            arguments,
+            actor=actor,
+            execution_scope=execution_scope,
+        )
 
     kernel.execute = revoke_after_preflight  # type: ignore[method-assign]
 
@@ -254,4 +282,122 @@ async def test_code_owned_message_search_reauthorizes_before_the_storage_read(
     )
 
     assert executions == 1
+    assert execution_scopes == ["internal"]
     assert "REVOKED-HIDDEN-PREFETCH-BODY" not in str(reply)
+
+
+@pytest.mark.asyncio
+async def test_code_owned_message_search_revoke_and_final_publication_share_transaction(
+    settings,
+    storage,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    kernel, actor = _bound_kernel(settings, storage)
+    conversation = storage.create_conversation(
+        "archive-facade-owner",
+        "same-transaction revoked hidden prefetch",
+    )
+    storage.store_message(
+        str(conversation["id"]),
+        "archive-facade-owner",
+        "user",
+        "SAME-TRANSACTION-REVOKED-BODY про телескоп",
+    )
+    runtime = AgentRuntime(
+        replace(settings, verify_answers=False),
+        storage,
+        llm=_ForbiddenModel(),
+        kernel=kernel,
+    )
+    original_publication_check = runtime._message_search_publication_authorized  # noqa: SLF001
+    original_execute = kernel.execute
+    publication_checks = 0
+    voice_checks: list[bool] = []
+    kernel_calls: list[tuple[str, str]] = []
+
+    async def recording_execute(  # noqa: ANN202
+        name,  # noqa: ANN001
+        arguments,  # noqa: ANN001
+        *,
+        actor=None,  # noqa: ANN001
+        execution_scope="dialogue",  # noqa: ANN001
+    ):
+        kernel_calls.append((str(name), str(execution_scope)))
+        return await original_execute(
+            name,
+            arguments,
+            actor=actor,
+            execution_scope=execution_scope,
+        )
+
+    async def recording_voice_check(**kwargs: Any) -> bool:
+        del kwargs
+        voice_checks.append(True)
+        return False
+
+    def revoke_inside_publication(  # noqa: ANN202
+        conn,  # noqa: ANN001
+        *,
+        actor,  # noqa: ANN001
+        context,  # noqa: ANN001
+    ):
+        nonlocal publication_checks
+        publication_checks += 1
+        assert conn.in_transaction
+        conn.execute(
+            """INSERT INTO user_permission_overrides(user_id, security_id, effect, updated_at)
+               VALUES(?, 'conversations.read', 'deny', ?)
+               ON CONFLICT(user_id, security_id) DO UPDATE SET
+                 effect=excluded.effect, updated_at=excluded.updated_at""",
+            ("archive-facade-owner", "2026-09-01T00:00:00+00:00"),
+        )
+        return original_publication_check(conn, actor=actor, context=context)
+
+    kernel.execute = recording_execute  # type: ignore[method-assign]
+    monkeypatch.setattr(runtime, "_final_voice_can_start", recording_voice_check)
+    monkeypatch.setattr(
+        runtime,
+        "_message_search_publication_authorized",
+        revoke_inside_publication,
+    )
+
+    reply = await runtime.chat(
+        "archive-facade-owner",
+        "что я писал про телескоп?",
+        actor=actor,
+        conversation_id=str(conversation["id"]),
+        answer_with_voice=True,
+    )
+
+    assert publication_checks == 1
+    assert reply["message_search_authority_changed_before_publication"] is True
+    assert reply["message"] == ("Доступ к переписке изменился до публикации; найденные данные не публикую.")
+    assert "SAME-TRANSACTION-REVOKED-BODY" not in json.dumps(reply, ensure_ascii=False)
+    assert reply["voice"] is None
+    assert reply["files"] == []
+    assert voice_checks == []
+    assert kernel_calls == [("message_search", "internal")]
+
+    persisted = storage.get_message(str(reply["message_id"]), "archive-facade-owner")
+    assert persisted is not None
+    assert "SAME-TRANSACTION-REVOKED-BODY" not in str(persisted)
+    metadata = json.loads(str(persisted["metadata_json"] or "{}"))
+    assert metadata.get("tools_used") == []
+    assert metadata.get("knowledge_object_ids") == []
+    for continuation_key in (
+        "message_locate_pending_action",
+        "message_locate_source_user_message_id",
+        "filename_result_pending_action",
+        "filename_result_pending_origin",
+        "filename_result_pending_message_source_user_message_id",
+    ):
+        assert continuation_key not in metadata
+    trace = metadata.get("interaction_trace")
+    assert isinstance(trace, dict)
+    assert trace.get("continuation") == "none"
+    assert trace.get("state_restored") is False
+    assert all(
+        str(step.get("capability") or "") != "message_retrieval"
+        for step in trace.get("steps", [])
+        if isinstance(step, dict)
+    )

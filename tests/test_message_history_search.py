@@ -536,6 +536,7 @@ async def test_exact_day_history_renders_96_of_96_without_model_variation(settin
             tools_used,
             evidence,
             context,
+            internal_search_adapters_enabled=True,
         )
 
         assert handled is True
@@ -615,10 +616,21 @@ async def test_own_day_history_auto_pages_to_a_honest_strict_cap(
         calls: list[dict[str, object]] = []
         original_execute = kernel.execute
 
-        async def recording_execute(name, arguments, *, actor=None):  # noqa: ANN001
+        async def recording_execute(  # noqa: ANN202
+            name,  # noqa: ANN001
+            arguments,  # noqa: ANN001
+            *,
+            actor=None,  # noqa: ANN001
+            execution_scope="dialogue",  # noqa: ANN001
+        ):
             if name == "message_search":
                 calls.append(dict(arguments))
-            return await original_execute(name, arguments, actor=actor)
+            return await original_execute(
+                name,
+                arguments,
+                actor=actor,
+                execution_scope=execution_scope,
+            )
 
         kernel.execute = recording_execute  # type: ignore[method-assign]
         runtime = AgentRuntime(replace(settings, verify_answers=False), storage, kernel=kernel)
@@ -641,6 +653,7 @@ async def test_own_day_history_auto_pages_to_a_honest_strict_cap(
             [],
             [],
             context=context,
+            authorized=True,
         )
 
         assert handled is True
@@ -720,10 +733,21 @@ async def test_full_history_analysis_pages_complete_text_and_keeps_tail_canaries
         calls: list[dict[str, object]] = []
         original_execute = kernel.execute
 
-        async def recording_execute(name, arguments, *, actor=None):  # noqa: ANN001
+        async def recording_execute(  # noqa: ANN202
+            name,  # noqa: ANN001
+            arguments,  # noqa: ANN001
+            *,
+            actor=None,  # noqa: ANN001
+            execution_scope="dialogue",  # noqa: ANN001
+        ):
             if name == "message_search":
                 calls.append(dict(arguments))
-            return await original_execute(name, arguments, actor=actor)
+            return await original_execute(
+                name,
+                arguments,
+                actor=actor,
+                execution_scope=execution_scope,
+            )
 
         kernel.execute = recording_execute  # type: ignore[method-assign]
         runtime = AgentRuntime(replace(settings, verify_answers=False), storage, kernel=kernel)
@@ -747,6 +771,7 @@ async def test_full_history_analysis_pages_complete_text_and_keeps_tail_canaries
             [],
             [],
             context=context,
+            authorized=True,
         )
 
         assert handled is True
@@ -824,6 +849,7 @@ async def test_full_history_analysis_refuses_any_truncated_row(settings, monkeyp
             [],
             [],
             context=context,
+            authorized=True,
         )
 
         assert handled is True and injected == [] and tools == []
@@ -896,6 +922,7 @@ async def test_full_history_analysis_cap_is_derived_from_active_model_context(
             [],
             [],
             context=context,
+            authorized=True,
         )
 
         assert handled is True and injected == []
@@ -1020,9 +1047,20 @@ async def test_thematic_own_history_search_uses_only_the_closed_subject(settings
         seen: list[dict[str, object]] = []
         original_execute = kernel.execute
 
-        async def recording_execute(name, arguments, *, actor=None):  # noqa: ANN001
+        async def recording_execute(  # noqa: ANN202
+            name,  # noqa: ANN001
+            arguments,  # noqa: ANN001
+            *,
+            actor=None,  # noqa: ANN001
+            execution_scope="dialogue",  # noqa: ANN001
+        ):
             seen.append(dict(arguments))
-            return await original_execute(name, arguments, actor=actor)
+            return await original_execute(
+                name,
+                arguments,
+                actor=actor,
+                execution_scope=execution_scope,
+            )
 
         kernel.execute = recording_execute  # type: ignore[method-assign]
         runtime = AgentRuntime(replace(settings, verify_answers=False), storage, kernel=kernel)
@@ -1045,6 +1083,7 @@ async def test_thematic_own_history_search_uses_only_the_closed_subject(settings
             tools_used,
             [],
             context=context,
+            authorized=True,
         )
 
         assert handled is True
@@ -1080,6 +1119,7 @@ async def test_thematic_own_history_search_uses_only_the_closed_subject(settings
             [],
             [],
             context=shared_context,
+            authorized=True,
         )
         assert shared is True
         assert seen[-1] == {
@@ -1108,6 +1148,7 @@ async def test_thematic_own_history_search_uses_only_the_closed_subject(settings
             [],
             [],
             context=missing_context,
+            authorized=True,
         )
         assert missing is True and len(seen) == 3
         assert "найдено сообщений: 0" in missing_context.structural_answer
@@ -1128,6 +1169,7 @@ async def test_thematic_own_history_search_uses_only_the_closed_subject(settings
             [],
             [],
             context=invalid_context,
+            authorized=True,
         )
         assert invalid is True and len(seen) == 3
         assert "точную тему" in invalid_context.structural_answer
@@ -1147,6 +1189,7 @@ async def test_thematic_own_history_search_uses_only_the_closed_subject(settings
             [],
             [],
             context=unavailable_context,
+            authorized=False,
         )
         assert unavailable is True and len(seen) == 3
         assert "модельная догадка" in unavailable_context.structural_answer
@@ -1191,6 +1234,7 @@ async def test_thematic_own_history_search_uses_only_the_closed_subject(settings
                 [],
                 [],
                 context=exact_context,
+                authorized=True,
             )
             assert exact is True
             assert seen[-1] == {

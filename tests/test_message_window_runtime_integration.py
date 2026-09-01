@@ -169,10 +169,17 @@ def _record_message_search(kernel: ExecutionKernel) -> list[dict[str, Any]]:
     calls: list[dict[str, Any]] = []
     original = kernel.execute
 
-    async def recording_execute(name, arguments, *, actor=None):  # noqa: ANN001, ANN202
+    async def recording_execute(  # noqa: ANN202
+        name,
+        arguments,
+        *,
+        actor=None,
+        execution_scope="dialogue",  # noqa: ANN001
+    ):
         if name == "message_search":
+            assert execution_scope == "internal"
             calls.append(dict(arguments))
-        return await original(name, arguments, actor=actor)
+        return await original(name, arguments, actor=actor, execution_scope=execution_scope)
 
     kernel.execute = recording_execute  # type: ignore[method-assign]
     return calls
@@ -265,9 +272,17 @@ async def test_plain_mapping_cannot_forge_the_private_message_selection_carrier(
     original = stack.kernel.execute
     calls = 0
 
-    async def stripping_execute(name, arguments, *, actor=None):  # noqa: ANN001, ANN202
+    async def stripping_execute(  # noqa: ANN202
+        name,
+        arguments,
+        *,
+        actor=None,
+        execution_scope="dialogue",  # noqa: ANN001
+    ):
         nonlocal calls
-        result = await original(name, arguments, actor=actor)
+        if name == "message_search":
+            assert execution_scope == "internal"
+        result = await original(name, arguments, actor=actor, execution_scope=execution_scope)
         if name != "message_search":
             return result
         calls += 1
@@ -312,9 +327,17 @@ async def test_late_message_read_revocation_publishes_denied_without_evidence_or
     original = stack.kernel.execute
     calls = 0
 
-    async def revoking_execute(name, arguments, *, actor=None):  # noqa: ANN001, ANN202
+    async def revoking_execute(  # noqa: ANN202
+        name,
+        arguments,
+        *,
+        actor=None,
+        execution_scope="dialogue",  # noqa: ANN001
+    ):
         nonlocal calls
-        result = await original(name, arguments, actor=actor)
+        if name == "message_search":
+            assert execution_scope == "internal"
+        result = await original(name, arguments, actor=actor, execution_scope=execution_scope)
         if name == "message_search":
             calls += 1
             stack.authorization.deny_permission(OWNER, "conversations.read")

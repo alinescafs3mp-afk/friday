@@ -46,7 +46,15 @@ class _Kernel:
         self._rendered = rendered
         self._success = success
 
-    async def execute(self, tool: str, params: dict, actor=None):  # noqa: ANN001, ARG002
+    async def execute(  # noqa: ANN202
+        self,
+        tool: str,
+        params: dict,
+        actor=None,  # noqa: ANN001, ARG002
+        *,
+        execution_scope: str = "dialogue",
+    ):
+        assert execution_scope == "internal"
         self.calls.append((tool, params))
         rendered, success = self._rendered, self._success
 

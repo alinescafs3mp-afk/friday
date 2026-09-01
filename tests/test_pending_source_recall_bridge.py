@@ -84,9 +84,23 @@ class _RecordingKernel(ExecutionKernel):
         super().__init__(authorization, settings)
         self.calls: list[tuple[str, dict[str, Any]]] = []
 
-    async def execute(self, name, arguments, *, actor=None):  # noqa: ANN001
+    async def execute(  # noqa: ANN202
+        self,
+        name,  # noqa: ANN001
+        arguments,  # noqa: ANN001
+        *,
+        actor=None,  # noqa: ANN001
+        execution_scope="dialogue",  # noqa: ANN001
+    ):
+        if name == "source_search":
+            assert execution_scope == "internal"
         self.calls.append((str(name), dict(arguments)))
-        return await super().execute(name, arguments, actor=actor)
+        return await super().execute(
+            name,
+            arguments,
+            actor=actor,
+            execution_scope=execution_scope,
+        )
 
 
 class _SourceModel:
@@ -658,8 +672,15 @@ async def test_malformed_source_result_is_closed_unknown_without_exposing_its_te
             }
         )
 
-    async def hostile_execute(name: str, arguments: dict[str, Any], *, actor: Any = None) -> ToolResult:
+    async def hostile_execute(
+        name: str,
+        arguments: dict[str, Any],
+        *,
+        actor: Any = None,
+        execution_scope: str = "dialogue",
+    ) -> ToolResult:
         del actor
+        assert name != "source_search" or execution_scope == "internal"
         kernel.calls.append((name, dict(arguments)))
         return ToolResult(tool_name=name, success=True, data=payload)
 
@@ -1044,8 +1065,15 @@ async def test_source_status_is_canonicalized_before_pending_disclosure(
         arguments: dict[str, Any],
         *,
         actor: Any = None,
+        execution_scope: str = "dialogue",
     ) -> ToolResult:
-        result = await production_execute(name, arguments, actor=actor)
+        assert name != "source_search" or execution_scope == "internal"
+        result = await production_execute(
+            name,
+            arguments,
+            actor=actor,
+            execution_scope=execution_scope,
+        )
         assert result.success and isinstance(result.data, dict)
         rows = result.data.get("results")
         assert isinstance(rows, list) and len(rows) == 1
@@ -1087,8 +1115,15 @@ async def test_plain_source_search_dict_has_no_private_snapshot_authority(
         arguments: dict[str, Any],
         *,
         actor: Any = None,
+        execution_scope: str = "dialogue",
     ) -> ToolResult:
-        result = await production_execute(name, arguments, actor=actor)
+        assert name != "source_search" or execution_scope == "internal"
+        result = await production_execute(
+            name,
+            arguments,
+            actor=actor,
+            execution_scope=execution_scope,
+        )
         assert result.success and isinstance(result.data, dict)
         return ToolResult(tool_name=name, success=True, data=dict(result.data))
 

@@ -48,8 +48,15 @@ class _NoExecuteKernel(ExecutionKernel):
         super().__init__(authorization, settings)
         self.calls: list[tuple[str, dict[str, Any]]] = []
 
-    async def execute(self, name, arguments, *, actor=None):  # noqa: ANN001
-        del actor
+    async def execute(  # noqa: ANN202
+        self,
+        name,  # noqa: ANN001
+        arguments,  # noqa: ANN001
+        *,
+        actor=None,  # noqa: ANN001
+        execution_scope="dialogue",  # noqa: ANN001
+    ):
+        del actor, execution_scope
         self.calls.append((str(name), dict(arguments)))
         raise AssertionError(f"body-free inventory invoked generic tool {name!r}")
 
@@ -61,9 +68,23 @@ class _RecordingKernel(ExecutionKernel):
         super().__init__(authorization, settings)
         self.calls: list[tuple[str, dict[str, Any]]] = []
 
-    async def execute(self, name, arguments, *, actor=None):  # noqa: ANN001
+    async def execute(  # noqa: ANN202
+        self,
+        name,  # noqa: ANN001
+        arguments,  # noqa: ANN001
+        *,
+        actor=None,  # noqa: ANN001
+        execution_scope="dialogue",  # noqa: ANN001
+    ):
+        if name == "source_search":
+            assert execution_scope == "internal"
         self.calls.append((str(name), dict(arguments)))
-        return await super().execute(name, arguments, actor=actor)
+        return await super().execute(
+            name,
+            arguments,
+            actor=actor,
+            execution_scope=execution_scope,
+        )
 
 
 class _StaffAnswerModel:

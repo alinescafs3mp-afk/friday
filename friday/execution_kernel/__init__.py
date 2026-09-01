@@ -582,10 +582,12 @@ def _storage_read_snapshot(storage: Any, operation: Callable[[], Any]) -> Any:
 # Execution scope is code-owned context, not a model/tool argument.  A mission
 # receives only the bounded gather surface below; every other tool remains a
 # dialogue-only capability even when the mission actor is otherwise authorized
-# to use it.  The kernel checks this immediately before dispatch as well as when
-# definitions are selected, because the list shown to a model is not a security
-# boundary.
-EXECUTION_SCOPES = frozenset({"dialogue", "mission"})
+# to use it.  ``internal`` is narrower still: it lets code-owned migration and
+# parity paths keep exercising the released retrieval adapters after a future
+# dialogue cutover without turning that scope into a model argument.  The kernel
+# checks scope immediately before dispatch as well as when definitions are
+# selected, because the list shown to a model is not a security boundary.
+EXECUTION_SCOPES = frozenset({"dialogue", "mission", "internal"})
 MISSION_EXECUTION_TOOLS = frozenset(
     {
         "memory_search",
@@ -598,6 +600,26 @@ MISSION_EXECUTION_TOOLS = frozenset(
         "web_research",
     }
 )
+INTERNAL_SEARCH_ADAPTER_TOOLS = frozenset(
+    {
+        "memory_search",
+        "message_search",
+        "source_search",
+    }
+)
+_INTERNAL_SEARCH_ADAPTER_SECURITY_IDS = {
+    "memory_search": "search.use",
+    "message_search": "search.use",
+    "source_search": "knowledge.read",
+}
+_INTERNAL_SEARCH_ADAPTER_EXECUTION_SCOPES = {
+    name: (
+        frozenset({"dialogue", "internal", "mission"})
+        if name in MISSION_EXECUTION_TOOLS
+        else frozenset({"dialogue", "internal"})
+    )
+    for name in INTERNAL_SEARCH_ADAPTER_TOOLS
+}
 
 
 async def _terminate_process_tree(process: asyncio.subprocess.Process) -> None:
@@ -3968,6 +3990,43 @@ class ExecutionKernel:
     def get_tool(self, name: str) -> ToolSpec | None:
         return self._tools.get(name)
 
+    def internal_search_adapter_available(self, name: str, actor: ActorContext) -> bool:
+        """Fresh code-owned preflight without exposing an internal model schema."""
+
+        tool = self._tools.get(str(name or ""))
+        authorization = self.authorization
+        storage = self.storage
+        if (
+            type(actor) is not ActorContext
+            or name not in INTERNAL_SEARCH_ADAPTER_TOOLS
+            or tool is None
+            or tool.name != name
+            or tool.security_id != _INTERNAL_SEARCH_ADAPTER_SECURITY_IDS.get(name)
+            or tool.risk != "observe"
+            or tool.allowed_execution_scopes != _INTERNAL_SEARCH_ADAPTER_EXECUTION_SCOPES.get(name)
+            or not callable(tool.handler)
+            or authorization is None
+            or storage is None
+        ):
+            return False
+        try:
+            with storage.transaction() as conn:
+                primary = authorization.authorize_in_transaction(
+                    conn,
+                    actor,
+                    tool.security_id,
+                )
+                conversation = (
+                    authorization.authorize_in_transaction(conn, actor, "conversations.read")
+                    if name == "message_search"
+                    else None
+                )
+                return bool(
+                    primary.allowed and primary.preset_key and (conversation is None or conversation.allowed)
+                )
+        except Exception:  # noqa: BLE001 - an unreadable authority snapshot denies the lane
+            return False
+
     def tool_is_approval_free(self, name: str) -> bool:
         """Whether a model-visible tool can never enqueue a HITL approval.
 
@@ -4222,6 +4281,14 @@ class ExecutionKernel:
             return ToolResult(name, False, error="Unknown tool")
         if not tool.handler:
             return ToolResult(name, False, error="Tool is not initialized")
+        if execution_scope == "internal" and (
+            name not in INTERNAL_SEARCH_ADAPTER_TOOLS
+            or tool.security_id != _INTERNAL_SEARCH_ADAPTER_SECURITY_IDS.get(name)
+            or tool.risk != "observe"
+            or tool.allowed_execution_scopes != _INTERNAL_SEARCH_ADAPTER_EXECUTION_SCOPES.get(name)
+        ):
+            await self._audit(actor, name, False, "execution_scope_denied", details=details)
+            return ToolResult(name, False, error="Tool is unavailable in this execution scope")
         if execution_scope not in EXECUTION_SCOPES or execution_scope not in tool.allowed_execution_scopes:
             await self._audit(
                 actor,
@@ -4253,7 +4320,33 @@ class ExecutionKernel:
             await self._audit(actor, name, False, "authorization_denied", details=details)
             return ToolResult(name, False, error="Authorization denied")
         try:
-            self.authorization.require(actor, effective_security_id)
+            if execution_scope == "internal":
+                # Internal adapters will outlive their eventual model-catalog
+                # retirement.  Their code-owned caller must not inherit a stale
+                # request-time preset: resolve account status, current preset and
+                # overrides in one fresh storage snapshot immediately before the
+                # handler boundary.  Dialogue/mission keep their released path
+                # unchanged until the measured cutover.
+                storage = self.storage
+                if storage is None:
+                    raise AuthorizationError("Internal execution storage is unavailable")
+                with storage.transaction() as conn:
+                    decision = self.authorization.require_in_transaction(
+                        conn,
+                        actor,
+                        effective_security_id,
+                    )
+                    if name == "message_search":
+                        self.authorization.require_in_transaction(
+                            conn,
+                            actor,
+                            "conversations.read",
+                        )
+                if not decision.preset_key:
+                    raise AuthorizationError("Internal execution principal is unavailable")
+                actor = replace(actor, preset_key=decision.preset_key)
+            else:
+                self.authorization.require(actor, effective_security_id)
         except AuthorizationError:
             await self._audit(actor, name, False, "authorization_denied", details=details)
             return ToolResult(name, False, error="Authorization denied")
@@ -9513,17 +9606,18 @@ class ExecutionKernel:
         ) -> None:
             if risk not in {"observe", "mutate", "high"}:
                 raise ValueError(f"unknown risk class {risk!r} for tool {name!r}")
+            scopes = {"dialogue"}
+            if name in MISSION_EXECUTION_TOOLS:
+                scopes.add("mission")
+            if name in INTERNAL_SEARCH_ADAPTER_TOOLS:
+                scopes.add("internal")
             self.register(
                 ToolSpec(
                     name=name,
                     description=description,
                     security_id=security_id,
                     risk=risk,
-                    allowed_execution_scopes=(
-                        frozenset({"dialogue", "mission"})
-                        if name in MISSION_EXECUTION_TOOLS
-                        else frozenset({"dialogue"})
-                    ),
+                    allowed_execution_scopes=frozenset(scopes),
                     parameters={
                         "type": "object",
                         "properties": properties,

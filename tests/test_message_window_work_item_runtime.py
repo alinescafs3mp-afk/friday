@@ -144,10 +144,17 @@ def _record_message_search(kernel: ExecutionKernel) -> list[dict[str, Any]]:
     calls: list[dict[str, Any]] = []
     original = kernel.execute
 
-    async def recording_execute(name, arguments, *, actor=None):  # noqa: ANN001, ANN202
+    async def recording_execute(  # noqa: ANN202
+        name,
+        arguments,
+        *,
+        actor=None,
+        execution_scope="dialogue",  # noqa: ANN001
+    ):
         if name == "message_search":
+            assert execution_scope == "internal"
             calls.append(dict(arguments))
-        return await original(name, arguments, actor=actor)
+        return await original(name, arguments, actor=actor, execution_scope=execution_scope)
 
     kernel.execute = recording_execute  # type: ignore[assignment]
     return calls
@@ -157,9 +164,15 @@ def _record_tool_calls(kernel: ExecutionKernel) -> list[str]:
     calls: list[str] = []
     original = kernel.execute
 
-    async def recording_execute(name, arguments, *, actor=None):  # noqa: ANN001, ANN202
+    async def recording_execute(  # noqa: ANN202
+        name,
+        arguments,
+        *,
+        actor=None,
+        execution_scope="dialogue",  # noqa: ANN001
+    ):
         calls.append(str(name))
-        return await original(name, arguments, actor=actor)
+        return await original(name, arguments, actor=actor, execution_scope=execution_scope)
 
     kernel.execute = recording_execute  # type: ignore[assignment]
     return calls
