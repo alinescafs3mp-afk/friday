@@ -84,8 +84,11 @@ def _run_candidate() -> tuple[dict[str, Any], bytes]:
             capture_output=True,
             timeout=30,
         )
+        runtime_tmp = Path(directory) / "tmp"
+        runtime_tmp.mkdir(mode=0o700)
         environment = dict(os.environ)
         environment["PYTHONPATH"] = str(checkout)
+        environment.update({name: str(runtime_tmp) for name in ("TMPDIR", "TEMP", "TMP")})
         completed = subprocess.run(  # noqa: S603
             [
                 sys.executable,
@@ -95,7 +98,7 @@ def _run_candidate() -> tuple[dict[str, Any], bytes]:
             ],
             cwd=checkout,
             env=environment,
-            check=True,
+            check=False,
             capture_output=True,
             timeout=120,
         )
@@ -106,6 +109,7 @@ def _run_candidate() -> tuple[dict[str, Any], bytes]:
             timeout=10,
         )
         assert status.stdout == status.stderr == b""
+    assert completed.returncode == 0, completed.stderr.decode("utf-8", errors="replace")
     assert completed.stderr == b""
     payload = json.loads(completed.stdout)
     assert type(payload) is dict

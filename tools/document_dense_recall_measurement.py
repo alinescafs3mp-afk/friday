@@ -28,6 +28,7 @@ import os
 import random
 import socket
 import subprocess
+import sys
 import tempfile
 from collections import defaultdict
 from collections.abc import Iterator, Mapping, Sequence
@@ -36,7 +37,11 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any, Final, cast
 
-import retrieval_bench as legacy_corpus
+_SOURCE_ROOT = Path(__file__).resolve().parents[1]
+if str(_SOURCE_ROOT) not in sys.path:
+    sys.path.insert(0, str(_SOURCE_ROOT))
+
+from tools import retrieval_bench as legacy_corpus  # noqa: E402
 
 _SCHEMA: Final = "friday.document-dense-recall-measurement.body-free.v1"
 _TENANT: Final = "document-dense-measurement-tenant"
