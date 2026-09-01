@@ -31,12 +31,20 @@ from typing import Any
 TARGET_INDEX_SCHEMA = "friday.release-artifact-proc-target-index.v2"
 PROBE_RECEIPT_SCHEMA = "friday.release-artifact-proc-reference-receipt.v2"
 PRIVILEGED_RECEIPT_SCHEMA = "friday.release-artifact-privileged-proc-receipt.v3"
+MAINTENANCE_PREMOUNT_RECEIPT_SCHEMA = "friday.release-artifact-maintenance-premount-receipt.v1"
+MAINTENANCE_PREMOUNT_AUTHORITY_SCHEMA = "friday.release-artifact-maintenance-premount-authority.v1"
+MAINTENANCE_TARGET_RECEIPT_SCHEMA = "friday.release-artifact-maintenance-target-receipt.v1"
 HOST_SCOPE_AUTHORITY_SCHEMA = "friday.release-artifact-proc-host-scope.v1"
 HOST_SCOPE_AUTHORITY_PATH = Path("/usr/libexec/friday/release_artifact_proc_scope.v1.json")
 INSTALL_LOCK_PATH = Path("/usr/libexec/friday/.release-artifact-proc-probe.install.lock")
+MAINTENANCE_PREMOUNT_RECEIPT_PATH = Path("/run/friday-retention/maintenance-premount-receipt.v1.json")
+MAINTENANCE_AUTHORITY_PATH = Path("/run/friday-retention/maintenance-premount-authority.v1.json")
+MAINTENANCE_RDINIT_PATH = "/usr/libexec/friday/release_artifact_retention_maintenance_launcher"
 PROBE_SCOPE = "namespace_visible_proc_references"
 PROBE_AUTHORITY = "diagnostic_only"
 PRIVILEGED_NO_DELETE_AUTHORITY = "code_owned_privileged_all_targets_no_delete_v1"
+MAINTENANCE_PREMOUNT_AUTHORITY = "code_owned_first_pid1_premount_v1"
+MAINTENANCE_TARGET_AUTHORITY = "code_owned_first_pid1_premount_target_scan_v1"
 _SHARED_MM_PROOF_KIND = "linux_tgid_membership_plus_exact_maps_and_exe.v1"
 _NS_GET_PARENT = 0xB702
 _AT_EMPTY_PATH = 0x1000
@@ -56,9 +64,14 @@ MAX_LINK_TARGET_BYTES = 4_096
 MAX_PROC_FILE_BYTES = 32 << 20
 MAX_RECEIPT_BYTES = 2 << 20
 MAX_PRIVILEGED_INPUT_BYTES = MAX_TARGET_INDEX_BYTES + (1 << 20)
+MAX_MAINTENANCE_AUTHORITY_BYTES = 32 << 10
+MAX_EXECUTING_INITRD_BYTES = 1 << 30
 
 _TARGET_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,127}\Z")
-_PRIVILEGED_FAILURE_CODE = re.compile(r"(?:privileged_probe|target_index|proc)_[a-z0-9_]{1,63}\Z")
+_PRIVILEGED_FAILURE_CODE = re.compile(
+    r"(?:maintenance_authority|maintenance_probe|privileged_probe|"
+    r"target_index|proc)_[a-z0-9_]{1,63}\Z"
+)
 _BOOT_ID = re.compile(rb"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\n?\Z")
 _MAP_LINE = re.compile(
     rb"([0-9a-f]+)-([0-9a-f]+) "
@@ -236,6 +249,36 @@ _OPENAT2_SYSCALLS = {"aarch64": 437, "x86_64": 437}
 
 class ProcProbeInputError(ValueError):
     """The caller supplied a non-canonical or unbounded target/probe input."""
+
+
+@dataclass(frozen=True)
+class MaintenancePremountAuthority:
+    """Compact immutable binding minted before the production root is mounted."""
+
+    transaction_id: str
+    request_file_sha256: str
+    executing_initrd_sha256: str
+    boot_id_sha256: str
+    authority_file_sha256: str
+    premount_receipt_sha256: str
+    process_epoch_sha256: str
+    namespace_epoch_sha256: str
+
+    def __post_init__(self) -> None:
+        if any(
+            not isinstance(value, str) or _HEX64.fullmatch(value) is None
+            for value in (
+                self.transaction_id,
+                self.request_file_sha256,
+                self.executing_initrd_sha256,
+                self.boot_id_sha256,
+                self.authority_file_sha256,
+                self.premount_receipt_sha256,
+                self.process_epoch_sha256,
+                self.namespace_epoch_sha256,
+            )
+        ):
+            raise ProcProbeInputError("maintenance_authority_invalid")
 
 
 @dataclass(frozen=True)
@@ -437,6 +480,555 @@ CapturePass = Callable[[TargetIndex], _GlobalObservation]
 
 def _canonical_json(value: Any) -> bytes:
     return json.dumps(value, ensure_ascii=True, sort_keys=True, separators=(",", ":")).encode("ascii")
+
+
+def _strict_canonical_json(value: Any) -> bytes:
+    """Canonical JSON for authority-bearing maintenance documents only."""
+
+    try:
+        return json.dumps(
+            value,
+            allow_nan=False,
+            ensure_ascii=True,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("ascii")
+    except (TypeError, ValueError, UnicodeError) as exc:
+        raise ProcProbeInputError("maintenance_receipt_invalid") from exc
+
+
+def _strict_canonical_document(raw: bytes, *, maximum: int, error: str) -> dict[str, Any]:
+    if not isinstance(raw, bytes) or not raw.endswith(b"\n") or not 1 < len(raw) <= maximum:
+        raise ProcProbeInputError(error)
+
+    def pairs(values: list[tuple[str, Any]]) -> dict[str, Any]:
+        result: dict[str, Any] = {}
+        for key, value in values:
+            if key in result:
+                raise ProcProbeInputError(error)
+            result[key] = value
+        return result
+
+    def reject_constant(_value: str) -> None:
+        raise ProcProbeInputError(error)
+
+    try:
+        value = json.loads(
+            raw.decode("ascii"),
+            object_pairs_hook=pairs,
+            parse_constant=reject_constant,
+        )
+    except (UnicodeError, ValueError, TypeError, json.JSONDecodeError) as exc:
+        if isinstance(exc, ProcProbeInputError):
+            raise
+        raise ProcProbeInputError(error) from exc
+    if not isinstance(value, dict) or raw != _strict_canonical_json(value) + b"\n":
+        raise ProcProbeInputError(error)
+    return value
+
+
+_MAINTENANCE_PREMOUNT_KEYS = frozenset(
+    {
+        "boot_id_sha256",
+        "cmdline_sha256",
+        "executing_initrd_sha256",
+        "io_uring_disabled",
+        "maintenance_cmdline_sha256",
+        "mountinfo_sha256",
+        "mount_namespace_sha256",
+        "namespace_epoch_sha256",
+        "nsfs_pins_absent",
+        "only_pid1_userspace_task",
+        "pid1_starttime_sha256",
+        "process_epoch_sha256",
+        "receipt_sha256",
+        "request_file_sha256",
+        "root_device_sha256",
+        "root_device_unmounted",
+        "schema",
+        "single_mount_namespace",
+        "transaction_id",
+    }
+)
+_MAINTENANCE_AUTHORITY_KEYS = frozenset(
+    {
+        "authority",
+        "boot_id_sha256",
+        "cmdline_sha256",
+        "executing_initrd_sha256",
+        "io_uring_disabled",
+        "maintenance_cmdline_sha256",
+        "mount_namespace_sha256",
+        "namespace_epoch_sha256",
+        "ordinary_workloads_started",
+        "premount_receipt_path",
+        "premount_receipt_sha256",
+        "process_epoch_sha256",
+        "rdinit_path",
+        "receipt_sha256",
+        "request_file_sha256",
+        "request_path",
+        "request_sha256",
+        "root_device_sha256",
+        "root_device_unmounted",
+        "schema",
+        "transaction_id",
+    }
+)
+
+
+def _maintenance_digest_fields(value: Mapping[str, Any], names: Sequence[str]) -> bool:
+    return all(isinstance(value.get(name), str) and _HEX64.fullmatch(value[name]) for name in names)
+
+
+def _validated_maintenance_premount(value: Mapping[str, Any]) -> dict[str, Any]:
+    document = dict(value)
+    digest = document.pop("receipt_sha256", None)
+    digest_names = (
+        "boot_id_sha256",
+        "cmdline_sha256",
+        "executing_initrd_sha256",
+        "maintenance_cmdline_sha256",
+        "mountinfo_sha256",
+        "mount_namespace_sha256",
+        "namespace_epoch_sha256",
+        "pid1_starttime_sha256",
+        "process_epoch_sha256",
+        "request_file_sha256",
+        "root_device_sha256",
+        "transaction_id",
+    )
+    if (
+        set(value) != _MAINTENANCE_PREMOUNT_KEYS
+        or value.get("schema") != MAINTENANCE_PREMOUNT_RECEIPT_SCHEMA
+        or type(value.get("io_uring_disabled")) is not int
+        or value.get("io_uring_disabled") != 2
+        or value.get("only_pid1_userspace_task") is not True
+        or value.get("single_mount_namespace") is not True
+        or value.get("nsfs_pins_absent") is not True
+        or value.get("root_device_unmounted") is not True
+        or not _maintenance_digest_fields(value, digest_names)
+        or value.get("namespace_epoch_sha256")
+        != hashlib.sha256(
+            (
+                "friday-maintenance-namespace-v1:"
+                f"{value.get('mount_namespace_sha256')}:"
+                f"{value.get('mountinfo_sha256')}:"
+                f"{value.get('process_epoch_sha256')}"
+            ).encode("ascii")
+        ).hexdigest()
+        or not isinstance(digest, str)
+        or _HEX64.fullmatch(digest) is None
+        or hashlib.sha256(_strict_canonical_json(document)).hexdigest() != digest
+    ):
+        raise ProcProbeInputError("maintenance_premount_receipt_invalid")
+    return dict(value)
+
+
+def canonical_maintenance_premount_receipt_bytes(receipt: Mapping[str, Any]) -> bytes:
+    """Validate and serialize the exact first-PID1 premount receipt."""
+
+    if not isinstance(receipt, Mapping):
+        raise ProcProbeInputError("maintenance_premount_receipt_invalid")
+    value = _validated_maintenance_premount(receipt)
+    raw = _strict_canonical_json(value) + b"\n"
+    if len(raw) > MAX_MAINTENANCE_AUTHORITY_BYTES:
+        raise ProcProbeInputError("maintenance_premount_receipt_invalid")
+    return raw
+
+
+def parse_maintenance_premount_receipt_bytes(raw: bytes) -> dict[str, Any]:
+    """Parse only canonical, duplicate-free, finite maintenance receipt JSON."""
+
+    try:
+        value = _strict_canonical_document(
+            raw,
+            maximum=MAX_MAINTENANCE_AUTHORITY_BYTES,
+            error="maintenance_premount_receipt_invalid",
+        )
+        value = _validated_maintenance_premount(value)
+    except ProcProbeInputError as exc:
+        if str(exc) == "maintenance_premount_receipt_invalid":
+            raise
+        raise ProcProbeInputError("maintenance_premount_receipt_invalid") from exc
+    if raw != canonical_maintenance_premount_receipt_bytes(value):
+        raise ProcProbeInputError("maintenance_premount_receipt_invalid")
+    return value
+
+
+def _validated_maintenance_authority(value: Mapping[str, Any]) -> dict[str, Any]:
+    document = dict(value)
+    digest = document.pop("receipt_sha256", None)
+    digest_names = (
+        "boot_id_sha256",
+        "cmdline_sha256",
+        "executing_initrd_sha256",
+        "maintenance_cmdline_sha256",
+        "mount_namespace_sha256",
+        "namespace_epoch_sha256",
+        "premount_receipt_sha256",
+        "process_epoch_sha256",
+        "request_file_sha256",
+        "request_sha256",
+        "root_device_sha256",
+        "transaction_id",
+    )
+    try:
+        request_path = Path(str(value.get("request_path")))
+    except (TypeError, ValueError) as exc:
+        raise ProcProbeInputError("maintenance_authority_invalid") from exc
+    if (
+        set(value) != _MAINTENANCE_AUTHORITY_KEYS
+        or value.get("schema") != MAINTENANCE_PREMOUNT_AUTHORITY_SCHEMA
+        or value.get("authority") != MAINTENANCE_PREMOUNT_AUTHORITY
+        or value.get("rdinit_path") != MAINTENANCE_RDINIT_PATH
+        or value.get("premount_receipt_path") != str(MAINTENANCE_PREMOUNT_RECEIPT_PATH)
+        or type(value.get("io_uring_disabled")) is not int
+        or value.get("io_uring_disabled") != 2
+        or value.get("ordinary_workloads_started") is not False
+        or value.get("root_device_unmounted") is not True
+        or request_path != Path(os.path.abspath(request_path))
+        or not request_path.name
+        or any(character in str(request_path) for character in "\x00\r\n")
+        or not _maintenance_digest_fields(value, digest_names)
+        or not isinstance(digest, str)
+        or _HEX64.fullmatch(digest) is None
+        or hashlib.sha256(_strict_canonical_json(document)).hexdigest() != digest
+    ):
+        raise ProcProbeInputError("maintenance_authority_invalid")
+    return dict(value)
+
+
+def _stable_maintenance_file_bytes(
+    path: Path,
+    *,
+    maximum: int,
+    modes: frozenset[int] = frozenset({0o400}),
+) -> bytes:
+    """Read one exact root-owned authority file through a no-follow descriptor."""
+
+    descriptor = -1
+    try:
+        lexical = Path(os.path.abspath(path))
+        if lexical != path or not lexical.name:
+            raise ProcProbeInputError("maintenance_authority_invalid")
+        for parent in (Path(os.sep), *reversed(lexical.parents[:-1])):
+            parent_status = os.lstat(parent)
+            if (
+                not stat.S_ISDIR(parent_status.st_mode)
+                or parent_status.st_uid != 0
+                or stat.S_IMODE(parent_status.st_mode) & 0o022
+            ):
+                raise ProcProbeInputError("maintenance_authority_invalid")
+        before = os.lstat(lexical)
+        descriptor = os.open(
+            lexical,
+            os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0),
+        )
+        opened = os.fstat(descriptor)
+        chunks: list[bytes] = []
+        total = 0
+        while True:
+            chunk = os.read(descriptor, min(64 << 10, maximum + 1 - total))
+            if not chunk:
+                break
+            chunks.append(chunk)
+            total += len(chunk)
+            if total > maximum:
+                raise ProcProbeInputError("maintenance_authority_invalid")
+        after = os.lstat(lexical)
+    except (OSError, ValueError) as exc:
+        if isinstance(exc, ProcProbeInputError):
+            raise
+        raise ProcProbeInputError("maintenance_authority_invalid") from exc
+    finally:
+        if descriptor >= 0:
+            os.close(descriptor)
+    identity = lambda item: (  # noqa: E731
+        item.st_dev,
+        item.st_ino,
+        item.st_mode,
+        item.st_nlink,
+        item.st_uid,
+        item.st_size,
+        item.st_mtime_ns,
+        item.st_ctime_ns,
+    )
+    raw = b"".join(chunks)
+    if (
+        not stat.S_ISREG(before.st_mode)
+        or before.st_uid != 0
+        or before.st_nlink != 1
+        or stat.S_IMODE(before.st_mode) not in modes
+        or identity(before) != identity(opened)
+        or identity(before) != identity(after)
+        or not raw
+    ):
+        raise ProcProbeInputError("maintenance_authority_invalid")
+    return raw
+
+
+def _stable_file_sha256(
+    path: Path,
+    *,
+    maximum: int,
+    modes: frozenset[int] | None = None,
+) -> str:
+    """Hash a stable kernel-exposed file without buffering the initrd in memory."""
+
+    descriptor = -1
+    try:
+        lexical = Path(os.path.abspath(path))
+        if lexical != path or not lexical.name or lexical.resolve(strict=True) != lexical:
+            raise ProcProbeInputError("maintenance_authority_invalid")
+        for parent in (Path(os.sep), *reversed(lexical.parents[:-1])):
+            parent_status = os.lstat(parent)
+            if (
+                not stat.S_ISDIR(parent_status.st_mode)
+                or parent_status.st_uid != 0
+                or stat.S_IMODE(parent_status.st_mode) & 0o022
+            ):
+                raise ProcProbeInputError("maintenance_authority_invalid")
+        before = os.lstat(lexical)
+        descriptor = os.open(
+            lexical,
+            os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0),
+        )
+        opened = os.fstat(descriptor)
+        digest = hashlib.sha256()
+        total = 0
+        while True:
+            chunk = os.read(descriptor, 1 << 20)
+            if not chunk:
+                break
+            total += len(chunk)
+            if total > maximum:
+                raise ProcProbeInputError("maintenance_authority_invalid")
+            digest.update(chunk)
+        after_open = os.fstat(descriptor)
+        after = os.lstat(lexical)
+    except (OSError, ValueError) as exc:
+        if isinstance(exc, ProcProbeInputError):
+            raise
+        raise ProcProbeInputError("maintenance_authority_invalid") from exc
+    finally:
+        if descriptor >= 0:
+            os.close(descriptor)
+    identity = lambda item: (  # noqa: E731
+        item.st_dev,
+        item.st_ino,
+        item.st_mode,
+        item.st_nlink,
+        item.st_uid,
+        item.st_size,
+        item.st_mtime_ns,
+        item.st_ctime_ns,
+    )
+    if (
+        not stat.S_ISREG(before.st_mode)
+        or before.st_uid != 0
+        or before.st_nlink != 1
+        or (modes is not None and stat.S_IMODE(before.st_mode) not in modes)
+        or identity(before) != identity(opened)
+        or identity(before) != identity(after_open)
+        or identity(before) != identity(after)
+        or total <= 0
+        or total != int(before.st_size)
+    ):
+        raise ProcProbeInputError("maintenance_authority_invalid")
+    return digest.hexdigest()
+
+
+def _namespace_identity_sha256(path: Path) -> str:
+    try:
+        before = os.stat(path)
+        after = os.stat(path)
+    except OSError as exc:
+        raise ProcProbeInputError("maintenance_authority_invalid") from exc
+    identity = (int(before.st_dev), int(before.st_ino))
+    if identity != (int(after.st_dev), int(after.st_ino)):
+        raise ProcProbeInputError("maintenance_authority_invalid")
+    return hashlib.sha256(f"{identity[0]}:{identity[1]}".encode("ascii")).hexdigest()
+
+
+def _validate_maintenance_cmdline(
+    raw: bytes,
+    *,
+    transaction_id: str,
+    executing_initrd_sha256: str,
+    maintenance_cmdline_sha256: str,
+) -> None:
+    try:
+        text = raw.decode("ascii")
+    except UnicodeError as exc:
+        raise ProcProbeInputError("maintenance_authority_invalid") from exc
+    if not text or any(character in text for character in "\x00\r\n\t"):
+        raise ProcProbeInputError("maintenance_authority_invalid")
+    tokens = text.split(" ")
+    if any(not token for token in tokens):
+        raise ProcProbeInputError("maintenance_authority_invalid")
+
+    def exact(prefix: str, expected: str) -> bool:
+        values = [token for token in tokens if token.startswith(prefix)]
+        return values == [expected]
+
+    projected = [
+        token
+        for token in tokens
+        if token != "retain_initrd"
+        and not token.startswith("rd.friday.retention.initrd_sha256=")
+        and not token.startswith("rdinit=")
+        and not token.startswith("sysctl.kernel.io_uring_disabled=")
+    ]
+
+    if (
+        not exact("rd.friday.retention=", f"rd.friday.retention={transaction_id}")
+        or not exact(
+            "rd.friday.retention.initrd_sha256=",
+            f"rd.friday.retention.initrd_sha256={executing_initrd_sha256}",
+        )
+        or not exact("rdinit=", f"rdinit={MAINTENANCE_RDINIT_PATH}")
+        or tokens.count("retain_initrd") != 1
+        or not exact(
+            "sysctl.kernel.io_uring_disabled=",
+            "sysctl.kernel.io_uring_disabled=2",
+        )
+        or any(token == "noinitrd" or token.startswith("init=") for token in tokens)
+        or _HEX64.fullmatch(maintenance_cmdline_sha256) is None
+        or hashlib.sha256(" ".join(projected).encode("ascii")).hexdigest() != maintenance_cmdline_sha256
+    ):
+        raise ProcProbeInputError("maintenance_authority_invalid")
+
+
+def _pid1_starttime_sha256() -> str:
+    try:
+        raw = _stable_kernel_bytes(Path("/proc/1/stat"), maximum=16 << 10).strip()
+        closing = raw.rfind(b") ")
+        fields = raw[closing + 2 :].split()
+        if closing <= 1 or not raw.startswith(b"1 (") or len(fields) < 20:
+            raise ProcProbeInputError("maintenance_authority_invalid")
+        starttime = fields[19]
+        if not starttime.isdigit() or int(starttime) <= 0:
+            raise ProcProbeInputError("maintenance_authority_invalid")
+    except (ValueError, ProcProbeInputError) as exc:
+        if isinstance(exc, ProcProbeInputError):
+            raise
+        raise ProcProbeInputError("maintenance_authority_invalid") from exc
+    return hashlib.sha256(starttime).hexdigest()
+
+
+def _maintenance_authority_document(
+    *,
+    authority_path: Path = MAINTENANCE_AUTHORITY_PATH,
+) -> tuple[MaintenancePremountAuthority, dict[str, Any], dict[str, Any]]:
+    """Authenticate both volatile documents and every live cross-boot binding."""
+
+    try:
+        authority_raw = _stable_maintenance_file_bytes(
+            authority_path,
+            maximum=MAX_MAINTENANCE_AUTHORITY_BYTES,
+        )
+        authority = _validated_maintenance_authority(
+            _strict_canonical_document(
+                authority_raw,
+                maximum=MAX_MAINTENANCE_AUTHORITY_BYTES,
+                error="maintenance_authority_invalid",
+            )
+        )
+        receipt_raw = _stable_maintenance_file_bytes(
+            MAINTENANCE_PREMOUNT_RECEIPT_PATH,
+            maximum=MAX_MAINTENANCE_AUTHORITY_BYTES,
+        )
+        receipt = parse_maintenance_premount_receipt_bytes(receipt_raw)
+    except ProcProbeInputError as exc:
+        if str(exc) == "maintenance_authority_invalid":
+            raise
+        raise ProcProbeInputError("maintenance_authority_invalid") from exc
+
+    shared = (
+        "boot_id_sha256",
+        "cmdline_sha256",
+        "executing_initrd_sha256",
+        "maintenance_cmdline_sha256",
+        "mount_namespace_sha256",
+        "namespace_epoch_sha256",
+        "process_epoch_sha256",
+        "request_file_sha256",
+        "root_device_sha256",
+        "transaction_id",
+    )
+    if (
+        any(authority.get(name) != receipt.get(name) for name in shared)
+        or authority.get("premount_receipt_sha256") != hashlib.sha256(receipt_raw).hexdigest()
+    ):
+        raise ProcProbeInputError("maintenance_authority_invalid")
+
+    try:
+        boot_id = _stable_kernel_bytes(
+            Path("/proc/sys/kernel/random/boot_id"),
+            maximum=37,
+        ).strip()
+        cmdline = _stable_kernel_bytes(Path("/proc/cmdline"), maximum=64 << 10).rstrip(b"\n")
+        io_uring = _stable_kernel_bytes(
+            Path("/proc/sys/kernel/io_uring_disabled"),
+            maximum=3,
+        )
+        executing_initrd_sha256 = _stable_file_sha256(
+            Path("/sys/firmware/initrd"),
+            maximum=MAX_EXECUTING_INITRD_BYTES,
+            modes=frozenset({0o400, 0o440, 0o444}),
+        )
+        self_mount_namespace = _namespace_identity_sha256(Path("/proc/self/ns/mnt"))
+        init_mount_namespace = _namespace_identity_sha256(Path("/proc/1/ns/mnt"))
+        request_file_sha256 = _stable_file_sha256(
+            Path(str(authority["request_path"])),
+            maximum=64 << 20,
+            modes=frozenset({0o400, 0o440, 0o444}),
+        )
+        pid1_starttime_sha256 = _pid1_starttime_sha256()
+    except (OSError, ProcProbeInputError) as exc:
+        raise ProcProbeInputError("maintenance_authority_invalid") from exc
+
+    _validate_maintenance_cmdline(
+        cmdline,
+        transaction_id=str(authority["transaction_id"]),
+        executing_initrd_sha256=str(authority["executing_initrd_sha256"]),
+        maintenance_cmdline_sha256=str(authority["maintenance_cmdline_sha256"]),
+    )
+    if (
+        _BOOT_ID.fullmatch(boot_id) is None
+        or hashlib.sha256(boot_id).hexdigest() != authority["boot_id_sha256"]
+        or hashlib.sha256(cmdline).hexdigest() != authority["cmdline_sha256"]
+        or io_uring != b"2\n"
+        or executing_initrd_sha256 != authority["executing_initrd_sha256"]
+        or self_mount_namespace != authority["mount_namespace_sha256"]
+        or init_mount_namespace != authority["mount_namespace_sha256"]
+        or request_file_sha256 != authority["request_file_sha256"]
+        or pid1_starttime_sha256 != receipt["pid1_starttime_sha256"]
+    ):
+        raise ProcProbeInputError("maintenance_authority_invalid")
+
+    binding = MaintenancePremountAuthority(
+        transaction_id=str(authority["transaction_id"]),
+        request_file_sha256=str(authority["request_file_sha256"]),
+        executing_initrd_sha256=str(authority["executing_initrd_sha256"]),
+        boot_id_sha256=str(authority["boot_id_sha256"]),
+        authority_file_sha256=hashlib.sha256(authority_raw).hexdigest(),
+        premount_receipt_sha256=hashlib.sha256(receipt_raw).hexdigest(),
+        process_epoch_sha256=str(authority["process_epoch_sha256"]),
+        namespace_epoch_sha256=str(authority["namespace_epoch_sha256"]),
+    )
+    return binding, authority, receipt
+
+
+def maintenance_premount_authority(
+    *,
+    authority_path: Path = MAINTENANCE_AUTHORITY_PATH,
+) -> MaintenancePremountAuthority:
+    """Return fresh code-owned authority or fail closed on any drift."""
+
+    binding, _authority, _receipt = _maintenance_authority_document(authority_path=authority_path)
+    return binding
 
 
 def _absolute_lexical(path: Path) -> Path:
@@ -1058,10 +1650,12 @@ class _LinuxProcScanner:
         target_index: TargetIndex,
         *,
         conservatively_retain_opaque_file_references: bool = False,
+        reject_namespace_pins: bool = False,
     ) -> None:
         self.proc_root = proc_root
         self.target_index = target_index
         self.conservatively_retain_opaque_file_references = conservatively_retain_opaque_file_references
+        self.reject_namespace_pins = reject_namespace_pins
         self.lookup = _target_lookup(target_index)
         self.identity_lookup: dict[tuple[int, int], tuple[ObjectKey, ...]] = {}
         for object_key in self.lookup:
@@ -1484,8 +2078,13 @@ class _LinuxProcScanner:
             for line in lines:
                 left, separator, right = line.partition(b" - ")
                 fields = left.split()
-                if not separator or not right or len(fields) < 6 or not fields[0].isdigit():
+                tail = right.split()
+                if not separator or len(tail) < 3 or len(fields) < 6 or not fields[0].isdigit():
                     raise _ProbeIssue("proc_observation_failed", pid=pid, source="mountinfo")
+                if self.reject_namespace_pins and (
+                    tail[0] == b"nsfs" or (fields[3].startswith(b"mnt:[") and fields[3].endswith(b"]"))
+                ):
+                    raise _ProbeIssue("proc_surface_unsupported", pid=pid, source="namespace")
                 mount_id = int(fields[0])
                 if mount_id <= 0 or mount_id in seen_mount_ids:
                     raise _ProbeIssue("proc_observation_failed", pid=pid, source="mountinfo")
@@ -2386,6 +2985,311 @@ def _capture_privileged_target_observation(
     raise ProcProbeInputError("privileged_probe_incomplete")
 
 
+def _maintenance_namespace_epoch(
+    scanner: _LinuxProcScanner,
+    observation: _GlobalObservation,
+) -> str:
+    """Bind every observed task root to the one authenticated mount namespace."""
+
+    projection: list[list[Any]] = []
+    namespaces: set[tuple[int, int]] = set()
+    for key, cached in sorted(scanner._mount_cache.items()):
+        (
+            namespace_device,
+            namespace_inode,
+            raw_sha256,
+            root_device,
+            root_inode,
+            root_type,
+            root_mount_id,
+        ) = key
+        _references, proof_sha256, _pid, _raw, _root, cached_root_mount = cached
+        namespaces.add((namespace_device, namespace_inode))
+        projection.append(
+            [
+                namespace_device,
+                namespace_inode,
+                raw_sha256,
+                root_device,
+                root_inode,
+                root_type,
+                root_mount_id,
+                cached_root_mount,
+                proof_sha256,
+            ]
+        )
+    if not projection or namespaces != {observation.scope.mount_namespace} or len(observation.tasks) < 1:
+        raise _ProbeIssue("proc_surface_unsupported", source="namespace")
+    return hashlib.sha256(
+        _strict_canonical_json(
+            {
+                "mount_namespace": list(observation.scope.mount_namespace),
+                "task_mount_roots": projection,
+            }
+        )
+    ).hexdigest()
+
+
+def _capture_maintenance_target_observation(
+    index: TargetIndex,
+    *,
+    expected_boot_id_sha256: str,
+    expected_mount_namespace_sha256: str,
+) -> tuple[_GlobalObservation, tuple[str, ...], str, str]:
+    """Find an exact global fixed point under boot-start opaque-reference absence."""
+
+    previous: tuple[_GlobalObservation, tuple[str, ...], str, str] | None = None
+    try:
+        with _LinuxProcScanner(
+            Path("/proc"),
+            index,
+            conservatively_retain_opaque_file_references=False,
+            reject_namespace_pins=True,
+        ) as scanner:
+            for _attempt in range(8):
+                try:
+                    kernel_before = _kernel_target_references(index)
+                    current = scanner.capture()
+                    namespace_epoch = _maintenance_namespace_epoch(scanner, current)
+                    kernel_after = _kernel_target_references(index)
+                    _require_initial_host_scope(current.scope)
+                except _ProbeIssue as issue:
+                    if issue.code not in {
+                        "proc_observation_raced",
+                        "proc_fixed_point_changed",
+                    }:
+                        raise
+                    previous = None
+                    continue
+                if (
+                    kernel_before != kernel_after
+                    or current.scope.boot_id_sha256 != expected_boot_id_sha256
+                    or hashlib.sha256(
+                        (f"{current.scope.mount_namespace[0]}:{current.scope.mount_namespace[1]}").encode(
+                            "ascii"
+                        )
+                    ).hexdigest()
+                    != expected_mount_namespace_sha256
+                ):
+                    previous = None
+                    continue
+                combined = (current, kernel_after[0], kernel_after[1], namespace_epoch)
+                if previous == combined:
+                    return combined
+                previous = combined
+    except (_ProbeIssue, ProcProbeInputError, OSError) as exc:
+        raise ProcProbeInputError("maintenance_probe_incomplete") from exc
+    raise ProcProbeInputError("maintenance_probe_incomplete")
+
+
+_MAINTENANCE_TARGET_RECEIPT_KEYS = frozenset(
+    {
+        "authority",
+        "authority_file_sha256",
+        "boot_id_sha256",
+        "executing_initrd_sha256",
+        "host_scope_authority_sha256",
+        "implementation_sha256",
+        "kernel_epoch_sha256",
+        "namespace_epoch_sha256",
+        "observation_sha256",
+        "observer_euid",
+        "observer_namespace_epoch_sha256",
+        "observer_process_epoch_sha256",
+        "premount_receipt_sha256",
+        "process_epoch_sha256",
+        "receipt_sha256",
+        "referenced_target_ids",
+        "request_file_sha256",
+        "schema",
+        "scope_identity_sha256",
+        "status",
+        "target_count",
+        "target_index_sha256",
+        "task_count",
+        "tgid_count",
+        "transaction_id",
+    }
+)
+
+
+def maintenance_target_reference_receipt(index: TargetIndex) -> dict[str, Any]:
+    """Return a target receipt only under exact fresh first-PID1 authority."""
+
+    if os.geteuid() != 0 or build_target_index(index.targets) != index:
+        raise ProcProbeInputError("maintenance_probe_authority_invalid")
+    binding, authority, _premount = _maintenance_authority_document()
+    _host_scope, host_scope_sha256 = _host_scope_authority()
+    observation, kernel_referenced, kernel_epoch, observer_namespace_epoch = (
+        _capture_maintenance_target_observation(
+            index,
+            expected_boot_id_sha256=binding.boot_id_sha256,
+            expected_mount_namespace_sha256=str(authority["mount_namespace_sha256"]),
+        )
+    )
+    known = {target.target_id for target in index.targets}
+    referenced = sorted(
+        {target_id for match in observation.matches for target_id in match.target_ids}
+        | set(kernel_referenced)
+    )
+    if any(target_id not in known for target_id in referenced):
+        raise ProcProbeInputError("maintenance_probe_incomplete")
+    scope_identity_sha256 = hashlib.sha256(_strict_canonical_json(observation.scope.projection())).hexdigest()
+    bound_kernel_epoch = hashlib.sha256(
+        _strict_canonical_json(
+            {
+                "authority_file_sha256": binding.authority_file_sha256,
+                "kernel_epoch_sha256": kernel_epoch,
+            }
+        )
+    ).hexdigest()
+    bound_observation = hashlib.sha256(
+        _strict_canonical_json(
+            {
+                "authority_file_sha256": binding.authority_file_sha256,
+                "observation_sha256": observation.observation_sha256,
+                "observer_namespace_epoch_sha256": observer_namespace_epoch,
+            }
+        )
+    ).hexdigest()
+    core: dict[str, Any] = {
+        "authority": MAINTENANCE_TARGET_AUTHORITY,
+        "authority_file_sha256": binding.authority_file_sha256,
+        "boot_id_sha256": binding.boot_id_sha256,
+        "executing_initrd_sha256": binding.executing_initrd_sha256,
+        "host_scope_authority_sha256": host_scope_sha256,
+        "implementation_sha256": _implementation_sha256(),
+        "kernel_epoch_sha256": bound_kernel_epoch,
+        "namespace_epoch_sha256": binding.namespace_epoch_sha256,
+        "observation_sha256": bound_observation,
+        "observer_euid": 0,
+        "observer_namespace_epoch_sha256": observer_namespace_epoch,
+        "observer_process_epoch_sha256": observation.task_epoch_set_sha256,
+        "premount_receipt_sha256": binding.premount_receipt_sha256,
+        "process_epoch_sha256": binding.process_epoch_sha256,
+        "referenced_target_ids": referenced,
+        "request_file_sha256": binding.request_file_sha256,
+        "schema": MAINTENANCE_TARGET_RECEIPT_SCHEMA,
+        "scope_identity_sha256": scope_identity_sha256,
+        "status": "referenced" if referenced else "clear",
+        "target_count": len(index.targets),
+        "target_index_sha256": index.sha256,
+        "task_count": observation.task_count,
+        "tgid_count": observation.tgid_count,
+        "transaction_id": binding.transaction_id,
+    }
+    return {
+        **core,
+        "receipt_sha256": hashlib.sha256(_strict_canonical_json(core)).hexdigest(),
+    }
+
+
+def canonical_maintenance_target_receipt_bytes(
+    receipt: Mapping[str, Any],
+    *,
+    expected_target_index: TargetIndex,
+    expected_implementation_sha256: str,
+    expected_host_scope_authority_sha256: str,
+    expected_authority: MaintenancePremountAuthority,
+) -> bytes:
+    """Validate the separate maintenance target-receipt schema."""
+
+    if (
+        not isinstance(receipt, Mapping)
+        or not isinstance(expected_authority, MaintenancePremountAuthority)
+        or not isinstance(expected_target_index, TargetIndex)
+        or build_target_index(expected_target_index.targets) != expected_target_index
+    ):
+        raise ProcProbeInputError("maintenance_probe_receipt_invalid")
+    value = dict(receipt)
+    digest = value.pop("receipt_sha256", None)
+    known_ids = {target.target_id for target in expected_target_index.targets}
+    referenced = value.get("referenced_target_ids")
+    binding_fields = {
+        "authority_file_sha256": expected_authority.authority_file_sha256,
+        "boot_id_sha256": expected_authority.boot_id_sha256,
+        "executing_initrd_sha256": expected_authority.executing_initrd_sha256,
+        "namespace_epoch_sha256": expected_authority.namespace_epoch_sha256,
+        "premount_receipt_sha256": expected_authority.premount_receipt_sha256,
+        "process_epoch_sha256": expected_authority.process_epoch_sha256,
+        "request_file_sha256": expected_authority.request_file_sha256,
+        "transaction_id": expected_authority.transaction_id,
+    }
+    digest_names = (
+        *binding_fields,
+        "host_scope_authority_sha256",
+        "implementation_sha256",
+        "kernel_epoch_sha256",
+        "observation_sha256",
+        "observer_namespace_epoch_sha256",
+        "observer_process_epoch_sha256",
+        "scope_identity_sha256",
+        "target_index_sha256",
+    )
+    if (
+        set(receipt) != _MAINTENANCE_TARGET_RECEIPT_KEYS
+        or value.get("schema") != MAINTENANCE_TARGET_RECEIPT_SCHEMA
+        or value.get("authority") != MAINTENANCE_TARGET_AUTHORITY
+        or value.get("observer_euid") != 0
+        or type(value.get("observer_euid")) is not int
+        or value.get("implementation_sha256") != expected_implementation_sha256
+        or value.get("host_scope_authority_sha256") != expected_host_scope_authority_sha256
+        or value.get("target_index_sha256") != expected_target_index.sha256
+        or value.get("target_count") != len(expected_target_index.targets)
+        or type(value.get("target_count")) is not int
+        or any(value.get(name) != expected for name, expected in binding_fields.items())
+        or not _maintenance_digest_fields(value, digest_names)
+        or not isinstance(referenced, list)
+        or referenced != sorted(set(referenced))
+        or any(not isinstance(item, str) or item not in known_ids for item in referenced)
+        or value.get("status") != ("referenced" if referenced else "clear")
+        or type(value.get("task_count")) is not int
+        or int(value.get("task_count", 0)) < 1
+        or type(value.get("tgid_count")) is not int
+        or not 1 <= int(value.get("tgid_count", 0)) <= int(value.get("task_count", 0))
+        or not isinstance(digest, str)
+        or _HEX64.fullmatch(digest) is None
+        or hashlib.sha256(_strict_canonical_json(value)).hexdigest() != digest
+    ):
+        raise ProcProbeInputError("maintenance_probe_receipt_invalid")
+    raw = _strict_canonical_json(dict(receipt)) + b"\n"
+    if len(raw) > MAX_RECEIPT_BYTES:
+        raise ProcProbeInputError("maintenance_probe_receipt_invalid")
+    return raw
+
+
+def parse_maintenance_target_receipt_bytes(
+    raw: bytes,
+    *,
+    expected_target_index: TargetIndex,
+    expected_implementation_sha256: str,
+    expected_host_scope_authority_sha256: str,
+    expected_authority: MaintenancePremountAuthority,
+) -> dict[str, Any]:
+    """Parse canonical maintenance output while rejecting duplicate keys."""
+
+    try:
+        value = _strict_canonical_document(
+            raw,
+            maximum=MAX_RECEIPT_BYTES,
+            error="maintenance_probe_receipt_invalid",
+        )
+        canonical = canonical_maintenance_target_receipt_bytes(
+            value,
+            expected_target_index=expected_target_index,
+            expected_implementation_sha256=expected_implementation_sha256,
+            expected_host_scope_authority_sha256=expected_host_scope_authority_sha256,
+            expected_authority=expected_authority,
+        )
+    except ProcProbeInputError as exc:
+        if str(exc) == "maintenance_probe_receipt_invalid":
+            raise
+        raise ProcProbeInputError("maintenance_probe_receipt_invalid") from exc
+    if raw != canonical:
+        raise ProcProbeInputError("maintenance_probe_receipt_invalid")
+    return value
+
+
 def _host_scope_authority() -> tuple[dict[str, Any], str]:
     """Authenticate the initial-host proc/PID scope pinned during root install."""
 
@@ -2726,12 +3630,97 @@ def _privileged_main() -> int:
             os.close(lock_fd)
 
 
+def _maintenance_main() -> int:
+    lock_fd = -1
+    try:
+        if os.geteuid() != 0:
+            raise ProcProbeInputError("maintenance_probe_authority_invalid")
+        lock_fd = os.open(
+            INSTALL_LOCK_PATH,
+            os.O_RDWR | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0),
+        )
+        lock_status = os.fstat(lock_fd)
+        lock_named = os.stat(INSTALL_LOCK_PATH, follow_symlinks=False)
+        if (
+            not stat.S_ISREG(lock_status.st_mode)
+            or lock_status.st_uid != 0
+            or lock_status.st_nlink != 1
+            or stat.S_IMODE(lock_status.st_mode) != 0o600
+            or (lock_status.st_dev, lock_status.st_ino) != (lock_named.st_dev, lock_named.st_ino)
+        ):
+            raise ProcProbeInputError("maintenance_probe_authority_invalid")
+        try:
+            fcntl.flock(lock_fd, fcntl.LOCK_SH | fcntl.LOCK_NB)
+        except BlockingIOError as exc:
+            raise ProcProbeInputError("maintenance_probe_authority_invalid") from exc
+        raw = sys.stdin.buffer.read(MAX_PRIVILEGED_INPUT_BYTES + 1)
+        if len(raw) > MAX_PRIVILEGED_INPUT_BYTES:
+            raise ProcProbeInputError("target_index_limit_exceeded")
+        index = parse_target_index_bytes(raw)
+        receipt = maintenance_target_reference_receipt(index)
+        binding = MaintenancePremountAuthority(
+            transaction_id=str(receipt["transaction_id"]),
+            request_file_sha256=str(receipt["request_file_sha256"]),
+            executing_initrd_sha256=str(receipt["executing_initrd_sha256"]),
+            boot_id_sha256=str(receipt["boot_id_sha256"]),
+            authority_file_sha256=str(receipt["authority_file_sha256"]),
+            premount_receipt_sha256=str(receipt["premount_receipt_sha256"]),
+            process_epoch_sha256=str(receipt["process_epoch_sha256"]),
+            namespace_epoch_sha256=str(receipt["namespace_epoch_sha256"]),
+        )
+        _scope, scope_sha256 = _host_scope_authority()
+        sys.stdout.buffer.write(
+            canonical_maintenance_target_receipt_bytes(
+                receipt,
+                expected_target_index=index,
+                expected_implementation_sha256=_implementation_sha256(),
+                expected_host_scope_authority_sha256=scope_sha256,
+                expected_authority=binding,
+            )
+        )
+        sys.stdout.buffer.flush()
+        return 0
+    except Exception as exc:
+        failure_code, source = _privileged_failure_projection(exc)
+        failure = {
+            "failure_code": failure_code,
+            "schema": MAINTENANCE_TARGET_RECEIPT_SCHEMA,
+            "source": source,
+            "status": "failed_closed",
+        }
+        sys.stderr.buffer.write(_strict_canonical_json(failure) + b"\n")
+        sys.stderr.buffer.flush()
+        return 2
+    finally:
+        if lock_fd >= 0:
+            with suppress(OSError):
+                fcntl.flock(lock_fd, fcntl.LOCK_UN)
+            os.close(lock_fd)
+
+
+def maintenance_boot_requested() -> bool:
+    """Return an untrusted routing hint; maintenance authority is still required."""
+
+    if os.path.lexists(MAINTENANCE_AUTHORITY_PATH) or os.path.lexists(MAINTENANCE_PREMOUNT_RECEIPT_PATH):
+        return True
+    try:
+        raw = _stable_kernel_bytes(Path("/proc/cmdline"), maximum=64 << 10)
+    except ProcProbeInputError:
+        return False
+    return any(token.startswith(b"rd.friday.retention") for token in raw.split())
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("command", choices=("privileged-target-probe",))
+    parser.add_argument(
+        "command",
+        choices=("maintenance-target-probe", "privileged-target-probe"),
+    )
     args = parser.parse_args(argv)
     if args.command == "privileged-target-probe":
         return _privileged_main()
+    if args.command == "maintenance-target-probe":
+        return _maintenance_main()
     return 2
 
 

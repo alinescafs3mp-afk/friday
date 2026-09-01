@@ -3438,6 +3438,112 @@ def test_explicit_reviewed_scratch_requires_exact_symlink_free_non_git_tree(
     assert git_target["reason"] == "reviewed_scratch_invalid"
 
 
+def test_maintenance_builder_omits_receipted_deleted_scratch_from_real_terminal_plan(
+    synthetic_inventory: dict[str, Any],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    scratch = synthetic_inventory["inventory"] / "reviewed-between-batches"
+    scratch.mkdir(mode=0o700)
+    (scratch / "artifact.bin").write_bytes(b"reviewed disposable bytes")
+    observed = retention._observe_target(scratch)  # noqa: SLF001
+    assert observed.inventory_sha256 is not None
+    reviewed = (
+        retention.ReviewedScratchTarget(
+            path=scratch,
+            inventory_sha256=observed.inventory_sha256,
+        ),
+    )
+    _enable_complete_delete_evidence(monkeypatch)
+    scope = retention.load_retention_scope_authority(
+        activation_journal=synthetic_inventory["activation_journal"],
+    )
+    inputs = {
+        "activation_journal": synthetic_inventory["activation_journal"],
+        "backup_inventory_roots": scope.backup_inventory_roots,
+        "backup_root": scope.backup_root,
+        "canonical_evidence_roots": scope.canonical_evidence_roots,
+        "inventory_roots": scope.inventory_roots,
+        "reviewed_scratch_targets": reviewed,
+        "unit_journal": synthetic_inventory["unit_journal"],
+    }
+    bindings = retention.build_retention_authority_bindings(
+        activation_journal=inputs["activation_journal"],
+        unit_journal=inputs["unit_journal"],
+        canonical_evidence_roots=inputs["canonical_evidence_roots"],
+    )
+    accepted = retention.plan_release_artifact_retention(
+        activation_journal=inputs["activation_journal"],
+        unit_journal=inputs["unit_journal"],
+        backup_root=scope.backup_root,
+        inventory_roots=scope.inventory_roots,
+        backup_inventory_roots=scope.backup_inventory_roots,
+        reviewed_scratch_targets=reviewed,
+        open_inventory=retention.OpenInventorySnapshot(
+            source="code_owned_candidate_scope_seed_v1",
+            complete=True,
+        ),
+        authority_bindings=bindings,
+        executable=True,
+        _scope_seed=True,  # noqa: SLF001
+        _retention_scope=scope.receipt,  # noqa: SLF001
+    )
+    assert accepted["classification_status"] == "scope_seed"
+    accepted_exact = retention_apply._reviewed_candidate_identities(  # noqa: SLF001
+        accepted
+    )
+    accepted_portable = tuple(
+        retention_apply._portable_reviewed_identity(item)  # noqa: SLF001
+        for item in accepted_exact
+    )
+    applied_paths = frozenset(str(item["path"]) for item in accepted_exact)
+    assert str(scratch) in applied_paths
+    for path in sorted((Path(value) for value in applied_paths), key=str):
+        shutil.rmtree(path)
+
+    stale_seed = retention.plan_release_artifact_retention(
+        activation_journal=inputs["activation_journal"],
+        unit_journal=inputs["unit_journal"],
+        backup_root=scope.backup_root,
+        inventory_roots=scope.inventory_roots,
+        backup_inventory_roots=scope.backup_inventory_roots,
+        reviewed_scratch_targets=reviewed,
+        open_inventory=retention.OpenInventorySnapshot(
+            source="code_owned_candidate_scope_seed_v1",
+            complete=True,
+        ),
+        authority_bindings=bindings,
+        executable=True,
+        _scope_seed=True,  # noqa: SLF001
+        _retention_scope=scope.receipt,  # noqa: SLF001
+    )
+    assert stale_seed["classification_status"] == "blocked"
+    assert stale_seed["block_reason"] == "reviewed_scratch_invalid"
+
+    real_maintenance_authority = retention_apply._maintenance_plan_authority  # noqa: SLF001
+    monkeypatch.setattr(
+        retention_apply,
+        "_maintenance_plan_authority",
+        lambda value: (
+            {"authenticated_test_maintenance": True}
+            if value is accepted
+            else real_maintenance_authority(value)
+        ),
+    )
+    terminal = retention_apply._build_reviewed_subset_plan(  # noqa: SLF001
+        inputs=inputs,
+        accepted_root=accepted,
+        accepted_portable_identities=accepted_portable,
+        applied_before_paths=applied_paths,
+    )
+
+    assert terminal["classification_status"] == "eligible"
+    assert terminal["reviewed_scratch_targets"] == []
+    assert retention_apply._is_exact_terminal_zero_plan(  # noqa: SLF001
+        terminal,
+        retention_apply._candidate_records(terminal),  # noqa: SLF001
+    )
+
+
 def test_nested_expected_name_symlink_is_never_backup_or_apply_candidate(
     synthetic_inventory: dict[str, Any],
     monkeypatch: pytest.MonkeyPatch,

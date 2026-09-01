@@ -57,7 +57,12 @@ def _install_cycle_fakes(
     root_path = tmp_path / "reviewed.json"
     root_path.write_text("{}\n", encoding="ascii")
     root_sha = "b" * 64
-    root = {"plan_sha256": root_sha, "kind": "root"}
+    root = {
+        "effect_authority": {},
+        "kind": "root",
+        "open_inventory": {"source": "code_owned_privileged_target_proc_v1"},
+        "plan_sha256": root_sha,
+    }
     epoch = {**_epoch(), "topology": topology}
     monkeypatch.setattr(operator, "_read_reviewed_plan", lambda *_args, **_kwargs: root)
     monkeypatch.setattr(
@@ -421,6 +426,21 @@ def test_converged_receipt_rechecks_namespace_after_constructing_receipt(
         operator,
         "_validated_terminal_chain",
         lambda *_args, **_kwargs: {"terminal": True},
+    )
+    monkeypatch.setattr(operator, "_load_journal", lambda _path: {"journal": True})
+    monkeypatch.setattr(operator, "_cycle_context_from_record", lambda _record: {})
+    monkeypatch.setattr(
+        operator,
+        "_load_accepted_root_plan",
+        lambda *_args, **_kwargs: {
+            "effect_authority": {},
+            "open_inventory": {"source": "code_owned_privileged_target_proc_v1"},
+        },
+    )
+    monkeypatch.setattr(
+        operator,
+        "_load_maintenance_convergence_authority",
+        lambda *_args, **_kwargs: None,
     )
 
     def convergence_receipt(**_kwargs: Any) -> dict[str, Any]:

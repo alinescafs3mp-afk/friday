@@ -39,8 +39,10 @@ from tools import release_dr_generation_authentication as dr_auth  # noqa: E402
 from tools import release_dr_generation_index as dr_index  # noqa: E402
 
 PLAN_SCHEMA = "friday.release-artifact-retention-plan.v3"
+MAINTENANCE_PLAN_SCHEMA = "friday.release-artifact-retention-maintenance-plan.v1"
 AUTHORITY_BINDINGS_SCHEMA = "friday.release-artifact-retention-authority-bindings.v1"
 OPEN_INVENTORY_SCHEMA = "friday.release-artifact-open-inventory.v1"
+MAINTENANCE_OPEN_INVENTORY_SCHEMA = "friday.release-artifact-maintenance-open-inventory.v1"
 RETENTION_SCOPE_SCHEMA = "friday.release-artifact-retention-scope.v1"
 RETENTION_SCOPE_NAME = "release-artifact-retention-scope.v1.json"
 BOUNDED_DELETE_CONTOUR = "sealed-localfs-proc-mount-kernel-lease-global-lock-v1"
@@ -85,6 +87,7 @@ _OPEN_SOURCES = frozenset(
         "code_owned_privileged_target_proc_v1",
         "code_owned_privileged_target_diagnostic_v1",
         "code_owned_privileged_all_targets_no_delete_v1",
+        "code_owned_one_shot_maintenance_global_premount_v1",
         "code_owned_no_delete_candidates_v1",
         "synthetic_test",
     }
@@ -93,6 +96,15 @@ _APPLY_AUTHORITY_OPEN_SOURCES = frozenset(
     {
         "code_owned_privileged_target_proc_v1",
         "code_owned_privileged_target_diagnostic_v1",
+    }
+)
+_MAINTENANCE_OPEN_SOURCE = "code_owned_one_shot_maintenance_global_premount_v1"
+_MAINTENANCE_AUTHORITY_SEAL = object()
+_FINAL_TARGET_INDEX_RECHECK_SOURCES = frozenset(
+    {
+        "code_owned_privileged_target_diagnostic_v1",
+        "code_owned_privileged_all_targets_no_delete_v1",
+        _MAINTENANCE_OPEN_SOURCE,
     }
 )
 _SCRATCH_CONTOUR = "exact_owner_tree_without_git_v1"
@@ -185,6 +197,77 @@ class OpenInventorySnapshot:
     authority_sha256: str = ""
     target_index_sha256: str = ""
     process_epoch_sha256: str = ""
+
+
+@dataclass(frozen=True)
+class _MaintenanceEffectAuthority:
+    """Projection of one authenticated maintenance-boot probe.
+
+    This object is not an authority boundary: its private seal only catches
+    accidental construction.  Consumers must reauthenticate the underlying
+    premount documents before granting authority, and the operator reacquires
+    them again immediately before every effect.
+    """
+
+    transaction_id: str
+    request_file_sha256: str
+    executing_initrd_sha256: str
+    boot_id_sha256: str
+    authority_sha256: str
+    premount_receipt_sha256: str
+    process_epoch_sha256: str
+    namespace_epoch_sha256: str
+    target_receipt_sha256: str
+    _seal: object | None = None
+
+    def projection(self) -> dict[str, str]:
+        return {
+            "authority_sha256": self.authority_sha256,
+            "boot_id_sha256": self.boot_id_sha256,
+            "executing_initrd_sha256": self.executing_initrd_sha256,
+            "namespace_epoch_sha256": self.namespace_epoch_sha256,
+            "premount_receipt_sha256": self.premount_receipt_sha256,
+            "process_epoch_sha256": self.process_epoch_sha256,
+            "request_file_sha256": self.request_file_sha256,
+            "target_receipt_sha256": self.target_receipt_sha256,
+            "transaction_id": self.transaction_id,
+        }
+
+    def stable_projection(self) -> dict[str, str]:
+        return {
+            "executing_initrd_sha256": self.executing_initrd_sha256,
+            "request_file_sha256": self.request_file_sha256,
+            "transaction_id": self.transaction_id,
+        }
+
+
+@dataclass(frozen=True)
+class _MaintenanceOpenInventorySnapshot:
+    snapshot: OpenInventorySnapshot
+    authority: _MaintenanceEffectAuthority
+
+
+def _validated_maintenance_effect_authority(
+    value: object,
+    *,
+    code: str,
+) -> _MaintenanceEffectAuthority:
+    if not isinstance(value, _MaintenanceEffectAuthority) or value._seal is not _MAINTENANCE_AUTHORITY_SEAL:
+        raise RetentionPlanError(code)
+    projection = value.projection()
+    if set(projection) != {
+        "authority_sha256",
+        "boot_id_sha256",
+        "executing_initrd_sha256",
+        "namespace_epoch_sha256",
+        "premount_receipt_sha256",
+        "process_epoch_sha256",
+        "request_file_sha256",
+        "target_receipt_sha256",
+        "transaction_id",
+    } or any(not _is_hex64(item) for item in projection.values()):
+        raise RetentionPlanError(code)
+    return value
 
 
 INCOMPLETE_OPEN_INVENTORY = OpenInventorySnapshot(source="unavailable", complete=False)
@@ -1549,6 +1632,39 @@ def _snapshot(path: Path) -> _TreeSnapshot:
     )
 
 
+def _target_observation_from_snapshot(
+    path: Path,
+    snapshot: _TreeSnapshot,
+    *,
+    raced: bool,
+) -> _TargetObservation:
+    """Project one tree snapshot without opening the target a second way."""
+
+    root = next(record for record in snapshot.records if record[0] == ".")
+    return _TargetObservation(
+        path=path,
+        device=root[1],
+        inode=root[2],
+        mount_id=root[9],
+        filesystem_magic=snapshot.filesystem_magic,
+        mode=root[3],
+        kind=_kind(root[3]),
+        nlink=root[4],
+        total_bytes=snapshot.total_bytes,
+        total_allocated_bytes=snapshot.total_allocated_bytes,
+        entry_count=snapshot.entry_count,
+        inventory_sha256=hashlib.sha256(_canonical_json(snapshot.records)).hexdigest(),
+        object_identities=frozenset((record[1], record[2]) for record in snapshot.records),
+        owner_ok=snapshot.owner_ok,
+        has_symlink=snapshot.has_symlink,
+        has_special=snapshot.has_special,
+        has_hardlink=snapshot.has_hardlink,
+        has_group_world_writable=snapshot.has_group_world_writable,
+        writable_authority_sha256=snapshot.writable_authority_sha256,
+        raced=raced,
+    )
+
+
 def _observe_target(path: Path) -> _TargetObservation:
     try:
         first = _snapshot(path)
@@ -1603,34 +1719,45 @@ def _observe_target(path: Path) -> _TargetObservation:
             writable_authority_sha256=None,
             raced=True,
         )
-    root = next(record for record in first.records if record[0] == ".")
-    return _TargetObservation(
-        path=path,
-        device=root[1],
-        inode=root[2],
-        mount_id=root[9],
-        filesystem_magic=first.filesystem_magic,
-        mode=root[3],
-        kind=_kind(root[3]),
-        nlink=root[4],
-        total_bytes=first.total_bytes,
-        total_allocated_bytes=first.total_allocated_bytes,
-        entry_count=first.entry_count,
-        inventory_sha256=hashlib.sha256(_canonical_json(first.records)).hexdigest(),
-        object_identities=frozenset((record[1], record[2]) for record in first.records),
-        owner_ok=first.owner_ok,
-        has_symlink=first.has_symlink,
-        has_special=first.has_special,
-        has_hardlink=first.has_hardlink,
-        has_group_world_writable=first.has_group_world_writable,
-        writable_authority_sha256=first.writable_authority_sha256,
+    return _target_observation_from_snapshot(
+        path,
+        first,
         raced=first != second,
     )
 
 
 def _normalize_open_inventory(
-    snapshot: OpenInventorySnapshot,
+    value: OpenInventorySnapshot | _MaintenanceOpenInventorySnapshot,
 ) -> tuple[dict[str, Any], frozenset[Path], frozenset[tuple[int, int]]]:
+    maintenance_authority: _MaintenanceEffectAuthority | None = None
+    if type(value) is _MaintenanceOpenInventorySnapshot:
+        if type(value.snapshot) is not OpenInventorySnapshot:
+            raise RetentionPlanError("open_inventory_invalid")
+        snapshot = value.snapshot
+        maintenance_authority = _validated_maintenance_effect_authority(
+            value.authority,
+            code="open_inventory_invalid",
+        )
+        try:
+            live = proc_probe.maintenance_premount_authority()
+        except proc_probe.ProcProbeInputError as exc:
+            raise RetentionPlanError("open_inventory_invalid") from exc
+        if maintenance_authority.projection() | {"target_receipt_sha256": ""} != {
+            "authority_sha256": live.authority_file_sha256,
+            "boot_id_sha256": live.boot_id_sha256,
+            "executing_initrd_sha256": live.executing_initrd_sha256,
+            "namespace_epoch_sha256": live.namespace_epoch_sha256,
+            "premount_receipt_sha256": live.premount_receipt_sha256,
+            "process_epoch_sha256": live.process_epoch_sha256,
+            "request_file_sha256": live.request_file_sha256,
+            "target_receipt_sha256": "",
+            "transaction_id": live.transaction_id,
+        }:
+            raise RetentionPlanError("open_inventory_invalid")
+    elif type(value) is OpenInventorySnapshot:
+        snapshot = value
+    else:
+        raise RetentionPlanError("open_inventory_invalid")
     if snapshot.source not in _OPEN_SOURCES or type(snapshot.complete) is not bool:
         raise RetentionPlanError("open_inventory_invalid")
     if snapshot.source == "unavailable" and (
@@ -1648,7 +1775,9 @@ def _normalize_open_inventory(
         "code_owned_privileged_target_proc_v1",
         "code_owned_privileged_target_diagnostic_v1",
         "code_owned_privileged_all_targets_no_delete_v1",
+        _MAINTENANCE_OPEN_SOURCE,
     }
+    maintenance = snapshot.source == _MAINTENANCE_OPEN_SOURCE
     no_candidates = snapshot.source == "code_owned_no_delete_candidates_v1"
     metadata = (
         snapshot.authority_sha256,
@@ -1670,6 +1799,16 @@ def _normalize_open_inventory(
             raise RetentionPlanError("open_inventory_invalid")
     elif any(metadata):
         raise RetentionPlanError("open_inventory_invalid")
+    if maintenance:
+        if maintenance_authority is None:
+            raise RetentionPlanError("open_inventory_invalid")
+        if maintenance_authority.process_epoch_sha256 != snapshot.process_epoch_sha256:
+            raise RetentionPlanError("open_inventory_invalid")
+        maintenance_projection: dict[str, str] = maintenance_authority.projection()
+    else:
+        if maintenance_authority is not None:
+            raise RetentionPlanError("open_inventory_invalid")
+        maintenance_projection = {}
     paths: set[Path] = set()
     for path in snapshot.open_paths:
         paths.add(_absolute_lexical(path, code="open_inventory_invalid"))
@@ -1690,10 +1829,12 @@ def _normalize_open_inventory(
     observation_role = (
         "conservative_retention_only"
         if snapshot.source == "code_owned_privileged_all_targets_no_delete_v1"
+        else "global_premount_effect_authority"
+        if maintenance
         else "diagnostic_prerequisite"
     )
     core = {
-        "schema": OPEN_INVENTORY_SCHEMA,
+        "schema": (MAINTENANCE_OPEN_INVENTORY_SCHEMA if maintenance else OPEN_INVENTORY_SCHEMA),
         "source": snapshot.source,
         "complete": snapshot.complete,
         "open_paths": canonical_paths,
@@ -1702,11 +1843,12 @@ def _normalize_open_inventory(
         "target_index_sha256": snapshot.target_index_sha256,
         "process_epoch_sha256": snapshot.process_epoch_sha256,
         "observation_role": observation_role,
-        "universal_absence_proof": False,
+        "universal_absence_proof": maintenance,
+        **({"maintenance_authority": maintenance_projection} if maintenance else {}),
     }
     return (
         {
-            "schema": OPEN_INVENTORY_SCHEMA,
+            "schema": (MAINTENANCE_OPEN_INVENTORY_SCHEMA if maintenance else OPEN_INVENTORY_SCHEMA),
             "source": snapshot.source,
             "complete": snapshot.complete,
             "open_path_count": len(paths),
@@ -1715,7 +1857,8 @@ def _normalize_open_inventory(
             "target_index_sha256": snapshot.target_index_sha256,
             "process_epoch_sha256": snapshot.process_epoch_sha256,
             "observation_role": observation_role,
-            "universal_absence_proof": False,
+            "universal_absence_proof": maintenance,
+            **({"maintenance_authority": maintenance_projection} if maintenance else {}),
             "snapshot_sha256": hashlib.sha256(_canonical_json(core)).hexdigest(),
         },
         frozenset(paths),
@@ -3001,21 +3144,23 @@ def _target_probe_index(
     targets: list[proc_probe.ProbeTarget] = []
     by_id: dict[str, tuple[Path, _TargetObservation]] = {}
     for path in sorted({_absolute_lexical(item, code="open_inventory_invalid") for item in paths}, key=str):
-        observation = _observe_target(path)
-        if observation.raced or observation.kind == "unknown":
-            raise RetentionPlanError("open_state_ambiguous")
         try:
             snapshot = _snapshot(path)
             snapshot_after = _snapshot(path)
             if snapshot != snapshot_after:
                 raise RetentionPlanError("open_state_ambiguous")
+            observation = _target_observation_from_snapshot(
+                path,
+                snapshot,
+                raced=False,
+            )
             objects = tuple(
                 proc_probe.ObjectKey(record[1], record[2], stat.S_IFMT(record[3]))
                 for record in snapshot.records
             )
             target_id = f"artifact-{hashlib.sha256(str(path).encode()).hexdigest()[:32]}"
             target = proc_probe.ProbeTarget(target_id, (path,), objects)
-        except (OSError, proc_probe.ProcProbeInputError) as exc:
+        except (OSError, proc_probe.ProcProbeInputError, RetentionPlanError) as exc:
             raise RetentionPlanError("open_state_ambiguous") from exc
         if target_id in by_id:
             raise RetentionPlanError("open_state_ambiguous")
@@ -3029,11 +3174,32 @@ def _target_probe_index(
         raise RetentionPlanError("open_state_ambiguous") from exc
 
 
-def _run_privileged_target_probe(index: proc_probe.TargetIndex) -> tuple[dict[str, Any], str]:
+def _require_exact_target_index(
+    index: proc_probe.TargetIndex,
+    seeds: Mapping[str, tuple[Path, _TargetObservation]],
+    *,
+    code: str,
+) -> None:
+    """Rebuild the path/object binding after a probe and reject every drift."""
+
+    try:
+        rebuilt, rebuilt_seeds = _target_probe_index(tuple(path for path, _observation in seeds.values()))
+    except RetentionPlanError as exc:
+        raise RetentionPlanError(code) from exc
+    if rebuilt.sha256 != index.sha256 or rebuilt_seeds != dict(seeds):
+        raise RetentionPlanError(code)
+
+
+def _run_exact_target_probe(
+    index: proc_probe.TargetIndex,
+    *,
+    maintenance: bool,
+) -> tuple[dict[str, Any], str, str]:
     helper, helper_sha256 = _root_owned_file_sha256(PRIVILEGED_PROC_HELPER)
     scope_authority_sha256 = PRIVILEGED_SCOPE_AUTHORITY_SHA256
     sudo, sudo_sha256 = _root_owned_file_sha256(Path("/usr/bin/sudo"), setuid=True)
     python, python_sha256 = _root_owned_file_sha256(Path("/usr/bin/python3"))
+    command_name = "maintenance-target-probe" if maintenance else "privileged-target-probe"
     command = [
         str(sudo),
         "-n",
@@ -3043,7 +3209,7 @@ def _run_privileged_target_probe(index: proc_probe.TargetIndex) -> tuple[dict[st
         "-B",
         "-S",
         str(helper),
-        "privileged-target-probe",
+        command_name,
     ]
     try:
         local_sha256 = _stable_file_sha256(
@@ -3065,14 +3231,36 @@ def _run_privileged_target_probe(index: proc_probe.TargetIndex) -> tuple[dict[st
         if result.returncode != 0 or len(result.stdout) > proc_probe.MAX_RECEIPT_BYTES:
             raise RetentionPlanError("open_state_ambiguous")
         receipt = _unique_json(result.stdout, code="open_state_ambiguous")
-        canonical = proc_probe.canonical_privileged_receipt_bytes(
-            receipt,
-            expected_target_index=index,
-            expected_implementation_sha256=helper_sha256,
-            expected_host_scope_authority_sha256=scope_authority_sha256,
-        )
-        if canonical != result.stdout:
-            raise RetentionPlanError("open_state_ambiguous")
+        if maintenance:
+            try:
+                maintenance_binding = proc_probe.MaintenancePremountAuthority(
+                    transaction_id=str(receipt["transaction_id"]),
+                    request_file_sha256=str(receipt["request_file_sha256"]),
+                    executing_initrd_sha256=str(receipt["executing_initrd_sha256"]),
+                    boot_id_sha256=str(receipt["boot_id_sha256"]),
+                    authority_file_sha256=str(receipt["authority_file_sha256"]),
+                    premount_receipt_sha256=str(receipt["premount_receipt_sha256"]),
+                    process_epoch_sha256=str(receipt["process_epoch_sha256"]),
+                    namespace_epoch_sha256=str(receipt["namespace_epoch_sha256"]),
+                )
+                receipt = proc_probe.parse_maintenance_target_receipt_bytes(
+                    result.stdout,
+                    expected_target_index=index,
+                    expected_implementation_sha256=helper_sha256,
+                    expected_host_scope_authority_sha256=scope_authority_sha256,
+                    expected_authority=maintenance_binding,
+                )
+            except (KeyError, TypeError, ValueError, proc_probe.ProcProbeInputError) as exc:
+                raise RetentionPlanError("open_state_ambiguous") from exc
+        else:
+            canonical = proc_probe.canonical_privileged_receipt_bytes(
+                receipt,
+                expected_target_index=index,
+                expected_implementation_sha256=helper_sha256,
+                expected_host_scope_authority_sha256=scope_authority_sha256,
+            )
+            if canonical != result.stdout:
+                raise RetentionPlanError("open_state_ambiguous")
         transport = {
             "argv": command,
             "helper_sha256": helper_sha256,
@@ -3080,7 +3268,11 @@ def _run_privileged_target_probe(index: proc_probe.TargetIndex) -> tuple[dict[st
             "scope_authority_sha256": scope_authority_sha256,
             "sudo_sha256": sudo_sha256,
         }
-        return receipt, hashlib.sha256(_canonical_json(transport)).hexdigest()
+        return (
+            receipt,
+            hashlib.sha256(_canonical_json(transport)).hexdigest(),
+            hashlib.sha256(result.stdout).hexdigest(),
+        )
     except (
         OSError,
         subprocess.SubprocessError,
@@ -3092,20 +3284,96 @@ def _run_privileged_target_probe(index: proc_probe.TargetIndex) -> tuple[dict[st
         raise RetentionPlanError("open_state_ambiguous") from exc
 
 
-def build_complete_open_inventory(*, target_paths: Sequence[Path]) -> OpenInventorySnapshot:
+def _run_privileged_target_probe(index: proc_probe.TargetIndex) -> tuple[dict[str, Any], str]:
+    """Run only the ordinary conservative v3 observer command."""
+
+    receipt, runtime_authority_sha256, _output_sha256 = _run_exact_target_probe(
+        index,
+        maintenance=False,
+    )
+    return receipt, runtime_authority_sha256
+
+
+def _run_maintenance_target_probe(
+    index: proc_probe.TargetIndex,
+) -> tuple[dict[str, Any], str, str]:
+    """Run only the authenticated maintenance target observer command."""
+
+    return _run_exact_target_probe(index, maintenance=True)
+
+
+def _maintenance_effect_authority_from_receipt(
+    receipt: Mapping[str, Any],
+    *,
+    target_receipt_sha256: str,
+) -> _MaintenanceEffectAuthority:
+    if receipt.get("schema") != proc_probe.MAINTENANCE_TARGET_RECEIPT_SCHEMA or not _is_hex64(
+        target_receipt_sha256
+    ):
+        raise RetentionPlanError("maintenance_effect_authority_invalid")
+    try:
+        authority = _MaintenanceEffectAuthority(
+            transaction_id=str(receipt["transaction_id"]),
+            request_file_sha256=str(receipt["request_file_sha256"]),
+            executing_initrd_sha256=str(receipt["executing_initrd_sha256"]),
+            boot_id_sha256=str(receipt["boot_id_sha256"]),
+            authority_sha256=str(receipt["authority_file_sha256"]),
+            premount_receipt_sha256=str(receipt["premount_receipt_sha256"]),
+            process_epoch_sha256=str(receipt["process_epoch_sha256"]),
+            namespace_epoch_sha256=str(receipt["namespace_epoch_sha256"]),
+            target_receipt_sha256=target_receipt_sha256,
+            _seal=_MAINTENANCE_AUTHORITY_SEAL,
+        )
+    except (KeyError, TypeError, ValueError) as exc:
+        raise RetentionPlanError("maintenance_effect_authority_invalid") from exc
+    return _validated_maintenance_effect_authority(
+        authority,
+        code="maintenance_effect_authority_invalid",
+    )
+
+
+def _build_complete_open_inventory(
+    *,
+    target_paths: Sequence[Path],
+    maintenance: bool,
+) -> OpenInventorySnapshot | _MaintenanceOpenInventorySnapshot:
     """Use one exact root observer result for only the reviewed inventory targets."""
 
     index, seeds = _target_probe_index(target_paths)
-    receipt, runtime_authority_sha256 = _run_privileged_target_probe(index)
+    target_receipt_sha256 = ""
+    if maintenance:
+        (
+            receipt,
+            runtime_authority_sha256,
+            target_receipt_sha256,
+        ) = _run_maintenance_target_probe(index)
+    else:
+        receipt, runtime_authority_sha256 = _run_privileged_target_probe(index)
     referenced = receipt.get("referenced_target_ids")
-    if referenced != sorted(seeds):
+    if (
+        not isinstance(referenced, list)
+        or referenced != sorted(set(referenced))
+        or any(target_id not in seeds for target_id in referenced)
+        or (not maintenance and referenced != sorted(seeds))
+    ):
         raise RetentionPlanError("open_state_ambiguous")
     open_paths = tuple(seeds[target_id][0] for target_id in referenced)
     for path, expected in seeds.values():
         if _observe_target(path) != expected:
             raise RetentionPlanError("open_state_ambiguous")
-    return OpenInventorySnapshot(
-        source="code_owned_privileged_all_targets_no_delete_v1",
+    _require_exact_target_index(index, seeds, code="open_state_ambiguous")
+    maintenance_authority = (
+        _maintenance_effect_authority_from_receipt(
+            receipt,
+            target_receipt_sha256=target_receipt_sha256,
+        )
+        if maintenance
+        else None
+    )
+    snapshot = OpenInventorySnapshot(
+        source=(
+            _MAINTENANCE_OPEN_SOURCE if maintenance else "code_owned_privileged_all_targets_no_delete_v1"
+        ),
         complete=True,
         open_paths=open_paths,
         authority_sha256=hashlib.sha256(
@@ -3118,6 +3386,66 @@ def build_complete_open_inventory(*, target_paths: Sequence[Path]) -> OpenInvent
         ).hexdigest(),
         target_index_sha256=index.sha256,
         process_epoch_sha256=str(receipt["process_epoch_sha256"]),
+    )
+    if maintenance_authority is None:
+        return snapshot
+    return _MaintenanceOpenInventorySnapshot(
+        snapshot=snapshot,
+        authority=maintenance_authority,
+    )
+
+
+def build_complete_open_inventory(*, target_paths: Sequence[Path]) -> OpenInventorySnapshot:
+    """Use the exact ordinary conservative observer for reviewed targets."""
+
+    result = _build_complete_open_inventory(
+        target_paths=target_paths,
+        maintenance=False,
+    )
+    if type(result) is not OpenInventorySnapshot:
+        raise RetentionPlanError("open_state_ambiguous")
+    return result
+
+
+def _build_maintenance_open_inventory(
+    *,
+    target_paths: Sequence[Path],
+) -> _MaintenanceOpenInventorySnapshot:
+    """Use only the explicitly selected authenticated maintenance observer."""
+
+    result = _build_complete_open_inventory(
+        target_paths=target_paths,
+        maintenance=True,
+    )
+    if type(result) is not _MaintenanceOpenInventorySnapshot:
+        raise RetentionPlanError("open_state_ambiguous")
+    return result
+
+
+def build_maintenance_effect_authority(*, target_path: Path) -> _MaintenanceEffectAuthority:
+    """Reacquire one fresh exact maintenance-boot authority without mutation."""
+
+    index, seeds = _target_probe_index((target_path,))
+    (
+        receipt,
+        _runtime_authority_sha256,
+        target_receipt_sha256,
+    ) = _run_maintenance_target_probe(index)
+    if receipt.get("referenced_target_ids") != [] or sorted(seeds) != sorted(
+        target.target_id for target in index.targets
+    ):
+        raise RetentionPlanError("maintenance_effect_authority_invalid")
+    for path, expected in seeds.values():
+        if _observe_target(path) != expected:
+            raise RetentionPlanError("maintenance_effect_authority_invalid")
+    _require_exact_target_index(
+        index,
+        seeds,
+        code="maintenance_effect_authority_invalid",
+    )
+    return _maintenance_effect_authority_from_receipt(
+        receipt,
+        target_receipt_sha256=target_receipt_sha256,
     )
 
 
@@ -3155,7 +3483,7 @@ def plan_release_artifact_retention(
     inventory_roots: Sequence[Path],
     backup_inventory_roots: Sequence[Path] = (),
     reviewed_scratch_targets: Sequence[ReviewedScratchTarget] = (),
-    open_inventory: OpenInventorySnapshot = INCOMPLETE_OPEN_INVENTORY,
+    open_inventory: OpenInventorySnapshot | _MaintenanceOpenInventorySnapshot = (INCOMPLETE_OPEN_INVENTORY),
     authority_bindings: RetentionAuthorityBindings | None = None,
     executable: bool = False,
     _scope_seed: bool = False,
@@ -3170,8 +3498,14 @@ def plan_release_artifact_retention(
     unit_path = _absolute_lexical(unit_journal, code="unit_install_journal_invalid")
     backup_path = _absolute_lexical(backup_root, code="activation_journal_invalid")
     open_receipt, open_paths, open_identities = _normalize_open_inventory(open_inventory)
-    apply_open_authority = open_inventory.source in _APPLY_AUTHORITY_OPEN_SOURCES
-    deferred_no_delete = open_inventory.source == "code_owned_privileged_all_targets_no_delete_v1"
+    open_snapshot = (
+        open_inventory.snapshot
+        if type(open_inventory) is _MaintenanceOpenInventorySnapshot
+        else open_inventory
+    )
+    maintenance_open_authority = open_snapshot.source == _MAINTENANCE_OPEN_SOURCE
+    apply_open_authority = open_snapshot.source in _APPLY_AUTHORITY_OPEN_SOURCES or maintenance_open_authority
+    deferred_no_delete = open_snapshot.source == "code_owned_privileged_all_targets_no_delete_v1"
 
     roots_with_status = [_strict_inventory_root(path) for path in inventory_roots]
     roots = tuple(sorted({path for path, _status in roots_with_status}, key=str))
@@ -3298,13 +3632,13 @@ def plan_release_artifact_retention(
             blocker = blocker or "activation_journal_invalid"
     if _scope_seed and (
         not executable
-        or open_inventory.source != "code_owned_candidate_scope_seed_v1"
-        or not open_inventory.complete
-        or open_inventory.open_paths
-        or open_inventory.open_identities
+        or open_snapshot.source != "code_owned_candidate_scope_seed_v1"
+        or not open_snapshot.complete
+        or open_snapshot.open_paths
+        or open_snapshot.open_identities
     ):
         raise RetentionPlanError("open_inventory_invalid")
-    if not open_inventory.complete:
+    if not open_snapshot.complete:
         blocker = blocker or "open_state_ambiguous"
 
     observations: list[tuple[_TargetObservation, Path]] = []
@@ -3719,7 +4053,7 @@ def plan_release_artifact_retention(
         deferred["reason"] = "deferred_batch_bound"
 
     core: dict[str, Any] = {
-        "schema": PLAN_SCHEMA,
+        "schema": (MAINTENANCE_PLAN_SCHEMA if maintenance_open_authority else PLAN_SCHEMA),
         "mode": (
             "candidate_scope_seed"
             if _scope_seed
@@ -3739,12 +4073,24 @@ def plan_release_artifact_retention(
             "global_operator_lock": True,
             "per_regular_file_write_lease": True,
             "privileged_probe_role": (
-                "conservative_retention_only" if deferred_no_delete else "diagnostic_prerequisite"
+                "conservative_retention_only"
+                if deferred_no_delete
+                else "global_premount_effect_authority"
+                if maintenance_open_authority
+                else "diagnostic_prerequisite"
             ),
             "sealed_quarantine_mode": "0700",
             "threat_boundary": THREAT_BOUNDARY,
             "unique_mount_identity": True,
-            "universal_absence_proof": False,
+            "universal_absence_proof": maintenance_open_authority,
+            **(
+                {
+                    "global_premount_authority": dict(open_receipt["maintenance_authority"]),
+                    "global_premount_quiescence": True,
+                }
+                if maintenance_open_authority
+                else {}
+            ),
         },
         "backup_root": str(backup_path),
         "inventory_roots": [
@@ -3815,7 +4161,7 @@ def plan_release_artifact_retention(
     return {**core, "plan_sha256": hashlib.sha256(_canonical_json(core)).hexdigest()}
 
 
-def build_eligible_retention_plan(
+def _build_eligible_retention_plan(
     *,
     activation_journal: Path,
     unit_journal: Path,
@@ -3824,6 +4170,7 @@ def build_eligible_retention_plan(
     backup_inventory_roots: Sequence[Path],
     canonical_evidence_roots: Sequence[CanonicalEvidenceRoot],
     reviewed_scratch_targets: Sequence[ReviewedScratchTarget] = (),
+    maintenance: bool,
 ) -> dict[str, Any]:
     """Build one executable plan solely from live code-owned authorities."""
 
@@ -3912,7 +4259,11 @@ def build_eligible_retention_plan(
         )
     )
     inventory = (
-        build_complete_open_inventory(target_paths=target_paths)
+        (
+            _build_maintenance_open_inventory(target_paths=target_paths)
+            if maintenance
+            else build_complete_open_inventory(target_paths=target_paths)
+        )
         if target_paths
         else OpenInventorySnapshot(
             source="code_owned_no_delete_candidates_v1",
@@ -3933,8 +4284,11 @@ def build_eligible_retention_plan(
         _candidate_scope_paths=frozenset(target_paths),
         _retention_scope=scope.receipt,
     )
+    inventory_snapshot = (
+        inventory.snapshot if type(inventory) is _MaintenanceOpenInventorySnapshot else inventory
+    )
     if target_paths:
-        if inventory.source == "code_owned_privileged_all_targets_no_delete_v1":
+        if inventory_snapshot.source == "code_owned_privileged_all_targets_no_delete_v1":
             if (
                 plan["classification_status"] != "blocked"
                 or plan["mode"] != "read_only_classification"
@@ -3947,17 +4301,14 @@ def build_eligible_retention_plan(
     elif (
         plan["classification_status"] != "eligible"
         or plan["apply_authority"] is not False
-        or inventory.source != "code_owned_no_delete_candidates_v1"
+        or inventory_snapshot.source != "code_owned_no_delete_candidates_v1"
     ):
         raise RetentionPlanError(str(plan["block_reason"] or "retention_authority_unbound"))
-    if inventory.source in {
-        "code_owned_privileged_target_diagnostic_v1",
-        "code_owned_privileged_all_targets_no_delete_v1",
-    }:
+    if inventory_snapshot.source in _FINAL_TARGET_INDEX_RECHECK_SOURCES:
         after_index, _after = _target_probe_index(target_paths)
-        if after_index.sha256 != inventory.target_index_sha256:
+        if after_index.sha256 != inventory_snapshot.target_index_sha256:
             raise RetentionPlanError("open_state_ambiguous")
-    expected_candidates = set(target_paths).difference(inventory.open_paths)
+    expected_candidates = set(target_paths).difference(inventory_snapshot.open_paths)
     actual_candidates = {
         Path(str(item["path"]))
         for key in ("targets", "backup_targets")
@@ -3968,9 +4319,57 @@ def build_eligible_retention_plan(
         raise RetentionPlanError("open_state_ambiguous")
     if load_retention_scope_authority(activation_journal=activation_journal) != scope:
         raise RetentionPlanError("retention_scope_changed")
-    if inventory.source == "code_owned_privileged_all_targets_no_delete_v1":
+    if inventory_snapshot.source == "code_owned_privileged_all_targets_no_delete_v1":
         raise RetentionPlanError("global_open_absence_authority_unavailable")
     return plan
+
+
+def build_eligible_retention_plan(
+    *,
+    activation_journal: Path,
+    unit_journal: Path,
+    backup_root: Path,
+    inventory_roots: Sequence[Path],
+    backup_inventory_roots: Sequence[Path],
+    canonical_evidence_roots: Sequence[CanonicalEvidenceRoot],
+    reviewed_scratch_targets: Sequence[ReviewedScratchTarget] = (),
+) -> dict[str, Any]:
+    """Build one ordinary executable plan from live code-owned authorities."""
+
+    return _build_eligible_retention_plan(
+        activation_journal=activation_journal,
+        unit_journal=unit_journal,
+        backup_root=backup_root,
+        inventory_roots=inventory_roots,
+        backup_inventory_roots=backup_inventory_roots,
+        canonical_evidence_roots=canonical_evidence_roots,
+        reviewed_scratch_targets=reviewed_scratch_targets,
+        maintenance=False,
+    )
+
+
+def _build_maintenance_eligible_retention_plan(
+    *,
+    activation_journal: Path,
+    unit_journal: Path,
+    backup_root: Path,
+    inventory_roots: Sequence[Path],
+    backup_inventory_roots: Sequence[Path],
+    canonical_evidence_roots: Sequence[CanonicalEvidenceRoot],
+    reviewed_scratch_targets: Sequence[ReviewedScratchTarget] = (),
+) -> dict[str, Any]:
+    """Build only an explicitly requested maintenance-authority plan."""
+
+    return _build_eligible_retention_plan(
+        activation_journal=activation_journal,
+        unit_journal=unit_journal,
+        backup_root=backup_root,
+        inventory_roots=inventory_roots,
+        backup_inventory_roots=backup_inventory_roots,
+        canonical_evidence_roots=canonical_evidence_roots,
+        reviewed_scratch_targets=reviewed_scratch_targets,
+        maintenance=True,
+    )
 
 
 def _publish_retention_scope_no_replace(
