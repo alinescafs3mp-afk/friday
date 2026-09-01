@@ -216,7 +216,10 @@ APPROVAL_TENANT_WITH_A_SEPARATE_PERSON = {
 # surface; the human proposer remains separately bound by created_by.
 # 309 → 310: backfill_conversation_passages advances one person's private
 # accepted conversation history; shared-tenant scope would mix private chats.
-EXPECTED_USER_ID_METHODS = 310
+# 310 → 311: list_inbox_advice_candidates pages the shared archive tenant's
+# privacy-filtered Inbox; a separate person identity is neither accepted nor
+# needed by this background corpus worker.
+EXPECTED_USER_ID_METHODS = 311
 
 
 def _methods_taking_user_id() -> set[str]:
