@@ -5,6 +5,7 @@ import json
 import os
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 from typing import Any
 
@@ -48,16 +49,63 @@ def _stable_measurement(payload: dict[str, Any]) -> dict[str, Any]:
 
 
 def _run_candidate() -> tuple[dict[str, Any], bytes]:
-    environment = dict(os.environ)
-    environment["PYTHONPATH"] = str(_ROOT)
-    completed = subprocess.run(  # noqa: S603
-        [sys.executable, str(_INSTRUMENT), "--arm", "dense"],
-        cwd=_ROOT,
-        env=environment,
-        check=True,
-        capture_output=True,
-        timeout=120,
+    head = (
+        subprocess.run(  # noqa: S603,S607
+            ["git", "rev-parse", "--verify", "HEAD^{commit}"],
+            cwd=_ROOT,
+            check=True,
+            capture_output=True,
+            timeout=10,
+        )
+        .stdout.decode("ascii")
+        .strip()
     )
+    with tempfile.TemporaryDirectory(prefix="friday-dense-evidence-checkout-", dir="/var/tmp") as directory:
+        checkout = Path(directory) / "source"
+        subprocess.run(  # noqa: S603,S607
+            [
+                "git",
+                "clone",
+                "--quiet",
+                "--no-local",
+                "--no-hardlinks",
+                "--no-checkout",
+                "--no-tags",
+                str(_ROOT),
+                str(checkout),
+            ],
+            check=True,
+            capture_output=True,
+            timeout=30,
+        )
+        subprocess.run(  # noqa: S603,S607
+            ["git", "-C", str(checkout), "checkout", "--quiet", "--detach", head],
+            check=True,
+            capture_output=True,
+            timeout=30,
+        )
+        environment = dict(os.environ)
+        environment["PYTHONPATH"] = str(checkout)
+        completed = subprocess.run(  # noqa: S603
+            [
+                sys.executable,
+                str(checkout / _INSTRUMENT.relative_to(_ROOT)),
+                "--arm",
+                "dense",
+            ],
+            cwd=checkout,
+            env=environment,
+            check=True,
+            capture_output=True,
+            timeout=120,
+        )
+        status = subprocess.run(  # noqa: S603,S607
+            ["git", "-C", str(checkout), "status", "--porcelain=v1", "--untracked-files=all"],
+            check=True,
+            capture_output=True,
+            timeout=10,
+        )
+        assert status.stdout == status.stderr == b""
     assert completed.stderr == b""
     payload = json.loads(completed.stdout)
     assert type(payload) is dict
