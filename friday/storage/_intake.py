@@ -3364,10 +3364,7 @@ class IntakeMixin(StorageShared):
             raise ValueError("Inbox advice candidate limit is invalid")
 
         model_slots = ",".join("?" for _alias in aliases)
-        safe_suggestions = (
-            "(CASE WHEN json_valid(i.suggestions_json) "
-            "THEN i.suggestions_json ELSE '{}' END)"
-        )
+        safe_suggestions = "(CASE WHEN json_valid(i.suggestions_json) THEN i.suggestions_json ELSE '{}' END)"
         failure_type = f"json_type({safe_suggestions},'$.model_advice_failures')"
         failure_value = f"json_extract({safe_suggestions},'$.model_advice_failures')"
         # Keep this exact grammar in lockstep with workers._advice_attempts:

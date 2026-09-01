@@ -324,16 +324,12 @@ async def test_inbox_advice_query_never_selects_reserved_product_witness(setting
     }
     assert advised == set(eligible_candidate_order[:2])
     retained_models = {
-        json.loads(str(storage.get_inbox_item(item_id, "alice")["suggestions_json"]))[
-            "model_advice"
-        ]["model"]
+        json.loads(str(storage.get_inbox_item(item_id, "alice")["suggestions_json"]))["model_advice"]["model"]
         for item_id in current_sample_ids
     }
     assert retained_models == {primary_alias, secondary_alias}
     assert all(
-        json.loads(str(storage.get_inbox_item(item_id, "alice")["suggestions_json"]))[
-            "model_advice_failures"
-        ]
+        json.loads(str(storage.get_inbox_item(item_id, "alice")["suggestions_json"]))["model_advice_failures"]
         == 3
         for item_id in capped_ids
     )
@@ -356,15 +352,13 @@ async def test_inbox_advice_query_never_selects_reserved_product_witness(setting
     await restarted_manager._inbox_model_advice("alice")  # noqa: SLF001
     assert llm.calls == 4
     remaining_old = eligible_candidate_order[2]
-    assert json.loads(
-        str(storage.get_inbox_item(remaining_old, "alice")["suggestions_json"])
-    ).get("model_advice")
+    assert json.loads(str(storage.get_inbox_item(remaining_old, "alice")["suggestions_json"])).get(
+        "model_advice"
+    )
     newly_advised = {
         item_id
         for item_id in new_high_ranked_ids
-        if json.loads(str(storage.get_inbox_item(item_id, "alice")["suggestions_json"])).get(
-            "model_advice"
-        )
+        if json.loads(str(storage.get_inbox_item(item_id, "alice")["suggestions_json"])).get("model_advice")
     }
     assert len(newly_advised) == 1
     untouched = {
@@ -413,21 +407,19 @@ async def test_inbox_advice_query_never_selects_reserved_product_witness(setting
         fresh_manager = WorkersManager(settings, storage, ingestion, kg=graph, llm=llm)
         await fresh_manager._inbox_model_advice(poison_owner)  # noqa: SLF001
         assert llm.calls - calls_before == 2
-    assert not json.loads(
-        str(storage.get_inbox_item(poison_tail, poison_owner)["suggestions_json"])
-    ).get("model_advice")
+    assert not json.loads(str(storage.get_inbox_item(poison_tail, poison_owner)["suggestions_json"])).get(
+        "model_advice"
+    )
 
     calls_before = llm.calls
     fresh_manager = WorkersManager(settings, storage, ingestion, kg=graph, llm=llm)
     await fresh_manager._inbox_model_advice(poison_owner)  # noqa: SLF001
     assert llm.calls - calls_before == 1
-    assert json.loads(
-        str(storage.get_inbox_item(poison_tail, poison_owner)["suggestions_json"])
-    ).get("model_advice")
+    assert json.loads(str(storage.get_inbox_item(poison_tail, poison_owner)["suggestions_json"])).get(
+        "model_advice"
+    )
     assert all(
-        json.loads(str(storage.get_inbox_item(item_id, poison_owner)["suggestions_json"])).get(
-            "model_advice"
-        )
+        json.loads(str(storage.get_inbox_item(item_id, poison_owner)["suggestions_json"])).get("model_advice")
         for item_id in poison_ids
     )
 
