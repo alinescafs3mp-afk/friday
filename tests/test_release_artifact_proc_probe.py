@@ -816,8 +816,20 @@ def test_privileged_target_index_round_trip_and_body_free_authority(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    object_key = probe.ObjectKey(8, 11, stat.S_IFREG)
-    index = _index(tmp_path, object_key)
+    index = probe.build_target_index(
+        (
+            probe.ProbeTarget(
+                "retired-release-a",
+                (tmp_path / "release-a",),
+                (probe.ObjectKey(8, 11, stat.S_IFREG),),
+            ),
+            probe.ProbeTarget(
+                "retired-release-b",
+                (tmp_path / "release-b",),
+                (probe.ObjectKey(8, 12, stat.S_IFREG),),
+            ),
+        )
+    )
     raw = probe.canonical_target_index_bytes(index)
     assert probe.parse_target_index_bytes(raw) == index
 
@@ -836,11 +848,11 @@ def test_privileged_target_index_round_trip_and_body_free_authority(
             scope_sha256,
         ),
     )
-    monkeypatch.setattr(probe, "_require_initial_host_scope", lambda _observation: None)
+    monkeypatch.setattr(probe, "_capture_privileged_no_delete_scope", lambda _index: scope)
     monkeypatch.setattr(
         probe,
         "_capture_privileged_target_observation",
-        lambda _index: (_observation(scope=scope, matches=(_match(object_key),)), (), "b" * 64),
+        lambda _index: pytest.fail("the no-delete contour must not scan global processes"),
     )
     receipt = probe.privileged_target_reference_receipt(index)
     canonical = probe.canonical_privileged_receipt_bytes(
@@ -851,10 +863,82 @@ def test_privileged_target_index_round_trip_and_body_free_authority(
     )
 
     assert receipt["status"] == "referenced"
-    assert receipt["referenced_target_ids"] == ["retired-release"]
-    assert b"/alias" not in canonical
+    assert receipt["authority"] == probe.PRIVILEGED_NO_DELETE_AUTHORITY
+    assert receipt["referenced_target_ids"] == ["retired-release-a", "retired-release-b"]
+    assert receipt["task_count"] == receipt["tgid_count"] == 0
+    assert str(tmp_path).encode() not in canonical
     assert b"link_target" not in canonical
     assert b'"matches"' not in canonical
+
+    expected_referenced = list(receipt["referenced_target_ids"])
+    for forged_referenced in (
+        expected_referenced[:-1],
+        [*expected_referenced, "unindexed-target"],
+        [*expected_referenced, expected_referenced[0]],
+        list(reversed(expected_referenced)),
+    ):
+        forged = copy.deepcopy(receipt)
+        forged["referenced_target_ids"] = forged_referenced
+        _resign(forged)
+        with pytest.raises(probe.ProcProbeInputError, match="privileged_probe_receipt_invalid"):
+            probe.canonical_privileged_receipt_bytes(
+                forged,
+                expected_target_index=index,
+                expected_implementation_sha256=probe._implementation_sha256(),  # noqa: SLF001
+                expected_host_scope_authority_sha256=scope_sha256,
+            )
+
+    for field, value in (
+        ("status", "clear"),
+        ("task_count", 1),
+        ("observer_euid", False),
+        ("target_count", True),
+        ("task_count", False),
+        ("tgid_count", False),
+        ("observation_sha256", "f" * 64),
+    ):
+        forged = copy.deepcopy(receipt)
+        forged[field] = value
+        _resign(forged)
+        with pytest.raises(probe.ProcProbeInputError, match="privileged_probe_receipt_invalid"):
+            probe.canonical_privileged_receipt_bytes(
+                forged,
+                expected_target_index=index,
+                expected_implementation_sha256=probe._implementation_sha256(),  # noqa: SLF001
+                expected_host_scope_authority_sha256=scope_sha256,
+            )
+
+
+def test_privileged_no_delete_scope_never_enumerates_global_processes(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    index = _index(tmp_path, probe.ObjectKey(8, 11, stat.S_IFREG))
+    scope = _scope()
+    calls: list[probe._ScopeIdentity] = []
+
+    class ScopeOnlyScanner:
+        def __init__(self, proc_root: Path, target_index: probe.TargetIndex) -> None:
+            assert proc_root == Path("/proc")
+            assert target_index == index
+
+        def __enter__(self) -> ScopeOnlyScanner:
+            return self
+
+        def __exit__(self, *args: object) -> None:
+            return None
+
+        def _scope_identity(self) -> probe._ScopeIdentity:
+            return scope
+
+        def capture(self) -> probe._GlobalObservation:
+            pytest.fail("global process capture is forbidden in the no-delete contour")
+
+    monkeypatch.setattr(probe, "_LinuxProcScanner", ScopeOnlyScanner)
+    monkeypatch.setattr(probe, "_require_initial_host_scope", calls.append)
+
+    assert probe._capture_privileged_no_delete_scope(index) == scope  # noqa: SLF001
+    assert calls == [scope]
 
 
 def test_unprivileged_complete_snapshot_fails_closed_on_nondumpable_same_uid(

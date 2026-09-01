@@ -30,12 +30,13 @@ from typing import Any
 
 TARGET_INDEX_SCHEMA = "friday.release-artifact-proc-target-index.v2"
 PROBE_RECEIPT_SCHEMA = "friday.release-artifact-proc-reference-receipt.v2"
-PRIVILEGED_RECEIPT_SCHEMA = "friday.release-artifact-privileged-proc-receipt.v2"
+PRIVILEGED_RECEIPT_SCHEMA = "friday.release-artifact-privileged-proc-receipt.v3"
 HOST_SCOPE_AUTHORITY_SCHEMA = "friday.release-artifact-proc-host-scope.v1"
 HOST_SCOPE_AUTHORITY_PATH = Path("/usr/libexec/friday/release_artifact_proc_scope.v1.json")
 INSTALL_LOCK_PATH = Path("/usr/libexec/friday/.release-artifact-proc-probe.install.lock")
 PROBE_SCOPE = "namespace_visible_proc_references"
 PROBE_AUTHORITY = "diagnostic_only"
+PRIVILEGED_NO_DELETE_AUTHORITY = "code_owned_privileged_all_targets_no_delete_v1"
 _SHARED_MM_PROOF_KIND = "linux_tgid_membership_plus_exact_maps_and_exe.v1"
 _NS_GET_PARENT = 0xB702
 _AT_EMPTY_PATH = 0x1000
@@ -2423,7 +2424,7 @@ def _host_scope_authority() -> tuple[dict[str, Any], str]:
     return value, hashlib.sha256(raw).hexdigest()
 
 
-def _require_initial_host_scope(observation: _GlobalObservation) -> None:
+def _require_initial_host_scope(scope: _ScopeIdentity) -> None:
     try:
         status = Path("/proc/self/status").read_bytes()
         capability_lines = [line for line in status.splitlines() if line.startswith(b"CapEff:\t")]
@@ -2451,7 +2452,7 @@ def _require_initial_host_scope(observation: _GlobalObservation) -> None:
                 (int(opened_namespace.st_dev), int(opened_namespace.st_ino)) != expected_namespace
                 or (int(named_namespace_after.st_dev), int(named_namespace_after.st_ino))
                 != expected_namespace
-                or observation.scope.pid_namespace != expected_namespace
+                or scope.pid_namespace != expected_namespace
             ):
                 raise ProcProbeInputError("privileged_probe_authority_invalid")
             try:
@@ -2468,52 +2469,92 @@ def _require_initial_host_scope(observation: _GlobalObservation) -> None:
         if isinstance(exc, ProcProbeInputError):
             raise
         raise ProcProbeInputError("privileged_probe_authority_invalid") from exc
-    if observation.scope.pid_namespace != (
+    if scope.pid_namespace != (
         int(self_namespace.st_dev),
         int(self_namespace.st_ino),
     ):
         raise ProcProbeInputError("privileged_probe_authority_invalid")
 
 
+def _capture_privileged_no_delete_scope(index: TargetIndex) -> _ScopeIdentity:
+    """Authenticate stable host scope without enumerating globally volatile tasks."""
+
+    if build_target_index(index.targets) != index:
+        raise ProcProbeInputError("privileged_probe_authority_invalid")
+    try:
+        with _LinuxProcScanner(Path("/proc"), index) as scanner:
+            before = scanner._scope_identity()
+            _require_initial_host_scope(before)
+            after = scanner._scope_identity()
+    except (_ProbeIssue, OSError) as exc:
+        raise ProcProbeInputError("privileged_probe_authority_invalid") from exc
+    if before != after:
+        raise ProcProbeInputError("privileged_probe_authority_invalid")
+    return before
+
+
+def _privileged_no_delete_digests(
+    *,
+    scope_identity_sha256: str,
+    target_index_sha256: str,
+    referenced_target_ids: Sequence[str],
+) -> tuple[str, str, str]:
+    """Bind legacy receipt digest slots to the explicit no-scan/no-delete mode."""
+
+    base = {
+        "authority": PRIVILEGED_NO_DELETE_AUTHORITY,
+        "scope_identity_sha256": scope_identity_sha256,
+        "target_index_sha256": target_index_sha256,
+    }
+    kernel_epoch_sha256 = hashlib.sha256(
+        _canonical_json({**base, "mode": "authenticated_host_scope_only_v1"})
+    ).hexdigest()
+    process_epoch_sha256 = hashlib.sha256(
+        _canonical_json({**base, "mode": "global_process_inventory_intentionally_unobserved_v1"})
+    ).hexdigest()
+    observation_sha256 = hashlib.sha256(
+        _canonical_json(
+            {
+                **base,
+                "mode": "all_exact_targets_conservatively_referenced_v1",
+                "referenced_target_ids": list(referenced_target_ids),
+            }
+        )
+    ).hexdigest()
+    return kernel_epoch_sha256, process_epoch_sha256, observation_sha256
+
+
 def privileged_target_reference_receipt(index: TargetIndex) -> dict[str, Any]:
-    """Observe exact targets from a root/CAP_SYS_PTRACE helper, body-free."""
+    """Authenticate scope and conservatively retain every exact target, body-free."""
 
     if os.geteuid() != 0 or build_target_index(index.targets) != index:
         raise ProcProbeInputError("privileged_probe_authority_invalid")
     host_scope, host_scope_sha256 = _host_scope_authority()
-    observation, kernel_referenced, kernel_epoch_sha256 = _capture_privileged_target_observation(index)
     del host_scope
-    _require_initial_host_scope(observation)
-    matches = [match.receipt_projection() for match in observation.matches]
-    referenced = sorted(
-        {
-            target_id
-            for match in matches
-            if isinstance(match, Mapping)
-            for target_id in match.get("target_ids", [])
-            if isinstance(target_id, str)
-        }
-        | set(kernel_referenced)
+    scope = _capture_privileged_no_delete_scope(index)
+    referenced = [target.target_id for target in index.targets]
+    scope_identity_sha256 = hashlib.sha256(_canonical_json(scope.projection())).hexdigest()
+    kernel_epoch_sha256, process_epoch_sha256, observation_sha256 = _privileged_no_delete_digests(
+        scope_identity_sha256=scope_identity_sha256,
+        target_index_sha256=index.sha256,
+        referenced_target_ids=referenced,
     )
-    if any(target_id not in {target.target_id for target in index.targets} for target_id in referenced):
-        raise ProcProbeInputError("privileged_probe_incomplete")
-    scope = observation.scope.projection()
     core: dict[str, Any] = {
-        "authority": "code_owned_privileged_bounded_proc_diagnostic_v1",
+        "authority": PRIVILEGED_NO_DELETE_AUTHORITY,
         "host_scope_authority_sha256": host_scope_sha256,
         "implementation_sha256": _implementation_sha256(),
         "kernel_epoch_sha256": kernel_epoch_sha256,
-        "observation_sha256": observation.observation_sha256,
+        "observation_sha256": observation_sha256,
         "observer_euid": 0,
-        "process_epoch_sha256": observation.task_epoch_set_sha256,
+        "process_epoch_sha256": process_epoch_sha256,
         "referenced_target_ids": referenced,
         "schema": PRIVILEGED_RECEIPT_SCHEMA,
-        "scope_identity_sha256": hashlib.sha256(_canonical_json(dict(scope))).hexdigest(),
-        "status": "referenced" if referenced else "clear",
+        "scope_identity_sha256": scope_identity_sha256,
+        "status": "referenced",
         "target_count": len(index.targets),
         "target_index_sha256": index.sha256,
-        "task_count": observation.task_count,
-        "tgid_count": observation.tgid_count,
+        "task_count": 0,
+        "tgid_count": 0,
     }
     return {**core, "receipt_sha256": hashlib.sha256(_canonical_json(core)).hexdigest()}
 
@@ -2551,23 +2592,31 @@ def canonical_privileged_receipt_bytes(
     digest = value.pop("receipt_sha256", None)
     known_ids = {target.target_id for target in expected_target_index.targets}
     referenced = value.get("referenced_target_ids")
+    expected_referenced = sorted(known_ids)
+    expected_digests: tuple[str, str, str] | None = None
+    if _is_hex_digest(value.get("scope_identity_sha256")):
+        expected_digests = _privileged_no_delete_digests(
+            scope_identity_sha256=str(value["scope_identity_sha256"]),
+            target_index_sha256=expected_target_index.sha256,
+            referenced_target_ids=expected_referenced,
+        )
     if (
         set(receipt) != required
         or not _is_hex_digest(digest)
         or hashlib.sha256(_canonical_json(value)).hexdigest() != digest
         or value.get("schema") != PRIVILEGED_RECEIPT_SCHEMA
-        or value.get("authority") != "code_owned_privileged_bounded_proc_diagnostic_v1"
+        or value.get("authority") != PRIVILEGED_NO_DELETE_AUTHORITY
+        or type(value.get("observer_euid")) is not int
         or value.get("observer_euid") != 0
         or value.get("implementation_sha256") != expected_implementation_sha256
         or value.get("host_scope_authority_sha256") != expected_host_scope_authority_sha256
         or value.get("target_index_sha256") != expected_target_index.sha256
+        or type(value.get("target_count")) is not int
         or value.get("target_count") != len(expected_target_index.targets)
-        or value.get("status") not in {"clear", "referenced"}
+        or value.get("status") != "referenced"
         or not isinstance(referenced, list)
-        or referenced != sorted(set(referenced))
+        or referenced != expected_referenced
         or any(not isinstance(item, str) or item not in known_ids for item in referenced)
-        or (value.get("status") == "clear" and referenced)
-        or (value.get("status") == "referenced" and not referenced)
         or any(
             not _is_hex_digest(value.get(name))
             for name in (
@@ -2579,10 +2628,17 @@ def canonical_privileged_receipt_bytes(
                 "scope_identity_sha256",
             )
         )
+        or expected_digests is None
+        or (
+            value.get("kernel_epoch_sha256"),
+            value.get("process_epoch_sha256"),
+            value.get("observation_sha256"),
+        )
+        != expected_digests
         or type(value.get("task_count")) is not int
+        or value.get("task_count") != 0
         or type(value.get("tgid_count")) is not int
-        or value["tgid_count"] <= 0
-        or value["task_count"] < value["tgid_count"]
+        or value.get("tgid_count") != 0
     ):
         raise ProcProbeInputError("privileged_probe_receipt_invalid")
     raw = _canonical_json(dict(receipt)) + b"\n"

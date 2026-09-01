@@ -84,6 +84,7 @@ _OPEN_SOURCES = frozenset(
         "code_owned_candidate_scope_seed_v1",
         "code_owned_privileged_target_proc_v1",
         "code_owned_privileged_target_diagnostic_v1",
+        "code_owned_privileged_all_targets_no_delete_v1",
         "code_owned_no_delete_candidates_v1",
         "synthetic_test",
     }
@@ -1646,6 +1647,7 @@ def _normalize_open_inventory(
     privileged = snapshot.source in {
         "code_owned_privileged_target_proc_v1",
         "code_owned_privileged_target_diagnostic_v1",
+        "code_owned_privileged_all_targets_no_delete_v1",
     }
     no_candidates = snapshot.source == "code_owned_no_delete_candidates_v1"
     metadata = (
@@ -1685,6 +1687,11 @@ def _normalize_open_inventory(
             raise RetentionPlanError("open_inventory_invalid")
         identities.add(identity)
     canonical_identities = tuple(sorted(identities))
+    observation_role = (
+        "conservative_retention_only"
+        if snapshot.source == "code_owned_privileged_all_targets_no_delete_v1"
+        else "diagnostic_prerequisite"
+    )
     core = {
         "schema": OPEN_INVENTORY_SCHEMA,
         "source": snapshot.source,
@@ -1694,7 +1701,7 @@ def _normalize_open_inventory(
         "authority_sha256": snapshot.authority_sha256,
         "target_index_sha256": snapshot.target_index_sha256,
         "process_epoch_sha256": snapshot.process_epoch_sha256,
-        "observation_role": "diagnostic_prerequisite",
+        "observation_role": observation_role,
         "universal_absence_proof": False,
     }
     return (
@@ -1707,7 +1714,7 @@ def _normalize_open_inventory(
             "authority_sha256": snapshot.authority_sha256,
             "target_index_sha256": snapshot.target_index_sha256,
             "process_epoch_sha256": snapshot.process_epoch_sha256,
-            "observation_role": "diagnostic_prerequisite",
+            "observation_role": observation_role,
             "universal_absence_proof": False,
             "snapshot_sha256": hashlib.sha256(_canonical_json(core)).hexdigest(),
         },
@@ -3091,14 +3098,14 @@ def build_complete_open_inventory(*, target_paths: Sequence[Path]) -> OpenInvent
     index, seeds = _target_probe_index(target_paths)
     receipt, runtime_authority_sha256 = _run_privileged_target_probe(index)
     referenced = receipt.get("referenced_target_ids")
-    if not isinstance(referenced, list):
+    if referenced != sorted(seeds):
         raise RetentionPlanError("open_state_ambiguous")
     open_paths = tuple(seeds[target_id][0] for target_id in referenced)
     for path, expected in seeds.values():
         if _observe_target(path) != expected:
             raise RetentionPlanError("open_state_ambiguous")
     return OpenInventorySnapshot(
-        source="code_owned_privileged_target_diagnostic_v1",
+        source="code_owned_privileged_all_targets_no_delete_v1",
         complete=True,
         open_paths=open_paths,
         authority_sha256=hashlib.sha256(
@@ -3164,6 +3171,7 @@ def plan_release_artifact_retention(
     backup_path = _absolute_lexical(backup_root, code="activation_journal_invalid")
     open_receipt, open_paths, open_identities = _normalize_open_inventory(open_inventory)
     apply_open_authority = open_inventory.source in _APPLY_AUTHORITY_OPEN_SOURCES
+    deferred_no_delete = open_inventory.source == "code_owned_privileged_all_targets_no_delete_v1"
 
     roots_with_status = [_strict_inventory_root(path) for path in inventory_roots]
     roots = tuple(sorted({path for path, _status in roots_with_status}, key=str))
@@ -3715,6 +3723,8 @@ def plan_release_artifact_retention(
         "mode": (
             "candidate_scope_seed"
             if _scope_seed
+            else "read_only_classification"
+            if deferred_no_delete
             else "eligible_classification"
             if executable
             else "read_only_classification"
@@ -3728,7 +3738,9 @@ def plan_release_artifact_retention(
             "filesystem_magic": _EXT4_SUPER_MAGIC,
             "global_operator_lock": True,
             "per_regular_file_write_lease": True,
-            "privileged_probe_role": "diagnostic_prerequisite",
+            "privileged_probe_role": (
+                "conservative_retention_only" if deferred_no_delete else "diagnostic_prerequisite"
+            ),
             "sealed_quarantine_mode": "0700",
             "threat_boundary": THREAT_BOUNDARY,
             "unique_mount_identity": True,
@@ -3785,9 +3797,17 @@ def plan_release_artifact_retention(
         "activation_backup": activation.activation_backup,
         "open_inventory": open_receipt,
         "classification_status": (
-            "scope_seed" if _scope_seed and blocker == "" else "eligible" if blocker == "" else "blocked"
+            "scope_seed"
+            if _scope_seed and blocker == ""
+            else "blocked"
+            if deferred_no_delete and blocker == ""
+            else "eligible"
+            if blocker == ""
+            else "blocked"
         ),
-        "block_reason": blocker,
+        "block_reason": (
+            "global_open_absence_authority_unavailable" if deferred_no_delete and blocker == "" else blocker
+        ),
         "protected_releases": protected_identities,
         "targets": entries,
         "backup_targets": backup_entries,
@@ -3913,14 +3933,27 @@ def build_eligible_retention_plan(
         _candidate_scope_paths=frozenset(target_paths),
         _retention_scope=scope.receipt,
     )
-    if plan["classification_status"] != "eligible":
-        raise RetentionPlanError(str(plan["block_reason"] or "retention_authority_unbound"))
     if target_paths:
-        if plan["apply_authority"] is not True:
+        if inventory.source == "code_owned_privileged_all_targets_no_delete_v1":
+            if (
+                plan["classification_status"] != "blocked"
+                or plan["mode"] != "read_only_classification"
+                or plan["block_reason"] != "global_open_absence_authority_unavailable"
+                or plan["apply_authority"] is not False
+            ):
+                raise RetentionPlanError("open_state_ambiguous")
+        elif plan["classification_status"] != "eligible" or plan["apply_authority"] is not True:
             raise RetentionPlanError(str(plan["block_reason"] or "retention_authority_unbound"))
-    elif plan["apply_authority"] is not False or inventory.source != "code_owned_no_delete_candidates_v1":
+    elif (
+        plan["classification_status"] != "eligible"
+        or plan["apply_authority"] is not False
+        or inventory.source != "code_owned_no_delete_candidates_v1"
+    ):
         raise RetentionPlanError(str(plan["block_reason"] or "retention_authority_unbound"))
-    if inventory.source == "code_owned_privileged_target_diagnostic_v1":
+    if inventory.source in {
+        "code_owned_privileged_target_diagnostic_v1",
+        "code_owned_privileged_all_targets_no_delete_v1",
+    }:
         after_index, _after = _target_probe_index(target_paths)
         if after_index.sha256 != inventory.target_index_sha256:
             raise RetentionPlanError("open_state_ambiguous")

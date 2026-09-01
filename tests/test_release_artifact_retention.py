@@ -39,6 +39,39 @@ def _sha256_file(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
+def _privileged_no_delete_receipt(
+    index: retention.proc_probe.TargetIndex,
+    *,
+    implementation_sha256: str = "1" * 64,
+    host_scope_authority_sha256: str = "2" * 64,
+    scope_identity_sha256: str = "3" * 64,
+) -> dict[str, Any]:
+    referenced = sorted(target.target_id for target in index.targets)
+    kernel, process, observation = retention.proc_probe._privileged_no_delete_digests(  # noqa: SLF001
+        scope_identity_sha256=scope_identity_sha256,
+        target_index_sha256=index.sha256,
+        referenced_target_ids=referenced,
+    )
+    core = {
+        "authority": retention.proc_probe.PRIVILEGED_NO_DELETE_AUTHORITY,
+        "host_scope_authority_sha256": host_scope_authority_sha256,
+        "implementation_sha256": implementation_sha256,
+        "kernel_epoch_sha256": kernel,
+        "observation_sha256": observation,
+        "observer_euid": 0,
+        "process_epoch_sha256": process,
+        "referenced_target_ids": referenced,
+        "schema": retention.proc_probe.PRIVILEGED_RECEIPT_SCHEMA,
+        "scope_identity_sha256": scope_identity_sha256,
+        "status": "referenced",
+        "target_count": len(index.targets),
+        "target_index_sha256": index.sha256,
+        "task_count": 0,
+        "tgid_count": 0,
+    }
+    return {**core, "receipt_sha256": hashlib.sha256(_canonical(core)).hexdigest()}
+
+
 def _privileged_open_inventory(
     *,
     target_paths: tuple[Path, ...] = (),
@@ -56,6 +89,20 @@ def _privileged_open_inventory(
         open_identities=open_identities,
         authority_sha256="1" * 64,
         target_index_sha256=target_index_sha256,
+        process_epoch_sha256="3" * 64,
+    )
+
+
+def _privileged_no_delete_open_inventory(
+    *, target_paths: tuple[Path, ...]
+) -> retention.OpenInventorySnapshot:
+    target_index, _seeds = retention._target_probe_index(target_paths)  # noqa: SLF001
+    return retention.OpenInventorySnapshot(
+        source="code_owned_privileged_all_targets_no_delete_v1",
+        complete=True,
+        open_paths=target_paths,
+        authority_sha256="1" * 64,
+        target_index_sha256=target_index.sha256,
         process_epoch_sha256="3" * 64,
     )
 
@@ -2739,6 +2786,60 @@ def test_eligible_cli_builds_code_owned_authority_and_classifies_exact_backup(
     assert json.loads(capsys.readouterr().out)["plan_sha256"] == plan["plan_sha256"]
 
 
+def test_privileged_retain_all_plan_is_deferred_and_operator_rejects_it(
+    synthetic_inventory: dict[str, Any],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    _enable_complete_delete_evidence(monkeypatch)
+    monkeypatch.setattr(
+        retention,
+        "build_complete_open_inventory",
+        lambda *, target_paths: _privileged_no_delete_open_inventory(target_paths=tuple(target_paths)),
+    )
+
+    plan = retention.build_eligible_retention_plan(
+        activation_journal=synthetic_inventory["activation_journal"],
+        unit_journal=synthetic_inventory["unit_journal"],
+        backup_root=synthetic_inventory["backup_root"],
+        inventory_roots=(synthetic_inventory["inventory"],),
+        backup_inventory_roots=(synthetic_inventory["backup_root"],),
+        canonical_evidence_roots=(
+            retention.CanonicalEvidenceRoot(
+                path=synthetic_inventory["evidence_root"],
+                authority_path=synthetic_inventory["evidence_authority"],
+                authority_sha256=_sha256_file(synthetic_inventory["evidence_authority"]),
+            ),
+        ),
+    )
+
+    assert plan["mode"] == "read_only_classification"
+    assert plan["classification_status"] == "blocked"
+    assert plan["block_reason"] == "global_open_absence_authority_unavailable"
+    assert plan["apply_authority"] is False
+    assert plan["open_inventory"]["source"] == "code_owned_privileged_all_targets_no_delete_v1"
+    assert plan["open_inventory"]["observation_role"] == "conservative_retention_only"
+    assert not any(
+        item["decision"] == "delete_candidate" for key in ("targets", "backup_targets") for item in plan[key]
+    )
+    assert any(
+        item["reason"] == "open_reference" for key in ("targets", "backup_targets") for item in plan[key]
+    )
+
+    plan_path = _plan_file(plan, tmp_path / "deferred-no-delete.json")
+    with pytest.raises(
+        retention_apply.RetentionApplyError,
+        match="^retention_apply_plan_digest_mismatch$",
+    ):
+        retention_apply.apply_retention_plan(
+            plan_path=plan_path,
+            expected_plan_sha256=str(plan["plan_sha256"]),
+        )
+    assert not (
+        synthetic_inventory["activation_journal"].parent / retention_apply.APPLY_JOURNAL_NAME
+    ).exists()
+
+
 @pytest.mark.parametrize(
     ("source", "snapshot"),
     (
@@ -2967,7 +3068,7 @@ def test_apply_rejects_forged_open_inventory_authority_before_journal_write(
     ).exists()
 
 
-def test_privileged_target_probe_marks_only_exact_referenced_target(
+def test_privileged_target_probe_requires_every_exact_target_referenced(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -2982,22 +3083,8 @@ def test_privileged_target_probe_marks_only_exact_referenced_target(
         index: retention.proc_probe.TargetIndex,
         target_ids: list[str],
     ) -> tuple[dict[str, Any], str]:
-        core = {
-            "authority": "code_owned_privileged_host_proc_v1",
-            "implementation_sha256": "1" * 64,
-            "observation_sha256": "2" * 64,
-            "observer_euid": 0,
-            "process_epoch_sha256": "3" * 64,
-            "referenced_target_ids": target_ids,
-            "schema": retention.proc_probe.PRIVILEGED_RECEIPT_SCHEMA,
-            "scope_identity_sha256": "4" * 64,
-            "status": "referenced",
-            "target_count": len(index.targets),
-            "target_index_sha256": index.sha256,
-            "task_count": 2,
-            "tgid_count": 2,
-        }
-        receipt = {**core, "receipt_sha256": hashlib.sha256(_canonical(core)).hexdigest()}
+        receipt = _privileged_no_delete_receipt(index)
+        receipt["referenced_target_ids"] = target_ids
         return receipt, "5" * 64
 
     def observe(index: retention.proc_probe.TargetIndex) -> tuple[dict[str, Any], str]:
@@ -3005,12 +3092,8 @@ def test_privileged_target_probe_marks_only_exact_referenced_target(
         return receipt_for(index, [target_id])
 
     monkeypatch.setattr(retention, "_run_privileged_target_probe", observe)
-    inventory = retention.build_complete_open_inventory(target_paths=(first, second))
-
-    assert inventory.source == "code_owned_privileged_target_diagnostic_v1"
-    assert inventory.open_paths == (second,)
-    assert len(inventory.target_index_sha256) == 64
-    assert len(inventory.authority_sha256) == 64
+    with pytest.raises(retention.RetentionPlanError, match="^open_state_ambiguous$"):
+        retention.build_complete_open_inventory(target_paths=(first, second))
 
     monkeypatch.setattr(
         retention,
@@ -3019,7 +3102,10 @@ def test_privileged_target_probe_marks_only_exact_referenced_target(
     )
     conservative = retention.build_complete_open_inventory(target_paths=(first, second))
 
+    assert conservative.source == "code_owned_privileged_all_targets_no_delete_v1"
     assert set(conservative.open_paths) == {first, second}
+    assert len(conservative.target_index_sha256) == 64
+    assert len(conservative.authority_sha256) == 64
 
 
 def test_privileged_probe_transport_uses_pinned_root_only_scope_digest_without_reading_it(
@@ -3045,24 +3131,11 @@ def test_privileged_probe_transport_uses_pinned_root_only_scope_digest_without_r
             return Path("/usr/bin/python3.14"), "2" * 64
         raise AssertionError(f"unexpected unprivileged authority read: {path}")
 
-    core = {
-        "authority": "code_owned_privileged_bounded_proc_diagnostic_v1",
-        "host_scope_authority_sha256": retention.PRIVILEGED_SCOPE_AUTHORITY_SHA256,
-        "implementation_sha256": helper_sha256,
-        "kernel_epoch_sha256": "3" * 64,
-        "observation_sha256": "4" * 64,
-        "observer_euid": 0,
-        "process_epoch_sha256": "5" * 64,
-        "referenced_target_ids": [],
-        "schema": retention.proc_probe.PRIVILEGED_RECEIPT_SCHEMA,
-        "scope_identity_sha256": "6" * 64,
-        "status": "clear",
-        "target_count": len(index.targets),
-        "target_index_sha256": index.sha256,
-        "task_count": 1,
-        "tgid_count": 1,
-    }
-    receipt = {**core, "receipt_sha256": hashlib.sha256(_canonical(core)).hexdigest()}
+    receipt = _privileged_no_delete_receipt(
+        index,
+        implementation_sha256=helper_sha256,
+        host_scope_authority_sha256=retention.PRIVILEGED_SCOPE_AUTHORITY_SHA256,
+    )
     expected_command = [
         "/usr/bin/sudo",
         "-n",
@@ -3119,24 +3192,11 @@ def test_privileged_probe_transport_rejects_a_self_consistent_wrong_scope_digest
             return Path("/usr/bin/python3.14"), "2" * 64
         raise AssertionError(path)
 
-    core = {
-        "authority": "code_owned_privileged_bounded_proc_diagnostic_v1",
-        "host_scope_authority_sha256": "f" * 64,
-        "implementation_sha256": helper_sha256,
-        "kernel_epoch_sha256": "3" * 64,
-        "observation_sha256": "4" * 64,
-        "observer_euid": 0,
-        "process_epoch_sha256": "5" * 64,
-        "referenced_target_ids": [],
-        "schema": retention.proc_probe.PRIVILEGED_RECEIPT_SCHEMA,
-        "scope_identity_sha256": "6" * 64,
-        "status": "clear",
-        "target_count": len(index.targets),
-        "target_index_sha256": index.sha256,
-        "task_count": 1,
-        "tgid_count": 1,
-    }
-    receipt = {**core, "receipt_sha256": hashlib.sha256(_canonical(core)).hexdigest()}
+    receipt = _privileged_no_delete_receipt(
+        index,
+        implementation_sha256=helper_sha256,
+        host_scope_authority_sha256="f" * 64,
+    )
     monkeypatch.setattr(retention, "_root_owned_file_sha256", root_owned)
     monkeypatch.setattr(
         retention.subprocess,
