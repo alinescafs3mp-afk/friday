@@ -145,16 +145,25 @@ def _fail() -> ArchiveSearchServiceError:
 def _materialized_lane_limit(
     request: ArchiveSearchRequest,
     *,
-    dense_available: bool = False,
+    usable_dense_targets: frozenset[tuple[SearchCorpus, SearchLane]] = frozenset(),
 ) -> int:
     """Fair-share the bounded tail across lanes that can actually extend it."""
 
     targets = canonical_archive_search_targets(request)
+    if (
+        type(usable_dense_targets) is not frozenset
+        or not usable_dense_targets.issubset(targets)
+        or any(
+            corpus not in _DOCUMENT_CORPUS or lane is not SearchLane.DENSE
+            for corpus, lane in usable_dense_targets
+        )
+    ):
+        raise _fail()
     extended_target_count = sum(
         (
             corpus in _DOCUMENT_CORPUS
             and lane in _DOCUMENT_LANES
-            and (lane is not SearchLane.DENSE or dense_available)
+            and (lane is not SearchLane.DENSE or (corpus, lane) in usable_dense_targets)
             or corpus is SearchCorpus.CONVERSATION
             and lane in {SearchLane.LEXICAL, SearchLane.MESSAGE_HISTORY}
         )
@@ -692,10 +701,7 @@ class _ArchiveSearchRecipe:
                 and type(self.continuation) is bool
                 and (
                     self.dense_query_plan is None
-                    or (
-                        type(self.dense_query_plan) is ArchiveDenseQueryPlan
-                        and dense_projection is not None
-                    )
+                    or (type(self.dense_query_plan) is ArchiveDenseQueryPlan and dense_projection is not None)
                 )
                 and _authority_projection_is_valid(
                     self.target_authority,
@@ -956,6 +962,7 @@ def _collect_document_target(
     recipe: _ArchiveSearchRecipe,
     run: ArchiveSearchRunBinding,
     target: tuple[SearchCorpus, SearchLane],
+    limit: int,
 ) -> tuple[tuple[ArchiveSearchCandidate, ...], SearchCoverage]:
     if target[1] is SearchLane.DENSE and recipe.dense_query_plan is None:
         return (), _unsupported(target, run.execution_binding)
@@ -970,10 +977,7 @@ def _collect_document_target(
         snapshot_discriminator=recipe.snapshot_discriminator,
         snapshot_current=True,
         dense_query_plan=recipe.dense_query_plan if target[1] is SearchLane.DENSE else None,
-        limit=_materialized_lane_limit(
-            recipe.request,
-            dense_available=recipe.dense_query_plan is not None,
-        ),
+        limit=limit,
     )
     if not page.available and not page.authority_rechecked:
         return (), _permission_filtered(target, run.execution_binding)
@@ -993,6 +997,7 @@ def _collect_message_target(
     recipe: _ArchiveSearchRecipe,
     run: ArchiveSearchRunBinding,
     target: tuple[SearchCorpus, SearchLane],
+    limit: int,
 ) -> tuple[tuple[ArchiveSearchCandidate, ...], SearchCoverage]:
     controls = archive_message_storage_controls(recipe.request)
     if (
@@ -1027,10 +1032,7 @@ def _collect_message_target(
             lifecycle_states=cast(tuple[LifecycleState, ...], controls["lifecycle_states"]),
             since=cast(str | None, controls["since"]),
             until=cast(str | None, controls["until"]),
-            limit=_materialized_lane_limit(
-                recipe.request,
-                dense_available=recipe.dense_query_plan is not None,
-            ),
+            limit=limit,
             context_before=cast(int, controls["context_before"]),
             context_after=cast(int, controls["context_after"]),
         )
@@ -1105,6 +1107,36 @@ def _collect_message_target(
         returned=len(candidates),
     )
     return candidates, coverage
+
+
+def _cap_materialized_target(
+    candidates: tuple[ArchiveSearchCandidate, ...],
+    coverage: SearchCoverage,
+    *,
+    limit: int,
+) -> tuple[tuple[ArchiveSearchCandidate, ...], SearchCoverage]:
+    """Apply the final fair share to an already revalidated dense target."""
+
+    if len(candidates) <= limit:
+        return candidates, coverage
+    states = set(coverage.states)
+    states.discard(CoverageState.COMPLETE)
+    states.update((CoverageState.CAPPED, CoverageState.PARTIAL))
+    bounded = candidates[:limit]
+    return bounded, SearchCoverage.create(
+        corpus=coverage.corpus,
+        lane=coverage.lane,
+        execution_binding=coverage.execution_binding,
+        states=states,
+        eligible_authorized=coverage.eligible_authorized,
+        examined=coverage.examined,
+        matched_at_least=coverage.matched_at_least,
+        returned=len(bounded),
+        limit=limit,
+        next_cursor_available=False,
+        authority_rechecked=coverage.authority_rechecked,
+        snapshot_current=coverage.snapshot_current,
+    )
 
 
 def _obsidian_phase(phase: ArchiveSearchAuthorityPhase) -> ArchiveObsidianReadPhase:
@@ -1193,6 +1225,38 @@ def _collect_federated_in_transaction(
     authority_by_target = {item.target: item for item in authority}
     candidates_by_target: dict[tuple[SearchCorpus, SearchLane], tuple[ArchiveSearchCandidate, ...]] = {}
     coverage_by_target: dict[tuple[SearchCorpus, SearchLane], SearchCoverage] = {}
+    dense_results: dict[
+        tuple[SearchCorpus, SearchLane],
+        tuple[tuple[ArchiveSearchCandidate, ...], SearchCoverage],
+    ] = {}
+    if recipe.dense_query_plan is not None:
+        for target in targets:
+            target_permission = authority_by_target[target]
+            if (
+                target[0] not in _DOCUMENT_CORPUS
+                or target[1] is not SearchLane.DENSE
+                or (target_permission.capability is not None and not target_permission.allowed)
+            ):
+                continue
+            try:
+                dense_results[target] = _collect_document_target(
+                    conn,
+                    recipe=recipe,
+                    run=run,
+                    target=target,
+                    limit=MAX_ARCHIVE_MATERIALIZED_CANDIDATES,
+                )
+            except _ArchiveAcceptedBoundaryDrift:
+                raise
+            except Exception:
+                dense_results[target] = ((), _storage_unavailable(target, binding))
+    usable_dense_targets = frozenset(
+        target for target, (candidates, _coverage_value) in dense_results.items() if candidates
+    )
+    materialized_limit = _materialized_lane_limit(
+        recipe.request,
+        usable_dense_targets=usable_dense_targets,
+    )
     for target in targets:
         candidates: tuple[ArchiveSearchCandidate, ...] = ()
         coverage = _unsupported(target, binding)
@@ -1202,12 +1266,18 @@ def _collect_federated_in_transaction(
             coverage_by_target[target] = _permission_filtered(target, binding)
             continue
         try:
-            if target[0] in _DOCUMENT_CORPUS and target[1] in _DOCUMENT_LANES:
+            if target in dense_results:
+                candidates, coverage = _cap_materialized_target(
+                    *dense_results[target],
+                    limit=materialized_limit,
+                )
+            elif target[0] in _DOCUMENT_CORPUS and target[1] in _DOCUMENT_LANES:
                 candidates, coverage = _collect_document_target(
                     conn,
                     recipe=recipe,
                     run=run,
                     target=target,
+                    limit=materialized_limit,
                 )
             elif target[0] is SearchCorpus.CONVERSATION and target[1] in {
                 SearchLane.LEXICAL,
@@ -1218,6 +1288,7 @@ def _collect_federated_in_transaction(
                     recipe=recipe,
                     run=run,
                     target=target,
+                    limit=materialized_limit,
                 )
             elif target[0] is SearchCorpus.OBSIDIAN and target[1] in _OBSIDIAN_LANES:
                 candidates, coverage = _collect_obsidian_target(

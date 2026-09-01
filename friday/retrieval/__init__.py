@@ -3699,9 +3699,9 @@ class HybridSearcher:
             )
             if document_id in provenance
         )
-        from friday.retrieval.archive_search_dense import issue_archive_dense_query_plan
+        from friday.retrieval.archive_search_dense import _issue_archive_dense_query_plan
 
-        return issue_archive_dense_query_plan(
+        return _issue_archive_dense_query_plan(
             principal_id=principal,
             query=query,
             model_id=embeddings.settings.embeddings_model,

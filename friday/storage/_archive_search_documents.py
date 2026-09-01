@@ -1817,7 +1817,11 @@ def _dense_chunk_text(row: dict[str, Any], projection: ArchiveDenseQueryProjecti
     max_chars, overlap_chars, max_chunks = (int(item) for item in match.groups())
     if max_chars > 1_000_000 or overlap_chars >= max_chars or max_chunks > 1_000_000:
         return None
-    body = row.get("knowledge_content")
+    # Both corpora expose the exact body being cited as ``passage_body``.  The
+    # document contour separately proves that its promoted KO body is byte-equal
+    # to the Raw body before reaching this reconstruction; Knowledge already
+    # projects the KO body directly under this name.
+    body = row.get("passage_body")
     start = row.get("dense_start_char")
     end = row.get("dense_end_char")
     if (
@@ -1857,8 +1861,7 @@ def _dense_score(blob: object, projection: ArchiveDenseQueryProjection) -> float
     if query_norm <= 0.0 or vector_norm <= 0.0:
         return None
     score = sum(
-        query * float(value)
-        for query, value in zip(projection.query_vector, values, strict=True)
+        query * float(value) for query, value in zip(projection.query_vector, values, strict=True)
     ) / (query_norm * vector_norm)
     return score if math.isfinite(score) else None
 
@@ -2891,6 +2894,7 @@ def _candidate(
     tenant_id: str,
     owner_id: str,
     document_passages: tuple[_StoredDocumentPassage, ...] | None = None,
+    dense_projection: ArchiveDenseQueryProjection | None = None,
 ) -> ArchiveSearchCandidate:
     resolved, passage_revision, raw_revision, knowledge_revision = _resolved_source(
         row,
@@ -2912,6 +2916,8 @@ def _candidate(
         lane_rank = raw_lane_rank
     except ValueError:
         raise _fail("archive document candidate state is invalid") from None
+    if (lane is SearchLane.DENSE) != (dense_projection is not None):
+        raise _fail("archive dense passage identity is invalid")
     passages: tuple[ArchiveSearchPassage, ...] = ()
     evidence_authority = ArchiveEvidenceAuthority.NAVIGATION_ONLY
     if (
@@ -2940,18 +2946,42 @@ def _candidate(
         )
         if excerpt is not None:
             text, start, end = excerpt
-            chunk_index = stored_excerpt[3] if stored_excerpt is not None else 0
-            passage_index_version = (
-                DOCUMENT_STORED_PASSAGE_INDEX_VERSION
-                if stored_excerpt is not None
-                else LEGACY_DOCUMENT_PASSAGE_INDEX_VERSION
-            )
+            if lane is SearchLane.DENSE:
+                chunk_index = row.get("dense_chunk_index")
+                chunk_digest = row.get("dense_content_hash")
+                if (
+                    dense_projection is None
+                    or knowledge_revision is None
+                    or type(chunk_index) is not int
+                    or chunk_index < 0
+                    or type(chunk_digest) is not str
+                    or _SHA256.fullmatch(chunk_digest) is None
+                ):
+                    raise _fail("archive dense passage identity is unavailable")
+                passage_revision = knowledge_revision
+                passage_index_version = dense_projection.chunk_scheme
+                embedding = EmbeddingIdentity.indexed(
+                    EmbeddingCompatibility.CURRENT,
+                    model_id=dense_projection.model_id,
+                    dimensions=dense_projection.dimensions,
+                    source_version=int(knowledge_revision.value),
+                    chunk_scheme=dense_projection.chunk_scheme,
+                    chunk_content_sha256=chunk_digest,
+                )
+            else:
+                chunk_index = stored_excerpt[3] if stored_excerpt is not None else 0
+                passage_index_version = (
+                    DOCUMENT_STORED_PASSAGE_INDEX_VERSION
+                    if stored_excerpt is not None
+                    else LEGACY_DOCUMENT_PASSAGE_INDEX_VERSION
+                )
+                embedding = EmbeddingIdentity.unindexed(EmbeddingCompatibility.NOT_APPLICABLE)
             passage_ref = PassageRef.from_resolved_source(
                 resolved,
                 source_revision=passage_revision,
                 locator=TextSpanLocator(chunk_index=chunk_index, start_char=start, end_char=end),
                 passage_index_version=passage_index_version,
-                embedding=EmbeddingIdentity.unindexed(EmbeddingCompatibility.NOT_APPLICABLE),
+                embedding=embedding,
             )
             passages = (ArchiveSearchPassage(passage_ref, text),)
             evidence_authority = (
@@ -3260,6 +3290,7 @@ def _search_archive_document_lane(
                     request=request,
                     tenant_id=tenant,
                     owner_id=owner,
+                    dense_projection=dense_projection,
                 )
                 for item in visible_hits
             )

@@ -193,7 +193,7 @@ def _valid(plan: object) -> bool:
         return False
 
 
-def issue_archive_dense_query_plan(
+def _issue_archive_dense_query_plan(
     *,
     principal_id: str,
     query: str,
@@ -203,7 +203,13 @@ def issue_archive_dense_query_plan(
     minimum_score: float,
     candidates: tuple[tuple[str, int], ...],
 ) -> ArchiveDenseQueryPlan:
-    """Seal one bounded sidecar-backed recall result for the archive facade."""
+    """Seal one retriever-owned sidecar result for the archive facade.
+
+    This is deliberately package-private.  Archive callers receive plans only
+    from ``HybridSearcher.prepare_archive_dense_query_plan``; exposing this
+    primitive would turn the process-private HMAC into an arbitrary-plan signing
+    oracle.
+    """
 
     principal = _text(principal_id)
     model = _text(model_id)
@@ -212,9 +218,7 @@ def issue_archive_dense_query_plan(
         raise _fail()
     if type(query_vector) is not list or not 1 <= len(query_vector) <= _MAX_DIMENSIONS:
         raise _fail()
-    if type(candidates) is not tuple or any(
-        type(item) is not tuple or len(item) != 2 for item in candidates
-    ):
+    if type(candidates) is not tuple or any(type(item) is not tuple or len(item) != 2 for item in candidates):
         raise _fail()
     try:
         vector = tuple(float(item) for item in query_vector)
@@ -296,6 +300,5 @@ __all__ = [
     "ArchiveDensePlanError",
     "ArchiveDenseQueryPlan",
     "ArchiveDenseQueryProjection",
-    "issue_archive_dense_query_plan",
     "project_archive_dense_query_plan",
 ]

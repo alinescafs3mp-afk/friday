@@ -61,8 +61,15 @@ _CHANNEL_PRIORITY = {
     ArchiveMatchChannel.EXACT_IDENTITY: 0,
     ArchiveMatchChannel.MESSAGE_HISTORY: 1,
     ArchiveMatchChannel.LEXICAL: 2,
+    # Dense passages have already crossed the sealed-plan, score-floor, source,
+    # owner, lifecycle, version, span, hash, and vector revalidation boundary.
+    # Keeping them in a lower absolute tier put dense lane rank 1 behind every
+    # lexical row (rank 86 on the frozen S4 corpus), so the new lane could consume
+    # bounded capacity without improving recall.  Equal priority interleaves the
+    # two evidence lanes by their independently established lane rank; exact
+    # identity and accepted message history remain strictly higher authority.
+    ArchiveMatchChannel.DENSE: 2,
     ArchiveMatchChannel.APPROXIMATE_IDENTITY: 3,
-    ArchiveMatchChannel.DENSE: 4,
     ArchiveMatchChannel.CATALOG: 5,
 }
 _CORPUS_PRIORITY = {

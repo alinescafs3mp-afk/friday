@@ -8,6 +8,8 @@ from typing import Any
 
 import pytest
 
+import friday.retrieval.archive_search_dense as dense_plan_module
+import friday.retrieval.archive_search_service as service_module
 from friday.execution_kernel import ExecutionKernel
 from friday.ingestion import IngestionPipeline
 from friday.knowledge_graph import KnowledgeGraph
@@ -15,10 +17,9 @@ from friday.permissions import ActorContext, AuthorizationService
 from friday.retrieval import HybridSearcher, knowledge_chunk_units, pack_vector
 from friday.retrieval.archive_search_authority import create_archive_model_batch_ledger
 from friday.retrieval.archive_search_contract import ArchiveSearchCorpus, ArchiveSearchRequest
-from friday.retrieval.archive_search_dense import issue_archive_dense_query_plan
 from friday.retrieval.archive_search_service import prepare_archive_search_in_transaction
-from friday.retrieval.contracts import SearchLane
-from friday.storage.models import KnowledgeObject, RawObject
+from friday.retrieval.contracts import EmbeddingCompatibility, RevisionKind, SearchLane
+from friday.storage.models import InboxItem, InboxStatus, KnowledgeObject, RawObject
 from friday.web_surfer import WebSurfer
 
 TENANT = "archive-dense-tenant"
@@ -27,12 +28,20 @@ OTHER = "archive-dense-other"
 MODEL = "archive-dense-test-model"
 SCHEME = "v2:200:20:8"
 QUERY = "семантическая метеорология"
+TAIL_QUERY = "densecapneedle"
 
 
 class _DeterministicEmbeddings:
     remote_enabled = True
 
-    def __init__(self, settings: Any, *, fail: bool = False, storage: Any = None) -> None:
+    def __init__(
+        self,
+        settings: Any,
+        *,
+        fail: bool = False,
+        storage: Any = None,
+        query_vector: list[float] | None = None,
+    ) -> None:
         self.settings = replace(
             settings,
             embeddings_model=MODEL,
@@ -46,6 +55,7 @@ class _DeterministicEmbeddings:
         )
         self.fail = fail
         self.storage = storage
+        self.query_vector = [1.0, 0.0] if query_vector is None else query_vector
 
     async def embed(self, texts: list[str], **_kwargs: object) -> list[list[float]] | None:
         if self.storage is not None:
@@ -53,7 +63,7 @@ class _DeterministicEmbeddings:
         if self.fail:
             return None
         assert len(texts) == 1 and texts[0]
-        return [[1.0, 0.0]]
+        return [self.query_vector]
 
 
 def _seed_document(
@@ -62,6 +72,7 @@ def _seed_document(
     suffix: str,
     owner: str,
     concept_vector: list[float],
+    with_chunks: bool = True,
 ) -> tuple[str, str]:
     raw_id = f"raw_{suffix:0>16}"
     ko_id = f"ko_dense{suffix:0>8}"
@@ -146,7 +157,7 @@ def _seed_document(
                 "vector": pack_vector(concept_vector),
             }
         ],
-        {ko_id: chunks},
+        {ko_id: chunks} if with_chunks else {},
     )
     return raw_id, ko_id
 
@@ -161,6 +172,144 @@ def _actor() -> ActorContext:
     )
 
 
+def _seed_tail_documents(
+    storage: Any,
+    count: int,
+    *,
+    needle: str = TAIL_QUERY,
+) -> set[str]:
+    storage.ensure_user(TENANT)
+    storage.ensure_user(OWNER)
+    raw_ids: set[str] = set()
+    for ordinal in range(1, count + 1):
+        identity = 0xD000000000000000 + ordinal
+        raw_id = f"raw_{identity:016x}"
+        raw_ids.add(raw_id)
+        body = f"{needle} bounded lexical evidence {ordinal:03d}"
+        at = f"2026-08-29T10:{ordinal // 60:02d}:{ordinal % 60:02d}+00:00"
+        storage.store_raw_object(
+            RawObject(
+                id=raw_id,
+                user_id=TENANT,
+                source="upload",
+                source_ref=f"tail:{ordinal:03d}",
+                raw_content=body,
+                content_type="file",
+                metadata_json={
+                    "filename": f"tail-{ordinal:03d}.txt",
+                    "media_kind": "document",
+                    "mime_type": "text/plain",
+                    "uploaded_by": OWNER,
+                },
+                content_hash=hashlib.sha256(body.encode()).hexdigest(),
+                received_at=at,
+                created_at=at,
+            )
+        )
+        storage.store_inbox_item(
+            InboxItem(
+                id=f"inbox_{identity:016x}",
+                user_id=TENANT,
+                raw_object_id=raw_id,
+                status=InboxStatus.CLASSIFIED,
+                created_at=at,
+                reviewed_at=at,
+                reviewed_by=OWNER,
+            )
+        )
+    return raw_ids
+
+
+def _seed_tail_messages(storage: Any, count: int) -> tuple[set[str], str, str]:
+    conversation_ids: set[str] = set()
+    for ordinal in range(1, count + 1):
+        conversation = storage.create_conversation(OWNER, f"tail conversation {ordinal:03d}")
+        conversation_ids.add(conversation["id"])
+        storage.store_message(
+            conversation["id"],
+            OWNER,
+            "assistant",
+            f"{TAIL_QUERY} bounded message evidence {ordinal:03d}",
+        )
+    boundary_conversation = storage.create_conversation(OWNER, "accepted dense tail boundary")
+    boundary = storage.store_message(
+        boundary_conversation["id"],
+        OWNER,
+        "user",
+        "current archive request",
+    )
+    return conversation_ids, boundary_conversation["id"], boundary["id"]
+
+
+def _install_federation_capture(monkeypatch: pytest.MonkeyPatch) -> list[Any]:
+    captured: list[Any] = []
+    original = service_module._collect_federated_in_transaction
+
+    def capture(*args: object, **kwargs: object) -> Any:
+        value = original(*args, **kwargs)
+        captured.append(value)
+        return value
+
+    monkeypatch.setattr(service_module, "_collect_federated_in_transaction", capture)
+    return captured
+
+
+def _stable_materialization(
+    storage: Any,
+    authorization: AuthorizationService,
+    request: ArchiveSearchRequest,
+    *,
+    captured: list[Any],
+    discriminator: str,
+    dense_query_plan: object | None,
+    current_conversation_id: str | None = None,
+    boundary_user_message_id: str | None = None,
+) -> dict[str, object]:
+    ledger = create_archive_model_batch_ledger(
+        tenant_id=TENANT,
+        principal_id=OWNER,
+        turn_discriminator=f"turn-{discriminator}",
+    )
+    before = len(captured)
+    with storage.transaction() as conn:
+        prepare_archive_search_in_transaction(
+            conn,
+            authorization=authorization,
+            actor=_actor(),
+            tenant_id=TENANT,
+            principal_id=OWNER,
+            request=request,
+            snapshot_discriminator=f"snapshot-{discriminator}",
+            run_discriminator=discriminator,
+            turn_ledger=ledger,
+            current_conversation_id=current_conversation_id,
+            boundary_user_message_id=boundary_user_message_id,
+            dense_query_plan=dense_query_plan,  # type: ignore[arg-type]
+        )
+    fresh = captured[before:]
+    assert len(fresh) == 2
+    assert service_module._same_federation(fresh[0], fresh[1])
+
+    def coverage_payload(item: Any) -> dict[str, object]:
+        return {key: value for key, value in item.to_payload().items() if key != "execution_binding"}
+
+    federation = fresh[0]
+    return {
+        "candidates": [
+            item.to_private_payload() for item in (*federation.candidates, *federation.tail_candidates)
+        ],
+        "coverage": [
+            coverage_payload(item) for item in federation.coverage if item.lane is not SearchLane.DENSE
+        ],
+        "terminal_coverage": [
+            coverage_payload(item)
+            for item in federation.terminal_coverage
+            if item.lane is not SearchLane.DENSE
+        ],
+        "warnings": [item.value for item in federation.warnings],
+    }
+
+
 @pytest.mark.asyncio
 async def test_corpus_dense_recall_is_deterministic_principal_scoped_and_cited(
     settings: Any,
@@ -169,14 +318,14 @@ async def test_corpus_dense_recall_is_deterministic_principal_scoped_and_cited(
     storage.ensure_user(TENANT)
     storage.ensure_user(OWNER)
     storage.ensure_user(OTHER)
-    _target_raw, target_ko = _seed_document(
+    _seed_document(
         storage,
         suffix="1",
         owner=OWNER,
         concept_vector=[1.0, 0.0],
     )
     _seed_document(storage, suffix="2", owner=OWNER, concept_vector=[0.0, 1.0])
-    _foreign_raw, foreign_ko = _seed_document(
+    _seed_document(
         storage,
         suffix="3",
         owner=OTHER,
@@ -198,6 +347,8 @@ async def test_corpus_dense_recall_is_deterministic_principal_scoped_and_cited(
         principal_id=OWNER,
     )
     assert repr(first_plan) == repr(second_plan) == "ArchiveDenseQueryPlan(private=True)"
+    assert not hasattr(dense_plan_module, "issue_archive_dense_query_plan")
+    assert "issue_archive_dense_query_plan" not in dense_plan_module.__all__
     with pytest.raises(TypeError):
         pickle.dumps(first_plan)
 
@@ -207,6 +358,7 @@ async def test_corpus_dense_recall_is_deterministic_principal_scoped_and_cited(
         corpora=(ArchiveSearchCorpus.DOCUMENTS,),
         limit=5,
     )
+    prepared_values: list[Any] = []
 
     def run(plan: object, discriminator: str) -> dict[str, Any]:
         with storage.transaction() as conn:
@@ -226,22 +378,11 @@ async def test_corpus_dense_recall_is_deterministic_principal_scoped_and_cited(
                 ),
                 dense_query_plan=plan,  # type: ignore[arg-type]
             )
+        prepared_values.append(prepared)
         return json.loads(prepared.authorized_batch.model_visible_canonical_bytes)
 
     first = run(first_plan, "dense-first")
     second = run(second_plan, "dense-second")
-    adversarial = run(
-        issue_archive_dense_query_plan(
-            principal_id=OWNER,
-            query=QUERY,
-            model_id=MODEL,
-            chunk_scheme=SCHEME,
-            query_vector=[1.0, 0.0],
-            minimum_score=0.35,
-            candidates=((foreign_ko, 0), (target_ko, 0)),
-        ),
-        "dense-adversarial",
-    )
     assert len(first["candidates"]) == 1
     assert len(second["candidates"]) == 1
     candidate = first["candidates"][0]
@@ -251,17 +392,80 @@ async def test_corpus_dense_recall_is_deterministic_principal_scoped_and_cited(
     assert [item["excerpt"] for item in candidate["passages"]] == [
         item["excerpt"] for item in second_candidate["passages"]
     ]
-    assert [item["title"] for item in adversarial["candidates"]] == ["Dense 1"]
     assert candidate["matches"] == [{"channel": "dense", "rank": 1}]
     assert candidate["passages"] and candidate["passages"][0]["excerpt"]
+    private_passage = (
+        prepared_values[0]
+        .authorized_batch._page.results[0]
+        .candidate.passages[  # noqa: SLF001
+            0
+        ]
+        .passage_ref
+    )
+    assert private_passage.source_revision.kind is RevisionKind.KNOWLEDGE_VERSION
+    assert private_passage.source_revision.value == "1"
+    assert private_passage.passage_index_version == SCHEME
+    assert private_passage.embedding.compatibility is EmbeddingCompatibility.CURRENT
+    assert private_passage.embedding.model_id == MODEL
+    assert private_passage.embedding.dimensions == 2
+    assert private_passage.embedding.source_version == 1
+    assert private_passage.embedding.chunk_scheme == SCHEME
+    assert private_passage.embedding.chunk_content_sha256 is not None
     serialized = json.dumps(first, ensure_ascii=False)
     assert "Dense 3" not in serialized
     dense_coverage = next(item for item in first["coverage"] if item["lane"] == SearchLane.DENSE.value)
     assert dense_coverage["states"] == ["backfill_pending", "partial"]
-    lexical_coverage = next(
-        item for item in first["coverage"] if item["lane"] == SearchLane.LEXICAL.value
-    )
+    lexical_coverage = next(item for item in first["coverage"] if item["lane"] == SearchLane.LEXICAL.value)
     assert lexical_coverage["matched_at_least"] == 0
+
+
+@pytest.mark.asyncio
+async def test_revalidated_dense_rank_one_is_not_buried_behind_the_lexical_tail(
+    settings: Any,
+    storage: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    storage.ensure_user(TENANT)
+    storage.ensure_user(OWNER)
+    _seed_document(
+        storage,
+        suffix="9201",
+        owner=OWNER,
+        concept_vector=[1.0, 0.0],
+    )
+    _seed_tail_documents(storage, 40, needle=QUERY)
+    plan = await HybridSearcher(
+        storage,
+        _DeterministicEmbeddings(settings),
+        dense_evidence_min=0.35,
+    ).prepare_archive_dense_query_plan(
+        TENANT,
+        QUERY,
+        principal_id=OWNER,
+    )
+    assert plan is not None
+    captured = _install_federation_capture(monkeypatch)
+    materialized = _stable_materialization(
+        storage,
+        AuthorizationService(storage, shared_tenant=TENANT),
+        ArchiveSearchRequest.create(
+            query=QUERY,
+            corpora=(ArchiveSearchCorpus.DOCUMENTS,),
+            limit=20,
+        ),
+        captured=captured,
+        discriminator="dense-ranked-with-lexical-tail",
+        dense_query_plan=plan,
+    )
+    candidates = materialized["candidates"]
+    target_rank = next(
+        rank
+        for rank, candidate in enumerate(candidates, 1)  # type: ignore[arg-type]
+        if candidate["title"] == "Dense 9201"
+    )
+    target = candidates[target_rank - 1]  # type: ignore[index]
+    assert target_rank <= 2
+    assert {item["channel"] for item in target["matches"]} >= {"dense"}
 
 
 @pytest.mark.asyncio
@@ -271,20 +475,49 @@ async def test_dense_backend_or_stale_sidecar_fails_soft_without_changing_lexica
 ) -> None:
     storage.ensure_user(TENANT)
     storage.ensure_user(OWNER)
-    _seed_document(storage, suffix="4", owner=OWNER, concept_vector=[1.0, 0.0])
-    unavailable = HybridSearcher(storage, _DeterministicEmbeddings(settings, fail=True))
-    assert (
-        await unavailable.prepare_archive_dense_query_plan(TENANT, QUERY, principal_id=OWNER)
-        is None
-    )
-
     request = ArchiveSearchRequest.create(
         query="Атмосферное давление",
         corpora=(ArchiveSearchCorpus.DOCUMENTS,),
         limit=5,
     )
+    _seed_document(
+        storage,
+        suffix="4000",
+        owner=OWNER,
+        concept_vector=[0.0, 1.0],
+        with_chunks=False,
+    )
+    empty_plan = await HybridSearcher(
+        storage,
+        _DeterministicEmbeddings(settings),
+    ).prepare_archive_dense_query_plan(
+        TENANT,
+        request.query,
+        principal_id=OWNER,
+    )
+    assert empty_plan is not None
+    _raw_id, knowledge_id = _seed_document(
+        storage,
+        suffix="4",
+        owner=OWNER,
+        concept_vector=[1.0, 0.0],
+    )
+    unavailable = HybridSearcher(storage, _DeterministicEmbeddings(settings, fail=True))
+    failed_backend = await unavailable.prepare_archive_dense_query_plan(
+        TENANT,
+        "Атмосферное давление",
+        principal_id=OWNER,
+    )
+    assert failed_backend is None
+
     authorization = AuthorizationService(storage, shared_tenant=TENANT)
     healthy = HybridSearcher(storage, _DeterministicEmbeddings(settings))
+    current_plan = await healthy.prepare_archive_dense_query_plan(
+        TENANT,
+        request.query,
+        principal_id=OWNER,
+    )
+    assert current_plan is not None
     tampered_plan = await healthy.prepare_archive_dense_query_plan(
         TENANT,
         request.query,
@@ -292,67 +525,266 @@ async def test_dense_backend_or_stale_sidecar_fails_soft_without_changing_lexica
     )
     assert tampered_plan is not None
     object.__setattr__(tampered_plan, "_seal", b"x" * 32)
-    with storage.transaction() as conn:
-        prepared = prepare_archive_search_in_transaction(
-            conn,
-            authorization=authorization,
-            actor=_actor(),
-            tenant_id=TENANT,
-            principal_id=OWNER,
-            request=request,
-            snapshot_discriminator="archive-dense-fail-soft",
-            run_discriminator="dense-fail-soft",
-            turn_ledger=create_archive_model_batch_ledger(
+    below_floor_plan = await HybridSearcher(
+        storage,
+        _DeterministicEmbeddings(settings, query_vector=[0.0, 1.0]),
+        dense_evidence_min=0.9,
+    ).prepare_archive_dense_query_plan(
+        TENANT,
+        request.query,
+        principal_id=OWNER,
+    )
+    assert below_floor_plan is not None
+
+    def run(plan: object | None, discriminator: str) -> dict[str, object]:
+        with storage.transaction() as conn:
+            prepared = prepare_archive_search_in_transaction(
+                conn,
+                authorization=authorization,
+                actor=_actor(),
                 tenant_id=TENANT,
                 principal_id=OWNER,
-                turn_discriminator="turn-dense-fail-soft",
-            ),
-            dense_query_plan=tampered_plan,
-        )
-    payload = json.loads(prepared.authorized_batch.model_visible_canonical_bytes)
-    assert payload["candidates"]
-    lexical = next(item for item in payload["coverage"] if item["lane"] == "lexical")
-    dense = next(item for item in payload["coverage"] if item["lane"] == "dense")
-    assert lexical["matched_at_least"] == 1
-    assert dense["states"] == ["unavailable"]
+                request=request,
+                snapshot_discriminator=f"archive-dense-{discriminator}",
+                run_discriminator=f"dense-{discriminator}",
+                turn_ledger=create_archive_model_batch_ledger(
+                    tenant_id=TENANT,
+                    principal_id=OWNER,
+                    turn_discriminator=f"turn-dense-{discriminator}",
+                ),
+                dense_query_plan=plan,  # type: ignore[arg-type]
+            )
+        payload = json.loads(prepared.authorized_batch.model_visible_canonical_bytes)
+        candidates = payload["candidates"]
+        for candidate in candidates:
+            candidate.pop("source_handle")
+            for passage in candidate["passages"]:
+                passage.pop("passage_handle")
+        return {
+            "candidates": candidates,
+            "coverage": [item for item in payload["coverage"] if item["lane"] != "dense"],
+        }
 
-    stale_plan = await healthy.prepare_archive_dense_query_plan(
+    baseline = run(None, "baseline")
+    assert baseline["candidates"]
+    for label, plan in (
+        ("backend-failure", failed_backend),
+        ("empty", empty_plan),
+        ("below-floor", below_floor_plan),
+        ("tampered", tampered_plan),
+    ):
+        assert run(plan, label) == baseline
+
+    with storage.transaction() as conn:
+        conn.execute(
+            "UPDATE knowledge_objects SET version=version+1 WHERE id=? AND user_id=?",
+            (knowledge_id, TENANT),
+        )
+    assert run(current_plan, "stale") == baseline
+
+
+@pytest.mark.asyncio
+async def test_empty_dense_plan_preserves_full_document_tail(
+    settings: Any,
+    storage: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    expected_sources = _seed_tail_documents(storage, 86)
+    _seed_document(
+        storage,
+        suffix="8600",
+        owner=OWNER,
+        concept_vector=[0.0, 1.0],
+        with_chunks=False,
+    )
+    authorization = AuthorizationService(storage, shared_tenant=TENANT)
+    captured = _install_federation_capture(monkeypatch)
+    request = ArchiveSearchRequest.create(
+        query=TAIL_QUERY,
+        corpora=(ArchiveSearchCorpus.DOCUMENTS,),
+        limit=20,
+    )
+    baseline = _stable_materialization(
+        storage,
+        authorization,
+        request,
+        captured=captured,
+        discriminator="tail-documents-baseline",
+        dense_query_plan=None,
+    )
+    baseline_sources = {
+        candidate["resolved_source"]["source_ref"]["canonical_object_id"]
+        for candidate in baseline["candidates"]  # type: ignore[union-attr]
+    }
+    assert baseline_sources == expected_sources
+
+    empty = await HybridSearcher(
+        storage,
+        _DeterministicEmbeddings(settings),
+    ).prepare_archive_dense_query_plan(
+        TENANT,
+        TAIL_QUERY,
+        principal_id=OWNER,
+    )
+    assert empty is not None
+    assert (
+        _stable_materialization(
+            storage,
+            authorization,
+            request,
+            captured=captured,
+            discriminator="tail-documents-empty",
+            dense_query_plan=empty,
+        )
+        == baseline
+    )
+
+
+@pytest.mark.asyncio
+async def test_empty_dense_plan_preserves_mixed_document_and_message_tail(
+    settings: Any,
+    storage: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    expected_documents = _seed_tail_documents(storage, 52)
+    expected_messages, conversation_id, boundary_id = _seed_tail_messages(storage, 52)
+    _seed_document(
+        storage,
+        suffix="5200",
+        owner=OWNER,
+        concept_vector=[0.0, 1.0],
+        with_chunks=False,
+    )
+    authorization = AuthorizationService(storage, shared_tenant=TENANT)
+    captured = _install_federation_capture(monkeypatch)
+    request = ArchiveSearchRequest.create(
+        query=TAIL_QUERY,
+        corpora=(ArchiveSearchCorpus.DOCUMENTS, ArchiveSearchCorpus.MESSAGES),
+        limit=20,
+    )
+    baseline = _stable_materialization(
+        storage,
+        authorization,
+        request,
+        captured=captured,
+        discriminator="tail-mixed-baseline",
+        dense_query_plan=None,
+        current_conversation_id=conversation_id,
+        boundary_user_message_id=boundary_id,
+    )
+    baseline_sources = {
+        candidate["resolved_source"]["source_ref"]["canonical_object_id"]
+        for candidate in baseline["candidates"]  # type: ignore[union-attr]
+    }
+    assert baseline_sources == expected_documents | expected_messages
+    empty = await HybridSearcher(
+        storage,
+        _DeterministicEmbeddings(settings),
+    ).prepare_archive_dense_query_plan(
+        TENANT,
+        TAIL_QUERY,
+        principal_id=OWNER,
+    )
+    assert empty is not None
+    assert (
+        _stable_materialization(
+            storage,
+            authorization,
+            request,
+            captured=captured,
+            discriminator="tail-mixed-empty",
+            dense_query_plan=empty,
+            current_conversation_id=conversation_id,
+            boundary_user_message_id=boundary_id,
+        )
+        == baseline
+    )
+
+
+@pytest.mark.parametrize("drift", ("stale", "tampered"))
+@pytest.mark.asyncio
+async def test_knowledge_dense_revalidates_current_and_rejects_stale_or_tampered(
+    drift: str,
+    settings: Any,
+    storage: Any,
+) -> None:
+    storage.ensure_user(TENANT)
+    storage.ensure_user(OWNER)
+    _raw_id, knowledge_id = _seed_document(
+        storage,
+        suffix="9101",
+        owner=OWNER,
+        concept_vector=[1.0, 0.0],
+    )
+    authorization = AuthorizationService(storage, shared_tenant=TENANT)
+    request = ArchiveSearchRequest.create(
+        query=QUERY,
+        corpora=(ArchiveSearchCorpus.KNOWLEDGE,),
+        limit=5,
+    )
+    plan = await HybridSearcher(
+        storage,
+        _DeterministicEmbeddings(settings),
+        dense_evidence_min=0.35,
+    ).prepare_archive_dense_query_plan(
         TENANT,
         QUERY,
         principal_id=OWNER,
     )
-    assert stale_plan is not None
-    with storage.transaction() as conn:
-        conn.execute(
-            "UPDATE knowledge_objects SET version=version+1 WHERE user_id=?",
-            (TENANT,),
-        )
-    stale_request = ArchiveSearchRequest.create(
-        query=QUERY,
-        corpora=(ArchiveSearchCorpus.DOCUMENTS,),
-        limit=5,
-    )
-    with storage.transaction() as conn:
-        stale = prepare_archive_search_in_transaction(
-            conn,
-            authorization=authorization,
-            actor=_actor(),
-            tenant_id=TENANT,
-            principal_id=OWNER,
-            request=stale_request,
-            snapshot_discriminator="archive-dense-stale",
-            run_discriminator="dense-stale",
-            turn_ledger=create_archive_model_batch_ledger(
+    assert plan is not None
+
+    def run(discriminator: str) -> tuple[dict[str, Any], Any]:
+        with storage.transaction() as conn:
+            prepared = prepare_archive_search_in_transaction(
+                conn,
+                authorization=authorization,
+                actor=_actor(),
                 tenant_id=TENANT,
                 principal_id=OWNER,
-                turn_discriminator="turn-dense-stale",
-            ),
-            dense_query_plan=stale_plan,
-        )
-    stale_payload = json.loads(stale.authorized_batch.model_visible_canonical_bytes)
-    stale_dense = next(item for item in stale_payload["coverage"] if item["lane"] == "dense")
-    assert stale_payload["candidates"] == []
-    assert stale_dense["states"] == ["backfill_pending", "partial"]
+                request=request,
+                snapshot_discriminator=f"knowledge-{discriminator}",
+                run_discriminator=f"knowledge-{discriminator}",
+                turn_ledger=create_archive_model_batch_ledger(
+                    tenant_id=TENANT,
+                    principal_id=OWNER,
+                    turn_discriminator=f"turn-knowledge-{discriminator}",
+                ),
+                dense_query_plan=plan,
+            )
+        return json.loads(prepared.authorized_batch.model_visible_canonical_bytes), prepared
+
+    current, prepared = run(f"current-{drift}")
+    assert [item["title"] for item in current["candidates"]] == ["Dense 9101"]
+    current_dense = next(item for item in current["coverage"] if item["lane"] == "dense")
+    assert current_dense["eligible_authorized"] == 1
+    assert current_dense["examined"] == 1
+    assert current_dense["matched_at_least"] == 1
+    candidate = prepared.authorized_batch._page.results[0].candidate  # noqa: SLF001
+    assert candidate.passages[0].passage_ref.source_revision.kind is RevisionKind.KNOWLEDGE_VERSION
+    assert candidate.passages[0].passage_ref.source_revision.value == "1"
+    assert candidate.passages[0].passage_ref.passage_index_version == SCHEME
+    assert candidate.passages[0].passage_ref.embedding.compatibility is EmbeddingCompatibility.CURRENT
+    assert candidate.passages[0].passage_ref.embedding.model_id == MODEL
+
+    with storage.transaction() as conn:
+        if drift == "stale":
+            conn.execute(
+                "UPDATE knowledge_objects SET version=version+1 WHERE id=? AND user_id=?",
+                (knowledge_id, TENANT),
+            )
+        else:
+            conn.execute(
+                "UPDATE knowledge_chunk_embeddings SET content_hash=? "
+                "WHERE knowledge_object_id=? AND chunk_index=0 AND user_id=?",
+                ("f" * 64, knowledge_id, TENANT),
+            )
+    rejected, _prepared = run(drift)
+    assert rejected["candidates"] == []
+    rejected_dense = next(item for item in rejected["coverage"] if item["lane"] == "dense")
+    assert rejected_dense["eligible_authorized"] == 1
+    assert rejected_dense["examined"] == 0
+    assert rejected_dense["matched_at_least"] == 0
+    assert rejected_dense["states"] == ["backfill_pending", "partial"]
 
 
 @pytest.mark.asyncio
