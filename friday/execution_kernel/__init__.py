@@ -91,7 +91,7 @@ from friday.source_identity import private_source_search_page, raw_source_snapsh
 from friday.storage._conversations import (
     select_promoted_current_conversation_window_in_transaction,
 )
-from friday.storage._core import iso_date
+from friday.storage._core import iso_date, read_only_storage_snapshot
 from friday.storage._oversight import ANALYSES
 from friday.storage.models import (
     AuditEntry,
@@ -6218,7 +6218,7 @@ class ExecutionKernel:
         )
         dense_allowed = False
         if dense_requested and callable(dense_prepare):
-            with storage.transaction() as conn:
+            with read_only_storage_snapshot(storage) as conn:
                 principal_row = conn.execute(
                     "SELECT preset_key, status FROM users WHERE id=?",
                     (invocation.principal_id,),

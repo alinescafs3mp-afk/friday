@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -48,6 +49,28 @@ def _arguments(invocation: object, *, corpora: list[str] | None = None) -> dict[
     }
 
 
+def _durable_read_signature(storage: Any) -> tuple[object, ...]:
+    database = Path(storage.settings.database_path)
+
+    def file_signature(path: Path) -> tuple[bool, int, str]:
+        if not path.exists():
+            return False, 0, hashlib.sha256(b"").hexdigest()
+        body = path.read_bytes()
+        return True, len(body), hashlib.sha256(body).hexdigest()
+
+    context = storage.conn.execute(
+        "SELECT singleton, batch_id, recorded_at, observed_at "
+        "FROM relation_revision_context WHERE singleton=1"
+    ).fetchone()
+    assert context is not None
+    return (
+        storage.conn.total_changes,
+        tuple(context),
+        file_signature(database),
+        file_signature(database.with_name(f"{database.name}-wal")),
+    )
+
+
 def test_archive_search_is_an_observe_capability_without_private_schema_fields(settings: Any) -> None:
     kernel = ExecutionKernel(settings=settings)
     tool = kernel.get_tool("archive_search")
@@ -57,6 +80,74 @@ def test_archive_search_is_an_observe_capability_without_private_schema_fields(s
     assert tool.risk == "observe"
     assert tool.parameters["additionalProperties"] is False
     assert "_archive_invocation" not in tool.parameters["properties"]
+
+
+@pytest.mark.asyncio
+async def test_dense_authority_preflight_is_an_effect_free_read_snapshot(
+    settings: Any,
+    storage: Any,
+) -> None:
+    kernel, actor, web = await _kernel(settings, storage, "archive-kernel-dense-read-only")
+    invocation = kernel.create_archive_search_invocation(
+        actor=actor,
+        turn_ledger=_ledger(actor, "archive-kernel-dense-read-only-turn"),
+    )
+    before = _durable_read_signature(storage)
+    calls: list[tuple[str, str, str | None]] = []
+
+    async def prepare(user_id: str, query: str, *, principal_id: str | None = None) -> None:
+        calls.append((user_id, query, principal_id))
+        assert storage.conn.in_transaction is False
+        assert _durable_read_signature(storage) == before
+
+    kernel.searcher = SimpleNamespace(prepare_archive_dense_query_plan=prepare)
+    try:
+        result = await kernel.execute(
+            "archive_search",
+            _arguments(invocation, corpora=["documents"]),
+            actor=actor,
+        )
+    finally:
+        await web.close()
+
+    assert result.success is True
+    assert calls == [(actor.user_id, "PRIVATE-ARCHIVE-QUERY", actor.own_id)]
+
+
+@pytest.mark.asyncio
+async def test_dense_revocation_after_preflight_still_fails_before_storage_publication(
+    settings: Any,
+    storage: Any,
+) -> None:
+    owner = "archive-kernel-dense-revoke"
+    kernel, actor, web = await _kernel(settings, storage, owner)
+    invocation = kernel.create_archive_search_invocation(
+        actor=actor,
+        turn_ledger=_ledger(actor, "archive-kernel-dense-revoke-turn"),
+    )
+    called = False
+
+    async def revoke(_user_id: str, _query: str, *, principal_id: str | None = None) -> None:
+        nonlocal called
+        called = True
+        assert principal_id == owner
+        assert storage.conn.in_transaction is False
+        storage.set_permission_override(owner, "search.use", "deny")
+
+    kernel.searcher = SimpleNamespace(prepare_archive_dense_query_plan=revoke)
+    try:
+        result = await kernel.execute(
+            "archive_search",
+            _arguments(invocation, corpora=["documents"]),
+            actor=actor,
+        )
+    finally:
+        await web.close()
+
+    assert called is True
+    assert result.success is False
+    assert result.prepared_archive_search is None
+    assert "PRIVATE-ARCHIVE-QUERY" not in result.to_llm_message()
 
 
 @pytest.mark.asyncio

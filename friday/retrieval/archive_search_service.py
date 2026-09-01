@@ -1253,10 +1253,18 @@ def _collect_federated_in_transaction(
     usable_dense_targets = frozenset(
         target for target, (candidates, _coverage_value) in dense_results.items() if candidates
     )
-    materialized_limit = _materialized_lane_limit(
-        recipe.request,
-        usable_dense_targets=usable_dense_targets,
-    )
+    materialized_limit = MAX_ARCHIVE_MATERIALIZED_CANDIDATES
+    if any(
+        corpus in _DOCUMENT_CORPUS
+        and lane in _DOCUMENT_LANES
+        or corpus is SearchCorpus.CONVERSATION
+        and lane in {SearchLane.LEXICAL, SearchLane.MESSAGE_HISTORY}
+        for corpus, lane in targets
+    ):
+        materialized_limit = _materialized_lane_limit(
+            recipe.request,
+            usable_dense_targets=usable_dense_targets,
+        )
     for target in targets:
         candidates: tuple[ArchiveSearchCandidate, ...] = ()
         coverage = _unsupported(target, binding)
