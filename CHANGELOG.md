@@ -1,3 +1,16 @@
+## 0.207.95 — 2026-09-01
+
+### Model-control compatibility hardening
+
+- Keeps released native, canonical textual JSON and unlabelled/JSON-fenced
+  offered tool calls working exactly once while refusing executable promotion
+  from non-JSON-labelled fences.
+- Fails closed on dominant malformed identity-plus-arguments carriers after
+  decoys or long prefixes without discarding quoted syntax examples and literal
+  unclosed `tool_call` documentation.
+- SQLite remains at schema 50; exact `0.207.94` is the predecessor and
+  `0.207.90` remains the immutable fallback.
+
 ## 0.207.94 — 2026-09-01
 
 ### Fair Inbox advice scheduling
