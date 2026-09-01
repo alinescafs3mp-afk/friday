@@ -22,6 +22,15 @@ from tools import quality_gate
 
 ROOT = Path(__file__).resolve().parents[1]
 CLEAN_CLASS = "clean artifact path"
+RESTART_CLASS = "restart and recovery evidence"
+CANDIDATE_FAULT_CASES = (
+    ("durable_scheduled_work", RESTART_CLASS),
+    ("honest_degradation", RESTART_CLASS),
+)
+CANDIDATE_RUNTIME_CASES = (
+    ("conversation_recall", CLEAN_CLASS),
+    *CANDIDATE_FAULT_CASES,
+)
 
 EXPECTED_CLEAN_INVENTORIES = {
     "conversation_recall": (
@@ -117,31 +126,34 @@ def _receipt(
     identity: evidence.ReleaseIdentity,
     journey_id: str,
     *,
+    evidence_class: str = CLEAN_CLASS,
     result: str = "VERIFIED",
 ) -> bytes:
+    execution: dict[str, object] = {
+        "collection_sha256": "d" * 64,
+        "exit_code": 0 if result == "VERIFIED" else 1,
+        "outcome_projection_sha256": "e" * 64,
+        "producer_path": evidence.PRODUCER_PATH,
+        "producer_source_sha256": "f" * 64,
+        "runner": "pytest",
+    }
+    if evidence._requires_candidate_runtime(journey_id, evidence_class):  # noqa: SLF001
+        execution["artifact_import"] = {
+            "interpreter_ref": "venv/bin/python",
+            "origin_report_sha256": "1" * 64,
+            "site_packages_ref": "venv/lib/python3.14/site-packages",
+            "subprocess_policy": evidence._SUBPROCESS_POLICY,  # noqa: SLF001
+            "tooling_modules_sha256": "2" * 64,
+            "tooling_policy": evidence._TEST_TOOLING_POLICY,  # noqa: SLF001
+            "tooling_snapshot_sha256": "3" * 64,
+        }
     return evidence.canonical_json_bytes(
         {
-            "$schema": evidence.CLEAN_ARTIFACT_RECEIPT_SCHEMA,
-            "check_ids": evidence._check_ids(journey_id, CLEAN_CLASS),  # noqa: SLF001
-            "environment": "clean_artifact",
-            "evidence_class": CLEAN_CLASS,
-            "execution": {
-                "artifact_import": {
-                    "interpreter_ref": "venv/bin/python",
-                    "origin_report_sha256": "1" * 64,
-                    "site_packages_ref": "venv/lib/python3.14/site-packages",
-                    "subprocess_policy": evidence._SUBPROCESS_POLICY,  # noqa: SLF001
-                    "tooling_modules_sha256": "2" * 64,
-                    "tooling_policy": evidence._TEST_TOOLING_POLICY,  # noqa: SLF001
-                    "tooling_snapshot_sha256": "3" * 64,
-                },
-                "collection_sha256": "d" * 64,
-                "exit_code": 0 if result == "VERIFIED" else 1,
-                "outcome_projection_sha256": "e" * 64,
-                "producer_path": evidence.PRODUCER_PATH,
-                "producer_source_sha256": "f" * 64,
-                "runner": "pytest",
-            },
+            "$schema": evidence.receipt_schema(evidence_class, journey_id=journey_id),
+            "check_ids": evidence._check_ids(journey_id, evidence_class),  # noqa: SLF001
+            "environment": evidence.ENVIRONMENT_BY_CLASS[evidence_class],
+            "evidence_class": evidence_class,
+            "execution": execution,
             "journey_id": journey_id,
             "observed_at_utc": "2026-08-30T08:00:00Z",
             "owner_smoke": None,
@@ -195,10 +207,22 @@ def test_clean_artifact_inventories_are_exact_closed_and_executable() -> None:
 def test_clean_artifact_schema_and_check_ids_are_truthful_and_narrow() -> None:
     assert evidence.receipt_schema(CLEAN_CLASS) == evidence.CLEAN_ARTIFACT_RECEIPT_SCHEMA
     assert evidence.receipt_schema("integration path") == evidence.RECEIPT_SCHEMA
+    assert evidence.receipt_schema(RESTART_CLASS) == evidence.RECEIPT_SCHEMA
     assert evidence.CLEAN_ARTIFACT_RECEIPT_SCHEMA not in {
         evidence.RECEIPT_SCHEMA,
         "friday.golden-journey-sanitized-receipt.v3",
     }
+    for journey_id, evidence_class in CANDIDATE_RUNTIME_CASES:
+        assert evidence._requires_candidate_runtime(journey_id, evidence_class) is True  # noqa: SLF001
+        assert (
+            evidence.receipt_schema(evidence_class, journey_id=journey_id)
+            == evidence.CLEAN_ARTIFACT_RECEIPT_SCHEMA
+        )
+    for journey_id, evidence_class in evidence._PROOF_REFS_BY_JOURNEY_CLASS:  # noqa: SLF001
+        expected = evidence_class == CLEAN_CLASS or ((journey_id, evidence_class) in CANDIDATE_FAULT_CASES)
+        assert evidence._requires_candidate_runtime(journey_id, evidence_class) is expected  # noqa: SLF001
+    assert evidence._requires_candidate_runtime("conversation_recall", RESTART_CLASS) is False  # noqa: SLF001
+    assert evidence.receipt_schema(RESTART_CLASS, journey_id="conversation_recall") == evidence.RECEIPT_SCHEMA
     for journey_id in EXPECTED_CLEAN_INVENTORIES:
         assert evidence._check_ids(journey_id, CLEAN_CLASS) == [  # noqa: SLF001
             f"{journey_id}.installed_journey_suite"
@@ -206,13 +230,43 @@ def test_clean_artifact_schema_and_check_ids_are_truthful_and_narrow() -> None:
 
 
 def test_clean_receipt_validation_requires_the_authenticated_sealed_release(tmp_path: Path) -> None:
-    with pytest.raises(evidence.ExactReleaseEvidenceError, match="^release_runtime_required$"):
+    for journey_id, evidence_class in CANDIDATE_RUNTIME_CASES:
+        with pytest.raises(evidence.ExactReleaseEvidenceError, match="^release_runtime_required$"):
+            evidence.validate_receipt(
+                _receipt(_identity(), journey_id, evidence_class=evidence_class),
+                expected_release=_identity(),
+                expected_journey_id=journey_id,
+                expected_evidence_class=evidence_class,
+                repo_root=tmp_path,
+            )
+
+    with pytest.raises(evidence.ExactReleaseEvidenceError, match="^release_runtime_unexpected$"):
         evidence.validate_receipt(
-            _receipt(_identity(), "conversation_recall"),
+            b"not-inspected",
             expected_release=_identity(),
             expected_journey_id="conversation_recall",
-            expected_evidence_class=CLEAN_CLASS,
+            expected_evidence_class=RESTART_CLASS,
             repo_root=tmp_path,
+            release_root=tmp_path,
+        )
+    for journey_id, evidence_class in CANDIDATE_FAULT_CASES:
+        with pytest.raises(evidence.ExactReleaseEvidenceError, match="^receipt_json_invalid$"):
+            evidence.validate_receipt_via_native_controller(
+                b"",
+                expected_release=_identity(),
+                expected_journey_id=journey_id,
+                expected_evidence_class=evidence_class,
+                repo_root=tmp_path,
+                release_root=tmp_path,
+            )
+    with pytest.raises(evidence.ExactReleaseEvidenceError, match="^native_validation_scope_invalid$"):
+        evidence.validate_receipt_via_native_controller(
+            b"",
+            expected_release=_identity(),
+            expected_journey_id="conversation_recall",
+            expected_evidence_class=RESTART_CLASS,
+            repo_root=tmp_path,
+            release_root=tmp_path,
         )
 
 
@@ -320,6 +374,38 @@ def test_clean_receipt_schema_origin_and_runtime_authority_fail_closed(
                 expected_release=identity,
                 expected_journey_id="conversation_recall",
                 expected_evidence_class=CLEAN_CLASS,
+                repo_root=tmp_path,
+                execution_witness=witness,
+                release_runtime=runtime,
+            )
+
+    for journey_id, evidence_class in CANDIDATE_FAULT_CASES:
+        fault_payload = json.loads(_receipt(identity, journey_id, evidence_class=evidence_class))
+        fault_payload["proofs"] = payload["proofs"]
+        fault_payload["execution"]["collection_sha256"] = witness.collection_sha256
+        fault_payload["execution"]["outcome_projection_sha256"] = witness.outcome_projection_sha256
+        fault_raw = evidence.canonical_json_bytes(fault_payload)
+        assert (
+            evidence._validate_receipt(  # noqa: SLF001
+                fault_raw,
+                expected_release=identity,
+                expected_journey_id=journey_id,
+                expected_evidence_class=evidence_class,
+                repo_root=tmp_path,
+                execution_witness=witness,
+                release_runtime=runtime,
+            )["result"]
+            == "VERIFIED"
+        )
+
+        downgraded_fault = dict(fault_payload)
+        downgraded_fault["$schema"] = evidence.RECEIPT_SCHEMA
+        with pytest.raises(evidence.ExactReleaseEvidenceError, match="^receipt_binding_invalid$"):
+            evidence._validate_receipt(  # noqa: SLF001
+                evidence.canonical_json_bytes(downgraded_fault),
+                expected_release=identity,
+                expected_journey_id=journey_id,
+                expected_evidence_class=evidence_class,
                 repo_root=tmp_path,
                 execution_witness=witness,
                 release_runtime=runtime,
@@ -1136,6 +1222,16 @@ def test_closed_clean_runner_binds_the_installed_bootstrap_and_origin_report(
         CLEAN_CLASS,
         release_runtime=runtime,
     )
+    fault_witnesses = [
+        evidence._run_closed_pytest(  # noqa: SLF001
+            tmp_path,
+            identity,
+            journey_id,
+            evidence_class,
+            release_runtime=runtime,
+        )
+        for journey_id, evidence_class in CANDIDATE_FAULT_CASES
+    ]
 
     command = commands[0]
     assert command[:8] == (
@@ -1174,6 +1270,21 @@ def test_closed_clean_runner_binds_the_installed_bootstrap_and_origin_report(
     assert witness.tooling_modules_sha256 == "4" * 64
     assert witness.tooling_policy == evidence._TEST_TOOLING_POLICY  # noqa: SLF001
     assert len(witness.tooling_snapshot_sha256 or "") == 64
+    assert len(commands) == len(CANDIDATE_RUNTIME_CASES)
+    for fault_command, fault_witness in zip(commands[1:], fault_witnesses, strict=True):
+        assert fault_command[:5] == (str(runtime.interpreter), "-I", "-S", "-B", "-X")
+        assert evidence._INSTALLED_PYTEST_BOOTSTRAP in fault_command  # noqa: SLF001
+        assert fault_witness.interpreter_ref == runtime.interpreter_ref
+        assert fault_witness.site_packages_ref == runtime.site_packages_ref
+        assert fault_witness.artifact_origin_sha256 is not None
+    with pytest.raises(evidence.ExactReleaseEvidenceError, match="^release_runtime_unexpected$"):
+        evidence._run_closed_pytest(  # noqa: SLF001
+            tmp_path,
+            identity,
+            "conversation_recall",
+            RESTART_CLASS,
+            release_runtime=runtime,
+        )
 
 
 @pytest.mark.parametrize(
@@ -1281,6 +1392,24 @@ def test_bundle_derives_canonical_body_free_manifest_and_paths(result: str) -> N
     for private in (b"raw message", b"prompt", b"/home/", b"telegram:test:5001"):
         assert private not in serialized
 
+    for fault_journey_id, fault_evidence_class in CANDIDATE_FAULT_CASES:
+        fault_raw = _receipt(
+            identity,
+            fault_journey_id,
+            evidence_class=fault_evidence_class,
+            result=result,
+        )
+        fault_bundle = evidence._bundle_from_receipt(  # noqa: SLF001
+            fault_raw,
+            identity=identity,
+            journey_id=fault_journey_id,
+            evidence_class=fault_evidence_class,
+        )
+        fault_manifest = json.loads(fault_bundle.manifest)
+        assert fault_manifest["observation"]["artifact_schema"] == (evidence.CLEAN_ARTIFACT_RECEIPT_SCHEMA)
+        assert fault_manifest["observation"]["environment"] == "restart_recovery"
+        assert json.loads(fault_bundle.receipt)["execution"]["artifact_import"]
+
 
 def test_bundle_projection_rejects_non_timestamp_body_content() -> None:
     identity = _identity()
@@ -1334,6 +1463,30 @@ def test_public_bundle_apis_accept_no_caller_claim_fields(monkeypatch: pytest.Mo
     )
     assert validations == [raw]
     assert bundle.result == "VERIFIED"
+
+    runtime = _release_runtime(ROOT / "sealed-candidate", identity)
+    produced: list[dict[str, object]] = []
+
+    def produce(**kwargs: object) -> bytes:
+        produced.append(dict(kwargs))
+        return _receipt(
+            identity,
+            str(kwargs["journey_id"]),
+            evidence_class=str(kwargs["evidence_class"]),
+        )
+
+    monkeypatch.setattr(evidence, "_authenticate_release_runtime", lambda _root: runtime)
+    monkeypatch.setattr(evidence, "_produce_for_identity", produce)
+    monkeypatch.setattr(evidence, "_reauthenticate_release_runtime", lambda _candidate: None)
+    for journey_id, evidence_class in CANDIDATE_FAULT_CASES:
+        fault_bundle = evidence.produce_evidence_bundle(
+            repo_root=ROOT,
+            release_root=runtime.root,
+            journey_id=journey_id,
+            evidence_class=evidence_class,
+        )
+        assert fault_bundle.result == "VERIFIED"
+    assert [item["release_runtime"] for item in produced] == [runtime, runtime]
 
 
 def test_bundle_publish_is_create_only_and_rolls_back_only_its_first_file(tmp_path: Path) -> None:
@@ -2250,7 +2403,11 @@ def test_bundle_authority_and_canonical_json_fail_closed(tmp_path: Path) -> None
             evidence._load_canonical_manifest(raw)  # noqa: SLF001
 
 
-def test_clean_artifact_requires_deterministic_bundle_cli() -> None:
+def test_clean_artifact_requires_deterministic_bundle_cli(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
     bundle_args = [
         "bundle",
         "--release-root",
@@ -2264,6 +2421,89 @@ def test_clean_artifact_requires_deterministic_bundle_cli() -> None:
     ]
     parsed = evidence.build_parser().parse_args(bundle_args)
     assert parsed.command == "bundle"
+    assert parsed.evidence_class == CLEAN_CLASS
+    for journey_id, evidence_class in CANDIDATE_FAULT_CASES:
+        fault_parsed = evidence.build_parser().parse_args(
+            [
+                "bundle",
+                "--release-root",
+                "/release",
+                "--repo-root",
+                "/repo",
+                "--journey-id",
+                journey_id,
+                "--evidence-class",
+                evidence_class,
+                "--output-root",
+                "/outside",
+            ]
+        )
+        assert (fault_parsed.journey_id, fault_parsed.evidence_class) == (
+            journey_id,
+            evidence_class,
+        )
+    monkeypatch.setattr(evidence, "_require_producer_process_authority", lambda: None)
+    invalid_pair = ("conversation_recall", RESTART_CLASS)
+    for command, output_option, expected_failure in (
+        ("bundle", "--output-root", "candidate_runtime_bundle_scope_invalid"),
+        ("validate", None, "native_validation_scope_invalid"),
+    ):
+        arguments = [
+            command,
+            "--release-root",
+            "/release",
+            "--repo-root",
+            "/repo",
+            "--journey-id",
+            invalid_pair[0],
+            "--evidence-class",
+            invalid_pair[1],
+        ]
+        if output_option is not None:
+            arguments.extend((output_option, str(tmp_path / "invalid-cross-product")))
+        else:
+            arguments.extend(
+                (
+                    "--expected-source-commit",
+                    "a" * 40,
+                    "--expected-tree-sha256",
+                    "b" * 64,
+                    "--expected-wheel-sha256",
+                    "c" * 64,
+                    "--expected-database-schema",
+                    "50",
+                )
+            )
+        assert evidence.main(arguments) == 2
+        assert json.loads(capsys.readouterr().out) == {
+            "failure_code": expected_failure,
+            "status": "failed_closed",
+        }
+    for index, (journey_id, evidence_class) in enumerate(CANDIDATE_FAULT_CASES):
+        output = tmp_path / f"forbidden-receipt-{index}.json"
+        assert (
+            evidence.main(
+                [
+                    "run",
+                    "--release-root",
+                    "/release",
+                    "--repo-root",
+                    "/repo",
+                    "--journey-id",
+                    journey_id,
+                    "--evidence-class",
+                    evidence_class,
+                    "--output",
+                    str(output),
+                ]
+            )
+            == 2
+        )
+        assert json.loads(capsys.readouterr().out) == {
+            "failure_code": "clean_artifact_bundle_required",
+            "status": "failed_closed",
+        }
+        assert not output.exists()
     with pytest.raises(SystemExit):
         evidence.build_parser().parse_args(
             [
@@ -2301,19 +2541,46 @@ def test_bundle_output_root_must_stay_outside_the_exact_checkout(tmp_path: Path)
 def test_clean_artifact_cannot_escape_through_receipt_only_publication(
     tmp_path: Path,
 ) -> None:
-    raw = _receipt(_identity(), "conversation_recall")
+    for index, (journey_id, evidence_class) in enumerate(CANDIDATE_RUNTIME_CASES):
+        raw = _receipt(_identity(), journey_id, evidence_class=evidence_class)
+        with pytest.raises(
+            evidence.ExactReleaseEvidenceError,
+            match="^clean_artifact_bundle_required$",
+        ):
+            evidence.write_receipt_exclusive(tmp_path / f"receipt-{index}.json", raw)
+        downgraded = json.loads(raw)
+        downgraded["$schema"] = evidence.RECEIPT_SCHEMA
+        with pytest.raises(
+            evidence.ExactReleaseEvidenceError,
+            match="^clean_artifact_bundle_required$",
+        ):
+            evidence.write_receipt_exclusive(
+                tmp_path / f"downgraded-receipt-{index}.json",
+                evidence.canonical_json_bytes(downgraded),
+            )
+        with pytest.raises(
+            evidence.ExactReleaseEvidenceError,
+            match="^clean_artifact_bundle_required$",
+        ):
+            evidence.produce_receipt(
+                repo_root=tmp_path,
+                release_root=tmp_path,
+                journey_id=journey_id,
+                evidence_class=evidence_class,
+            )
+    forged_v4 = json.loads(
+        _receipt(
+            _identity(),
+            "conversation_recall",
+            evidence_class=RESTART_CLASS,
+        )
+    )
+    forged_v4["$schema"] = evidence.CLEAN_ARTIFACT_RECEIPT_SCHEMA
     with pytest.raises(
         evidence.ExactReleaseEvidenceError,
         match="^clean_artifact_bundle_required$",
     ):
-        evidence.write_receipt_exclusive(tmp_path / "receipt.json", raw)
-    with pytest.raises(
-        evidence.ExactReleaseEvidenceError,
-        match="^clean_artifact_bundle_required$",
-    ):
-        evidence.produce_receipt(
-            repo_root=tmp_path,
-            release_root=tmp_path,
-            journey_id="conversation_recall",
-            evidence_class=CLEAN_CLASS,
+        evidence.write_receipt_exclusive(
+            tmp_path / "forged-v4-non-candidate.json",
+            evidence.canonical_json_bytes(forged_v4),
         )

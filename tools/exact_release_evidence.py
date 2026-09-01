@@ -48,6 +48,13 @@ VALIDATION_TIMEOUT_SECONDS = PYTEST_TIMEOUT_SECONDS + 60
 VALIDATION_TERMINATION_GRACE_SECONDS = 5.0
 _EVIDENCE_ROOT = PurePosixPath("evidence/golden_journeys")
 _CLEAN_ARTIFACT_CLASS = "clean artifact path"
+_RESTART_RECOVERY_CLASS = "restart and recovery evidence"
+_CANDIDATE_BOUND_FAULT_JOURNEYS = frozenset(
+    {
+        "durable_scheduled_work",
+        "honest_degradation",
+    }
+)
 _SUBPROCESS_POLICY = "cpython_audit_deny"
 _TEST_TOOLING_POLICY = "explicit_single_site_v1"
 _INTERPRETER_REF = "venv/bin/python"
@@ -1666,10 +1673,30 @@ def proof_refs(journey_id: str, evidence_class: str) -> tuple[str, ...]:
     return refs
 
 
-def receipt_schema(evidence_class: str) -> str:
+def _requires_candidate_runtime(journey_id: object, evidence_class: object) -> bool:
+    """Return the only journey/class pairs whose proofs execute the sealed wheel."""
+
+    return bool(
+        type(journey_id) is str
+        and type(evidence_class) is str
+        and (
+            evidence_class == _CLEAN_ARTIFACT_CLASS
+            or (evidence_class == _RESTART_RECOVERY_CLASS and journey_id in _CANDIDATE_BOUND_FAULT_JOURNEYS)
+        )
+    )
+
+
+def receipt_schema(evidence_class: str, *, journey_id: str | None = None) -> str:
     if type(evidence_class) is not str or evidence_class not in ENVIRONMENT_BY_CLASS:
         raise ExactReleaseEvidenceError("evidence_class_invalid")
-    return CLEAN_ARTIFACT_RECEIPT_SCHEMA if evidence_class == _CLEAN_ARTIFACT_CLASS else RECEIPT_SCHEMA
+    if journey_id is not None and type(journey_id) is not str:
+        raise ExactReleaseEvidenceError("journey_id_invalid")
+    candidate_runtime = (
+        evidence_class == _CLEAN_ARTIFACT_CLASS
+        if journey_id is None
+        else _requires_candidate_runtime(journey_id, evidence_class)
+    )
+    return CLEAN_ARTIFACT_RECEIPT_SCHEMA if candidate_runtime else RECEIPT_SCHEMA
 
 
 def _closed_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
@@ -1763,7 +1790,7 @@ def _bundle_from_receipt(
     receipt = _load_canonical_receipt(raw)
     expected_release = _release_payload(identity)
     result = receipt.get("result")
-    expected_schema = receipt_schema(evidence_class)
+    expected_schema = receipt_schema(evidence_class, journey_id=journey_id)
     if (
         set(receipt) != _RECEIPT_FIELDS
         or receipt.get("$schema") != expected_schema
@@ -2865,14 +2892,14 @@ def _run_closed_pytest(
     if signal.getsignal(signal.SIGCHLD) != signal.SIG_DFL:
         raise ExactReleaseEvidenceError("child_process_authority_invalid")
     nodeids = proof_refs(journey_id, evidence_class)
-    clean_artifact = evidence_class == _CLEAN_ARTIFACT_CLASS
-    if clean_artifact:
+    candidate_runtime_required = _requires_candidate_runtime(journey_id, evidence_class)
+    if candidate_runtime_required:
         runtime = _require_release_runtime(release_runtime, identity)
     elif release_runtime is not None:
         raise ExactReleaseEvidenceError("release_runtime_unexpected")
     else:
         runtime = None
-    if clean_artifact and not require_isolated_startup:
+    if candidate_runtime_required and not require_isolated_startup:
         raise ExactReleaseEvidenceError("producer_process_authority_invalid")
     source_tooling_site: Path | None = None
     _require_exact_checkout(repo_root, identity.source_commit)
@@ -3088,8 +3115,8 @@ def _produce_for_identity(
     release_payload = _release_payload(identity)
     owner_smoke_payload = _owner_smoke_payload(owner_smoke)
     root = _resolve_directory(repo_root, "repo_root_invalid")
-    clean_artifact = evidence_class == _CLEAN_ARTIFACT_CLASS
-    if clean_artifact:
+    candidate_runtime_required = _requires_candidate_runtime(journey_id, evidence_class)
+    if candidate_runtime_required:
         runtime = _require_release_runtime(release_runtime, identity)
     elif release_runtime is not None:
         raise ExactReleaseEvidenceError("release_runtime_unexpected")
@@ -3128,7 +3155,7 @@ def _produce_for_identity(
             "tooling_snapshot_sha256": witness.tooling_snapshot_sha256,
         }
     receipt = {
-        "$schema": receipt_schema(evidence_class),
+        "$schema": receipt_schema(evidence_class, journey_id=journey_id),
         "check_ids": _check_ids(journey_id, evidence_class),
         "environment": ENVIRONMENT_BY_CLASS[evidence_class],
         "evidence_class": evidence_class,
@@ -3175,8 +3202,11 @@ def _validate_receipt(
     """
 
     expected_release_payload = _release_payload(expected_release)
-    clean_artifact = expected_evidence_class == _CLEAN_ARTIFACT_CLASS
-    if clean_artifact:
+    candidate_runtime_required = _requires_candidate_runtime(
+        expected_journey_id,
+        expected_evidence_class,
+    )
+    if candidate_runtime_required:
         runtime = _require_release_runtime(release_runtime, expected_release)
     elif release_runtime is not None:
         raise ExactReleaseEvidenceError("release_runtime_unexpected")
@@ -3196,7 +3226,7 @@ def _validate_receipt(
     refs = proof_refs(expected_journey_id, expected_evidence_class)
     expected_checks = _check_ids(expected_journey_id, expected_evidence_class)
     if (
-        value.get("$schema") != receipt_schema(expected_evidence_class)
+        value.get("$schema") != receipt_schema(expected_evidence_class, journey_id=expected_journey_id)
         or value.get("journey_id") != expected_journey_id
         or value.get("evidence_class") != expected_evidence_class
         or value.get("environment") != ENVIRONMENT_BY_CLASS[expected_evidence_class]
@@ -3217,12 +3247,12 @@ def _validate_receipt(
 
     execution = value.get("execution")
     execution_fields = set(_EXECUTION_FIELDS)
-    if clean_artifact:
+    if candidate_runtime_required:
         execution_fields.add("artifact_import")
     if type(execution) is not dict or set(execution) != execution_fields:
         raise ExactReleaseEvidenceError("execution_binding_invalid")
     artifact_import = execution.get("artifact_import")
-    if clean_artifact:
+    if candidate_runtime_required:
         assert runtime is not None
         if (
             type(artifact_import) is not dict
@@ -3319,7 +3349,7 @@ def _validate_receipt(
         or execution.get("outcome_projection_sha256") != witness.outcome_projection_sha256
         or witness.outcome_projection_sha256 != _outcome_projection_sha256(refs, witness.outcomes)
         or (
-            clean_artifact
+            candidate_runtime_required
             and (
                 witness.artifact_origin_sha256 != artifact_binding.get("origin_report_sha256")
                 or witness.interpreter_ref != artifact_binding.get("interpreter_ref")
@@ -3331,7 +3361,7 @@ def _validate_receipt(
             )
         )
         or (
-            not clean_artifact
+            not candidate_runtime_required
             and any(
                 item is not None
                 for item in (
@@ -3362,7 +3392,11 @@ def validate_receipt(
 ) -> dict[str, Any]:
     """Validate structure, then independently rerun the exact closed inventory."""
 
-    if expected_evidence_class == _CLEAN_ARTIFACT_CLASS:
+    candidate_runtime_required = _requires_candidate_runtime(
+        expected_journey_id,
+        expected_evidence_class,
+    )
+    if candidate_runtime_required:
         if release_root is None:
             raise ExactReleaseEvidenceError("release_runtime_required")
         _require_native_validation_context()
@@ -3386,7 +3420,7 @@ def validate_receipt(
             repo_root=source_root,
             authenticated_owner_smoke=authenticated_owner_smoke,
             require_running_producer=require_running_producer,
-            require_isolated_startup=expected_evidence_class == _CLEAN_ARTIFACT_CLASS,
+            require_isolated_startup=candidate_runtime_required,
             release_runtime=runtime,
         )
 
@@ -3401,17 +3435,20 @@ def _validation_request(
 ) -> dict[str, object]:
     _load_canonical_receipt(raw)
     proof_refs(expected_journey_id, expected_evidence_class)
-    clean_artifact = expected_evidence_class == _CLEAN_ARTIFACT_CLASS
-    if clean_artifact != (release_root is not None):
+    candidate_runtime_required = _requires_candidate_runtime(
+        expected_journey_id,
+        expected_evidence_class,
+    )
+    if candidate_runtime_required != (release_root is not None):
         raise ExactReleaseEvidenceError(
-            "release_runtime_required" if clean_artifact else "release_runtime_unexpected"
+            "release_runtime_required" if candidate_runtime_required else "release_runtime_unexpected"
         )
     return {
         "evidence_class": expected_evidence_class,
         "journey_id": expected_journey_id,
         "receipt_sha256": hashlib.sha256(raw).hexdigest(),
         "release": _release_payload(expected_release),
-        "release_root_required": clean_artifact,
+        "release_root_required": candidate_runtime_required,
     }
 
 
@@ -3875,7 +3912,7 @@ def validate_receipt_via_native_controller(
 ) -> dict[str, Any]:
     """Validate through one exact stdlib-only controller from a native gate."""
 
-    if expected_evidence_class != _CLEAN_ARTIFACT_CLASS or release_root is None:
+    if not _requires_candidate_runtime(expected_journey_id, expected_evidence_class) or release_root is None:
         raise ExactReleaseEvidenceError("native_validation_scope_invalid")
     if (
         _NATIVE_VALIDATION_TOOLING_SITE is not None
@@ -4298,7 +4335,7 @@ def produce_receipt(
     consumers must independently supply that same expected token to validation.
     """
 
-    if evidence_class == _CLEAN_ARTIFACT_CLASS:
+    if _requires_candidate_runtime(journey_id, evidence_class):
         raise ExactReleaseEvidenceError("clean_artifact_bundle_required")
     identity = derive_release_identity(release_root)
     raw = _produce_for_identity(
@@ -4352,7 +4389,7 @@ def produce_evidence_bundle(
 ) -> EvidenceBundle:
     """Run the closed verifier and derive receipt plus manifest without caller claims."""
 
-    if evidence_class == _CLEAN_ARTIFACT_CLASS:
+    if _requires_candidate_runtime(journey_id, evidence_class):
         runtime = _authenticate_release_runtime(release_root)
         identity = runtime.identity
     else:
@@ -4485,7 +4522,10 @@ def write_receipt_exclusive(path: Path, raw: bytes) -> str:
     """Write one complete canonical receipt without replacing an existing name."""
 
     receipt = _load_canonical_receipt(raw)
-    if receipt.get("$schema") == CLEAN_ARTIFACT_RECEIPT_SCHEMA:
+    if receipt.get("$schema") == CLEAN_ARTIFACT_RECEIPT_SCHEMA or _requires_candidate_runtime(
+        receipt.get("journey_id"),
+        receipt.get("evidence_class"),
+    ):
         raise ExactReleaseEvidenceError("clean_artifact_bundle_required")
     digest, _identity = _write_canonical_exclusive(
         path,
@@ -5309,6 +5349,11 @@ def _external_bundle_output_root(repo_root: Path, output_root: Path) -> Path:
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     commands = parser.add_subparsers(dest="command", required=True)
+    candidate_runtime_pairs = tuple(
+        (journey_id, evidence_class)
+        for journey_id, evidence_class in _PROOF_REFS_BY_JOURNEY_CLASS
+        if _requires_candidate_runtime(journey_id, evidence_class)
+    )
     validate = commands.add_parser("validate")
     validate.add_argument("--repo-root", required=True, type=Path)
     validate.add_argument("--release-root", required=True, type=Path)
@@ -5319,16 +5364,12 @@ def build_parser() -> argparse.ArgumentParser:
     validate.add_argument(
         "--journey-id",
         required=True,
-        choices=sorted(
-            journey_id
-            for journey_id, evidence_class in _PROOF_REFS_BY_JOURNEY_CLASS
-            if evidence_class == _CLEAN_ARTIFACT_CLASS
-        ),
+        choices=sorted({journey_id for journey_id, _evidence_class in candidate_runtime_pairs}),
     )
     validate.add_argument(
         "--evidence-class",
         required=True,
-        choices=(_CLEAN_ARTIFACT_CLASS,),
+        choices=sorted({evidence_class for _journey_id, evidence_class in candidate_runtime_pairs}),
     )
     run = commands.add_parser("run")
     run.add_argument("--release-root", required=True, type=Path)
@@ -5348,11 +5389,12 @@ def build_parser() -> argparse.ArgumentParser:
     bundle.add_argument(
         "--journey-id",
         required=True,
-        choices=sorted(
-            journey_id
-            for journey_id, evidence_class in _PROOF_REFS_BY_JOURNEY_CLASS
-            if evidence_class == "clean artifact path"
-        ),
+        choices=sorted({journey_id for journey_id, _evidence_class in candidate_runtime_pairs}),
+    )
+    bundle.add_argument(
+        "--evidence-class",
+        default=_CLEAN_ARTIFACT_CLASS,
+        choices=sorted({evidence_class for _journey_id, evidence_class in candidate_runtime_pairs}),
     )
     bundle.add_argument("--output-root", required=True, type=Path)
     return parser
@@ -5363,7 +5405,10 @@ def main(argv: list[str] | None = None) -> int:
         _require_producer_process_authority()
         args = build_parser().parse_args(argv)
         if args.command == "validate":
-            if args.evidence_class != _CLEAN_ARTIFACT_CLASS or args.release_root is None:
+            if (
+                not _requires_candidate_runtime(args.journey_id, args.evidence_class)
+                or args.release_root is None
+            ):
                 raise ExactReleaseEvidenceError("native_validation_scope_invalid")
             _require_native_validation_context()
             raw = sys.stdin.buffer.read(65_537)
@@ -5392,12 +5437,14 @@ def main(argv: list[str] | None = None) -> int:
             print(canonical_json_bytes(attestation).decode())
             return 0
         if args.command == "bundle":
+            if not _requires_candidate_runtime(args.journey_id, args.evidence_class):
+                raise ExactReleaseEvidenceError("candidate_runtime_bundle_scope_invalid")
             output_root = _external_bundle_output_root(args.repo_root, args.output_root)
             bundle = produce_evidence_bundle(
                 repo_root=args.repo_root,
                 release_root=args.release_root,
                 journey_id=args.journey_id,
-                evidence_class="clean artifact path",
+                evidence_class=args.evidence_class,
             )
             published = write_evidence_bundle_exclusive(output_root, bundle)
             print(canonical_json_bytes(published).decode())

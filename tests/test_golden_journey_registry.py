@@ -639,7 +639,7 @@ def _validate_sanitized_receipt(
     if (
         type(artifact_ref) is not str
         or type(artifact_schema) is not str
-        or artifact_schema != exact_evidence.receipt_schema(evidence_class)
+        or artifact_schema != exact_evidence.receipt_schema(evidence_class, journey_id=journey_id)
     ):
         raise RegistryValidationError("manifest does not bind a canonical sanitized receipt")
     expected_artifact_ref = _expected_artifact_ref(
@@ -661,7 +661,10 @@ def _validate_sanitized_receipt(
     try:
         validator = (
             exact_evidence.validate_receipt_via_native_controller
-            if evidence_class == "clean artifact path"
+            if exact_evidence._requires_candidate_runtime(  # noqa: SLF001
+                journey_id,
+                evidence_class,
+            )
             else exact_evidence.validate_receipt
         )
         receipt = validator(
@@ -817,7 +820,13 @@ def _validate_claim(
 
 def _clean_release_root_for_registry(rows: tuple[JourneyRow, ...]) -> Path | None:
     required = any(
-        row.evidence["clean artifact path"].state in {"VERIFIED", "FAILED", "STALE"} for row in rows
+        claim.state in {"VERIFIED", "FAILED", "STALE"}
+        and exact_evidence._requires_candidate_runtime(  # noqa: SLF001
+            row.journey_id,
+            evidence_class,
+        )
+        for row in rows
+        for evidence_class, claim in row.evidence.items()
     )
     raw = os.environ.get(_CLEAN_RELEASE_ROOT_ENV)
     if not required:
@@ -1017,9 +1026,10 @@ def _machine_manifest(
 def _clean_machine_manifest(
     identity: ReleaseIdentity,
     repo_root: Path,
+    *,
+    journey_id: str = "conversation_recall",
+    evidence_class: str = "clean artifact path",
 ) -> tuple[dict[str, Any], str, bytes]:
-    journey_id = "conversation_recall"
-    evidence_class = "clean artifact path"
     exact_identity = exact_evidence.ReleaseIdentity(
         source_commit=identity.source_commit,
         tree_sha256=identity.tree_sha256,
@@ -1030,7 +1040,7 @@ def _clean_machine_manifest(
     outcomes = ("PASSED",) * len(refs)
     collection = exact_evidence.canonical_json_bytes({"nodeids": list(refs), "version": 1})
     receipt = {
-        "$schema": exact_evidence.CLEAN_ARTIFACT_RECEIPT_SCHEMA,
+        "$schema": exact_evidence.receipt_schema(evidence_class, journey_id=journey_id),
         "check_ids": _expected_check_ids(journey_id, evidence_class),
         "environment": ENVIRONMENT_BY_CLASS[evidence_class],
         "evidence_class": evidence_class,
@@ -1141,8 +1151,6 @@ def test_decisive_clean_registry_passes_one_exact_request_to_native_controller(
         wheel_sha256="b" * 64,
         database_schema=50,
     )
-    artifact_root = tmp_path / "clean-artifacts"
-    manifest, manifest_ref, raw = _clean_machine_manifest(identity, artifact_root)
     sealed_release_root = tmp_path / "sealed-release"
     sealed_release_root.mkdir()
     calls: list[dict[str, object]] = []
@@ -1156,32 +1164,47 @@ def test_decisive_clean_registry_passes_one_exact_request_to_native_controller(
         "validate_receipt_via_native_controller",
         validate_native,
     )
-    _validate_manifest_payload(
-        manifest,
-        manifest_ref=manifest_ref,
-        journey_id="conversation_recall",
-        evidence_class="clean artifact path",
-        current=identity,
-        require_current=True,
-        repo_root=artifact_root,
-        release_root=sealed_release_root,
+    cases = (
+        ("conversation_recall", "clean artifact path"),
+        ("durable_scheduled_work", "restart and recovery evidence"),
+        ("honest_degradation", "restart and recovery evidence"),
     )
+    expected_calls: list[dict[str, object]] = []
+    for journey_id, evidence_class in cases:
+        artifact_root = tmp_path / f"{journey_id}-artifacts"
+        manifest, manifest_ref, raw = _clean_machine_manifest(
+            identity,
+            artifact_root,
+            journey_id=journey_id,
+            evidence_class=evidence_class,
+        )
+        _validate_manifest_payload(
+            manifest,
+            manifest_ref=manifest_ref,
+            journey_id=journey_id,
+            evidence_class=evidence_class,
+            current=identity,
+            require_current=True,
+            repo_root=artifact_root,
+            release_root=sealed_release_root,
+        )
+        expected_calls.append(
+            {
+                "raw": raw,
+                "expected_release": exact_evidence.ReleaseIdentity(
+                    source_commit=identity.source_commit,
+                    tree_sha256=identity.tree_sha256,
+                    wheel_sha256=identity.wheel_sha256,
+                    database_schema=identity.database_schema,
+                ),
+                "expected_journey_id": journey_id,
+                "expected_evidence_class": evidence_class,
+                "repo_root": ROOT,
+                "release_root": sealed_release_root,
+            }
+        )
 
-    assert calls == [
-        {
-            "raw": raw,
-            "expected_release": exact_evidence.ReleaseIdentity(
-                source_commit=identity.source_commit,
-                tree_sha256=identity.tree_sha256,
-                wheel_sha256=identity.wheel_sha256,
-                database_schema=identity.database_schema,
-            ),
-            "expected_journey_id": "conversation_recall",
-            "expected_evidence_class": "clean artifact path",
-            "repo_root": ROOT,
-            "release_root": sealed_release_root,
-        }
-    ]
+    assert calls == expected_calls
 
 
 def test_site_loaded_clean_registry_crosses_the_real_native_controller(
@@ -1347,7 +1370,14 @@ def test_canonical_golden_journey_registry_is_closed_current_and_privacy_safe(
                 evidence_class,
                 claim,
                 identity,
-                release_root=(clean_release_root if evidence_class == "clean artifact path" else None),
+                release_root=(
+                    clean_release_root
+                    if exact_evidence._requires_candidate_runtime(  # noqa: SLF001
+                        row.journey_id,
+                        evidence_class,
+                    )
+                    else None
+                ),
             )
         _validate_readiness(row)
     assert all(
@@ -1410,6 +1440,16 @@ def test_canonical_golden_journey_registry_is_closed_current_and_privacy_safe(
     future_release_root = tmp_path / "future-sealed-release"
     monkeypatch.setenv(_CLEAN_RELEASE_ROOT_ENV, str(future_release_root))
     assert _clean_release_root_for_registry((future_conversation,)) == future_release_root
+    for journey_id in ("durable_scheduled_work", "honest_degradation"):
+        fault_row = next(row for row in rows if row.journey_id == journey_id)
+        future_fault_evidence = dict(fault_row.evidence)
+        future_fault_evidence["restart and recovery evidence"] = EvidenceClaim("VERIFIED", ())
+        future_fault_row = replace(fault_row, evidence=future_fault_evidence)
+        monkeypatch.delenv(_CLEAN_RELEASE_ROOT_ENV, raising=False)
+        with pytest.raises(RegistryValidationError, match="authenticated release root"):
+            _clean_release_root_for_registry((future_fault_row,))
+        monkeypatch.setenv(_CLEAN_RELEASE_ROOT_ENV, str(future_release_root))
+        assert _clean_release_root_for_registry((future_fault_row,)) == future_release_root
     with quality_gate._isolated_test_environment() as gate_environment:  # noqa: SLF001
         assert gate_environment[_CLEAN_RELEASE_ROOT_ENV] == str(future_release_root)
     generic_operator = RepositoryLink(
