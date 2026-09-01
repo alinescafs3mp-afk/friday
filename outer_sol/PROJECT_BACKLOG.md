@@ -14,20 +14,20 @@ either merged here or discarded before that source is removed.
 ## Current production identity
 
 - Branch: `main`
-- Deployed implementation head: `916aaa36c416ba4cfbe42ed3113e6ab6f342f110`.
-- Live: Friday `0.207.95` / `916aaa36c416ba4cfbe42ed3113e6ab6f342f110`;
-  tree `3b84b74f3b478794bf025026af6835dac32097bc78befaefce667ae5abc159ae`;
-  wheel `fc2b002fc742164554e2e01cfe5d0678182741f70c223fb1b6fe00e5fe8ac266`.
-- Immediate runtime predecessor: Friday `0.207.94` /
-  `b5cf9b70f4493c8083c840bf8ce92b847ce5044b`; tree
-  `983cf655db523d0a7b8d91b0bc4d816d28ada5d763e0dc698d4ba70a8d3081a4`.
+- Deployed implementation head: `7af9698fc4b50730711bca755b59bdc68b83ff67`.
+- Live: Friday `0.207.96` / `7af9698fc4b50730711bca755b59bdc68b83ff67`;
+  tree `a04f2587064d6ae18f76b22633474017fee53be605ad0266204dbe2405d62e6e`;
+  wheel `bd7645b2f9120ab3c51acbe82d83269dd8cd0d86f30af31d9b112539d221be3a`.
+- Immediate runtime predecessor: Friday `0.207.95` /
+  `916aaa36c416ba4cfbe42ed3113e6ab6f342f110`; tree
+  `3b84b74f3b478794bf025026af6835dac32097bc78befaefce667ae5abc159ae`.
   Schema-capable fallback: Friday `0.207.90` /
   `7abb3c5e3fb29bdc7c53bf923f8b218fa26f07e9`; tree
   `c1c29331db489ad1c56080d70a8c37d4051b4752f1309dba9c0a012099ebcae5`.
 - Database schema: 50 in deployed production and the fallback.
 - Production: immutable activation `clear`; backend and Telegram bridge active;
   trusted-CA health `200`. The post-activation DR lifecycle is published at
-  index revision 28 with `0.207.95` current, `0.207.94` older and the
+  index revision 32 with `0.207.96` current, `0.207.95` older and the
   pre-activation anchor retained; retention admission is honestly
   `review_required` and grants no apply/delete authority.
   V12
@@ -54,13 +54,14 @@ either merged here or discarded before that source is removed.
 
 ## Active package
 
-S4-R6 bounded conversation lexical refill, R7 five-contour document recall and
-the R8A model-control compatibility slice are live. The inbox-advice worker now
+S4-R6 bounded conversation lexical refill, R7 five-contour document recall,
+fail-soft dense document passage recall and the R8A model-control compatibility
+slice are live. The inbox-advice worker now
 selects eligible privacy-safe rows before
 its finite page, so current, exhausted or excluded rows cannot starve later
 work. S6-R3 exact journey evidence is live; P0G Gate Diet is included in the
 current release. P0H reader, pair-bearing writer and safe no-delete continuation
-remain live through `0.207.95`; the permanent `io_uring_disabled=2` R3 proposal
+remain live through `0.207.96`; the permanent `io_uring_disabled=2` R3 proposal
 is rejected, so P0H remains open only for a one-shot maintenance authority and
 reviewed bounded deletion that preserves the ordinary Engineer environment. S4-R8
 remains open for sole-facade parity; R8A deliberately preserves the released
@@ -406,8 +407,9 @@ deployed in `0.207.78`; R4a reader-first conversation passages are deployed in
 `0.207.79`; R4b schema-50 writer/lexical activation is deployed in `0.207.80`;
 R5 measured conversation recall is deployed in `0.207.83`; R6 bounded lexical
 refill and R7 five-contour document recall are deployed in `0.207.93`; the R8A
-compatibility/model-control slice is deployed in `0.207.95`. R8 sole
-dialogue-facade retirement is not deployed.
+compatibility/model-control slice is deployed in `0.207.95`; fail-soft dense
+document passage recall is deployed in `0.207.96`. R8 sole dialogue-facade
+retirement is not deployed.
 
 1. Add reader-first `document_passages` with a schema-capable fallback, bounded
    writer, restart-safe resumable backfill and honest `index_incomplete`.
@@ -566,6 +568,24 @@ binding `95800fe23d86e497faf83ed6d6578edaa5ffb9fbe48c4d64bffc131ea0298335`.
 Immutable activation ended `clear`; DR lifecycle revision 28 retains
 `0.207.95` current and `0.207.94` older with retention `review_required`.
 Trusted-CA health reports `0.207.95`/`ok`, and signed private-owner smoke passed
+all 11 checks.
+
+Dense document recall acceptance: `archive_search` now admits bounded dense
+passage candidates without replacing its complete lexical/message tails, then
+re-authorizes and re-scores exact-current sources before returning provenance.
+Missing, stale or failed dense state fails soft to the released non-dense path.
+The frozen body-free 140-document/24-qrel synthetic ranking corpus improved
+recall@10 from 12/24 to 24/24 and recall@20 from 13/24 to 24/24 with zero
+foreign-authority results; this evidence deliberately makes no claim about the
+private production corpus or production embedding-model quality. The exact
+release gate passed 24,772 non-UI plus 32 UI tests with zero failures, skips or
+retries; summary SHA-256
+`ae22e5d4b2689bfdf927c8638b7cc1e43e009651c0261e00ae0c9a46a3fe3a88`.
+Independent clean-checkout and clean Git-archive builds reproduced release wheel
+`bd7645b2f9120ab3c51acbe82d83269dd8cd0d86f30af31d9b112539d221be3a`.
+Immutable activation ended `clear`; DR lifecycle revision 32 retains
+`0.207.96` current and `0.207.95` older with retention `review_required`.
+Trusted-CA health reports `0.207.96`/`ok`, and signed private-owner smoke passed
 all 11 checks.
 
 Estimate: 4–10 clean-work days across the remaining separately reversible releases.
