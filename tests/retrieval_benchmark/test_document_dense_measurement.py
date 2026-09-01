@@ -100,7 +100,7 @@ def test_current_dense_report_reproduces_the_exact_body_free_candidate() -> None
     assert len(evidence["instrument"]["candidate_repeat_output_sha256"]) == 64
 
 
-def test_dense_report_is_truthful_about_scope_and_preserves_released_controls() -> None:
+def test_dense_report_is_truthful_about_scope_and_context_only_observations() -> None:
     evidence = json.loads(_EVIDENCE.read_text(encoding="utf-8"))
     baseline = evidence["baseline"]
     candidate = evidence["candidate"]
