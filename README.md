@@ -595,6 +595,9 @@ export FRIDAY_SYNCTHING_AMD64_TARBALL="${FRIDAY_SYNCTHING_AMD64_TARBALL:-$HOME/.
 umask 077
 candidate_sha="$(git rev-parse --verify HEAD^{commit})"
 base_sha="$(git rev-parse --verify "${QUALITY_GATE_BASE_SHA:?set accepted base}^{commit}")"
+GOLDEN_JOURNEY_RELEASE_ROOT="$(readlink -f -- "$HOME/.jericho/wheel-only-releases/ff8c62926e7c7ea9cfcd53c460f9a0608d83621c")" || exit 1
+test -d "$GOLDEN_JOURNEY_RELEASE_ROOT" || exit 1
+export GOLDEN_JOURNEY_RELEASE_ROOT
 evidence_dir="$(mktemp -d /var/tmp/friday-gate.XXXXXXXX)"
 .venv/bin/python -I -B tools/quality_gate.py --tier exact-release \
   --candidate-sha "$candidate_sha" --base-sha "$base_sha" \

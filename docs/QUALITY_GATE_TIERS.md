@@ -50,7 +50,7 @@ the isolated gate maps only this named asset into the test environment.
 umask 077
 candidate_sha="$(git rev-parse --verify 'HEAD^{commit}')"
 base_sha="$(git rev-parse --verify "${QUALITY_GATE_BASE_SHA:?set accepted base}^{commit}")"
-GOLDEN_JOURNEY_RELEASE_ROOT="$(readlink -f -- "$HOME/.jericho/current-release")" || exit 1
+GOLDEN_JOURNEY_RELEASE_ROOT="$(readlink -f -- "$HOME/.jericho/wheel-only-releases/ff8c62926e7c7ea9cfcd53c460f9a0608d83621c")" || exit 1
 test -d "$GOLDEN_JOURNEY_RELEASE_ROOT" || exit 1
 export GOLDEN_JOURNEY_RELEASE_ROOT
 evidence_dir="$(mktemp -d -p /var/tmp friday-exact-evidence.XXXXXXXX)"
@@ -58,6 +58,10 @@ evidence_dir="$(mktemp -d -p /var/tmp friday-exact-evidence.XXXXXXXX)"
   --tier exact-release --candidate-sha "$candidate_sha" --base-sha "$base_sha" \
   --evidence-dir "$evidence_dir"
 ```
+
+`GOLDEN_JOURNEY_RELEASE_ROOT` is the immutable runtime identity pinned by the
+canonical sanitized receipts. Never substitute the mutable `current-release`
+symlink: a newer production runtime is not evidence for those receipts.
 
 Nightly is never routed through public Actions. Run it only in a private operator
 session whose readable absolute `QUALITY_GATE_REAL_BACKUPS_DIR`, executable
