@@ -73,7 +73,7 @@ _EXPECTED_DEPENDENCY_HASHES = {
     "friday/diagnostics/runtime_lease.py": (
         "6986bcef0d21d1754672ad784746fbc205b4822de708c71b16dd93576f3d1926"
     ),
-    "friday/admin_api/_overview.py": ("ae6a861de89bcee5209e7f322f8c0f0b6c9502d01890a676685379d63135d1ea"),
+    "friday/admin_api/_overview.py": ("322873e979178985e2e3cffc7d2c8690cc97f27c5970f9a06db9b1fb9e524677"),
 }
 
 _MODEL_ENV_ALLOWLIST = frozenset(
