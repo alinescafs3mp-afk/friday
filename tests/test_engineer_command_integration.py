@@ -104,6 +104,11 @@ class _StatusThenFinishModel(_SchemaSpy):
 
 
 class _DependentHostCommandModel(_SchemaSpy):
+    # This fixture exercises two real native service round-trips.  Its turn
+    # budget must cover host scheduling under the canonical 20-worker gate;
+    # the inherited four-second turn is only suitable for in-process doubles.
+    total_budget_sec = 15.0
+
     def __init__(self) -> None:
         super().__init__()
         self.calls = 0
