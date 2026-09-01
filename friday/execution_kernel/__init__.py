@@ -72,6 +72,7 @@ from friday.reports import SUPPORTED_KINDS, render, spec_from_payload
 from friday.retrieval import _public_graph_context, best_snippet, is_relational_query, tokens_of
 from friday.retrieval.archive_search_authority import ArchiveModelBatchLedger
 from friday.retrieval.archive_search_contract import ArchiveSearchCorpus, ArchiveSearchRequest
+from friday.retrieval.archive_search_dense import ArchiveDenseQueryPlan
 from friday.retrieval.archive_search_obsidian_reader import (
     BoundArchiveObsidianExactFileReader,
 )
@@ -6209,6 +6210,56 @@ class ExecutionKernel:
                 payload[key] = value
         request = ArchiveSearchRequest.from_model_payload(payload)
 
+        dense_query_plan: ArchiveDenseQueryPlan | None = None
+        dense_prepare = getattr(self.searcher, "prepare_archive_dense_query_plan", None)
+        dense_requested = any(
+            corpus in request.corpora
+            for corpus in (ArchiveSearchCorpus.DOCUMENTS, ArchiveSearchCorpus.KNOWLEDGE)
+        )
+        dense_allowed = False
+        if dense_requested and callable(dense_prepare):
+            with storage.transaction() as conn:
+                principal_row = conn.execute(
+                    "SELECT preset_key, status FROM users WHERE id=?",
+                    (invocation.principal_id,),
+                ).fetchone()
+                tenant_active = (
+                    principal_row is not None
+                    if invocation.tenant_id == invocation.principal_id
+                    else conn.execute(
+                        "SELECT 1 FROM users WHERE id=? AND status='active'",
+                        (invocation.tenant_id,),
+                    ).fetchone()
+                    is not None
+                )
+                fresh_dense_actor = (
+                    replace(actor, preset_key=str(principal_row["preset_key"] or "guest"))
+                    if principal_row is not None
+                    and str(principal_row["status"] or "") == "active"
+                    and tenant_active
+                    else None
+                )
+                dense_allowed = bool(
+                    fresh_dense_actor is not None
+                    and fresh_dense_actor.user_id == invocation.tenant_id
+                    and fresh_dense_actor.own_id == invocation.principal_id
+                    and authorization.authorize(fresh_dense_actor, "search.use").allowed
+                    and authorization.authorize(fresh_dense_actor, "knowledge.read").allowed
+                )
+        if dense_allowed and callable(dense_prepare):
+            try:
+                candidate_dense_plan = await dense_prepare(
+                    actor.user_id,
+                    request.query,
+                    principal_id=actor.own_id,
+                )
+                if type(candidate_dense_plan) is ArchiveDenseQueryPlan:
+                    dense_query_plan = candidate_dense_plan
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:  # noqa: BLE001 - dense is an optional fail-soft lane
+                LOGGER.warning("Archive dense preparation unavailable (%s)", type(exc).__name__)
+
         exact_file_reader: BoundArchiveObsidianExactFileReader | None = None
         reader_factory = self._archive_obsidian_exact_file_reader_factory
         if ArchiveSearchCorpus.OBSIDIAN in request.corpora and reader_factory is not None:
@@ -6263,6 +6314,7 @@ class ExecutionKernel:
                 current_conversation_id=invocation.current_conversation_id,
                 boundary_user_message_id=invocation.boundary_user_message_id,
                 exact_file_reader=exact_file_reader,
+                dense_query_plan=dense_query_plan,
             )
         return _ArchiveSearchHandlerResult(
             prepared=prepared,

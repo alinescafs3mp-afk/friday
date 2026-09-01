@@ -49,6 +49,10 @@ from friday.retrieval.archive_search_contract import (
     ArchiveSearchResult,
     ArchiveSearchWarning,
 )
+from friday.retrieval.archive_search_dense import (
+    ArchiveDenseQueryPlan,
+    project_archive_dense_query_plan,
+)
 from friday.retrieval.archive_search_federation import (
     FederatedArchiveSearch,
     federate_archive_search,
@@ -104,7 +108,7 @@ _DOCUMENT_CORPUS = {
     SearchCorpus.RAW_DOCUMENTS: ArchiveSearchCorpus.DOCUMENTS,
     SearchCorpus.KNOWLEDGE: ArchiveSearchCorpus.KNOWLEDGE,
 }
-_DOCUMENT_LANES = frozenset({SearchLane.CATALOG, SearchLane.LEXICAL})
+_DOCUMENT_LANES = frozenset({SearchLane.CATALOG, SearchLane.LEXICAL, SearchLane.DENSE})
 _OBSIDIAN_LANES = frozenset(
     {
         SearchLane.CATALOG,
@@ -138,7 +142,11 @@ def _fail() -> ArchiveSearchServiceError:
     return ArchiveSearchServiceError("archive search service is unavailable")
 
 
-def _materialized_lane_limit(request: ArchiveSearchRequest) -> int:
+def _materialized_lane_limit(
+    request: ArchiveSearchRequest,
+    *,
+    dense_available: bool = False,
+) -> int:
     """Fair-share the bounded tail across lanes that can actually extend it."""
 
     targets = canonical_archive_search_targets(request)
@@ -146,6 +154,7 @@ def _materialized_lane_limit(request: ArchiveSearchRequest) -> int:
         (
             corpus in _DOCUMENT_CORPUS
             and lane in _DOCUMENT_LANES
+            and (lane is not SearchLane.DENSE or dense_available)
             or corpus is SearchCorpus.CONVERSATION
             and lane in {SearchLane.LEXICAL, SearchLane.MESSAGE_HISTORY}
         )
@@ -640,16 +649,25 @@ class _ArchiveSearchRecipe:
     current_conversation_id: str | None
     boundary_user_message_id: str | None
     accepted_boundary_identity_sha256: str | None
+    dense_query_plan: ArchiveDenseQueryPlan | None
     continuation: bool
     target_authority: tuple[_ArchiveTargetAuthority, ...]
     seal: bytes
 
     def material(self) -> dict[str, object]:
+        dense_projection = project_archive_dense_query_plan(
+            self.dense_query_plan,
+            principal_id=self.principal_id,
+            query=self.request.query,
+        )
         return {
             "accepted_boundary_identity_sha256": self.accepted_boundary_identity_sha256,
             "boundary_user_message_id": self.boundary_user_message_id,
             "continuation": self.continuation,
             "current_conversation_id": self.current_conversation_id,
+            "dense_query_plan_identity": (
+                None if dense_projection is None else dense_projection.identity_sha256
+            ),
             "principal_id": self.principal_id,
             "request": self.request.to_private_payload(),
             "snapshot_discriminator": self.snapshot_discriminator,
@@ -661,12 +679,24 @@ class _ArchiveSearchRecipe:
         try:
             frozen_request = ArchiveSearchRequest.parse_private(self.request.to_private_json())
             messages_requested = ArchiveSearchCorpus.MESSAGES in self.request.corpora
+            dense_projection = project_archive_dense_query_plan(
+                self.dense_query_plan,
+                principal_id=self.principal_id,
+                query=self.request.query,
+            )
             return bool(
                 type(self) is _ArchiveSearchRecipe
                 and type(self.request) is ArchiveSearchRequest
                 and _same_exact_graph(self.request, frozen_request)
                 and self.request.continuation is None
                 and type(self.continuation) is bool
+                and (
+                    self.dense_query_plan is None
+                    or (
+                        type(self.dense_query_plan) is ArchiveDenseQueryPlan
+                        and dense_projection is not None
+                    )
+                )
                 and _authority_projection_is_valid(
                     self.target_authority,
                     canonical_archive_search_targets(self.request),
@@ -715,6 +745,7 @@ def _new_recipe(
     current_conversation_id: str | None,
     boundary_user_message_id: str | None,
     accepted_boundary_identity_sha256: str | None,
+    dense_query_plan: ArchiveDenseQueryPlan | None,
     continuation: bool,
     target_authority: tuple[_ArchiveTargetAuthority, ...],
 ) -> _ArchiveSearchRecipe:
@@ -726,6 +757,7 @@ def _new_recipe(
         current_conversation_id=current_conversation_id,
         boundary_user_message_id=boundary_user_message_id,
         accepted_boundary_identity_sha256=accepted_boundary_identity_sha256,
+        dense_query_plan=dense_query_plan,
         continuation=continuation,
         target_authority=target_authority,
         seal=b"0" * 32,
@@ -925,6 +957,8 @@ def _collect_document_target(
     run: ArchiveSearchRunBinding,
     target: tuple[SearchCorpus, SearchLane],
 ) -> tuple[tuple[ArchiveSearchCandidate, ...], SearchCoverage]:
+    if target[1] is SearchLane.DENSE and recipe.dense_query_plan is None:
+        return (), _unsupported(target, run.execution_binding)
     page = search_archive_document_lane(
         conn,
         tenant_id=recipe.tenant_id,
@@ -935,7 +969,11 @@ def _collect_document_target(
         execution_binding=run.execution_binding,
         snapshot_discriminator=recipe.snapshot_discriminator,
         snapshot_current=True,
-        limit=_materialized_lane_limit(recipe.request),
+        dense_query_plan=recipe.dense_query_plan if target[1] is SearchLane.DENSE else None,
+        limit=_materialized_lane_limit(
+            recipe.request,
+            dense_available=recipe.dense_query_plan is not None,
+        ),
     )
     if not page.available and not page.authority_rechecked:
         return (), _permission_filtered(target, run.execution_binding)
@@ -989,7 +1027,10 @@ def _collect_message_target(
             lifecycle_states=cast(tuple[LifecycleState, ...], controls["lifecycle_states"]),
             since=cast(str | None, controls["since"]),
             until=cast(str | None, controls["until"]),
-            limit=_materialized_lane_limit(recipe.request),
+            limit=_materialized_lane_limit(
+                recipe.request,
+                dense_available=recipe.dense_query_plan is not None,
+            ),
             context_before=cast(int, controls["context_before"]),
             context_after=cast(int, controls["context_after"]),
         )
@@ -1675,6 +1716,7 @@ def prepare_archive_search_in_transaction(
     current_conversation_id: str | None = None,
     boundary_user_message_id: str | None = None,
     exact_file_reader: ArchiveObsidianExactFileReader | None = None,
+    dense_query_plan: ArchiveDenseQueryPlan | None = None,
 ) -> PreparedArchiveSearch:
     """Build and authorize one fresh or resumed archive page in one transaction."""
 
@@ -1689,6 +1731,20 @@ def prepare_archive_search_in_transaction(
             raise _fail()
         request_value = ArchiveSearchRequest.parse_private(request.to_private_json())
         storage_request = _storage_request(request_value)
+        dense_requested = any(
+            corpus in storage_request.corpora
+            for corpus in (ArchiveSearchCorpus.DOCUMENTS, ArchiveSearchCorpus.KNOWLEDGE)
+        )
+        if not dense_requested or (
+            dense_query_plan is not None
+            and project_archive_dense_query_plan(
+                dense_query_plan,
+                principal_id=principal,
+                query=storage_request.query,
+            )
+            is None
+        ):
+            dense_query_plan = None
         continuation = request_value.continuation is not None
         targets = canonical_archive_search_targets(storage_request)
         current_authority = _fresh_target_authority_in_transaction(
@@ -1750,6 +1806,7 @@ def prepare_archive_search_in_transaction(
             current_conversation_id=current_conversation_id,
             boundary_user_message_id=boundary_user_message_id,
             accepted_boundary_identity_sha256=accepted_boundary_identity_sha256,
+            dense_query_plan=dense_query_plan,
             continuation=continuation,
             target_authority=target_authority,
         )

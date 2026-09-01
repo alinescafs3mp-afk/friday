@@ -2244,14 +2244,13 @@ class HybridSearcher:
         chunk_provenance: dict[str, tuple[int, int]] = {}
         chunk_carried: set[str] = set()
         if self.embeddings and self.embeddings.remote_enabled:
-            dense_scope_kwargs = {"uploaded_by": author_scope} if author_scope is not None else {}
             embedding_scores = await self._dense_recall(
                 user_id,
                 clean_query,
                 candidate_map,
                 meta=dense_meta,
                 window_ids=window_ids,
-                **dense_scope_kwargs,
+                uploaded_by=author_scope,
             )
             chunk_provenance = dict(dense_meta.get("chunk_provenance") or {})
             chunk_carried = set(dense_meta.get("chunk_carried") or set())
@@ -3419,6 +3418,7 @@ class HybridSearcher:
         meta: dict[str, Any] | None = None,
         window_ids: set[str] | None = None,
         uploaded_by: str | None = None,
+        query_vector: list[float] | None = None,
     ) -> dict[str, float]:
         """Corpus-wide dense recall over persisted vectors.
 
@@ -3444,12 +3444,13 @@ class HybridSearcher:
         # Плотный канал — улучшение, а не условие ответа: лексика и граф уже дали
         # результат, и ждать ради добавки дольше, чем человек готов ждать весь ответ,
         # значит менять полезное на бесполезное.
-        query_vectors = await self.embeddings.embed(
-            [query], budget_sec=self.embeddings.settings.retrieval_dense_query_budget_sec
-        )
-        if not query_vectors:
-            return {}
-        query_vector = query_vectors[0]
+        if query_vector is None:
+            query_vectors = await self.embeddings.embed(
+                [query], budget_sec=self.embeddings.settings.retrieval_dense_query_budget_sec
+            )
+            if not query_vectors:
+                return {}
+            query_vector = query_vectors[0]
         query_dim = len(query_vector)
         if query_dim == 0:
             return {}
@@ -3490,6 +3491,8 @@ class HybridSearcher:
                 meta["dense_cache"] = cached.state
             if not cached.doc_ids and not cached.chunk_ids:
                 return await self._dense_recall_pool(query_vector, candidate_map)
+            if meta is not None:
+                meta["dense_indexed"] = True
         else:
             stored = await storage_read(
                 self.storage.get_user_embeddings,
@@ -3549,6 +3552,8 @@ class HybridSearcher:
             if not stored and not chunk_rows:
                 # Nothing indexed yet: degrade to re-ranking the pool, exactly as before.
                 return await self._dense_recall_pool(query_vector, candidate_map)
+            if meta is not None:
+                meta["dense_indexed"] = True
 
         # The whole-object vector is the FLOOR: passage scores can only raise an
         # object, never lower it, so chunking cannot regress any existing result.
@@ -3632,6 +3637,79 @@ class HybridSearcher:
                 and chunk_scores.get(document_id, -1.0) >= doc_scores.get(document_id, -1.0)
             }
         return {document_id: score for document_id, score in combined.items() if document_id in candidate_map}
+
+    async def prepare_archive_dense_query_plan(
+        self,
+        user_id: str,
+        query: str,
+        *,
+        principal_id: str | None = None,
+    ) -> object | None:
+        """Prepare the async half of the archive dense lane.
+
+        Only persisted passage-vector recall is admitted.  Pool embedding remains
+        available to the legacy hybrid searcher, but cannot become archive evidence
+        because it has no durable source/span identity for later reauthorization.
+        """
+
+        embeddings = self.embeddings
+        if embeddings is None or not embeddings.remote_enabled or not query.strip():
+            return None
+        vectors = await embeddings.embed(
+            [query],
+            budget_sec=embeddings.settings.retrieval_dense_query_budget_sec,
+        )
+        if (
+            not vectors
+            or len(vectors) != 1
+            or type(vectors[0]) is not list
+            or not 1 <= len(vectors[0]) <= 16_384
+        ):
+            return None
+        try:
+            query_vector = [float(item) for item in vectors[0]]
+        except (OverflowError, TypeError, ValueError):
+            return None
+        query_norm_squared = sum(item * item for item in query_vector)
+        if (
+            any(not math.isfinite(item) for item in query_vector)
+            or not math.isfinite(query_norm_squared)
+            or query_norm_squared <= 0.0
+        ):
+            return None
+        candidate_map: dict[str, dict[str, Any]] = {}
+        meta: dict[str, Any] = {}
+        principal = user_id if principal_id is None else principal_id
+        scores = await self._dense_recall(
+            user_id,
+            query,
+            candidate_map,
+            meta=meta,
+            uploaded_by=principal if principal_id is not None else None,
+            query_vector=query_vector,
+        )
+        if meta.get("dense_indexed") is not True:
+            return None
+        provenance = dict(meta.get("chunk_provenance") or {})
+        selected = tuple(
+            (document_id, int(provenance[document_id][0]))
+            for document_id, score in sorted(
+                scores.items(),
+                key=lambda item: (-float(item[1]), str(item[0])),
+            )
+            if document_id in provenance
+        )
+        from friday.retrieval.archive_search_dense import issue_archive_dense_query_plan
+
+        return issue_archive_dense_query_plan(
+            principal_id=principal,
+            query=query,
+            model_id=embeddings.settings.embeddings_model,
+            chunk_scheme=chunk_scheme(embeddings.settings),
+            query_vector=query_vector,
+            minimum_score=self._dense_evidence_min,
+            candidates=selected,
+        )
 
     async def _dense_recall_pool(
         self,

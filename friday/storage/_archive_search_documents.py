@@ -7,10 +7,12 @@ or limiting.  Returned identifiers and source bodies remain process-private.
 
 from __future__ import annotations
 
+import array
 import hashlib
 import hmac
 import importlib
 import json
+import math
 import re
 import secrets
 import sqlite3
@@ -33,6 +35,11 @@ from friday.retrieval.archive_search_contract import (
     ArchiveSearchRequest,
     ArchiveTemporalConstraint,
     ReviewScope,
+)
+from friday.retrieval.archive_search_dense import (
+    ArchiveDenseQueryPlan,
+    ArchiveDenseQueryProjection,
+    project_archive_dense_query_plan,
 )
 from friday.retrieval.archive_search_document_locator import (
     DOCUMENT_STORED_PASSAGE_INDEX_VERSION,
@@ -91,7 +98,7 @@ _MESSAGE_ID = re.compile(r"msg_[0-9a-f]{16}\Z")
 _SHA256 = re.compile(r"[0-9a-f]{64}\Z")
 _PASSAGE_REVISION = re.compile(r"[A-Za-z0-9][A-Za-z0-9:._-]{0,119}\Z")
 _SUPPORTED_CORPORA = frozenset({ArchiveSearchCorpus.DOCUMENTS, ArchiveSearchCorpus.KNOWLEDGE})
-_SUPPORTED_LANES = frozenset({SearchLane.CATALOG, SearchLane.LEXICAL})
+_SUPPORTED_LANES = frozenset({SearchLane.CATALOG, SearchLane.LEXICAL, SearchLane.DENSE})
 _SEARCH_CORPUS = {
     ArchiveSearchCorpus.DOCUMENTS: SearchCorpus.RAW_DOCUMENTS,
     ArchiveSearchCorpus.KNOWLEDGE: SearchCorpus.KNOWLEDGE,
@@ -99,6 +106,7 @@ _SEARCH_CORPUS = {
 _MATCH_CHANNEL = {
     SearchLane.CATALOG: ArchiveMatchChannel.CATALOG,
     SearchLane.LEXICAL: ArchiveMatchChannel.LEXICAL,
+    SearchLane.DENSE: ArchiveMatchChannel.DENSE,
 }
 _PAGE_KEY = secrets.token_bytes(32)
 _PAGE_PROCESS_AUTHORITY = object()
@@ -735,7 +743,7 @@ class ArchiveDocumentLanePage:
             )
         ):
             raise _fail("archive catalog page cannot claim derivative health")
-        if self.lane is SearchLane.LEXICAL:
+        if self.lane in {SearchLane.LEXICAL, SearchLane.DENSE}:
             if any(
                 type(item) is not bool
                 for item in (
@@ -744,11 +752,11 @@ class ArchiveDocumentLanePage:
                     self.derivative_unavailable,
                 )
             ):
-                raise _fail("archive lexical page requires derivative health")
+                raise _fail("archive derivative lane requires derivative health")
             if self.derivative_current is (
                 bool(self.derivative_backfill_pending) or bool(self.derivative_unavailable)
             ):
-                raise _fail("archive lexical derivative health is inconsistent")
+                raise _fail("archive derivative health is inconsistent")
         document_catalog_page = (
             self.corpus is ArchiveSearchCorpus.DOCUMENTS and self.lane is SearchLane.CATALOG
         )
@@ -866,7 +874,7 @@ class ArchiveDocumentLanePage:
                 or self.catalog_projection_current is False
             ):
                 incomplete.add(CoverageState.BACKFILL_PENDING)
-            if self.lane is SearchLane.LEXICAL:
+            if self.lane in {SearchLane.LEXICAL, SearchLane.DENSE}:
                 if self.derivative_backfill_pending:
                     incomplete.add(CoverageState.BACKFILL_PENDING)
                 if self.derivative_unavailable:
@@ -989,9 +997,9 @@ def _unavailable_page(
         matched=0,
         has_more=False,
         available=False,
-        derivative_current=False if lane is SearchLane.LEXICAL else None,
-        derivative_backfill_pending=False if lane is SearchLane.LEXICAL else None,
-        derivative_unavailable=True if lane is SearchLane.LEXICAL else None,
+        derivative_current=False if lane in {SearchLane.LEXICAL, SearchLane.DENSE} else None,
+        derivative_backfill_pending=False if lane in {SearchLane.LEXICAL, SearchLane.DENSE} else None,
+        derivative_unavailable=True if lane in {SearchLane.LEXICAL, SearchLane.DENSE} else None,
         catalog_projection_current=None,
         authority_scope_complete=False,
         authority_rechecked=authority_rechecked,
@@ -1306,7 +1314,8 @@ def _common_raw_authority(
     knowledge_source_rows AS MATERIALIZED (
         SELECT knowledge_rowid, knowledge_id, raw_object_id, knowledge_version, knowledge_lifecycle,
                knowledge_superseded_by_id,
-               knowledge_title, knowledge_summary, knowledge_tags_json, knowledge_created_at,
+               knowledge_title, knowledge_summary, knowledge_tags_json, knowledge_kind,
+               knowledge_created_at,
                knowledge_updated_at{knowledge_body_outer}
           FROM (
             SELECT k.rowid AS knowledge_rowid, k.id AS knowledge_id, k.raw_object_id,
@@ -1314,7 +1323,7 @@ def _common_raw_authority(
                    k.lifecycle_stage AS knowledge_lifecycle,
                    k.superseded_by_id AS knowledge_superseded_by_id,
                    k.title AS knowledge_title, k.summary AS knowledge_summary,
-                   k.tags_json AS knowledge_tags_json,
+                   k.tags_json AS knowledge_tags_json, k.knowledge_kind AS knowledge_kind,
                    k.created_at AS knowledge_created_at,
                    k.updated_at AS knowledge_updated_at{knowledge_body_inner}
              FROM knowledge_objects k
@@ -1379,7 +1388,11 @@ def _source_cte(
             temporal_expressions=temporal_expressions,
             include_unknown=True,
         )
-        body_projection = ", ar.raw_content AS passage_body" if include_body else ""
+        body_projection = (
+            ", ar.raw_content AS passage_body, ck.knowledge_content AS knowledge_content"
+            if include_body
+            else ""
+        )
         return (
             f"""{common},
             document_knowledge AS MATERIALIZED (
@@ -1401,6 +1414,7 @@ def _source_cte(
                        ck.knowledge_rowid, ck.knowledge_id,
                        ck.knowledge_version, ck.knowledge_lifecycle,
                        ck.knowledge_title, ck.knowledge_summary, ck.knowledge_tags_json,
+                       ck.knowledge_kind,
                        ck.knowledge_created_at, ck.knowledge_updated_at,
                        {_DOCUMENT_LIFECYCLE} AS lifecycle_state,
                        {_DOCUMENT_REVIEW} AS review_state,
@@ -1448,6 +1462,7 @@ def _source_cte(
                    ck.knowledge_rowid, ck.knowledge_id,
                    ck.knowledge_version, ck.knowledge_lifecycle,
                    ck.knowledge_title, ck.knowledge_summary, ck.knowledge_tags_json,
+                   ck.knowledge_kind,
                    ck.knowledge_created_at, ck.knowledge_updated_at,
                    {_KNOWLEDGE_LIFECYCLE} AS lifecycle_state,
                    {_KNOWLEDGE_REVIEW} AS review_state,
@@ -1791,6 +1806,219 @@ def _select_rows(
         return [_row(cursor, item) for item in cursor.fetchall()]
     except sqlite3.Error:
         raise _fail("archive document storage read is unavailable") from None
+
+
+def _dense_chunk_text(row: dict[str, Any], projection: ArchiveDenseQueryProjection) -> str | None:
+    """Rebuild the exact text whose hash is stored beside one chunk vector."""
+
+    match = re.fullmatch(r"v2:([1-9][0-9]*):([0-9]+):([1-9][0-9]*)", projection.chunk_scheme)
+    if match is None:
+        return None
+    max_chars, overlap_chars, max_chunks = (int(item) for item in match.groups())
+    if max_chars > 1_000_000 or overlap_chars >= max_chars or max_chunks > 1_000_000:
+        return None
+    body = row.get("knowledge_content")
+    start = row.get("dense_start_char")
+    end = row.get("dense_end_char")
+    if (
+        type(body) is not str
+        or type(start) is not int
+        or type(end) is not int
+        or not 0 <= start < end <= len(body)
+    ):
+        return None
+    chunk_index = row.get("dense_chunk_index")
+    if type(chunk_index) is not int or not 0 <= chunk_index < max_chunks:
+        return None
+    header = " ".join(
+        item
+        for item in (
+            str(row.get("knowledge_title") or ""),
+            str(row.get("knowledge_summary") or ""),
+            str(row.get("knowledge_kind") or ""),
+        )
+        if item.strip()
+    )[: max(0, max_chars // 4)]
+    return f"{header}\n\n{body[start:end]}"
+
+
+def _dense_score(blob: object, projection: ArchiveDenseQueryProjection) -> float | None:
+    if type(blob) is not bytes or len(blob) != projection.dimensions * 4:
+        return None
+    values = array.array("f")
+    try:
+        values.frombytes(blob)
+    except (BufferError, EOFError, MemoryError, ValueError):
+        return None
+    if len(values) != projection.dimensions or any(not math.isfinite(value) for value in values):
+        return None
+    query_norm = math.sqrt(sum(value * value for value in projection.query_vector))
+    vector_norm = math.sqrt(sum(float(value) * float(value) for value in values))
+    if query_norm <= 0.0 or vector_norm <= 0.0:
+        return None
+    score = sum(
+        query * float(value)
+        for query, value in zip(projection.query_vector, values, strict=True)
+    ) / (query_norm * vector_norm)
+    return score if math.isfinite(score) else None
+
+
+def _dense_excerpt(row: dict[str, Any]) -> tuple[str, int, int] | None:
+    body = row.get("passage_body")
+    start = row.get("dense_start_char")
+    end = row.get("dense_end_char")
+    if type(body) is not str or type(start) is not int or type(end) is not int:
+        return None
+    if not 0 <= start < end <= len(body):
+        return None
+    # Archive passages cannot contain control characters.  Extracted documents
+    # commonly contain newlines, so rejecting the whole winning chunk would make
+    # dense recall disappear on ordinary PDFs.  Select the longest exact bounded
+    # control-free run; ties stay at the earliest stable offset.
+    best_start = best_end = start
+    run_start = start
+    for index in range(start, end + 1):
+        if index < end and not unicodedata.category(body[index]).startswith("C"):
+            continue
+        run_end = index
+        while run_start < run_end and body[run_start].isspace():
+            run_start += 1
+        while run_end > run_start and body[run_end - 1].isspace():
+            run_end -= 1
+        if run_end - run_start > best_end - best_start:
+            best_start, best_end = run_start, run_end
+        run_start = index + 1
+    excerpt_start = best_start
+    excerpt_end = min(best_end, excerpt_start + _MAX_EXCERPT_CHARS)
+    while excerpt_end > excerpt_start and body[excerpt_end - 1].isspace():
+        excerpt_end -= 1
+    text = body[excerpt_start:excerpt_end]
+    if (
+        not text
+        or text != text.strip()
+        or any(unicodedata.category(character).startswith("C") for character in text)
+    ):
+        return None
+    return text, excerpt_start, excerpt_end
+
+
+def _dense_rows(
+    conn: sqlite3.Connection,
+    *,
+    tenant_id: str,
+    owner_id: str,
+    request: ArchiveSearchRequest,
+    corpus: ArchiveSearchCorpus,
+    projection: ArchiveDenseQueryProjection,
+) -> tuple[int, int, bool, list[dict[str, Any]]]:
+    """Reauthorize and re-score the bounded dense selection in this snapshot."""
+
+    source_cte, scope_parameters = _source_cte(corpus, request, include_body=True)
+    authority_parameters = (*_authority_parameters(tenant_id, owner_id), *scope_parameters)
+    totals = _select_rows(
+        conn,
+        f"""WITH {source_cte}
+            SELECT (SELECT COUNT(DISTINCT raw_id) FROM authorized_sources) AS total,
+                   CASE WHEN (SELECT value FROM authority_backfill)=1
+                              OR (SELECT value FROM lane_backfill)=1
+                        THEN 1 ELSE 0 END AS authority_backfill""",
+        authority_parameters,
+    )
+    if (
+        len(totals) != 1
+        or type(totals[0].get("total")) is not int
+        or int(totals[0]["total"]) < 0
+        or type(totals[0].get("authority_backfill")) is not int
+        or totals[0]["authority_backfill"] not in {0, 1}
+    ):
+        raise _fail("archive dense coverage is unavailable")
+    total = int(totals[0]["total"])
+    authority_backfill = totals[0].get("authority_backfill") == 1
+    if not projection.candidates:
+        return total, 0, authority_backfill, []
+    candidate_json = json.dumps(
+        [[item.knowledge_object_id, item.chunk_index] for item in projection.candidates],
+        ensure_ascii=True,
+        separators=(",", ":"),
+    )
+    rows = _select_rows(
+        conn,
+        f"""WITH {source_cte},
+            dense_candidates AS MATERIALIZED (
+                SELECT CAST(key AS INTEGER) AS admitted_rank,
+                       json_extract(value,'$[0]') AS knowledge_id,
+                       json_extract(value,'$[1]') AS chunk_index
+                  FROM json_each(?)
+                 WHERE type='array'
+                   AND json_type(value,'$[0]')='text'
+                   AND json_type(value,'$[1]')='integer'
+            )
+            SELECT s.*, {_filename_expression("s")} AS filename, d.admitted_rank,
+                   e.chunk_index AS dense_chunk_index,
+                   e.start_char AS dense_start_char,
+                   e.end_char AS dense_end_char,
+                   e.content_hash AS dense_content_hash,
+                   e.vector AS dense_vector
+              FROM dense_candidates d
+              JOIN authorized_sources s ON s.knowledge_id=d.knowledge_id
+              JOIN knowledge_chunk_embeddings e
+                ON e.knowledge_object_id=s.knowledge_id
+               AND e.chunk_index=d.chunk_index
+               AND e.user_id=? AND e.model=? AND e.dim=?
+               AND e.source_version=s.knowledge_version
+               AND e.chunk_scheme=?
+             ORDER BY d.admitted_rank, s.raw_id""",
+        (
+            *authority_parameters,
+            candidate_json,
+            tenant_id,
+            projection.model_id,
+            projection.dimensions,
+            projection.chunk_scheme,
+        ),
+    )
+    valid: list[dict[str, Any]] = []
+    examined_sources: set[str] = set()
+    for row in rows:
+        if corpus is ArchiveSearchCorpus.DOCUMENTS and row.get("knowledge_content") != row.get(
+            "passage_body"
+        ):
+            continue
+        expected = _dense_chunk_text(row, projection)
+        digest = row.get("dense_content_hash")
+        score = _dense_score(row.get("dense_vector"), projection)
+        if (
+            expected is None
+            or type(digest) is not str
+            or _SHA256.fullmatch(digest) is None
+            or not hmac.compare_digest(
+                hashlib.sha256(expected.encode("utf-8", errors="strict")).hexdigest(),
+                digest,
+            )
+            or score is None
+        ):
+            continue
+        raw_id = row.get("raw_id")
+        if type(raw_id) is str:
+            examined_sources.add(raw_id)
+        if score < projection.minimum_score or _dense_excerpt(row) is None:
+            continue
+        row["dense_score"] = score
+        valid.append(row)
+    valid.sort(
+        key=lambda item: (
+            -float(item["dense_score"]),
+            str(item.get("knowledge_id") or ""),
+            str(item.get("raw_id") or ""),
+        )
+    )
+    best_by_source: dict[str, dict[str, Any]] = {}
+    for item in valid:
+        best_by_source.setdefault(str(item["raw_id"]), item)
+    valid = list(best_by_source.values())
+    for lane_rank, row in enumerate(valid, 1):
+        row["lane_rank"] = lane_rank
+    return total, len(examined_sources), authority_backfill, valid
 
 
 def _select_current_document_passages(
@@ -2687,7 +2915,7 @@ def _candidate(
     passages: tuple[ArchiveSearchPassage, ...] = ()
     evidence_authority = ArchiveEvidenceAuthority.NAVIGATION_ONLY
     if (
-        lane is SearchLane.LEXICAL
+        lane in {SearchLane.LEXICAL, SearchLane.DENSE}
         and lifecycle_state is not LifecycleState.DEPRECATED
         and not (
             corpus is ArchiveSearchCorpus.KNOWLEDGE
@@ -2700,11 +2928,13 @@ def _candidate(
                 request.query,
                 document_passages,
             )
-            if corpus is ArchiveSearchCorpus.DOCUMENTS
+            if lane is SearchLane.LEXICAL and corpus is ArchiveSearchCorpus.DOCUMENTS
             else None
         )
         excerpt = (
-            (stored_excerpt[0], stored_excerpt[1], stored_excerpt[2])
+            _dense_excerpt(row)
+            if lane is SearchLane.DENSE
+            else (stored_excerpt[0], stored_excerpt[1], stored_excerpt[2])
             if stored_excerpt is not None
             else _excerpt(row.get("passage_body"), request.query)
         )
@@ -2914,6 +3144,7 @@ def _search_archive_document_lane(
     execution_binding: SearchExecutionBinding,
     snapshot_discriminator: str,
     snapshot_current: bool,
+    dense_query_plan: ArchiveDenseQueryPlan | None = None,
     limit: int | None = None,
     maximum_results: int = MAX_ARCHIVE_DOCUMENT_RESULTS,
 ) -> ArchiveDocumentLanePage:
@@ -2987,6 +3218,81 @@ def _search_archive_document_lane(
             snapshot_discriminator=snapshot,
             snapshot_current=snapshot_current,
             authority_rechecked=True,
+        )
+
+    dense_projection = (
+        project_archive_dense_query_plan(
+            dense_query_plan,
+            principal_id=owner,
+            query=request.query,
+        )
+        if lane is SearchLane.DENSE
+        else None
+    )
+    if lane is SearchLane.DENSE:
+        if dense_projection is None:
+            return _unavailable_page(
+                corpus,
+                lane,
+                execution_binding=execution_binding,
+                request=request,
+                tenant_id=tenant,
+                owner_id=owner,
+                snapshot_discriminator=snapshot,
+                snapshot_current=snapshot_current,
+                authority_rechecked=True,
+            )
+        total, examined, dense_authority_backfill, hits = _dense_rows(
+            conn,
+            tenant_id=tenant,
+            owner_id=owner,
+            request=request,
+            corpus=corpus,
+            projection=dense_projection,
+        )
+        visible_hits = hits[:page_limit]
+        try:
+            candidates = tuple(
+                _candidate(
+                    item,
+                    corpus=corpus,
+                    lane=lane,
+                    request=request,
+                    tenant_id=tenant,
+                    owner_id=owner,
+                )
+                for item in visible_hits
+            )
+        except ArchiveDocumentStorageError:
+            raise
+        except Exception:
+            raise _fail("archive dense evidence projection is unavailable") from None
+        scope_complete = not dense_authority_backfill
+        # This first slice authenticates every returned passage but deliberately
+        # does not scan and prove the complete expected chunk topology for every
+        # authorized source.  It may improve recall; it may not establish absence.
+        derivative_current = False
+        return _new_page(
+            corpus=corpus,
+            lane=lane,
+            candidates=candidates,
+            total=total if scope_complete else None,
+            examined=examined,
+            matched=len(hits),
+            has_more=len(hits) > page_limit,
+            available=True,
+            derivative_current=derivative_current,
+            derivative_backfill_pending=True,
+            derivative_unavailable=False,
+            catalog_projection_current=None,
+            authority_scope_complete=scope_complete,
+            authority_rechecked=True,
+            snapshot_current=snapshot_current,
+            execution_binding=execution_binding,
+            request=request,
+            tenant_id=tenant,
+            owner_id=owner,
+            snapshot_discriminator=snapshot,
         )
 
     document_catalog_available = False
@@ -3172,6 +3478,7 @@ def search_archive_document_lane(
     execution_binding: SearchExecutionBinding,
     snapshot_discriminator: str,
     snapshot_current: bool,
+    dense_query_plan: ArchiveDenseQueryPlan | None = None,
     limit: int | None = None,
 ) -> ArchiveDocumentLanePage:
     """Search one lane through the released twenty-result storage seam."""
@@ -3186,6 +3493,7 @@ def search_archive_document_lane(
         execution_binding=execution_binding,
         snapshot_discriminator=snapshot_discriminator,
         snapshot_current=snapshot_current,
+        dense_query_plan=dense_query_plan,
         limit=limit,
         maximum_results=MAX_ARCHIVE_DOCUMENT_RESULTS,
     )
@@ -3202,6 +3510,7 @@ def _materialize_archive_document_lane(
     execution_binding: SearchExecutionBinding,
     snapshot_discriminator: str,
     snapshot_current: bool,
+    dense_query_plan: ArchiveDenseQueryPlan | None = None,
     limit: int,
 ) -> ArchiveDocumentLanePage:
     """Collect one bounded process-private lane tail for the archive facade."""
@@ -3216,6 +3525,7 @@ def _materialize_archive_document_lane(
         execution_binding=execution_binding,
         snapshot_discriminator=snapshot_discriminator,
         snapshot_current=snapshot_current,
+        dense_query_plan=dense_query_plan,
         limit=limit,
         maximum_results=_MAX_ARCHIVE_DOCUMENT_MATERIALIZED_RESULTS,
     )
