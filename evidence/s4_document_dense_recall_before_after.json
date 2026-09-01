@@ -1,0 +1,158 @@
+{
+  "baseline": {
+    "arm": "lexical",
+    "authorized_foreign_sources_returned": 0,
+    "case_results_sha256": "697df4c006262c8546418d8843d0e1da3cc1a449e2bdd07252c65a90e3cbb360",
+    "current_revision_cases": 13,
+    "dense_evidence_cases": 0,
+    "metrics": {
+      "mrr_at_10_ppm": 394841,
+      "ndcg_at_10_ppm": 420633,
+      "recall_at_10": {"denominator": 24, "numerator": 12, "ppm": 500000},
+      "recall_at_20": {"denominator": 24, "numerator": 13, "ppm": 541667}
+    },
+    "per_kind_recall_at_10": {
+      "cross-script": {"denominator": 4, "numerator": 0, "ppm": 0},
+      "lexical": {"denominator": 4, "numerator": 4, "ppm": 1000000},
+      "literal": {"denominator": 5, "numerator": 5, "ppm": 1000000},
+      "paraphrase": {"denominator": 6, "numerator": 2, "ppm": 333333},
+      "synonym": {"denominator": 5, "numerator": 1, "ppm": 200000}
+    },
+    "release_sha256": "f6af7de2d7e09f2abec43d3ac99c615add814487f063b489db4e2dd47b9612ee",
+    "repeat_output_sha256": "4924a3cb68790f755a1fa558aded668d02ab20797d7a093694b4d15b26fae770",
+    "result_sha256": "1b850d991b3b67ec509d940991ee616d86be1220cb26ae3d4ea46c865a2568d6",
+    "source_commit": "bacab801c776fff4ee901db3ad804ad8acf75c55",
+    "source_guard": {
+      "instrument_sha256_end": "b4470caad55a65f04be2b35ce17486863b6cb5d0505dafe05a25da63909bfb01",
+      "instrument_sha256_start": "b4470caad55a65f04be2b35ce17486863b6cb5d0505dafe05a25da63909bfb01",
+      "release_sha256_end": "f6af7de2d7e09f2abec43d3ac99c615add814487f063b489db4e2dd47b9612ee",
+      "release_sha256_start": "f6af7de2d7e09f2abec43d3ac99c615add814487f063b489db4e2dd47b9612ee"
+    },
+    "source_worktree_clean": true,
+    "source_worktree_status_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "stable_envelope_sha256": "3d83e25196d766c1e69e8256dea37f8a30652cd405ae571b4a40fdfa88b813a0"
+  },
+  "candidate": {
+    "arm": "dense",
+    "authorized_foreign_sources_returned": 0,
+    "case_results_sha256": "44e6b6b9444e880f0373b2c4445682dc181c0eef3d8642c3fe23f50db106c4d5",
+    "current_revision_cases": 24,
+    "dense_evidence_cases": 24,
+    "metrics": {
+      "mrr_at_10_ppm": 916667,
+      "ndcg_at_10_ppm": 938488,
+      "recall_at_10": {"denominator": 24, "numerator": 24, "ppm": 1000000},
+      "recall_at_20": {"denominator": 24, "numerator": 24, "ppm": 1000000}
+    },
+    "per_kind_recall_at_10": {
+      "cross-script": {"denominator": 4, "numerator": 4, "ppm": 1000000},
+      "lexical": {"denominator": 4, "numerator": 4, "ppm": 1000000},
+      "literal": {"denominator": 5, "numerator": 5, "ppm": 1000000},
+      "paraphrase": {"denominator": 6, "numerator": 6, "ppm": 1000000},
+      "synonym": {"denominator": 5, "numerator": 5, "ppm": 1000000}
+    },
+    "release_sha256": "11a6ab10789ed3e24705cf4e3ac9a252ed35869e0c66e889e072eaeeaf12d3bd",
+    "repeat_output_sha256": "934659746854a2d2bdeba9a47dc0056644ca75e7dca50660da59aa8483bcb796",
+    "result_sha256": "66e943fda982457e47e06eabc6ab977936646e2cecce8d78e089a7c00cd276a8",
+    "source_commit": "f47206b686bf2cdc4d8095564f970fbfa62817ec",
+    "source_guard": {
+      "instrument_sha256_end": "b4470caad55a65f04be2b35ce17486863b6cb5d0505dafe05a25da63909bfb01",
+      "instrument_sha256_start": "b4470caad55a65f04be2b35ce17486863b6cb5d0505dafe05a25da63909bfb01",
+      "release_sha256_end": "11a6ab10789ed3e24705cf4e3ac9a252ed35869e0c66e889e072eaeeaf12d3bd",
+      "release_sha256_start": "11a6ab10789ed3e24705cf4e3ac9a252ed35869e0c66e889e072eaeeaf12d3bd"
+    },
+    "source_worktree_clean": true,
+    "source_worktree_status_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "stable_envelope_sha256": "b49f813a134f02f281e401456a154a99fbdbd0677f056a89bf01e245b3fc5159"
+  },
+  "claim": {
+    "corpus": "current_code_owned_synthetic_long_form_projection",
+    "execution_kernel_path": "not_measured",
+    "model_visible_output": "not_measured",
+    "production_embedding_model_quality": "not_measured",
+    "production_owner_corpus": "not_measured",
+    "scope": "synthetic_archive_federation_ranking_and_reauthorization"
+  },
+  "comparison": {
+    "mrr_at_10_delta_ppm": 521826,
+    "ndcg_at_10_delta_ppm": 517855,
+    "per_kind_recall_at_10_numerator_delta": {
+      "cross-script": 4,
+      "lexical": 0,
+      "literal": 0,
+      "paraphrase": 4,
+      "synonym": 4
+    },
+    "recall_at_10_numerator_delta": 12,
+    "recall_at_10_ppm_delta": 500000,
+    "recall_at_20_numerator_delta": 11,
+    "recall_at_20_ppm_delta": 458333,
+    "regression": false
+  },
+  "context_only_observations": {
+    "embedding_backend_benchmark": {
+      "case_count": 24,
+      "classification": "body_free_on_demand_model_benchmark_not_archive_federation_owner_corpus_or_release_evidence",
+      "dense_recall_at_10": {"denominator": 24, "numerator": 20, "ppm": 833333},
+      "document_count": 140,
+      "embedding_failures": 0,
+      "lexical_recall_at_10": {"denominator": 24, "numerator": 14, "ppm": 583333},
+      "model_id": "qwen3-embedding-0.6b",
+      "recall_at_10_delta_ppm": 250000
+    },
+    "production_index_coverage": {
+      "classification": "read_only_coverage_only_not_recall_quality_or_release_evidence",
+      "embedding_identity": {
+        "chunk_scheme": "v2:1200:200:64",
+        "dimensions": 1024,
+        "model_id": "qwen3-embedding-0.6b"
+      },
+      "knowledge_objects_with_vectors": 1088,
+      "object_vectors": 1570,
+      "passage_vectors": 14094,
+      "schema_version": 50
+    }
+  },
+  "corpus": {
+    "case_count": 24,
+    "corpus_manifest_sha256": "b87678a84b21255aeeb41f180c173485694e8a802de7bdff70e07d0c98be94e1",
+    "document_count": 140,
+    "legacy_corpus_source_sha256": "317241c461487cbbe25221bf0f8bb68d9594b57ced22516e931eb7c2e5b886d8",
+    "projection": "complete_current_code_owned_corpus_long_form_v1",
+    "qrel_manifest_sha256": "1048f0c8686d75e9ed881952a2489b9397416f0382f9462418dccdcacd8f9748",
+    "vector_fixture_sha256": "8976a46f9e1a1047b77cdc231bc8f15b117136c688040e54d34f574aef14c3e3"
+  },
+  "gate": {
+    "canonical_requirement": "outer_sol/PROJECT_BACKLOG.md S4 item 4",
+    "disposition": "current_code_owned_synthetic_corpus_established_before_candidate_comparison",
+    "production_embedding_model_quality": "not_measured",
+    "production_owner_corpus": "not_measured",
+    "release_threshold": "not_assessed"
+  },
+  "index_fixture": {
+    "foreign_authority_control_documents": 1,
+    "object_vectors": 141,
+    "passage_vectors": 900,
+    "principal_documents": 140,
+    "seeded_documents": 141
+  },
+  "instrument": {
+    "baseline_repeat_output_identical": true,
+    "baseline_repeat_output_sha256": "4924a3cb68790f755a1fa558aded668d02ab20797d7a093694b4d15b26fae770",
+    "candidate_repeat_output_identical": true,
+    "candidate_repeat_output_sha256": "934659746854a2d2bdeba9a47dc0056644ca75e7dca50660da59aa8483bcb796",
+    "instrument_sha256": "b4470caad55a65f04be2b35ce17486863b6cb5d0505dafe05a25da63909bfb01",
+    "network_forbidden": true,
+    "path": "tools/document_dense_recall_measurement.py",
+    "production_storage_writes": 0,
+    "schema_migrations": 0
+  },
+  "limitations": [
+    "frozen_qrel_axis_vectors_measure_archive_federation_ranking_and_reauthorization_not_production_embedding_quality",
+    "private_federation_capture_does_not_measure_execution_kernel_or_model_visible_output",
+    "long_form_projection_preserves_current_24_qrels_but_is_synthetic_not_live_owner_corpus",
+    "production_embedding_model_quality_not_measured",
+    "absence_is_not_claimed_from_the_dense_lane"
+  ],
+  "schema": "friday.s4-document-dense-recall.before-after.body-free.v2"
+}
