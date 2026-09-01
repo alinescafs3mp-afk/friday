@@ -21,12 +21,27 @@ _MAX_CALLS_PER_TURN = 8
 _ENVELOPE_DOMINANCE = 0.6
 _MAX_ARGUMENT_BYTES = 64_000
 _MAX_TOOL_NAME_LENGTH = 128
+_MAX_CONTROL_SCAN_CHARS = 64_000
 _TOOL_NAME_RE = re.compile(r"^[A-Za-z0-9_.:-]+$")
-_FULL_JSON_FENCE_RE = re.compile(r"```(?:json)?\s*(.*?)\s*```", re.IGNORECASE | re.DOTALL)
+_JSON_FENCE_PREFIX = "```json"
 # A whole LINE that is nothing but «Call: something» — the shape a model emits
 # when it tries to invoke a tool in prose. Anchored end to end because the loose
 # version matched «Call: +7 495…» inside a sentence and threw the answer away.
 _CALL_MARKER_RE = re.compile(r"(?im)^\s*call\s*:\s*[A-Za-z_][A-Za-z0-9_.:-]*\s*$")
+_TOOL_CALL_OPEN_RE = re.compile(r"<\s*tool_call\s*>", re.I)
+_TOOL_CALL_CLOSE_RE = re.compile(r"<\s*/\s*tool_call\s*>", re.I)
+_TAGGED_TOOL_BODY_CONTROL_PREFIX_RE = re.compile(
+    r"""(?ix)^(?:
+        (?:call|tool|name|function|action)\s*[:=]
+        |(?:tool|name|function|action)\s+[A-Za-z_][A-Za-z0-9_.:-]{0,127}
+            \s+(?:arguments|args|parameters|input)\b
+        |[A-Za-z_][A-Za-z0-9_.:-]{0,127}[ \t]*(?:\r?\n)+[ \t]*[\[{]
+        |[A-Za-z_][A-Za-z0-9_.:-]{0,127}\s*\(
+        |[A-Za-z_][A-Za-z0-9_.:-]{0,127}\s*$
+    )"""
+)
+_MAX_TOOL_CALL_MARKERS = 64
+_MAX_TAGGED_TOOL_BODY_CHARS = 16_000
 _TOOL_JSON_KEY_RE = re.compile(
     r"""["'](?:tool|name|arguments|args|parameters|input|tool_calls|function_call|function)["']\s*:"""
 )
@@ -36,6 +51,23 @@ _TOOL_ENVELOPE_TEXT_RE = re.compile(
         ["']name["']\s*:\s*["'][^"']+["'][^}\]]*["'](?:arguments|args|parameters|input)["']\s*:
     )""",
     re.VERBOSE,
+)
+_MALFORMED_TOOL_ROOT_RE = re.compile(
+    r"""(?ix)
+    \{\s*
+    ["']?(?:tool|name|function|action)["']?
+    (?:
+        [ \t\r\n]*(?P<authority_separator>[:=])[ \t\r\n]*
+        |(?P<authority_missing>[ \t\r\n]+)
+    )
+    ["']?[A-Za-z0-9_.:-]{1,128}["']?
+    [ \t\r\n,]*
+    ["']?(?:arguments|args|parameters|input)["']?
+    (?:
+        [ \t\r\n]*(?P<arguments_separator>[:=])
+        |(?P<arguments_missing>(?=[ \t\r\n]|[\[{]))
+    )
+    """
 )
 _TOOL_NAME_KEYS = ("tool", "name", "function", "action")
 _TOOL_ARGUMENT_KEYS = ("arguments", "args", "parameters", "input")
@@ -89,7 +121,7 @@ def _is_json_value(value: Any) -> bool:
         return False
     try:
         encoded = json.dumps(value, ensure_ascii=False, allow_nan=False, separators=(",", ":"))
-    except (TypeError, ValueError, OverflowError):
+    except (TypeError, ValueError, OverflowError, RecursionError):
         return False
     return len(encoded.encode("utf-8")) <= _MAX_ARGUMENT_BYTES
 
@@ -107,7 +139,7 @@ def _coerce_arguments(value: Any) -> dict[str, Any] | None:
             return None
         try:
             parsed = _strict_json_loads(text)
-        except (json.JSONDecodeError, ValueError):
+        except (json.JSONDecodeError, ValueError, RecursionError):
             return None
         return parsed if isinstance(parsed, dict) and _is_json_value(parsed) else None
     return None
@@ -241,12 +273,107 @@ def _embedded_objects(text: str, *, limit: int = 6) -> list[tuple[dict[str, Any]
                     break
         if end < 0:
             return found
-        with suppress(json.JSONDecodeError, ValueError):
+        with suppress(json.JSONDecodeError, ValueError, RecursionError):
             decoded = _strict_json_loads(text[start:end])
             if isinstance(decoded, dict):
                 found.append((decoded, end - start))
         index = end
     return found
+
+
+def _has_dominant_malformed_tool_root(text: str) -> bool:
+    """Find one bounded identity-plus-arguments carrier missed by JSON decode.
+
+    Some runtimes omit both colons while emitting a tool envelope.  Anchoring
+    directly at the authority slot keeps earlier ``{x}`` decoys from consuming
+    the only candidate budget.  An unclosed root owns the suffix, but it is
+    control only when that suffix dominates the complete reply; short examples
+    inside ordinary prose therefore remain answers.
+    """
+
+    scan_stop = min(len(text), _MAX_CONTROL_SCAN_CHARS)
+    position = 0
+    while position < scan_stop:
+        character = text[position]
+        if character != "{":
+            position += 1
+            continue
+        match = _MALFORMED_TOOL_ROOT_RE.match(text, position, scan_stop)
+        if match is None:
+            position += 1
+            continue
+        if match.group("authority_separator") == ":" and match.group("arguments_separator") == ":":
+            position += 1
+            continue
+        root_start = position
+        root_stop = min(len(text), root_start + _MAX_CONTROL_SCAN_CHARS)
+        depth = 0
+        root_quote = ""
+        root_escaped = False
+        carrier_stop = root_stop
+        root_closed = False
+        for position in range(root_start, root_stop):
+            character = text[position]
+            word_apostrophe = bool(
+                character == "'"
+                and position > root_start
+                and position + 1 < root_stop
+                and text[position - 1].isalnum()
+                and text[position + 1].isalnum()
+            )
+            if root_quote:
+                if root_escaped:
+                    root_escaped = False
+                elif character == "\\":
+                    root_escaped = True
+                elif character == root_quote and not word_apostrophe:
+                    root_quote = ""
+                continue
+            if character == '"' or (
+                character == "'" and (position == root_start or not text[position - 1].isalnum())
+            ):
+                root_quote = character
+            elif character == "{":
+                depth += 1
+            elif character == "}":
+                depth -= 1
+                if depth == 0:
+                    carrier_stop = position + 1
+                    root_closed = True
+                    break
+        if carrier_stop - root_start >= len(text) * _ENVELOPE_DOMINANCE:
+            return True
+        if not root_closed:
+            return False
+        position = carrier_stop
+    return False
+
+
+def unclosed_tool_call_markup_has_control(content: str) -> bool:
+    """Detect bounded unclosed tag bodies that are control rather than prose."""
+
+    text = content or ""
+    opens: list[re.Match[str]] = []
+    for match in _TOOL_CALL_OPEN_RE.finditer(text):
+        if len(opens) >= _MAX_TOOL_CALL_MARKERS:
+            return True
+        opens.append(match)
+    for index, opened in enumerate(opens):
+        next_open = opens[index + 1].start() if index + 1 < len(opens) else len(text)
+        closed = _TOOL_CALL_CLOSE_RE.search(text, opened.end(), next_open)
+        if closed is not None:
+            continue
+        body = text[opened.end() : next_open]
+        stripped = body.strip()
+        if not stripped:
+            continue
+        if len(body) > _MAX_TAGGED_TOOL_BODY_CHARS:
+            return True
+        if stripped.startswith(("{", "[", "`", "~")):
+            return True
+        if _TAGGED_TOOL_BODY_CONTROL_PREFIX_RE.match(stripped) is not None:
+            return True
+    return False
 
 
 def contains_internal_tool_output(content: str) -> bool:
@@ -264,7 +391,35 @@ def contains_internal_tool_output(content: str) -> bool:
     text = (content or "").strip()
     if not text:
         return False
+    try:
+        complete = _strict_json_loads(text)
+    except (json.JSONDecodeError, ValueError, RecursionError):
+        pass
+    else:
+        if isinstance(complete, dict):
+            return is_tool_envelope(complete)
+        pending = [complete]
+        envelope_chars = 0
+        while pending:
+            value = pending.pop()
+            if isinstance(value, dict):
+                if is_tool_envelope(value):
+                    try:
+                        encoded = json.dumps(
+                            value,
+                            ensure_ascii=False,
+                            allow_nan=False,
+                            separators=(",", ":"),
+                        )
+                    except (TypeError, ValueError, OverflowError, RecursionError):
+                        return True
+                    envelope_chars = max(envelope_chars, len(encoded))
+            elif isinstance(value, list):
+                pending.extend(value)
+        return envelope_chars >= len(text) * _ENVELOPE_DOMINANCE
     if _CALL_MARKER_RE.search(text):
+        return True
+    if unclosed_tool_call_markup_has_control(text):
         return True
     # The payload has to BE the message, not appear in it. `{"name": …,
     # "parameters": …}` is exactly the shape of a tool call AND exactly the shape
@@ -276,7 +431,7 @@ def contains_internal_tool_output(content: str) -> bool:
         (length for candidate, length in _embedded_objects(text) if is_tool_envelope(candidate)),
         default=0,
     )
-    return envelope_chars >= len(text) * _ENVELOPE_DOMINANCE
+    return envelope_chars >= len(text) * _ENVELOPE_DOMINANCE or _has_dominant_malformed_tool_root(text)
 
 
 #: Вызов инструмента, записанный как код: `memory_search.search(query="…")`.
@@ -306,15 +461,31 @@ def looks_like_a_code_style_call(content: str) -> bool:
     return bool(_CODE_STYLE_CALL_RE.fullmatch(text))
 
 
+def _unwrap_full_json_fence(text: str) -> str | None:
+    """Return one exact JSON-owned fence body with deterministic linear work."""
+
+    if len(text) < len(_JSON_FENCE_PREFIX) + 3:
+        return None
+    if text[: len(_JSON_FENCE_PREFIX)].casefold() != _JSON_FENCE_PREFIX:
+        return None
+    boundary = len(_JSON_FENCE_PREFIX)
+    if text[boundary] not in " \t\r\n[{":
+        return None
+    if not text.endswith("```"):
+        return None
+    body = text[boundary:-3].strip()
+    return body or None
+
+
 def classify_tool_turn(content: str) -> ToolTurn:
     """Classify a complete assistant response without leaking control payloads."""
 
     text = (content or "").strip()
-    fenced = _FULL_JSON_FENCE_RE.fullmatch(text)
-    candidate = fenced.group(1).strip() if fenced is not None else text
+    fenced = _unwrap_full_json_fence(text)
+    candidate = fenced if fenced is not None else text
     try:
         decoded = _strict_json_loads(candidate)
-    except (json.JSONDecodeError, ValueError):
+    except (json.JSONDecodeError, ValueError, RecursionError):
         decoded = None
 
     if isinstance(decoded, dict):

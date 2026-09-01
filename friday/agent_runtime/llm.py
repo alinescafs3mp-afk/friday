@@ -13,6 +13,10 @@ from typing import Any
 
 import httpx
 
+from friday.agent_runtime.tool_protocol import (
+    classify_tool_turn,
+    unclosed_tool_call_markup_has_control,
+)
 from friday.config import FridaySettings, detect_repeated_token_degeneration
 
 LOGGER = logging.getLogger(__name__)
@@ -395,6 +399,37 @@ def _bounded_tool_schema_names(tools: Any) -> list[str]:
 
 
 _TOOL_CALL_MARKUP = re.compile(r"<\s*tool_call\s*>.*?(?:<\s*/\s*tool_call\s*>|$)", re.S | re.I)
+_TOOL_CALL_OPEN_MARKUP = re.compile(r"<\s*tool_call\s*>", re.I)
+_TOOL_CALL_CLOSE_MARKUP = re.compile(r"<\s*/\s*tool_call\s*>", re.I)
+_MAX_TOOL_CALL_MARKERS = 64
+_MAX_LITERAL_TOOL_CALL_BODY_CHARS = 16_000
+
+
+def _unclosed_tool_call_markers_are_literal(content: str) -> bool:
+    """Keep bounded literal tag spellings whose following text is prose."""
+
+    if _TOOL_CALL_CLOSE_MARKUP.search(content) is not None:
+        return False
+    if unclosed_tool_call_markup_has_control(content):
+        return False
+    opens: list[re.Match[str]] = []
+    for match in _TOOL_CALL_OPEN_MARKUP.finditer(content):
+        if len(opens) >= _MAX_TOOL_CALL_MARKERS:
+            return False
+        opens.append(match)
+    if not opens:
+        return False
+    for index, match in enumerate(opens):
+        segment_stop = opens[index + 1].start() if index + 1 < len(opens) else len(content)
+        segment = content[match.end() : segment_stop]
+        stripped = segment.strip()
+        if (
+            not stripped
+            or len(segment) > _MAX_LITERAL_TOOL_CALL_BODY_CHARS
+            or classify_tool_turn(segment).kind != "answer"
+        ):
+            return False
+    return True
 
 
 def _strip_tool_call_markup(content: str) -> str:
@@ -419,6 +454,8 @@ def _strip_tool_call_markup(content: str) -> str:
     до и после правки, а не тестом.
     """
     if "tool_call" not in content.casefold():
+        return content
+    if _unclosed_tool_call_markers_are_literal(content):
         return content
     return _TOOL_CALL_MARKUP.sub("", content).strip()
 
