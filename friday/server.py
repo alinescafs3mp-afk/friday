@@ -2225,9 +2225,33 @@ def _bridge_header(request: Request, name: str) -> str:
 async def _authenticate(request: Request) -> ActorContext:
     state = request.app.state
     settings: FridaySettings = state.settings
+    authorization_values = request.headers.getlist("authorization")
     authorization = request.headers.get("authorization", "")
     bearer = authorization[7:].strip() if authorization.casefold().startswith("bearer ") else ""
     signature = _bridge_header(request, "signature")
+
+    # This hidden Release-Captain read must not turn authentication bookkeeping
+    # into a production mutation.  Unlike ordinary interactive requests it
+    # neither provisions/touches an account nor accepts a scoped or implicit
+    # loopback principal: the configured installation-owner token and the
+    # already-active canonical owner row must both exist exactly as observed.
+    if request.url.path == "/api/admin/production-read-only-observation":
+        if len(authorization_values) != 1 or signature or not bearer or not settings.api_token:
+            raise AuthenticationError("Canonical owner authentication is required")
+        if not hmac.compare_digest(
+            bearer.encode("utf-8"),
+            settings.api_token.encode("utf-8"),
+        ):
+            raise AuthenticationError("Invalid API token")
+        user = state.storage.get_user(LEGACY_OWNER_USER_ID)
+        if not user or user.get("status") != "active" or user.get("preset_key") != "owner":
+            raise AuthenticationError("Canonical owner account is unavailable")
+        return ActorContext(
+            LEGACY_OWNER_USER_ID,
+            "owner",
+            "api-token",
+            identity_id="owner-token",
+        )
 
     if bearer and signature:
         raise AuthenticationError("Use either API-token or bridge authentication, not both")

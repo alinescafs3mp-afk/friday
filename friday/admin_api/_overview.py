@@ -8,10 +8,12 @@ owns ``/api/admin`` and the order these modules are included in.
 from __future__ import annotations
 
 import ipaddress
+import re
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Response
 
 from friday.admin_api._deps import (
+    LEGACY_OWNER_USER_ID,
     Any,
     Request,
     _require,
@@ -19,6 +21,7 @@ from friday.admin_api._deps import (
     collect_diagnostics,
 )
 from friday.diagnostics import collect_document_contour_observer_snapshot
+from friday.diagnostics.production_observation import collect_production_read_only_observation
 from friday.storage._privacy import (
     _not_private_entity_material_dependency,
     _not_private_inbox_dependency,
@@ -30,6 +33,9 @@ from friday.storage._privacy import (
 from friday.workers._blocking import run_blocking
 
 router = APIRouter()
+
+_PRODUCTION_OBSERVATION_CHALLENGE_HEADER = "x-friday-production-observation-challenge-sha256"
+_PRODUCTION_OBSERVATION_CHALLENGE_RE = re.compile(r"[0-9a-f]{64}\Z")
 
 
 @router.get("/overview")
@@ -268,3 +274,62 @@ def _document_contour_observer_snapshot_sync(request: Request) -> dict[str, Any]
         return collect_document_contour_observer_snapshot(state.settings, state.storage)
     except Exception as exc:  # noqa: BLE001 - every snapshot uncertainty is a closed 503
         raise HTTPException(status_code=503, detail="Снимок барьера релиза недоступен") from exc
+
+
+@router.get("/production-read-only-observation", include_in_schema=False)
+async def production_read_only_observation(request: Request) -> Response:
+    # The collector must use the already-open lifespan-thread connection; an
+    # executor hop would have no bound connection and must fail closed.
+    return _production_read_only_observation_sync(request)
+
+
+def _production_read_only_observation_sync(request: Request) -> Response:
+    actor = _require(request, "admin.diagnostics")
+    if (
+        not actor.is_owner
+        or actor.user_id != LEGACY_OWNER_USER_ID
+        or actor.own_id != LEGACY_OWNER_USER_ID
+        or actor.identity_id != "owner-token"
+    ):
+        raise HTTPException(
+            status_code=403,
+            detail="Production-наблюдение доступно только владельцу",
+        )
+    peer = str(getattr(getattr(request, "client", None), "host", "") or "")
+    try:
+        local_peer = ipaddress.ip_address(peer).is_loopback
+    except ValueError:
+        local_peer = False
+    if not local_peer:
+        raise HTTPException(
+            status_code=403,
+            detail="Production-наблюдение доступно только локально на сервере",
+        )
+
+    challenges = request.headers.getlist(_PRODUCTION_OBSERVATION_CHALLENGE_HEADER)
+    if (
+        len(challenges) != 1
+        or _PRODUCTION_OBSERVATION_CHALLENGE_RE.fullmatch(challenges[0]) is None
+        or set(challenges[0]) == {"0"}
+    ):
+        raise HTTPException(
+            status_code=400,
+            detail="Некорректный challenge production-наблюдения",
+        )
+
+    state = _services(request)
+    try:
+        observation = collect_production_read_only_observation(
+            state.settings,
+            state.storage,
+            challenge_sha256=challenges[0],
+        )
+        payload = observation.canonical_bytes()
+        if type(payload) is not bytes:
+            raise TypeError("production observation canonical payload is not bytes")
+    except Exception as exc:  # noqa: BLE001 - every collector uncertainty is a closed 503
+        raise HTTPException(
+            status_code=503,
+            detail="Production-наблюдение недоступно",
+        ) from exc
+    return Response(content=payload, media_type="application/json")
