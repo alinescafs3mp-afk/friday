@@ -1,3 +1,16 @@
+## 0.207.94 — 2026-09-01
+
+### Fair Inbox advice scheduling
+
+- Selects only pending, privacy-safe Inbox rows that still need current model
+  advice before applying the finite worker page limit.
+- Excludes already-current advice, exhausted attempts and reserved secondary
+  product witnesses in SQL, then rechecks the attempt fence after selection.
+- Uses stable oldest-first ordering so a blocked prefix or arriving high-score
+  material cannot permanently starve an eligible row.
+- SQLite remains at schema 50; exact `0.207.93` is the predecessor and
+  `0.207.90` remains the immutable fallback.
+
 ## 0.207.93 — 2026-09-01
 
 ### Measured-recall convergence
