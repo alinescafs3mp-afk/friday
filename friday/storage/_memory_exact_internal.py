@@ -26,7 +26,7 @@ import unicodedata
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import Any, Final, NoReturn, SupportsIndex
+from typing import TYPE_CHECKING, Any, Final, NoReturn, SupportsIndex
 
 from friday.audit_privacy import decode_audit_privacy_key
 from friday.retrieval.memory_exact_contract import (
@@ -57,6 +57,9 @@ from friday.storage._privacy import (
     _not_private_relation_dependency,
 )
 from friday.storage.models import normalize_known_at
+
+if TYPE_CHECKING:
+    from friday.knowledge_graph import KnowledgeGraph
 
 _AUTHORITY_FACTORY = object()
 _PROVIDER_FACTORY = object()
@@ -104,6 +107,7 @@ MEMORY_EXACT_MAX_ENTITY_MERGE_ROWS: Final = 1_024
 MEMORY_EXACT_MAX_ENTITY_MERGE_DEPTH: Final = 16
 MEMORY_EXACT_MAX_IMPLICIT_LINK_ROWS: Final = 30
 _MEMORY_EXACT_MAX_PROVIDER_MATERIAL_ROWS: Final = 400
+_MEMORY_EXACT_MAX_HISTORICAL_RELATION_IDS: Final = 802
 _MAX_GRAPH_TEXT_BYTES = 1024
 _MAX_QUERY_BYTES = 16_384
 _FETCH_BATCH = 8
@@ -576,7 +580,10 @@ def _copy_graph_context(
     *,
     effective_query: str,
     temporal: Mapping[str, object],
+    graph_saturated: bool,
 ) -> dict[str, object]:
+    if type(graph_saturated) is not bool:
+        raise MemoryExactStorageError("memory exact graph saturation binding is invalid")
     context = _mapping(raw, label="memory exact provider graph")
     if context.get("query") != effective_query:
         raise MemoryExactStorageError("memory exact provider graph changed its effective query")
@@ -657,6 +664,18 @@ def _copy_graph_context(
         paths_matched += 1
     if not expanded and (relations or paths or paths_matched or paths_truncated):
         raise MemoryExactStorageError("memory exact unexpanded provider graph is invalid")
+    if graph_saturated and (
+        temporal["as_of"]
+        or temporal["known_at"]
+        or expanded
+        or roots
+        or nodes
+        or relations
+        or paths
+        or paths_matched
+        or paths_truncated
+    ):
+        raise MemoryExactStorageError("memory exact saturated graph projection is invalid")
 
     def upstream_coverage(*, observed: int, cap: int) -> str:
         if observed >= cap:
@@ -675,7 +694,9 @@ def _copy_graph_context(
         "nodes_coverage": upstream_coverage(
             observed=len(nodes),
             cap=MEMORY_EXACT_MAX_GRAPH_NODES,
-        ),
+        )
+        if not graph_saturated
+        else MemoryExactGraphCoverage.UNKNOWN.value,
         "relations_coverage": upstream_coverage(
             observed=len(relations),
             cap=MEMORY_EXACT_MAX_GRAPH_RELATIONS,
@@ -813,9 +834,13 @@ def _create_memory_exact_provider_snapshot(
     request: MemoryExactRequest,
     payload: Mapping[str, Any],
     provider_revisions: Mapping[str, tuple[str, str]],
+    *,
+    graph_saturated: bool = False,
 ) -> MemoryExactProviderSnapshot:
     """Close the HybridSearcher response before it reaches storage authority."""
 
+    if type(graph_saturated) is not bool:
+        raise MemoryExactStorageError("memory exact graph saturation binding is invalid")
     selector = _selector_payload(request)
     raw = _mapping(payload, label="memory exact provider response")
     effective_query = _private_text(
@@ -917,6 +942,7 @@ def _create_memory_exact_provider_snapshot(
         raw.get("graph_context"),
         effective_query=effective_query,
         temporal=temporal,
+        graph_saturated=graph_saturated,
     )
     request_identity_sha256 = _request_identity(request)
     temporal_json = _canonical_bytes(temporal).decode("ascii")
@@ -2146,20 +2172,616 @@ def _memory_exact_provider_live_id_in_transaction(
     return () if row is None else (identity,)
 
 
+def _install_memory_exact_provider_select_authorizer(conn: sqlite3.Connection) -> None:
+    """Install the strict authorizer used by one statement or whole graph lease."""
+
+    allowed = {
+        sqlite3.SQLITE_FUNCTION,
+        sqlite3.SQLITE_READ,
+        sqlite3.SQLITE_SELECT,
+    }
+    recursive = getattr(sqlite3, "SQLITE_RECURSIVE", None)
+    if isinstance(recursive, int):
+        allowed.add(recursive)
+
+    def authorize(
+        action: int,
+        _first: str | None,
+        _second: str | None,
+        _database: str | None,
+        _source: str | None,
+    ) -> int:
+        return sqlite3.SQLITE_OK if action in allowed else sqlite3.SQLITE_DENY
+
+    conn.set_authorizer(authorize)
+
+
+def _execute_memory_exact_provider_select(
+    conn: sqlite3.Connection,
+    sql: str,
+    params: tuple[object, ...],
+) -> sqlite3.Cursor:
+    """Prepare one statement under SQLite's own closed read-only authorizer."""
+
+    from friday.storage._core import _install_private_material_authorizer
+
+    _install_memory_exact_provider_select_authorizer(conn)
+    try:
+        return conn.execute(sql, params)
+    except sqlite3.DatabaseError as exc:
+        if "author" in str(exc).casefold() or "not authorized" in str(exc).casefold():
+            raise MemoryExactStorageError("provider replay statement is not read-only") from None
+        raise
+    finally:
+        # sqlite3 exposes no getter for the previous callback. Every FridayStorage
+        # connection owns this canonical guard, so restore its code-owned factory.
+        _install_private_material_authorizer(conn)
+
+
+def _memory_exact_provider_scoped_topology_proof_in_transaction(
+    conn: sqlite3.Connection,
+    *,
+    tenant_id: str,
+    entity_ids: tuple[str, ...],
+    known_at: str,
+    reserve_bytes: Callable[[int], None],
+    maximum_identities: int,
+    allow_later_unwitnessed: bool,
+) -> tuple[str, tuple[str, ...]]:
+    """Validate only keyed topology scalars needed by one historical graph read."""
+
+    _require_transaction(conn)
+    tenant = _scope(tenant_id, label="provider topology tenant", maximum=240)
+    boundary = _validated_known_at(
+        known_at,
+        label="provider topology boundary",
+        reject_future=True,
+    )
+    if (
+        type(entity_ids) is not tuple
+        or isinstance(maximum_identities, bool)
+        or not isinstance(maximum_identities, int)
+        or maximum_identities < 0
+        or len(entity_ids) > maximum_identities
+        or not callable(reserve_bytes)
+        or type(allow_later_unwitnessed) is not bool
+    ):
+        raise MemoryExactStorageError("provider topology source set is invalid")
+    identities = tuple(
+        _scope(item, label="provider topology identity", maximum=240) for item in entity_ids
+    )
+    if identities != tuple(sorted(identities)) or len(identities) != len(set(identities)):
+        raise MemoryExactStorageError("provider topology source set is invalid")
+    if not identities:
+        return (
+            _sha256(
+                {
+                    "schema": "friday.memory-exact-provider-topology-proof.v1",
+                    "boundary_sha256": _bytes_sha256(boundary),
+                    "entities": [],
+                    "merges": [],
+                }
+            ),
+            (),
+        )
+
+    identity_set = set(identities)
+    frontier = identities
+    public_merge_entity = _not_private_entity_material_dependency("entity")
+    for depth in range(MEMORY_EXACT_MAX_ENTITY_MERGE_DEPTH + 1):
+        frontier_values = ",".join("(?)" for _identity in frontier)
+        frontier_wanted = (
+            f"WITH wanted(entity_id) AS (VALUES {frontier_values})"  # nosec B608
+        )
+        closure_preflight = conn.execute(
+            frontier_wanted
+            + f""" SELECT COUNT(*) AS row_count,
+                         COALESCE(MAX(length(CAST(COALESCE(entity.merged_into_id,'') AS BLOB))),0)
+                             AS maximum_target,
+                         COALESCE(SUM(
+                             length(CAST(entity.id AS BLOB))
+                             + length(CAST(COALESCE(entity.merged_into_id,'') AS BLOB)) + 64
+                         ),0) AS storage_bytes,
+                         COALESCE(SUM(CASE
+                             WHEN entity.merged_into_id IS NULL OR (
+                                 typeof(entity.merged_into_id)='text'
+                                 AND length(CAST(entity.merged_into_id AS BLOB)) BETWEEN 1 AND 240
+                             ) THEN 0 ELSE 1 END),0) AS invalid_rows
+                    FROM wanted
+                    JOIN entities entity
+                      ON entity.id=wanted.entity_id AND entity.user_id=?
+                     AND {public_merge_entity}""",  # nosec B608 - fixed private predicate
+            (*frontier, tenant),
+        ).fetchone()
+        if (
+            closure_preflight is None
+            or any(isinstance(item, bool) or not isinstance(item, int) for item in closure_preflight)
+            or int(closure_preflight[0]) != len(frontier)
+            or not 0 <= int(closure_preflight[1]) <= 240
+            or int(closure_preflight[2]) < 0
+            or int(closure_preflight[3]) != 0
+        ):
+            raise MemoryExactStorageError("provider topology merge closure is invalid")
+        reserve_bytes(int(closure_preflight[2]))
+        closure_rows = conn.execute(
+            frontier_wanted
+            + f""" SELECT entity.id,entity.merged_into_id
+                    FROM wanted
+                    JOIN entities entity
+                      ON entity.id=wanted.entity_id AND entity.user_id=?
+                     AND {public_merge_entity}
+                   ORDER BY entity.id""",  # nosec B608 - fixed private predicate
+            (*frontier, tenant),
+        ).fetchall()
+        discovered = {
+            _scope(row[1], label="provider topology merge target", maximum=240)
+            for row in closure_rows
+            if row[1] is not None
+        } - identity_set
+        if not discovered:
+            break
+        if depth >= MEMORY_EXACT_MAX_ENTITY_MERGE_DEPTH:
+            raise MemoryExactStorageError("provider topology merge chain exceeds its depth limit")
+        if len(identity_set) + len(discovered) > maximum_identities:
+            raise MemoryExactStorageError("provider graph topology source set is saturated")
+        identity_set.update(discovered)
+        frontier = tuple(sorted(discovered))
+    identities = tuple(sorted(identity_set))
+
+    values = ",".join("(?)" for _identity in identities)
+    wanted = f"WITH wanted(entity_id) AS (VALUES {values})"  # nosec B608 - placeholders only
+    public_entity = _not_private_entity_material_dependency("entity")
+    current_preflight = conn.execute(
+        wanted
+        + f""" SELECT COUNT(*) AS row_count,
+                     COALESCE(MAX(max(
+                         length(CAST(entity.id AS BLOB)),
+                         length(CAST(COALESCE(entity.merged_into_id,'') AS BLOB))
+                     )),0) AS maximum_identity,
+                     COALESCE(SUM(
+                         length(CAST(entity.id AS BLOB))
+                         + length(CAST(COALESCE(entity.merged_into_id,'') AS BLOB)) + 96
+                     ),0) AS storage_bytes,
+                     COALESCE(SUM(CASE
+                         WHEN typeof(entity.id)='text'
+                          AND length(CAST(entity.id AS BLOB)) BETWEEN 1 AND 240
+                          AND entity.canonical IN (0,1)
+                          AND (entity.merged_into_id IS NULL OR (
+                              typeof(entity.merged_into_id)='text'
+                              AND length(CAST(entity.merged_into_id AS BLOB)) BETWEEN 1 AND 240
+                          ))
+                         THEN 0 ELSE 1 END),0) AS invalid_rows
+                FROM wanted
+                JOIN entities entity ON entity.id=wanted.entity_id AND entity.user_id=?
+                 AND {public_entity}""",  # nosec B608 - fixed private predicate
+        (*identities, tenant),
+    ).fetchone()
+    if (
+        current_preflight is None
+        or any(isinstance(item, bool) or not isinstance(item, int) for item in current_preflight)
+        or int(current_preflight[0]) != len(identities)
+        or not 0 <= int(current_preflight[1]) <= 240
+        or int(current_preflight[2]) < 0
+        or int(current_preflight[3]) != 0
+    ):
+        raise MemoryExactStorageError("provider topology current projection is invalid")
+    reserve_bytes(int(current_preflight[2]))
+    current_cursor = conn.execute(
+        wanted
+        + f""" SELECT entity.id, entity.canonical, entity.merged_into_id,
+                     entity.deleted_at IS NOT NULL AS deleted
+                FROM wanted
+                JOIN entities entity ON entity.id=wanted.entity_id AND entity.user_id=?
+                 AND {public_entity}
+               ORDER BY entity.id""",  # nosec B608 - fixed private predicate
+        (*identities, tenant),
+    )
+    current_rows = current_cursor.fetchall()
+    current_cursor.close()
+    current: dict[str, tuple[bool, str, bool]] = {}
+    for row in current_rows:
+        identity = _scope(row[0], label="provider topology current identity", maximum=240)
+        merged = ""
+        if row[2] is not None:
+            merged = _scope(row[2], label="provider topology merge target", maximum=240)
+        current[identity] = (bool(row[1]), merged, bool(row[3]))
+    if set(current) != set(identities):
+        raise MemoryExactStorageError("provider topology current projection changed")
+
+    relation_public = _not_private_relation_dependency("revision")
+    existence_cursor = conn.execute(
+        wanted
+        + f""" SELECT entity.id,
+                     CASE WHEN length(CAST((
+                         SELECT version.created_at FROM entity_versions version
+                          WHERE version.user_id=entity.user_id AND version.entity_id=entity.id
+                          ORDER BY version.version,version.created_at,version.id LIMIT 1
+                     ) AS BLOB)) BETWEEN 1 AND 64 THEN (
+                         SELECT version.created_at FROM entity_versions version
+                          WHERE version.user_id=entity.user_id AND version.entity_id=entity.id
+                          ORDER BY version.version,version.created_at,version.id LIMIT 1
+                     ) END AS first_recorded_at,
+                     EXISTS(
+                         SELECT 1 FROM relation_revisions revision
+                         JOIN entities source_entity
+                           ON source_entity.id=revision.source_entity_id
+                          AND source_entity.user_id=revision.user_id
+                          AND {_not_private_entity_material_dependency('source_entity')}
+                         JOIN entities target_entity
+                           ON target_entity.id=revision.target_entity_id
+                          AND target_entity.user_id=revision.user_id
+                          AND {_not_private_entity_material_dependency('target_entity')}
+                        WHERE revision.user_id=? AND revision.recorded_at<=?
+                          AND (revision.source_entity_id=entity.id
+                               OR revision.target_entity_id=entity.id)
+                          AND {relation_public} LIMIT 1
+                     ) AS witnessed
+                FROM wanted
+                JOIN entities entity ON entity.id=wanted.entity_id AND entity.user_id=?
+                 AND {public_entity}
+               ORDER BY entity.id""",  # nosec B608 - fixed private predicates
+        (*identities, tenant, boundary, tenant),
+    )
+    existence_rows = existence_cursor.fetchall()
+    existence_cursor.close()
+    reserve_bytes(len(identities) * 384)
+    relevant: list[str] = []
+    entity_proof: list[dict[str, object]] = []
+    for row in existence_rows:
+        identity = _scope(row[0], label="provider topology existence identity", maximum=240)
+        if type(row[1]) is not str or row[2] not in {0, 1}:
+            raise MemoryExactStorageError("provider topology existence history is incomplete")
+        first_raw = row[1]
+        first = _validated_known_at(
+            first_raw,
+            label="provider topology existence timestamp",
+            reject_future=False,
+        )
+        coarse_same_second = (
+            not re.search(r"T\d{2}:\d{2}:\d{2}\.\d+", first_raw)
+            and first[:19] == boundary[:19]
+        )
+        later = not bool(row[2]) and (first > boundary or coarse_same_second)
+        if later and not allow_later_unwitnessed:
+            raise MemoryExactStorageError("provider topology identity did not exist at the boundary")
+        if not later:
+            relevant.append(identity)
+        entity_proof.append(
+            {
+                "entity_handle": _hmac(
+                    _PROVIDER_SEAL_KEY,
+                    domain="friday.memory-exact-provider-topology-entity.v1",
+                    material=_canonical_bytes({"tenant": tenant, "entity_id": identity}),
+                ),
+                "first_recorded_at_sha256": _bytes_sha256(first_raw),
+                "later_unwitnessed": later,
+                "witnessed": bool(row[2]),
+            }
+        )
+    if len(existence_rows) != len(identities):
+        raise MemoryExactStorageError("provider topology existence projection changed")
+
+    version_proof: list[dict[str, object]] = []
+    recorded_tails: dict[str, tuple[bool, str, bool]] = {}
+    if relevant:
+        relevant_tuple = tuple(sorted(relevant))
+        relevant_values = ",".join("(?)" for _identity in relevant_tuple)
+        version_wanted = (
+            f"WITH wanted(entity_id) AS (VALUES {relevant_values})"  # nosec B608
+        )
+        version_preflight = conn.execute(
+            version_wanted
+            + f""" SELECT COUNT(*) AS row_count,
+                         COALESCE(MAX(length(CAST(version.snapshot_json AS BLOB))),0)
+                             AS maximum_json,
+                         COALESCE(SUM(length(CAST(version.snapshot_json AS BLOB))),0)
+                             AS aggregate_json,
+                         COALESCE(MAX(max(
+                             length(CAST(version.id AS BLOB)),
+                             length(CAST(version.entity_id AS BLOB)),
+                             length(CAST(version.created_at AS BLOB)),
+                             CASE WHEN length(CAST(version.snapshot_json AS BLOB))
+                                           <= {MEMORY_EXACT_MAX_METADATA_UTF8_BYTES}
+                                      AND json_valid(version.snapshot_json)
+                                  THEN length(CAST(COALESCE(
+                                      json_extract(version.snapshot_json,'$.merged_into_id'),'') AS BLOB))
+                                  ELSE 0 END
+                         )),0) AS maximum_scalar,
+                         COALESCE(SUM(
+                             length(CAST(version.id AS BLOB))
+                             + length(CAST(version.entity_id AS BLOB))
+                             + length(CAST(version.created_at AS BLOB)) + 160
+                         ),0) AS scalar_bytes,
+                         COALESCE(SUM(CASE
+                             WHEN length(CAST(version.snapshot_json AS BLOB))
+                                      > {MEMORY_EXACT_MAX_METADATA_UTF8_BYTES}
+                               OR NOT json_valid(version.snapshot_json)
+                               OR json_type(version.snapshot_json,'$.canonical') IS NULL
+                               OR json_type(version.snapshot_json,'$.canonical')
+                                      NOT IN ('true','false','integer')
+                               OR json_type(version.snapshot_json,'$.merged_into_id') IS NULL
+                               OR json_type(version.snapshot_json,'$.merged_into_id')
+                                      NOT IN ('null','text')
+                               OR json_type(version.snapshot_json,'$.deleted_at') IS NULL
+                               OR json_type(version.snapshot_json,'$.deleted_at')
+                                      NOT IN ('null','text')
+                             THEN 1 ELSE 0 END),0) AS invalid_rows
+                    FROM wanted
+                    JOIN entity_versions version
+                      ON version.entity_id=wanted.entity_id AND version.user_id=?
+                    JOIN entities entity
+                      ON entity.id=version.entity_id AND entity.user_id=version.user_id
+                     AND {public_entity}""",  # nosec B608 - fixed private predicate
+            (*relevant_tuple, tenant),
+        ).fetchone()
+        if (
+            version_preflight is None
+            or any(isinstance(item, bool) or not isinstance(item, int) for item in version_preflight)
+            or not 0 <= int(version_preflight[0]) <= MEMORY_EXACT_MAX_ENTITY_VERSION_ROWS
+            or not 0 <= int(version_preflight[1]) <= MEMORY_EXACT_MAX_METADATA_UTF8_BYTES
+            or not 0 <= int(version_preflight[2]) <= MEMORY_EXACT_MAX_ENTITY_HISTORY_UTF8_BYTES
+            or not 0 <= int(version_preflight[3]) <= 240
+            or int(version_preflight[4]) < 0
+            or int(version_preflight[5]) != 0
+        ):
+            raise MemoryExactStorageError("provider topology version history exceeds its limits")
+        reserve_bytes(int(version_preflight[2]) + int(version_preflight[4]))
+        version_cursor = conn.execute(
+            version_wanted
+            + f""" SELECT version.id,version.entity_id,version.version,version.created_at,
+                         json_extract(version.snapshot_json,'$.canonical') AS canonical,
+                         json_extract(version.snapshot_json,'$.merged_into_id') AS merged_into_id,
+                         json_extract(version.snapshot_json,'$.deleted_at') IS NOT NULL AS deleted
+                    FROM wanted
+                    JOIN entity_versions version
+                      ON version.entity_id=wanted.entity_id AND version.user_id=?
+                    JOIN entities entity
+                      ON entity.id=version.entity_id AND entity.user_id=version.user_id
+                     AND {public_entity}
+                   ORDER BY version.entity_id,version.version,version.created_at,version.id""",  # nosec B608
+            (*relevant_tuple, tenant),
+        )
+        version_rows = version_cursor.fetchall()
+        version_cursor.close()
+        if len(version_rows) != int(version_preflight[0]):
+            raise MemoryExactStorageError("provider topology version history changed")
+        previous: dict[str, tuple[bool, str, bool]] = {}
+        for row in version_rows:
+            version_id = _scope(row[0], label="provider topology version identity", maximum=240)
+            identity = _scope(row[1], label="provider topology version entity", maximum=240)
+            _integer(row[2], label="provider topology version", low=1, high=2**63 - 1)
+            raw_recorded = _bounded_text(
+                row[3],
+                label="provider topology version timestamp",
+                maximum=64,
+                allow_empty=False,
+                allow_controls=False,
+            )
+            recorded = _validated_known_at(
+                raw_recorded,
+                label="provider topology version timestamp",
+                reject_future=False,
+            )
+            merged = ""
+            if row[5] is not None:
+                merged = _scope(row[5], label="provider topology historical merge target", maximum=240)
+            topology = (bool(row[4]), merged, bool(row[6]))
+            earlier = previous.get(identity)
+            coarse_same_second = (
+                not re.search(r"T\d{2}:\d{2}:\d{2}\.\d+", raw_recorded)
+                and recorded[:19] == boundary[:19]
+            )
+            if earlier is not None and topology != earlier and (
+                recorded > boundary or coarse_same_second
+            ):
+                raise MemoryExactStorageError("provider known_at crosses an entity topology change")
+            previous[identity] = topology
+            version_proof.append(
+                {
+                    "version_handle": _hmac(
+                        _PROVIDER_SEAL_KEY,
+                        domain="friday.memory-exact-provider-topology-version.v1",
+                        material=_canonical_bytes({"tenant": tenant, "version_id": version_id}),
+                    ),
+                    "entity_handle": _hmac(
+                        _PROVIDER_SEAL_KEY,
+                        domain="friday.memory-exact-provider-topology-entity.v1",
+                        material=_canonical_bytes({"tenant": tenant, "entity_id": identity}),
+                    ),
+                    "recorded_at_sha256": _bytes_sha256(raw_recorded),
+                    "canonical": topology[0],
+                    "merged_handle": (
+                        None
+                        if not merged
+                        else _hmac(
+                            _PROVIDER_SEAL_KEY,
+                            domain="friday.memory-exact-provider-topology-entity.v1",
+                            material=_canonical_bytes({"tenant": tenant, "entity_id": merged}),
+                        )
+                    ),
+                    "deleted": topology[2],
+                }
+            )
+        if set(previous) != set(relevant_tuple):
+            raise MemoryExactStorageError("provider topology version history is incomplete")
+        recorded_tails = previous
+
+    merge_proof: list[dict[str, object]] = []
+    active_merges: set[tuple[str, str]] = set()
+    if relevant:
+        relevant_tuple = tuple(sorted(relevant))
+        relevant_values = ",".join("(?)" for _identity in relevant_tuple)
+        merge_wanted = f"WITH wanted(entity_id) AS (VALUES {relevant_values})"  # nosec B608
+        merge_preflight = conn.execute(
+            merge_wanted
+            + """ SELECT COUNT(*) AS row_count,
+                         COALESCE(MAX(max(
+                             length(CAST(history.id AS BLOB)),
+                             length(CAST(history.source_entity_id AS BLOB)),
+                             length(CAST(history.target_entity_id AS BLOB)),
+                             length(CAST(history.created_at AS BLOB)),
+                             length(CAST(COALESCE(history.undone_at,'') AS BLOB))
+                         )),0) AS maximum_scalar,
+                         COALESCE(SUM(
+                             length(CAST(history.id AS BLOB))
+                             + length(CAST(history.source_entity_id AS BLOB))
+                             + length(CAST(history.target_entity_id AS BLOB))
+                             + length(CAST(history.created_at AS BLOB))
+                             + length(CAST(COALESCE(history.undone_at,'') AS BLOB)) + 128
+                         ),0) AS storage_bytes
+                    FROM wanted
+                    JOIN entity_merge_history history
+                      ON history.source_entity_id=wanted.entity_id AND history.user_id=?""",
+            (*relevant_tuple, tenant),
+        ).fetchone()
+        if (
+            merge_preflight is None
+            or any(isinstance(item, bool) or not isinstance(item, int) for item in merge_preflight)
+            or not 0 <= int(merge_preflight[0]) <= MEMORY_EXACT_MAX_ENTITY_MERGE_ROWS
+            or not 0 <= int(merge_preflight[1]) <= 240
+            or int(merge_preflight[2]) < 0
+        ):
+            raise MemoryExactStorageError("provider topology merge history exceeds its limits")
+        reserve_bytes(int(merge_preflight[2]))
+        merge_cursor = conn.execute(
+            merge_wanted
+            + """ SELECT history.id,history.source_entity_id,history.target_entity_id,
+                         history.created_at,history.undone_at
+                    FROM wanted
+                    JOIN entity_merge_history history
+                      ON history.source_entity_id=wanted.entity_id AND history.user_id=?
+                   ORDER BY history.source_entity_id,history.created_at,history.id""",
+            (*relevant_tuple, tenant),
+        )
+        merge_rows = merge_cursor.fetchall()
+        merge_cursor.close()
+        if len(merge_rows) != int(merge_preflight[0]):
+            raise MemoryExactStorageError("provider topology merge history changed")
+        for row in merge_rows:
+            merge_id = _scope(row[0], label="provider topology merge identity", maximum=240)
+            source = _scope(row[1], label="provider topology merge source", maximum=240)
+            target = _scope(row[2], label="provider topology merge target", maximum=240)
+            created_raw = _bounded_text(
+                row[3],
+                label="provider topology merge timestamp",
+                maximum=64,
+                allow_empty=False,
+                allow_controls=False,
+            )
+            created = _validated_known_at(
+                created_raw,
+                label="provider topology merge timestamp",
+                reject_future=False,
+            )
+            undone_raw = None
+            undone = None
+            if row[4] is not None:
+                undone_raw = _bounded_text(
+                    row[4],
+                    label="provider topology unmerge timestamp",
+                    maximum=64,
+                    allow_empty=False,
+                    allow_controls=False,
+                )
+                undone = _validated_known_at(
+                    undone_raw,
+                    label="provider topology unmerge timestamp",
+                    reject_future=False,
+                )
+            if (
+                source == target
+                or created > boundary
+                or (undone is not None and (undone > boundary or undone < created))
+            ):
+                raise MemoryExactStorageError("provider known_at crosses an entity merge or unmerge")
+            if undone is None:
+                active_merges.add((source, target))
+            merge_proof.append(
+                {
+                    "merge_handle": _hmac(
+                        _PROVIDER_SEAL_KEY,
+                        domain="friday.memory-exact-provider-topology-merge.v1",
+                        material=_canonical_bytes({"tenant": tenant, "merge_id": merge_id}),
+                    ),
+                    "source_handle": _hmac(
+                        _PROVIDER_SEAL_KEY,
+                        domain="friday.memory-exact-provider-topology-entity.v1",
+                        material=_canonical_bytes({"tenant": tenant, "entity_id": source}),
+                    ),
+                    "target_handle": _hmac(
+                        _PROVIDER_SEAL_KEY,
+                        domain="friday.memory-exact-provider-topology-entity.v1",
+                        material=_canonical_bytes({"tenant": tenant, "entity_id": target}),
+                    ),
+                    "created_at_sha256": _bytes_sha256(created_raw),
+                    "undone_at_sha256": (
+                        None if undone_raw is None else _bytes_sha256(undone_raw)
+                    ),
+                }
+            )
+
+    for identity, recorded in recorded_tails.items():
+        actual = current[identity]
+        recorded_merge = (
+            not actual[0]
+            and bool(actual[1])
+            and actual[2]
+            and (identity, actual[1]) in active_merges
+        )
+        if recorded != actual and not recorded_merge:
+            raise MemoryExactStorageError("provider current topology differs from its history")
+    return (
+        _sha256(
+            {
+                "schema": "friday.memory-exact-provider-topology-proof.v1",
+                "boundary_sha256": _bytes_sha256(boundary),
+                "entities": entity_proof,
+                "versions": version_proof,
+                "merges": merge_proof,
+            }
+        ),
+        identities,
+    )
+
+
 class _MemoryExactReadOnlyRelationHistoryView:
     """Minimal GraphMixin view whose observation edge can only verify."""
 
-    __slots__ = ("_conn",)
+    __slots__ = (
+        "_allow_active_managed_context",
+        "_conn",
+        "_reserve_bytes",
+        "_strict_lease",
+    )
 
-    def __init__(self, conn: sqlite3.Connection) -> None:
+    def __init__(
+        self,
+        conn: sqlite3.Connection,
+        *,
+        reserve_bytes: Callable[[int], None],
+        allow_active_managed_context: bool,
+        strict_lease: bool = False,
+    ) -> None:
+        _require_transaction(conn)
+        if (
+            not callable(reserve_bytes)
+            or type(allow_active_managed_context) is not bool
+            or type(strict_lease) is not bool
+        ):
+            raise MemoryExactStorageError("provider relation history reservation is unavailable")
         self._conn = conn
+        self._reserve_bytes = reserve_bytes
+        self._allow_active_managed_context = allow_active_managed_context
+        self._strict_lease = strict_lease
 
     def execute(
         self,
         sql: str,
         params: tuple[object, ...] | None = None,
     ) -> sqlite3.Cursor:
-        return self._conn.execute(sql, params or ())
+        if self._strict_lease:
+            return self._conn.execute(sql, params or ())
+        return _execute_memory_exact_provider_select(self._conn, sql, params or ())
 
     def _observe_relation_history_boundary(self, boundary: str) -> None:
         canonical = _validated_known_at(
@@ -2167,15 +2789,16 @@ class _MemoryExactReadOnlyRelationHistoryView:
             label="memory exact provider known_at boundary",
             reject_future=False,
         )
-        row = self._conn.execute(
+        row = self.execute(
             """SELECT batch_id,recorded_at,observed_at
                  FROM relation_revision_context WHERE singleton=1"""
         ).fetchone()
         if row is None:
             raise MemoryExactStorageError("memory exact provider relation history observation is unavailable")
+        self._reserve_bytes(256)
         batch_id, recorded_at, raw_observed = tuple(row)
-        if batch_id != "" or recorded_at != "" or type(raw_observed) is not str:
-            raise MemoryExactStorageError("memory exact provider relation history context is not idle")
+        if type(batch_id) is not str or type(recorded_at) is not str or type(raw_observed) is not str:
+            raise MemoryExactStorageError("memory exact provider relation history context is invalid")
         observed = _validated_known_at(
             raw_observed,
             label="memory exact provider relation history observation",
@@ -2183,6 +2806,22 @@ class _MemoryExactReadOnlyRelationHistoryView:
         )
         if observed != raw_observed or observed < canonical:
             raise MemoryExactStorageError("memory exact provider relation history boundary was not observed")
+        if batch_id == "" and recorded_at == "":
+            return
+        if not batch_id or not recorded_at:
+            raise MemoryExactStorageError("memory exact provider relation history context is invalid")
+        _scope(batch_id, label="memory exact provider relation history batch", maximum=240)
+        recorded = _validated_known_at(
+            recorded_at,
+            label="memory exact provider relation history transaction",
+            reject_future=False,
+        )
+        if recorded != recorded_at or recorded != observed:
+            raise MemoryExactStorageError("memory exact provider relation history context is invalid")
+        if not self._allow_active_managed_context:
+            raise MemoryExactStorageError(
+                "memory exact provider relation history transaction is not authorized"
+            )
 
 
 def _memory_exact_provider_relation_history_status_in_transaction(
@@ -2190,8 +2829,12 @@ def _memory_exact_provider_relation_history_status_in_transaction(
     *,
     tenant_id: str,
     known_at: str,
-) -> dict[str, Any]:
-    """Run the released history validator without advancing its durable clock."""
+    candidate_entity_ids: tuple[str, ...],
+    reserve_bytes: Callable[[int], None],
+    allow_active_managed_context: bool = False,
+    strict_lease: bool = False,
+) -> tuple[dict[str, Any], str]:
+    """Replay the bounded history floor and exact candidate topology scope."""
 
     _require_transaction(conn)
     tenant = _scope(tenant_id, label="provider relation-history tenant", maximum=240)
@@ -2200,33 +2843,45 @@ def _memory_exact_provider_relation_history_status_in_transaction(
         label="memory exact provider known_at boundary",
         reject_future=True,
     )
-    from friday.storage._graph import GraphMixin
-
-    view = _MemoryExactReadOnlyRelationHistoryView(conn)
-    try:
-        raw = GraphMixin.relation_history_status(view, tenant, boundary)
-    except MemoryExactStorageError:
-        raise
-    except Exception:
-        raise MemoryExactStorageError("memory exact provider relation history is unavailable") from None
-    if type(raw) is not dict:
-        raise MemoryExactStorageError("memory exact provider relation history is invalid")
-    expected = {
-        "known_at": boundary,
-        "known_at_floor": raw.get("known_at_floor"),
-        "history_complete": True,
-        "identity_basis": "current_names",
-    }
-    if raw != expected or type(expected["known_at_floor"]) is not str:
-        raise MemoryExactStorageError("memory exact provider relation history is invalid")
+    view = _MemoryExactReadOnlyRelationHistoryView(
+        conn,
+        reserve_bytes=reserve_bytes,
+        allow_active_managed_context=allow_active_managed_context,
+        strict_lease=strict_lease,
+    )
+    marker = view.execute(
+        """SELECT CASE
+                     WHEN typeof(value)='text' AND length(CAST(value AS BLOB)) BETWEEN 1 AND 64
+                     THEN value ELSE NULL END AS value
+                 FROM schema_meta WHERE key='relation_history_complete_from'"""
+    ).fetchone()
+    reserve_bytes(128)
+    if marker is None or type(marker[0]) is not str:
+        raise MemoryExactStorageError("memory exact provider relation history floor is unavailable")
     floor = _validated_known_at(
-        expected["known_at_floor"],
+        marker[0],
         label="memory exact provider relation history floor",
         reject_future=False,
     )
-    if floor != expected["known_at_floor"] or floor > boundary:
+    if floor != marker[0] or floor > boundary:
         raise MemoryExactStorageError("memory exact provider relation history is invalid")
-    return expected
+    view._observe_relation_history_boundary(boundary)  # noqa: SLF001 - closed local view
+    expected = {
+        "known_at": boundary,
+        "known_at_floor": floor,
+        "history_complete": True,
+        "identity_basis": "current_names",
+    }
+    topology_proof, _topology_ids = _memory_exact_provider_scoped_topology_proof_in_transaction(
+        conn,
+        tenant_id=tenant,
+        entity_ids=candidate_entity_ids,
+        known_at=boundary,
+        reserve_bytes=reserve_bytes,
+        maximum_identities=_MEMORY_EXACT_MAX_PROVIDER_MATERIAL_ROWS,
+        allow_later_unwitnessed=True,
+    )
+    return expected, topology_proof
 
 
 def _reserve_provider_object_window_ids(
@@ -2665,6 +3320,1709 @@ def _load_memory_exact_provider_rows_in_transaction(
     if len(rows) != len(identities) or tuple(str(row["id"]) for row in rows) != identities:
         raise MemoryExactStorageError("provider material changed during selection")
     return tuple(rows), revisions
+
+
+class _MemoryExactProviderSelectView:
+    """SELECT-only storage view for exact provider read-set replay."""
+
+    __slots__ = ("_conn", "_strict_lease")
+
+    def __init__(self, conn: sqlite3.Connection, *, strict_lease: bool = False) -> None:
+        _require_transaction(conn)
+        if type(strict_lease) is not bool:
+            raise MemoryExactStorageError("provider replay lease is invalid")
+        self._conn = conn
+        self._strict_lease = strict_lease
+
+    def execute(
+        self,
+        sql: str,
+        params: tuple[object, ...] | None = None,
+    ) -> sqlite3.Cursor:
+        if self._strict_lease:
+            return self._conn.execute(sql, params or ())
+        return _execute_memory_exact_provider_select(self._conn, sql, params or ())
+
+
+class _MemoryExactProviderTopologyCollector:
+    """Bound and validate entity identities before graph code consumes their rows."""
+
+    __slots__ = ("_identities", "_maximum", "_proofs", "_validate", "_validated")
+
+    def __init__(
+        self,
+        *,
+        maximum: int,
+        initial_identities: tuple[str, ...],
+        validate: Callable[[tuple[str, ...]], tuple[str, tuple[str, ...]]] | None,
+    ) -> None:
+        if (
+            type(initial_identities) is not tuple
+            or len(initial_identities) > maximum
+            or initial_identities != tuple(sorted(initial_identities))
+            or len(initial_identities) != len(set(initial_identities))
+        ):
+            raise MemoryExactStorageError("provider graph topology source set is invalid")
+        self._identities = set(initial_identities)
+        self._maximum = maximum
+        self._proofs: list[str] = []
+        self._validate = validate
+        self._validated: set[str] = set()
+
+    def add(self, values: Sequence[object]) -> None:
+        pending: set[str] = set()
+        for value in values:
+            if value is None or value == "":
+                continue
+            identity = _scope(value, label="provider graph topology identity", maximum=240)
+            if identity not in self._validated:
+                pending.add(identity)
+        if not pending:
+            return
+        new_pending = pending - self._identities
+        if len(self._identities) + len(new_pending) > self._maximum:
+            raise MemoryExactStorageError("provider graph topology source set is saturated")
+        ordered = tuple(sorted(pending))
+        expanded = ordered
+        if self._validate is not None:
+            proof, expanded = self._validate(ordered)
+            if not _SHA256.fullmatch(proof):
+                raise MemoryExactStorageError("provider graph topology proof is invalid")
+            if (
+                type(expanded) is not tuple
+                or expanded != tuple(sorted(expanded))
+                or len(expanded) != len(set(expanded))
+                or not set(ordered).issubset(expanded)
+            ):
+                raise MemoryExactStorageError("provider graph topology proof is invalid")
+            if len(self._identities | set(expanded)) > self._maximum:
+                raise MemoryExactStorageError("provider graph topology source set is saturated")
+            self._proofs.append(proof)
+        self._identities.update(expanded)
+        self._validated.update(expanded)
+
+    def account_rows(
+        self,
+        description: object,
+        rows: Sequence[sqlite3.Row],
+        *,
+        track_plain_id: bool,
+    ) -> None:
+        if not rows:
+            return
+        if not isinstance(description, Sequence):
+            raise MemoryExactStorageError("provider graph cursor description is invalid")
+        names = tuple(str(column[0]) for column in description)
+        wanted = {
+            "entity_id",
+            "_entity_id",
+            "source_entity_id",
+            "target_entity_id",
+            "other_id",
+            "merged_into_id",
+        }
+        indices = [index for index, name in enumerate(names) if name in wanted]
+        if track_plain_id and "id" in names:
+            indices.append(names.index("id"))
+        discovered: list[object] = []
+        for row in rows:
+            values = tuple(row)
+            for index in indices:
+                discovered.append(values[index])
+        self.add(discovered)
+
+    def finish(self) -> tuple[tuple[str, ...], tuple[str, ...]]:
+        return tuple(sorted(self._identities)), tuple(self._proofs)
+
+
+class _MemoryExactProviderGraphCursor:
+    """Incrementally account every row materialized by the graph view."""
+
+    __slots__ = ("_collector", "_cursor", "_reserve_bytes", "_track_plain_id")
+
+    def __init__(
+        self,
+        cursor: sqlite3.Cursor,
+        reserve_bytes: Callable[[int], None],
+        collector: _MemoryExactProviderTopologyCollector,
+        *,
+        track_plain_id: bool,
+    ) -> None:
+        if (
+            type(cursor) is not sqlite3.Cursor
+            or not callable(reserve_bytes)
+            or type(collector) is not _MemoryExactProviderTopologyCollector
+        ):
+            raise MemoryExactStorageError("provider graph cursor is invalid")
+        self._cursor = cursor
+        self._reserve_bytes = reserve_bytes
+        self._collector = collector
+        self._track_plain_id = track_plain_id
+
+    @property
+    def description(self) -> object:
+        return self._cursor.description
+
+    def _account(self, rows: Sequence[sqlite3.Row]) -> None:
+        storage_bytes = 0
+        for row in rows:
+            values = tuple(row)
+            storage_bytes += 64 + 8 * len(values)
+            for value in values:
+                value_type = type(value)
+                if value is None:
+                    continue
+                if value_type is str:
+                    try:
+                        storage_bytes += len(value.encode("utf-8", errors="strict"))
+                    except UnicodeError:
+                        raise MemoryExactStorageError("provider graph row is invalid") from None
+                elif value_type is bytes:
+                    storage_bytes += len(value)
+                elif value_type in (int, float):
+                    storage_bytes += 8
+                else:
+                    raise MemoryExactStorageError("provider graph row is invalid")
+        self._reserve_bytes(storage_bytes)
+        self._collector.account_rows(
+            self._cursor.description,
+            rows,
+            track_plain_id=self._track_plain_id,
+        )
+
+    def fetchone(self) -> sqlite3.Row | None:
+        row = self._cursor.fetchone()
+        if row is not None:
+            self._account((row,))
+        return row
+
+    def fetchmany(self, size: int | None = None) -> list[sqlite3.Row]:
+        if size is None:
+            rows = self._cursor.fetchmany()
+        else:
+            if isinstance(size, bool) or not isinstance(size, int) or size < 0:
+                raise MemoryExactStorageError("provider graph fetch size is invalid")
+            rows = self._cursor.fetchmany(size)
+        self._account(rows)
+        return rows
+
+    def fetchall(self) -> list[sqlite3.Row]:
+        rows: list[sqlite3.Row] = []
+        while True:
+            batch = self._cursor.fetchmany(_FETCH_BATCH)
+            if not batch:
+                break
+            self._account(batch)
+            rows.extend(batch)
+        return rows
+
+    def close(self) -> None:
+        self._cursor.close()
+
+    def __iter__(self) -> _MemoryExactProviderGraphCursor:
+        return self
+
+    def __next__(self) -> sqlite3.Row:
+        row = self.fetchone()
+        if row is None:
+            raise StopIteration
+        return row
+
+
+def _memory_exact_provider_incident_relation_ids_in_transaction(
+    conn: sqlite3.Connection,
+    *,
+    tenant_id: str,
+    entity_id: str,
+    known_at: str,
+    historical_sql: str,
+    historical_params: tuple[object, ...],
+    reserve_bytes: Callable[[int], None],
+) -> tuple[str, ...]:
+    """Select the complete bounded relation-ID scope for one historical endpoint."""
+
+    tenant = _scope(tenant_id, label="provider historical relation tenant", maximum=240)
+    endpoint = _scope(entity_id, label="provider historical relation endpoint", maximum=240)
+    boundary = _validated_known_at(
+        known_at,
+        label="provider historical relation boundary",
+        reject_future=True,
+    )
+    if not callable(reserve_bytes):
+        raise MemoryExactStorageError("provider historical relation reservation is unavailable")
+    if type(historical_sql) is not str or type(historical_params) is not tuple:
+        raise MemoryExactStorageError("provider historical relation query is invalid")
+    marker = "), selected AS ("
+    marker_at = historical_sql.find(marker)
+    if marker_at < 0:
+        raise MemoryExactStorageError("provider historical relation query is invalid")
+    selected_suffix = historical_sql[marker_at + len(marker) :]
+    outer = re.search(
+        r"\)\s*(SELECT\s+r\.relation_id\s+AS\s+id\b)",
+        selected_suffix,
+        flags=re.IGNORECASE,
+    )
+    if outer is None or len(historical_params) < 5:
+        raise MemoryExactStorageError("provider historical relation query is invalid")
+    scoped_suffix = selected_suffix[outer.start(1) :]
+    scoped_params_tail = historical_params[2:]
+    if re.search(r"\sLIMIT\s+\?\s*\Z", scoped_suffix, flags=re.IGNORECASE):
+        scoped_suffix = re.sub(
+            r"\sLIMIT\s+\?\s*\Z",
+            "",
+            scoped_suffix,
+            flags=re.IGNORECASE,
+        )
+        if not scoped_params_tail:
+            raise MemoryExactStorageError("provider historical relation query is invalid")
+        scoped_params_tail = scoped_params_tail[:-1]
+    incident_prefix = """WITH incident(relation_id) AS (
+        SELECT relation_id FROM relation_revisions
+         WHERE user_id=? AND recorded_at<=? AND source_entity_id=?
+        UNION
+        SELECT relation_id FROM relation_revisions
+         WHERE user_id=? AND recorded_at<=? AND target_entity_id=?
+    ), selected AS (
+        SELECT rr.event_seq
+          FROM incident scoped
+          JOIN relation_revisions rr ON rr.relation_id=scoped.relation_id
+         WHERE rr.user_id=? AND rr.recorded_at<=?
+           AND rr.present=1
+           AND NOT EXISTS (
+               SELECT 1 FROM relation_revisions newer
+                WHERE newer.user_id=rr.user_id
+                  AND newer.relation_id=rr.relation_id
+                  AND newer.recorded_at<=?
+                  AND (newer.recorded_at>rr.recorded_at
+                       OR (newer.recorded_at=rr.recorded_at
+                           AND newer.event_seq>rr.event_seq))
+           )
+    ) """
+    scoped_sql = incident_prefix + scoped_suffix
+    scoped_params: tuple[object, ...] = (
+        tenant,
+        boundary,
+        endpoint,
+        tenant,
+        boundary,
+        endpoint,
+        tenant,
+        boundary,
+        boundary,
+        *scoped_params_tail,
+    )
+    cap = _MEMORY_EXACT_MAX_HISTORICAL_RELATION_IDS
+    selected = (
+        "WITH eligible AS MATERIALIZED (SELECT id AS relation_id FROM ("
+        + scoped_sql
+        + f") LIMIT {cap + 1})"
+    )
+    preflight = conn.execute(
+        selected
+        + """ SELECT COUNT(*) AS row_count,
+                     COALESCE(MAX(length(CAST(relation_id AS BLOB))),0) AS maximum_identity,
+                     COALESCE(SUM(length(CAST(relation_id AS BLOB)) + 64),0) AS storage_bytes,
+                     COALESCE(SUM(CASE
+                         WHEN typeof(relation_id)='text'
+                          AND length(CAST(relation_id AS BLOB)) BETWEEN 1 AND 240
+                         THEN 0 ELSE 1 END),0) AS invalid_rows
+                FROM eligible""",
+        scoped_params,
+    ).fetchone()
+    if (
+        preflight is None
+        or any(isinstance(item, bool) or not isinstance(item, int) for item in preflight)
+        or not 0 <= int(preflight[0]) <= cap + 1
+        or not 0 <= int(preflight[1]) <= 240
+        or int(preflight[2]) < 0
+        or int(preflight[3]) != 0
+    ):
+        raise MemoryExactStorageError("provider historical relation scope is invalid")
+    if int(preflight[0]) == cap + 1:
+        raise MemoryExactStorageError("provider historical relation scope is saturated")
+    reserve_bytes(int(preflight[2]))
+    rows = conn.execute(
+        selected + " SELECT relation_id FROM eligible ORDER BY relation_id",
+        scoped_params,
+    ).fetchall()
+    identities = tuple(
+        _scope(row[0], label="provider historical relation identity", maximum=240) for row in rows
+    )
+    if len(identities) != int(preflight[0]) or identities != tuple(sorted(set(identities))):
+        raise MemoryExactStorageError("provider historical relation scope changed")
+    return identities
+
+
+class _MemoryExactProviderGraphSelectView(_MemoryExactProviderSelectView):
+    """Closed storage surface used by the two witnessed graph operations."""
+
+    __slots__ = (
+        "_allow_active_managed_context",
+        "_candidate_entity_ids",
+        "_collector",
+        "_reserve_bytes",
+        "_tenant_id",
+    )
+
+    def __init__(
+        self,
+        conn: sqlite3.Connection,
+        reserve_bytes: Callable[[int], None],
+        *,
+        collector: _MemoryExactProviderTopologyCollector,
+        tenant_id: str,
+        candidate_entity_ids: tuple[str, ...],
+        allow_active_managed_context: bool,
+    ) -> None:
+        super().__init__(conn, strict_lease=True)
+        if (
+            not callable(reserve_bytes)
+            or type(collector) is not _MemoryExactProviderTopologyCollector
+            or type(candidate_entity_ids) is not tuple
+            or type(allow_active_managed_context) is not bool
+        ):
+            raise MemoryExactStorageError("provider graph reservation is unavailable")
+        self._reserve_bytes = reserve_bytes
+        self._collector = collector
+        self._tenant_id = _scope(tenant_id, label="provider graph tenant", maximum=240)
+        self._candidate_entity_ids = candidate_entity_ids
+        self._allow_active_managed_context = allow_active_managed_context
+
+    def __getattr__(self, _name: str) -> NoReturn:
+        raise MemoryExactStorageError("provider graph read is unavailable")
+
+    def execute(
+        self,
+        sql: str,
+        params: tuple[object, ...] | None = None,
+    ) -> _MemoryExactProviderGraphCursor:
+        bound = params or ()
+        normalized = " ".join(sql.upper().split())
+        if (
+            "SELECT COALESCE(MAX(RR.EVENT_SEQ), 0) AS WATERMARK" in normalized
+            and "FROM RELATION_REVISIONS RR" in normalized
+        ):
+            # One caller-owned SQLite transaction is already the watermark. Keep
+            # the released equality check without scanning the tenant revision set.
+            sql = "SELECT 0 AS watermark"
+            bound = ()
+            normalized = sql.upper()
+        elif (
+            normalized.startswith("WITH RANKED AS (")
+            and "ROW_NUMBER() OVER" in normalized
+            and "FROM RELATION_REVISIONS RR" in normalized
+            and "WHERE (R.SOURCE_ENTITY_ID=? OR R.TARGET_ENTITY_ID=?)" in normalized
+        ):
+            if (
+                len(bound) < 5
+                or bound[0] != self._tenant_id
+                or bound[2] != bound[3]
+                or bound[4] != self._tenant_id
+            ):
+                raise MemoryExactStorageError("provider historical relation query is invalid")
+            endpoint = _scope(
+                bound[2],
+                label="provider historical relation endpoint",
+                maximum=240,
+            )
+            boundary = _validated_known_at(
+                bound[1],
+                label="provider historical relation boundary",
+                reject_future=True,
+            )
+            self._collector.add((endpoint,))
+            relation_ids = _memory_exact_provider_incident_relation_ids_in_transaction(
+                self._conn,
+                tenant_id=self._tenant_id,
+                entity_id=endpoint,
+                known_at=boundary,
+                historical_sql=sql,
+                historical_params=bound,
+                reserve_bytes=self._reserve_bytes,
+            )
+            marker = "), selected AS ("
+            marker_at = sql.find(marker)
+            if marker_at < 0:
+                raise MemoryExactStorageError("provider historical relation query is invalid")
+            if relation_ids:
+                relation_values = ",".join("(?)" for _identity in relation_ids)
+                incident = f"incident(relation_id) AS ( VALUES {relation_values}), "  # nosec B608
+            else:
+                incident = (
+                    "incident(relation_id) AS "
+                    "(SELECT CAST(NULL AS TEXT) WHERE 0), "
+                )
+            sql = (
+                "WITH "
+                + incident
+                + "ranked AS (\n"
+                + "    SELECT rr.event_seq, rr.relation_id, rr.recorded_at, rr.present,\n"
+                + "           ROW_NUMBER() OVER (\n"
+                + "               PARTITION BY rr.relation_id\n"
+                + "               ORDER BY rr.recorded_at DESC, rr.event_seq DESC\n"
+                + "           ) AS snapshot_rank\n"
+                + "      FROM incident scoped\n"
+                + "      JOIN relation_revisions rr ON rr.relation_id=scoped.relation_id\n"
+                + "     WHERE rr.user_id=? AND rr.recorded_at<=?\n"
+                + "), selected AS ("
+                + sql[marker_at + len(marker) :]
+            )
+            bound = (*relation_ids, *bound)
+            normalized = " ".join(sql.upper().split())
+        track_plain_id = (
+            "FROM ENTITIES E WHERE ID=? AND USER_ID=?" in normalized
+            or "AS FIRST_RECORDED_AT" in normalized
+        )
+        return _MemoryExactProviderGraphCursor(
+            super().execute(sql, bound),
+            self._reserve_bytes,
+            self._collector,
+            track_plain_id=track_plain_id,
+        )
+
+    def find_entities_by_normalized_names(
+        self,
+        user_id: str,
+        names: Sequence[str],
+        *,
+        include_aliases: bool = True,
+        limit: int = 800,
+    ) -> list[dict[str, Any]]:
+        from friday.storage._graph import GraphMixin
+
+        return GraphMixin.find_entities_by_normalized_names(  # type: ignore[arg-type]
+            self,
+            user_id,
+            names,
+            include_aliases=include_aliases,
+            limit=limit,
+        )
+
+    def count_entity_relations(self, entity_id: str, user_id: str | None = None) -> int:
+        from friday.storage._graph import GraphMixin
+
+        return GraphMixin.count_entity_relations(  # type: ignore[arg-type]
+            self,
+            entity_id,
+            user_id,
+        )
+
+    def count_entity_knowledge(self, user_id: str, entity_id: str) -> int:
+        from friday.storage._knowledge import KnowledgeMixin
+
+        return KnowledgeMixin.count_entity_knowledge(  # type: ignore[arg-type]
+            self,
+            user_id,
+            entity_id,
+        )
+
+    def list_knowledge_entity_links(
+        self,
+        user_id: str,
+        *,
+        entity_id: str | None = None,
+        knowledge_object_id: str | None = None,
+        status: str | None = "accepted",
+        limit: int = 100,
+    ) -> list[dict[str, Any]]:
+        tenant = _scope(user_id, label="provider graph link tenant", maximum=240)
+        if (
+            tenant != self._tenant_id
+            or entity_id is not None
+            or status != "accepted"
+            or limit != 30
+            or isinstance(limit, bool)
+        ):
+            raise MemoryExactStorageError("provider graph link read is unavailable")
+        knowledge_id = _scope(
+            knowledge_object_id,
+            label="provider graph link knowledge identity",
+            maximum=240,
+        )
+        selected = f"""WITH selected AS MATERIALIZED (
+            SELECT link.rowid AS link_rowid
+              FROM knowledge_entity_links link
+              JOIN entities entity
+                ON entity.id=link.entity_id AND entity.user_id=link.user_id
+              JOIN knowledge_objects knowledge
+                ON knowledge.id=link.knowledge_object_id AND knowledge.user_id=link.user_id
+             WHERE link.user_id=? AND link.knowledge_object_id=? AND link.status='accepted'
+               AND {_not_private_entity_material_dependency('entity')}
+               AND {_not_private_knowledge_dependency('knowledge')}
+             ORDER BY CASE link.status WHEN 'suggested' THEN 0
+                                       WHEN 'accepted' THEN 1 ELSE 2 END,
+                      link.confidence DESC,link.created_at DESC LIMIT 30
+        )"""  # nosec B608 - fixed code-owned predicates
+        preflight = self._conn.execute(
+            selected
+            + """ SELECT COUNT(*) AS row_count,
+                         COALESCE(MAX(max(
+                             length(CAST(link.id AS BLOB)),
+                             length(CAST(link.entity_id AS BLOB)),
+                             length(CAST(link.created_at AS BLOB))
+                         )),0) AS maximum_field,
+                         COALESCE(SUM(
+                             length(CAST(link.id AS BLOB))
+                             + length(CAST(link.entity_id AS BLOB))
+                             + length(CAST(link.created_at AS BLOB)) + 96
+                         ),0) AS storage_bytes,
+                         COALESCE(SUM(CASE
+                             WHEN typeof(link.id)='text'
+                              AND length(CAST(link.id AS BLOB)) BETWEEN 1 AND 240
+                              AND typeof(link.entity_id)='text'
+                              AND length(CAST(link.entity_id AS BLOB)) BETWEEN 1 AND 240
+                              AND typeof(link.created_at)='text'
+                              AND length(CAST(link.created_at AS BLOB)) BETWEEN 1 AND 64
+                              AND typeof(link.confidence) IN ('integer','real')
+                              AND link.confidence=link.confidence
+                             THEN 0 ELSE 1 END),0) AS invalid_rows
+                    FROM selected
+                    JOIN knowledge_entity_links link ON link.rowid=selected.link_rowid""",
+            (tenant, knowledge_id),
+        ).fetchone()
+        if (
+            preflight is None
+            or any(isinstance(item, bool) or not isinstance(item, int) for item in preflight)
+            or not 0 <= int(preflight[0]) <= 30
+            or not 0 <= int(preflight[1]) <= 240
+            or int(preflight[2]) < 0
+            or int(preflight[3]) != 0
+        ):
+            raise MemoryExactStorageError("provider graph link projection exceeds its limits")
+        self._reserve_bytes(int(preflight[2]))
+        cursor = self._conn.execute(
+            selected
+            + """ SELECT link.id,link.entity_id,link.confidence,link.created_at
+                    FROM selected
+                    JOIN knowledge_entity_links link ON link.rowid=selected.link_rowid
+                   ORDER BY CASE link.status WHEN 'suggested' THEN 0
+                                             WHEN 'accepted' THEN 1 ELSE 2 END,
+                            link.confidence DESC,link.created_at DESC""",
+            (tenant, knowledge_id),
+        )
+        rows = cursor.fetchall()
+        cursor.close()
+        if len(rows) != int(preflight[0]):
+            raise MemoryExactStorageError("provider graph link projection changed")
+        self._collector.add(tuple(row[1] for row in rows))
+        return [
+            {
+                "id": row[0],
+                "entity_id": row[1],
+                "confidence": row[2],
+                "created_at": row[3],
+            }
+            for row in rows
+        ]
+
+    def list_entities_knowledge_refs(
+        self,
+        user_id: str,
+        entity_ids: Sequence[str],
+        *,
+        limit: int = 50,
+    ) -> dict[str, list[dict[str, Any]]]:
+        from friday.storage._knowledge import KnowledgeMixin
+
+        return KnowledgeMixin.list_entities_knowledge_refs(  # type: ignore[arg-type]
+            self,
+            user_id,
+            entity_ids,
+            limit=limit,
+        )
+
+    def relation_history_status(self, user_id: str, known_at: str = "") -> dict[str, Any]:
+        status_result = _memory_exact_provider_relation_history_status_in_transaction(
+            self._conn,
+            tenant_id=_scope(user_id, label="provider graph history tenant", maximum=240),
+            known_at=known_at,
+            candidate_entity_ids=(),
+            reserve_bytes=self._reserve_bytes,
+            allow_active_managed_context=self._allow_active_managed_context,
+            strict_lease=True,
+        )
+        return status_result[0]
+
+    def _observe_relation_history_boundary(self, boundary: str) -> None:
+        _MemoryExactReadOnlyRelationHistoryView(
+            self._conn,
+            reserve_bytes=self._reserve_bytes,
+            allow_active_managed_context=self._allow_active_managed_context,
+            strict_lease=True,
+        )._observe_relation_history_boundary(boundary)  # noqa: SLF001
+
+
+def _memory_exact_provider_graph_in_transaction(
+    conn: sqlite3.Connection,
+    *,
+    reserve_bytes: Callable[[int], None],
+    collector: _MemoryExactProviderTopologyCollector,
+    tenant_id: str,
+    candidate_entity_ids: tuple[str, ...],
+    allow_active_managed_context: bool,
+) -> KnowledgeGraph:
+    """Build a KnowledgeGraph inside its caller-owned strict read-only lease."""
+
+    _require_transaction(conn)
+    from friday.knowledge_graph import KnowledgeGraph
+
+    try:
+        graph = KnowledgeGraph(  # type: ignore[arg-type]
+            _MemoryExactProviderGraphSelectView(
+                conn,
+                reserve_bytes,
+                collector=collector,
+                tenant_id=tenant_id,
+                candidate_entity_ids=candidate_entity_ids,
+                allow_active_managed_context=allow_active_managed_context,
+            )
+        )
+    except Exception:
+        raise MemoryExactStorageError("provider graph view is unavailable") from None
+    if type(graph) is not KnowledgeGraph:
+        raise MemoryExactStorageError("provider graph view is invalid")
+    return graph
+
+
+def _replay_memory_exact_provider_graph_operation_in_transaction(
+    conn: sqlite3.Connection,
+    *,
+    storage: object,
+    kind: str,
+    arguments: tuple[object, ...],
+    candidate_entity_ids: tuple[str, ...],
+    reserve_bytes: Callable[[int], None],
+    allow_active_managed_context: bool = False,
+) -> tuple[object, str]:
+    """Replay and fully materialize one closed graph operation under one lease."""
+
+    _require_transaction(conn)
+    if (
+        type(kind) is not str
+        or type(arguments) is not tuple
+        or type(candidate_entity_ids) is not tuple
+        or not callable(reserve_bytes)
+        or type(allow_active_managed_context) is not bool
+        or getattr(storage, "conn", None) is not conn
+    ):
+        raise MemoryExactStorageError("provider graph operation is invalid")
+    candidates = tuple(
+        _scope(item, label="provider graph candidate identity", maximum=240)
+        for item in candidate_entity_ids
+    )
+    if (
+        len(candidates) > _MEMORY_EXACT_MAX_PROVIDER_MATERIAL_ROWS
+        or candidates != tuple(sorted(candidates))
+        or len(candidates) != len(set(candidates))
+    ):
+        raise MemoryExactStorageError("provider graph candidate set is invalid")
+    if not arguments:
+        raise MemoryExactStorageError("provider graph operation arguments are invalid")
+    tenant = _scope(arguments[0], label="provider graph tenant", maximum=240)
+
+    known_at = ""
+    if kind == "graph_search_entities":
+        if (
+            len(arguments) != 4
+            or type(arguments[1]) is not str
+            or isinstance(arguments[2], bool)
+            or not isinstance(arguments[2], int)
+            or arguments[3] is not None
+        ):
+            raise MemoryExactStorageError("provider graph search arguments are invalid")
+    elif kind == "graph_context_for_query":
+        if (
+            len(arguments) != 8
+            or type(arguments[1]) is not str
+            or any(
+                isinstance(arguments[index], bool) or not isinstance(arguments[index], int)
+                for index in (2, 3, 4)
+            )
+            or (arguments[5] is not None and type(arguments[5]) is not tuple)
+            or type(arguments[6]) is not str
+            or type(arguments[7]) is not str
+        ):
+            raise MemoryExactStorageError("provider graph context arguments are invalid")
+        known_at = arguments[7]
+        if known_at:
+            known_at = _validated_known_at(
+                known_at,
+                label="provider graph known_at boundary",
+                reject_future=True,
+            )
+    else:
+        raise MemoryExactStorageError("provider graph operation is unavailable")
+
+    def validate_new_topology(
+        identities: tuple[str, ...],
+    ) -> tuple[str, tuple[str, ...]]:
+        if not known_at:
+            return (
+                _sha256(
+                    {
+                        "schema": "friday.memory-exact-provider-current-topology.v1",
+                        "identities": [
+                            _hmac(
+                                _PROVIDER_SEAL_KEY,
+                                domain="friday.memory-exact-provider-topology-entity.v1",
+                                material=_canonical_bytes(
+                                    {"tenant": tenant, "entity_id": identity}
+                                ),
+                            )
+                            for identity in identities
+                        ],
+                    }
+                ),
+                identities,
+            )
+        return _memory_exact_provider_scoped_topology_proof_in_transaction(
+            conn,
+            tenant_id=tenant,
+            entity_ids=identities,
+            known_at=known_at,
+            reserve_bytes=reserve_bytes,
+            maximum_identities=MEMORY_EXACT_MAX_GRAPH_ENTITY_SOURCE_ROWS,
+            allow_later_unwitnessed=False,
+        )
+
+    collector = _MemoryExactProviderTopologyCollector(
+        maximum=MEMORY_EXACT_MAX_GRAPH_ENTITY_SOURCE_ROWS,
+        initial_identities=candidates,
+        validate=validate_new_topology if known_at else None,
+    )
+    query_only = conn.execute("PRAGMA query_only").fetchone()
+    if (
+        query_only is None
+        or len(tuple(query_only)) != 1
+        or type(query_only[0]) is not int
+        or query_only[0] != 0
+    ):
+        raise MemoryExactStorageError("provider graph read-only lease is unavailable")
+    try:
+        conn.execute("PRAGMA query_only=ON")
+        enabled = conn.execute("PRAGMA query_only").fetchone()
+        if (
+            enabled is None
+            or len(tuple(enabled)) != 1
+            or type(enabled[0]) is not int
+            or enabled[0] != 1
+        ):
+            raise MemoryExactStorageError("provider graph read-only lease is unavailable")
+        _install_memory_exact_provider_select_authorizer(conn)
+        graph = _memory_exact_provider_graph_in_transaction(
+            conn,
+            reserve_bytes=reserve_bytes,
+            collector=collector,
+            tenant_id=tenant,
+            candidate_entity_ids=candidates,
+            allow_active_managed_context=allow_active_managed_context,
+        )
+        if kind == "graph_search_entities":
+            value = graph.search_entities(
+                tenant,
+                arguments[1],
+                limit=arguments[2],
+                entity_type=None,
+            )
+            if type(value) is not list:
+                raise MemoryExactStorageError("provider graph search result is invalid")
+            published_ids = tuple(
+                _scope(item.get("id"), label="provider graph result identity", maximum=240)
+                for item in value
+                if type(item) is dict
+            )
+            if len(published_ids) != len(value):
+                raise MemoryExactStorageError("provider graph search result is invalid")
+        else:
+            seed_ids = None if arguments[5] is None else list(arguments[5])
+            value = graph.context_for_query(
+                tenant,
+                arguments[1],
+                depth=arguments[2],
+                entity_limit=arguments[3],
+                knowledge_limit=arguments[4],
+                seed_knowledge_ids=seed_ids,
+                as_of=arguments[6],
+                known_at=known_at,
+            )
+            if type(value) is not dict:
+                raise MemoryExactStorageError("provider graph context result is invalid")
+            published_ids = _graph_entity_ids(value)
+        if any(identity not in candidates for identity in published_ids):
+            raise MemoryExactStorageError("provider graph result escaped its candidate set")
+        collector.add(published_ids)
+        reserve_bytes(len(_canonical_bytes(value)))
+        topology_ids, topology_proofs = collector.finish()
+        proof = _sha256(
+            {
+                "schema": "friday.memory-exact-provider-graph-topology.v1",
+                "candidate_handles": [
+                    _hmac(
+                        _PROVIDER_SEAL_KEY,
+                        domain="friday.memory-exact-provider-topology-entity.v1",
+                        material=_canonical_bytes(
+                            {"tenant": tenant, "entity_id": identity}
+                        ),
+                    )
+                    for identity in candidates
+                ],
+                "topology_handles": [
+                    _hmac(
+                        _PROVIDER_SEAL_KEY,
+                        domain="friday.memory-exact-provider-topology-entity.v1",
+                        material=_canonical_bytes(
+                            {"tenant": tenant, "entity_id": identity}
+                        ),
+                    )
+                    for identity in topology_ids
+                ],
+                "scoped_proofs": list(topology_proofs),
+            }
+        )
+        return value, proof
+    finally:
+        from friday.storage._core import _install_private_material_authorizer
+
+        try:
+            _install_private_material_authorizer(conn)
+            conn.execute("PRAGMA query_only=OFF")
+            restored = conn.execute("PRAGMA query_only").fetchone()
+            if (
+                restored is None
+                or len(tuple(restored)) != 1
+                or type(restored[0]) is not int
+                or restored[0] != 0
+            ):
+                raise MemoryExactStorageError("provider graph read-only lease restore failed")
+        except BaseException as cleanup_error:
+            # Best-effort recovery keeps a failed probe from silently poisoning
+            # this thread-local connection; the cleanup error still overrides the
+            # operation while retaining it as the exception context.
+            try:
+                conn.set_authorizer(None)
+                conn.execute("PRAGMA query_only=OFF")
+                _install_private_material_authorizer(conn)
+            except BaseException:
+                pass
+            raise MemoryExactStorageError("provider graph read-only lease restore failed") from cleanup_error
+
+
+def _memory_exact_provider_graph_candidates_in_transaction(
+    conn: sqlite3.Connection,
+    *,
+    tenant_id: str,
+    reserve_bytes: Callable[[int], None],
+) -> tuple[bool, tuple[dict[str, Any], ...]]:
+    """Return saturation or the complete bounded graph-search card set."""
+
+    _require_transaction(conn)
+    tenant = _scope(tenant_id, label="provider graph tenant", maximum=240)
+    if not callable(reserve_bytes):
+        raise MemoryExactStorageError("provider graph reservation is unavailable")
+    public_entity = _not_private_entity_material_dependency("e")
+    cap = 400
+    raw_rows = conn.execute(
+        f"""SELECT e.rowid FROM entities e
+             WHERE e.user_id=? AND e.deleted_at IS NULL AND e.canonical=1
+               AND e.merged_into_id IS NULL
+               AND {public_entity} AND e.id>?
+             ORDER BY e.id LIMIT ?""",  # nosec B608 - module-owned predicate
+        (tenant, "", cap + 1),
+    ).fetchall()
+    rowids = tuple(row[0] for row in raw_rows)
+    if (
+        len(rowids) > cap + 1
+        or any(
+            isinstance(rowid, bool) or not isinstance(rowid, int) or rowid <= 0
+            for rowid in rowids
+        )
+        or len(rowids) != len(set(rowids))
+    ):
+        raise MemoryExactStorageError("provider graph candidate probe is invalid")
+    if len(rowids) == cap + 1:
+        return True, ()
+    if not rowids:
+        return False, ()
+
+    from friday.storage._graph import _entity_search_projection
+
+    holders = ",".join("(?)" for _rowid in rowids)
+    projection = _entity_search_projection()
+    selected = f"""WITH selected(entity_rowid) AS (VALUES {holders}),
+                 cards AS MATERIALIZED (
+                     SELECT {projection}
+                       FROM selected
+                       JOIN entities e ON e.rowid=selected.entity_rowid
+                 )"""  # nosec B608 - bounded rowids and code-owned projection
+    preflight = conn.execute(
+        selected
+        + """ SELECT COUNT(*) AS row_count,
+                   COALESCE(SUM(
+                       length(CAST(COALESCE(id,'') AS BLOB))
+                       + length(CAST(COALESCE(user_id,'') AS BLOB))
+                       + length(CAST(COALESCE(name,'') AS BLOB))
+                       + length(CAST(COALESCE(entity_type,'') AS BLOB))
+                       + length(CAST(COALESCE(aliases_json,'') AS BLOB))
+                       + length(CAST(COALESCE(description,'') AS BLOB))
+                       + length(CAST(COALESCE(metadata_json,'') AS BLOB))
+                       + length(CAST(COALESCE(canonical,'') AS BLOB))
+                       + length(CAST(COALESCE(merged_into_id,'') AS BLOB))
+                       + length(CAST(COALESCE(version,'') AS BLOB))
+                       + length(CAST(COALESCE(created_at,'') AS BLOB))
+                       + length(CAST(COALESCE(updated_at,'') AS BLOB))
+                       + length(CAST(COALESCE(deleted_at,'') AS BLOB)) + 256
+                   ),0) AS storage_bytes
+              FROM cards""",
+        rowids,
+    ).fetchone()
+    if preflight is None:
+        raise MemoryExactStorageError("provider graph preflight is unavailable")
+    row_count, storage_bytes = tuple(preflight)
+    if (
+        isinstance(row_count, bool)
+        or not isinstance(row_count, int)
+        or row_count != len(rowids)
+        or isinstance(storage_bytes, bool)
+        or not isinstance(storage_bytes, int)
+        or storage_bytes < 0
+    ):
+        raise MemoryExactStorageError("provider graph preflight is invalid")
+    reserve_bytes(storage_bytes)
+    rows = conn.execute(
+        selected + " SELECT * FROM cards ORDER BY id",
+        rowids,
+    ).fetchall()
+    cards = tuple(dict(row) for row in rows)
+    if len(cards) != row_count:
+        raise MemoryExactStorageError("provider graph candidate set changed")
+    return False, cards
+
+
+def _provider_optional_date(value: object, *, label: str) -> str | None:
+    if value is None:
+        return None
+    return _bounded_text(
+        value,
+        label=label,
+        maximum=128,
+        allow_empty=True,
+        allow_controls=False,
+    )
+
+
+def _memory_exact_provider_list_ids_in_transaction(
+    conn: sqlite3.Connection,
+    *,
+    tenant_id: str,
+    limit: int,
+    since: str | None,
+    until: str | None,
+    reserve_bytes: Callable[[int], None],
+) -> tuple[str, ...]:
+    """Replay the released recent/date-window identity selection."""
+
+    _require_transaction(conn)
+    tenant = _scope(tenant_id, label="provider list tenant", maximum=240)
+    bounded_limit = _integer(
+        limit,
+        label="provider list limit",
+        low=1,
+        high=_MEMORY_EXACT_MAX_PROVIDER_MATERIAL_ROWS,
+    )
+    lower = _provider_optional_date(since, label="provider list since")
+    upper = _provider_optional_date(until, label="provider list until")
+    if not callable(reserve_bytes):
+        raise MemoryExactStorageError("provider list reservation is unavailable")
+    if lower is not None or upper is not None:
+        _require_provider_date_metadata_in_transaction(
+            conn,
+            tenant_id=tenant,
+            uploaded_by=None,
+        )
+
+    from friday.storage._knowledge import KnowledgeMixin
+
+    view = _MemoryExactProviderSelectView(conn)
+    where, parameters = KnowledgeMixin._knowledge_filter(  # noqa: SLF001
+        view,  # type: ignore[arg-type]
+        tenant,
+        lifecycle_stage=None,
+        tag=None,
+        entity_id=None,
+        query=None,
+        since=lower,
+        until=upper,
+        uploaded_by=None,
+    )
+    selected = f"""WITH selected AS MATERIALIZED (
+        SELECT rowid AS knowledge_rowid FROM knowledge_objects WHERE {where}
+         ORDER BY importance DESC, updated_at DESC, id DESC LIMIT ? OFFSET 0
+    )"""  # nosec B608 - released predicate and bound parameters only
+    selected_parameters = (*parameters, bounded_limit)
+    preflight = conn.execute(
+        selected
+        + """ SELECT COUNT(*) AS row_count,
+                     COALESCE(SUM(length(CAST(k.id AS BLOB)) + 64),0) AS storage_bytes,
+                     COALESCE(SUM(CASE
+                         WHEN typeof(k.id)='text'
+                          AND length(CAST(k.id AS BLOB)) BETWEEN 1 AND 240
+                         THEN 0 ELSE 1 END),0) AS invalid_rows
+                FROM selected
+                JOIN knowledge_objects k ON k.rowid=selected.knowledge_rowid""",
+        selected_parameters,
+    ).fetchone()
+    if preflight is None:
+        raise MemoryExactStorageError("provider list preflight is unavailable")
+    row_count, storage_bytes, invalid_rows = tuple(preflight)
+    if (
+        isinstance(row_count, bool)
+        or not isinstance(row_count, int)
+        or not 0 <= row_count <= bounded_limit
+        or isinstance(storage_bytes, bool)
+        or not isinstance(storage_bytes, int)
+        or storage_bytes < 0
+        or isinstance(invalid_rows, bool)
+        or not isinstance(invalid_rows, int)
+        or invalid_rows != 0
+    ):
+        raise MemoryExactStorageError("provider list preflight is invalid")
+    reserve_bytes(storage_bytes)
+    rows = conn.execute(
+        selected
+        + """ SELECT k.id FROM selected
+                JOIN knowledge_objects k ON k.rowid=selected.knowledge_rowid
+               ORDER BY k.importance DESC, k.updated_at DESC, k.id DESC""",
+        selected_parameters,
+    ).fetchall()
+    identities = tuple(
+        _scope(row[0], label="provider list knowledge identity", maximum=240) for row in rows
+    )
+    if len(identities) != row_count or len(identities) != len(set(identities)):
+        raise MemoryExactStorageError("provider list identity selection changed")
+    return identities
+
+
+def _memory_exact_provider_window_ids_in_transaction(
+    conn: sqlite3.Connection,
+    *,
+    tenant_id: str,
+    since: str | None,
+    until: str | None,
+    reserve_bytes: Callable[[int], None],
+) -> set[str] | None:
+    """Replay the released all-or-none date-window identity selection."""
+
+    _require_transaction(conn)
+    tenant = _scope(tenant_id, label="provider window tenant", maximum=240)
+    lower = _provider_optional_date(since, label="provider window since")
+    upper = _provider_optional_date(until, label="provider window until")
+    if not lower and not upper:
+        return None
+    if not callable(reserve_bytes):
+        raise MemoryExactStorageError("provider window reservation is unavailable")
+    _require_provider_date_metadata_in_transaction(
+        conn,
+        tenant_id=tenant,
+        uploaded_by=None,
+    )
+
+    from friday.storage._knowledge import KnowledgeMixin
+
+    view = _MemoryExactProviderSelectView(conn)
+    where, parameters = KnowledgeMixin._knowledge_filter(  # noqa: SLF001
+        view,  # type: ignore[arg-type]
+        tenant,
+        lifecycle_stage=None,
+        tag=None,
+        entity_id=None,
+        query=None,
+        since=lower,
+        until=upper,
+        uploaded_by=None,
+    )
+    window_cap = 20_000
+    selected = f"""WITH selected AS MATERIALIZED (
+        SELECT rowid AS knowledge_rowid FROM knowledge_objects
+         WHERE {where} LIMIT ?
+    )"""  # nosec B608 - released predicate and bound parameters only
+    selected_parameters = (*parameters, window_cap + 1)
+    preflight = conn.execute(
+        selected
+        + """ SELECT COUNT(*) AS row_count,
+                     COALESCE(SUM(length(CAST(k.id AS BLOB)) + 64),0) AS storage_bytes,
+                     COALESCE(SUM(CASE
+                         WHEN typeof(k.id)='text'
+                          AND length(CAST(k.id AS BLOB)) BETWEEN 1 AND 240
+                         THEN 0 ELSE 1 END),0) AS invalid_rows
+                FROM selected
+                JOIN knowledge_objects k ON k.rowid=selected.knowledge_rowid""",
+        selected_parameters,
+    ).fetchone()
+    if preflight is None:
+        raise MemoryExactStorageError("provider window preflight is unavailable")
+    row_count, storage_bytes, invalid_rows = tuple(preflight)
+    if (
+        isinstance(row_count, bool)
+        or not isinstance(row_count, int)
+        or not 0 <= row_count <= window_cap + 1
+        or isinstance(storage_bytes, bool)
+        or not isinstance(storage_bytes, int)
+        or storage_bytes < 0
+        or isinstance(invalid_rows, bool)
+        or not isinstance(invalid_rows, int)
+        or invalid_rows < 0
+    ):
+        raise MemoryExactStorageError("provider window preflight is invalid")
+    if row_count > window_cap:
+        return None
+    if invalid_rows != 0:
+        raise MemoryExactStorageError("provider window identity is invalid")
+    reserve_bytes(storage_bytes)
+    rows = conn.execute(
+        selected
+        + """ SELECT k.id FROM selected
+                JOIN knowledge_objects k ON k.rowid=selected.knowledge_rowid""",
+        selected_parameters,
+    ).fetchall()
+    identities = {
+        _scope(row[0], label="provider window knowledge identity", maximum=240) for row in rows
+    }
+    if len(rows) != row_count or len(identities) != row_count:
+        raise MemoryExactStorageError("provider window identity selection changed")
+    return identities
+
+
+def _memory_exact_provider_entity_links_in_transaction(
+    conn: sqlite3.Connection,
+    *,
+    tenant_id: str,
+    knowledge_ids: tuple[str, ...],
+    reserve_bytes: Callable[[int], None],
+) -> dict[str, list[dict[str, Any]]]:
+    """Replay bounded accepted entity-label signals used by provider ranking."""
+
+    _require_transaction(conn)
+    tenant = _scope(tenant_id, label="provider entity-link tenant", maximum=240)
+    if type(knowledge_ids) is not tuple or len(knowledge_ids) > 400:
+        raise MemoryExactStorageError("provider entity-link source set is invalid")
+    identities = tuple(
+        _scope(item, label="provider entity-link knowledge identity", maximum=240)
+        for item in knowledge_ids
+    )
+    if not identities:
+        return {}
+    if not callable(reserve_bytes):
+        raise MemoryExactStorageError("provider entity-link reservation is unavailable")
+    holders = ",".join("?" for _item in identities)
+    public_entity = _not_private_entity_material_dependency("e")
+    parameters: tuple[object, ...] = (tenant, *identities)
+    preflight = conn.execute(
+        f"""SELECT COUNT(*) AS row_count,
+                   COALESCE(SUM(
+                       length(CAST(COALESCE(l.knowledge_object_id,'') AS BLOB))
+                       + length(CAST(COALESCE(l.entity_id,'') AS BLOB))
+                       + length(CAST(COALESCE(l.confidence,'') AS BLOB))
+                       + length(CAST(COALESCE(e.name,'') AS BLOB))
+                       + length(CAST(COALESCE(e.entity_type,'') AS BLOB)) + 128
+                   ),0) AS storage_bytes
+              FROM knowledge_entity_links l
+              JOIN entities e ON e.id=l.entity_id AND e.user_id=l.user_id
+             WHERE l.user_id=? AND l.status='accepted' AND e.deleted_at IS NULL
+               AND {public_entity}
+               AND l.knowledge_object_id IN ({holders})""",  # nosec B608
+        parameters,
+    ).fetchone()
+    if preflight is None:
+        raise MemoryExactStorageError("provider entity-link preflight is unavailable")
+    row_count, storage_bytes = tuple(preflight)
+    if (
+        isinstance(row_count, bool)
+        or not isinstance(row_count, int)
+        or row_count < 0
+        or isinstance(storage_bytes, bool)
+        or not isinstance(storage_bytes, int)
+        or storage_bytes < 0
+    ):
+        raise MemoryExactStorageError("provider entity-link preflight is invalid")
+    reserve_bytes(storage_bytes)
+    rows = conn.execute(
+        f"""SELECT l.knowledge_object_id,
+                   substr(l.entity_id,1,160) AS entity_id,
+                   l.confidence,
+                   substr(e.name,1,240) AS name,
+                   substr(e.entity_type,1,80) AS entity_type
+              FROM knowledge_entity_links l
+              JOIN entities e ON e.id=l.entity_id AND e.user_id=l.user_id
+             WHERE l.user_id=? AND l.status='accepted' AND e.deleted_at IS NULL
+               AND {public_entity}
+               AND l.knowledge_object_id IN ({holders})
+             ORDER BY l.confidence DESC,e.name COLLATE NOCASE,
+                      l.knowledge_object_id,l.entity_id,l.id""",  # nosec B608
+        parameters,
+    ).fetchall()
+    if len(rows) != row_count:
+        raise MemoryExactStorageError("provider entity-link selection changed")
+    output: dict[str, list[dict[str, Any]]] = {}
+    for row in rows:
+        knowledge_id = _scope(
+            row["knowledge_object_id"],
+            label="provider entity-link knowledge identity",
+            maximum=240,
+        )
+        if knowledge_id not in set(identities):
+            raise MemoryExactStorageError("provider entity-link escaped its source set")
+        entity_id = _scope(
+            row["entity_id"],
+            label="provider entity-link entity identity",
+            maximum=160,
+        )
+        name = _bounded_text(
+            row["name"],
+            label="provider entity-link name",
+            maximum=240,
+            allow_empty=True,
+            allow_controls=True,
+        )
+        entity_type = _bounded_text(
+            row["entity_type"],
+            label="provider entity-link type",
+            maximum=80,
+            allow_empty=True,
+            allow_controls=False,
+        )
+        confidence = _finite_number(row["confidence"] or 0.0, label="provider link confidence")
+        output.setdefault(knowledge_id, []).append(
+            {
+                "id": entity_id,
+                "name": name,
+                "type": entity_type,
+                "confidence": confidence,
+            }
+        )
+    return output
+
+
+def _memory_exact_provider_feedback_in_transaction(
+    conn: sqlite3.Connection,
+    *,
+    tenant_id: str,
+    knowledge_ids: tuple[str, ...],
+    reserve_bytes: Callable[[int], None],
+) -> dict[str, float]:
+    """Replay bounded per-document feedback aggregates used by ranking."""
+
+    _require_transaction(conn)
+    tenant = _scope(tenant_id, label="provider feedback tenant", maximum=240)
+    if type(knowledge_ids) is not tuple or len(knowledge_ids) > 400:
+        raise MemoryExactStorageError("provider feedback source set is invalid")
+    identities = tuple(
+        _scope(item, label="provider feedback knowledge identity", maximum=240)
+        for item in knowledge_ids
+    )
+    if not identities:
+        return {}
+    if not callable(reserve_bytes):
+        raise MemoryExactStorageError("provider feedback reservation is unavailable")
+    holders = ",".join("?" for _item in identities)
+    selected = f"""SELECT target_id,AVG(score) AS score FROM feedback_state
+                     WHERE user_id=? AND target_id IN ({holders})
+                       AND feedback_type IN ('search_quality','answer_usefulness')
+                     GROUP BY target_id"""  # nosec B608
+    parameters: tuple[object, ...] = (tenant, *identities)
+    preflight = conn.execute(
+        f"""WITH selected AS MATERIALIZED ({selected})
+            SELECT COUNT(*) AS row_count,
+                   COALESCE(SUM(
+                       length(CAST(COALESCE(target_id,'') AS BLOB))
+                       + length(CAST(COALESCE(score,'') AS BLOB)) + 64
+                   ),0) AS storage_bytes
+              FROM selected""",  # nosec B608
+        parameters,
+    ).fetchone()
+    if preflight is None:
+        raise MemoryExactStorageError("provider feedback preflight is unavailable")
+    row_count, storage_bytes = tuple(preflight)
+    if (
+        isinstance(row_count, bool)
+        or not isinstance(row_count, int)
+        or not 0 <= row_count <= len(set(identities))
+        or isinstance(storage_bytes, bool)
+        or not isinstance(storage_bytes, int)
+        or storage_bytes < 0
+    ):
+        raise MemoryExactStorageError("provider feedback preflight is invalid")
+    reserve_bytes(storage_bytes)
+    rows = conn.execute(selected + " ORDER BY target_id", parameters).fetchall()
+    if len(rows) != row_count:
+        raise MemoryExactStorageError("provider feedback selection changed")
+    result: dict[str, float] = {}
+    identity_set = set(identities)
+    for row in rows:
+        identity = _scope(
+            row["target_id"],
+            label="provider feedback knowledge identity",
+            maximum=240,
+        )
+        if identity not in identity_set or identity in result:
+            raise MemoryExactStorageError("provider feedback escaped its source set")
+        result[identity] = _finite_number(
+            row["score"] or 0.0,
+            label="provider feedback score",
+        )
+    return result
+
+
+def _memory_exact_provider_embeddings_in_transaction(
+    conn: sqlite3.Connection,
+    *,
+    tenant_id: str,
+    model: str,
+    dim: int,
+    limit: int | None,
+    reserve_bytes: Callable[[int], None],
+) -> list[tuple[str, bytes]]:
+    """Replay whole-object embedding bytes through the released SELECT recipe."""
+
+    _reserve_memory_exact_provider_embeddings_in_transaction(
+        conn,
+        tenant_id=tenant_id,
+        model=model,
+        dim=dim,
+        limit=limit,
+        uploaded_by=None,
+        reserve_bytes=reserve_bytes,
+    )
+    from friday.storage._vectors import VectorsMixin
+
+    view = _MemoryExactProviderSelectView(conn)
+    rows = VectorsMixin.get_user_embeddings(  # type: ignore[arg-type]
+        view,
+        tenant_id,
+        model,
+        dim,
+        limit=limit,
+        uploaded_by=None,
+    )
+    return rows
+
+
+def _memory_exact_provider_chunk_embeddings_in_transaction(
+    conn: sqlite3.Connection,
+    *,
+    tenant_id: str,
+    model: str,
+    dim: int,
+    object_limit: int | None,
+    row_limit: int | None,
+    reserve_bytes: Callable[[int], None],
+) -> list[tuple[str, bytes]]:
+    """Replay passage embedding bytes through the released SELECT recipe."""
+
+    _reserve_memory_exact_provider_chunk_embeddings_in_transaction(
+        conn,
+        tenant_id=tenant_id,
+        model=model,
+        dim=dim,
+        object_limit=object_limit,
+        row_limit=row_limit,
+        uploaded_by=None,
+        reserve_bytes=reserve_bytes,
+    )
+    from friday.storage._knowledge import KnowledgeMixin
+
+    view = _MemoryExactProviderSelectView(conn)
+    rows = KnowledgeMixin.get_user_chunk_embeddings(  # type: ignore[arg-type]
+        view,
+        tenant_id,
+        model,
+        dim,
+        object_limit=object_limit,
+        row_limit=row_limit,
+        uploaded_by=None,
+    )
+    return rows
+
+
+def _memory_exact_provider_relation_history_status_replay(
+    conn: sqlite3.Connection,
+    *,
+    tenant_id: str,
+    known_at: str,
+    candidate_entity_ids: tuple[str, ...],
+    reserve_bytes: Callable[[int], None],
+    allow_active_managed_context: bool,
+) -> tuple[dict[str, Any], str]:
+    tenant = _scope(tenant_id, label="provider relation-history tenant", maximum=240)
+    boundary = _bounded_text(
+        known_at,
+        label="provider relation-history boundary",
+        maximum=64,
+        allow_empty=True,
+        allow_controls=False,
+    )
+    if boundary:
+        return _memory_exact_provider_relation_history_status_in_transaction(
+            conn,
+            tenant_id=tenant,
+            known_at=boundary,
+            candidate_entity_ids=candidate_entity_ids,
+            reserve_bytes=reserve_bytes,
+            allow_active_managed_context=allow_active_managed_context,
+        )
+    identities = tuple(
+        _scope(item, label="provider history candidate identity", maximum=240)
+        for item in candidate_entity_ids
+    )
+    if (
+        len(identities) > _MEMORY_EXACT_MAX_PROVIDER_MATERIAL_ROWS
+        or identities != tuple(sorted(identities))
+        or len(identities) != len(set(identities))
+    ):
+        raise MemoryExactStorageError("provider history candidate set is invalid")
+    view = _MemoryExactReadOnlyRelationHistoryView(
+        conn,
+        reserve_bytes=reserve_bytes,
+        allow_active_managed_context=allow_active_managed_context,
+    )
+    marker = view.execute(
+        """SELECT CASE
+                     WHEN typeof(value)='text' AND length(CAST(value AS BLOB)) BETWEEN 1 AND 64
+                     THEN value ELSE NULL END AS value
+                 FROM schema_meta WHERE key='relation_history_complete_from'"""
+    ).fetchone()
+    reserve_bytes(128)
+    if marker is None or type(marker[0]) is not str:
+        raise MemoryExactStorageError("memory exact provider relation history is unavailable")
+    floor = _validated_known_at(
+        marker[0],
+        label="provider relation-history floor",
+        reject_future=False,
+    )
+    expected = {
+        "known_at": "",
+        "known_at_floor": floor,
+        "history_complete": True,
+        "identity_basis": "current_names",
+    }
+    proof = _sha256(
+        {
+            "schema": "friday.memory-exact-provider-current-history-scope.v1",
+            "candidate_handles": [
+                _hmac(
+                    _PROVIDER_SEAL_KEY,
+                    domain="friday.memory-exact-provider-topology-entity.v1",
+                    material=_canonical_bytes({"tenant": tenant, "entity_id": identity}),
+                )
+                for identity in identities
+            ],
+        }
+    )
+    return expected, proof
+
+
+def _replay_memory_exact_provider_read_in_transaction(
+    conn: sqlite3.Connection,
+    *,
+    kind: str,
+    arguments: tuple[object, ...],
+    reserve_bytes: Callable[[int], None],
+    allow_active_managed_context: bool = False,
+) -> object:
+    """Replay one closed, bounded provider read without invoking the provider."""
+
+    _require_transaction(conn)
+    if (
+        type(kind) is not str
+        or type(arguments) is not tuple
+        or not callable(reserve_bytes)
+        or type(allow_active_managed_context) is not bool
+    ):
+        raise MemoryExactStorageError("provider read witness is invalid")
+
+    if kind == "graph_candidate_cards" and len(arguments) == 1:
+        return _memory_exact_provider_graph_candidates_in_transaction(
+            conn,
+            tenant_id=_scope(
+                arguments[0],
+                label="provider graph tenant",
+                maximum=240,
+            ),
+            reserve_bytes=reserve_bytes,
+        )
+
+    if kind == "search_knowledge" and len(arguments) == 5:
+        tenant, query, limit, uploaded_by, fts_available = arguments
+        if uploaded_by is not None or type(fts_available) is not bool:
+            raise MemoryExactStorageError("provider search witness is invalid")
+        text = _private_text(query, label="provider search query", maximum=_MAX_QUERY_BYTES)
+        bounded_limit = _integer(limit, label="provider search limit", low=1, high=200)
+        return _memory_exact_provider_search_ids_in_transaction(
+            conn,
+            tenant_id=_scope(tenant, label="provider search tenant", maximum=240),
+            query=text,
+            limit=bounded_limit,
+            uploaded_by=None,
+            fts_available=fts_available,
+            reserve_bytes=reserve_bytes,
+        )
+
+    if kind == "list_knowledge_objects" and len(arguments) == 10:
+        tenant, limit, offset, lifecycle, tag, entity, query, since, until, uploaded_by = arguments
+        if (
+            offset != 0
+            or type(offset) is not int
+            or lifecycle is not None
+            or tag is not None
+            or entity is not None
+            or query is not None
+            or uploaded_by is not None
+        ):
+            raise MemoryExactStorageError("provider list witness is invalid")
+        return _memory_exact_provider_list_ids_in_transaction(
+            conn,
+            tenant_id=_scope(tenant, label="provider list tenant", maximum=240),
+            limit=_integer(
+                limit,
+                label="provider list limit",
+                low=1,
+                high=_MEMORY_EXACT_MAX_PROVIDER_MATERIAL_ROWS,
+            ),
+            since=_provider_optional_date(since, label="provider list since"),
+            until=_provider_optional_date(until, label="provider list until"),
+            reserve_bytes=reserve_bytes,
+        )
+
+    if kind == "knowledge_ids_in_window" and len(arguments) == 4:
+        tenant, since, until, uploaded_by = arguments
+        if uploaded_by is not None:
+            raise MemoryExactStorageError("provider window witness is invalid")
+        return _memory_exact_provider_window_ids_in_transaction(
+            conn,
+            tenant_id=_scope(tenant, label="provider window tenant", maximum=240),
+            since=_provider_optional_date(since, label="provider window since"),
+            until=_provider_optional_date(until, label="provider window until"),
+            reserve_bytes=reserve_bytes,
+        )
+
+    if kind == "provider_rows" and len(arguments) == 2:
+        tenant, identities = arguments
+        if type(identities) is not tuple:
+            raise MemoryExactStorageError("provider material witness is invalid")
+        return _load_memory_exact_provider_rows_in_transaction(
+            conn,
+            tenant_id=_scope(tenant, label="provider material tenant", maximum=240),
+            knowledge_ids=identities,
+            reserve_bytes=reserve_bytes,
+        )
+
+    if kind == "count_knowledge_objects" and len(arguments) == 2:
+        tenant, uploaded_by = arguments
+        if uploaded_by is not None:
+            raise MemoryExactStorageError("provider count witness is invalid")
+        from friday.storage._knowledge import KnowledgeMixin
+
+        view = _MemoryExactProviderSelectView(conn)
+        return KnowledgeMixin.count_knowledge_objects(  # type: ignore[arg-type]
+            view,
+            _scope(tenant, label="provider count tenant", maximum=240),
+            uploaded_by=None,
+        )
+
+    if kind == "relation_history_status" and len(arguments) == 3:
+        tenant, known_at, candidate_entity_ids = arguments
+        if type(candidate_entity_ids) is not tuple:
+            raise MemoryExactStorageError("provider history candidate set is invalid")
+        return _memory_exact_provider_relation_history_status_replay(
+            conn,
+            tenant_id=_scope(tenant, label="provider history tenant", maximum=240),
+            known_at=_bounded_text(
+                known_at,
+                label="provider history boundary",
+                maximum=64,
+                allow_empty=True,
+                allow_controls=False,
+            ),
+            candidate_entity_ids=candidate_entity_ids,
+            reserve_bytes=reserve_bytes,
+            allow_active_managed_context=allow_active_managed_context,
+        )
+
+    if kind in {"entity_links_by_document", "feedback_scores"} and len(arguments) == 2:
+        tenant, identities = arguments
+        if type(identities) is not tuple:
+            raise MemoryExactStorageError("provider keyed witness is invalid")
+        helper = (
+            _memory_exact_provider_entity_links_in_transaction
+            if kind == "entity_links_by_document"
+            else _memory_exact_provider_feedback_in_transaction
+        )
+        return helper(
+            conn,
+            tenant_id=_scope(tenant, label="provider keyed tenant", maximum=240),
+            knowledge_ids=identities,
+            reserve_bytes=reserve_bytes,
+        )
+
+    if kind == "get_user_embeddings" and len(arguments) == 5:
+        tenant, model, dim, limit, uploaded_by = arguments
+        if uploaded_by is not None:
+            raise MemoryExactStorageError("provider vector witness is invalid")
+        return _memory_exact_provider_embeddings_in_transaction(
+            conn,
+            tenant_id=_scope(tenant, label="provider vector tenant", maximum=240),
+            model=_bounded_text(
+                model,
+                label="provider vector model",
+                maximum=512,
+                allow_empty=False,
+                allow_controls=False,
+            ),
+            dim=_integer(dim, label="provider vector dimension", low=1, high=1_000_000),
+            limit=limit,  # validated by the exact preflight
+            reserve_bytes=reserve_bytes,
+        )
+
+    if kind == "get_user_chunk_embeddings" and len(arguments) == 6:
+        tenant, model, dim, object_limit, row_limit, uploaded_by = arguments
+        if uploaded_by is not None:
+            raise MemoryExactStorageError("provider chunk-vector witness is invalid")
+        return _memory_exact_provider_chunk_embeddings_in_transaction(
+            conn,
+            tenant_id=_scope(tenant, label="provider chunk-vector tenant", maximum=240),
+            model=_bounded_text(
+                model,
+                label="provider chunk-vector model",
+                maximum=512,
+                allow_empty=False,
+                allow_controls=False,
+            ),
+            dim=_integer(
+                dim,
+                label="provider chunk-vector dimension",
+                low=1,
+                high=1_000_000,
+            ),
+            object_limit=object_limit,  # validated by the exact preflight
+            row_limit=row_limit,  # validated by the exact preflight
+            reserve_bytes=reserve_bytes,
+        )
+
+    if kind == "get_knowledge_object" and len(arguments) == 3:
+        tenant, knowledge_id, uploaded_by = arguments
+        if uploaded_by is not None:
+            raise MemoryExactStorageError("provider object witness is invalid")
+        return _memory_exact_provider_live_id_in_transaction(
+            conn,
+            tenant_id=_scope(tenant, label="provider object tenant", maximum=240),
+            knowledge_id=_scope(
+                knowledge_id,
+                label="provider object identity",
+                maximum=240,
+            ),
+            uploaded_by=None,
+        )
+
+    raise MemoryExactStorageError("provider read witness operation is unavailable")
 
 
 def _count_authorized_rows(
