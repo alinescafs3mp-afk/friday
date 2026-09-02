@@ -2481,7 +2481,7 @@ class MemoryExactPublicationDecision(_ProcessPrivate):
         *,
         _factory: object = None,
     ) -> str | None:
-        """Atomically burn this receipt before the live authority work awaits."""
+        """Atomically burn this receipt at the caller-owned transaction edge."""
 
         with _PUBLICATION_LOCK:
             if (
@@ -2510,6 +2510,26 @@ class MemoryExactPublicationDecision(_ProcessPrivate):
             object.__setattr__(self, "_consumed", True)
             object.__setattr__(self, "_seal", claimed_seal)
             return token
+
+    def _matches_live_edge(
+        self,
+        page: MemoryExactPage,
+        *,
+        _factory: object = None,
+    ) -> bool:
+        """Check an exact unconsumed receipt without granting or consuming it."""
+
+        with _PUBLICATION_LOCK:
+            return (
+                _factory is _DECISION_FACTORY
+                and self._is_process_owned()
+                and not self._consumed
+                and self.status is MemoryExactPublicationStatus.AUTHORIZED
+                and type(page) is MemoryExactPage
+                and page._is_process_owned()
+                and hmac.compare_digest(self._selection_handle, page.selection_handle)
+                and hmac.compare_digest(self._authority_handle, page.authority_handle)
+            )
 
     def _finish_live_edge(
         self,
@@ -2593,7 +2613,7 @@ def _claim_memory_exact_publication_decision(
     decision: MemoryExactPublicationDecision,
     page: MemoryExactPage,
 ) -> str | None:
-    """Private adapter seam that burns a bound receipt before any await."""
+    """Private adapter seam that burns a bound receipt at final publication."""
 
     if type(decision) is not MemoryExactPublicationDecision:
         return None
@@ -2601,6 +2621,18 @@ def _claim_memory_exact_publication_decision(
         page,
         _factory=_DECISION_FACTORY,
     )
+
+
+def _matches_memory_exact_publication_decision(
+    *,
+    decision: MemoryExactPublicationDecision,
+    page: MemoryExactPage,
+) -> bool:
+    """Private non-consuming check used by the asynchronous refresh stage."""
+
+    if type(decision) is not MemoryExactPublicationDecision:
+        return False
+    return decision._matches_live_edge(page, _factory=_DECISION_FACTORY)
 
 
 def _finish_memory_exact_publication_decision(

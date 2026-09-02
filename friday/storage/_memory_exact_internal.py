@@ -23,7 +23,7 @@ import re
 import secrets
 import sqlite3
 import unicodedata
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any, Final, NoReturn, SupportsIndex
@@ -50,6 +50,7 @@ from friday.retrieval.memory_exact_contract import (
     _create_memory_exact_page,
 )
 from friday.storage._privacy import (
+    _exact_uploader_knowledge_dependency,
     _not_private_entity_material_dependency,
     _not_private_knowledge_dependency,
     _not_private_raw_dependency,
@@ -67,6 +68,7 @@ _TOKEN = re.compile(r"[A-Za-z0-9_-]+\Z")
 
 _AUTHORITY_SCHEMA = "friday.memory-exact-storage-authority.v1"
 _PROVIDER_SCHEMA = "friday.memory-exact-provider-snapshot.v1"
+_PROVIDER_ROW_REVISION_SCHEMA = "friday.memory-exact-provider-row-revision.v1"
 _CURSOR_SCHEMA = "friday.memory-exact-continuation.v1"
 _SNAPSHOT_SCHEMA = "friday.memory-exact-storage-snapshot.v1"
 _ROW_REVISION_SCHEMA = "friday.memory-exact-knowledge-revision.v1"
@@ -101,6 +103,7 @@ MEMORY_EXACT_MAX_ENTITY_HISTORY_UTF8_BYTES: Final = 16 * 1024 * 1024
 MEMORY_EXACT_MAX_ENTITY_MERGE_ROWS: Final = 1_024
 MEMORY_EXACT_MAX_ENTITY_MERGE_DEPTH: Final = 16
 MEMORY_EXACT_MAX_IMPLICIT_LINK_ROWS: Final = 30
+_MEMORY_EXACT_MAX_PROVIDER_MATERIAL_ROWS: Final = 400
 _MAX_GRAPH_TEXT_BYTES = 1024
 _MAX_QUERY_BYTES = 16_384
 _FETCH_BATCH = 8
@@ -695,6 +698,7 @@ class MemoryExactProviderSnapshot:
         "_effective_query",
         "_graph_json",
         "_knowledge_ids",
+        "_knowledge_revision_sha256s",
         "_matched_at_least",
         "_request",
         "_request_identity_sha256",
@@ -708,6 +712,7 @@ class MemoryExactProviderSnapshot:
         request: MemoryExactRequest,
         effective_query: str,
         knowledge_ids: tuple[str, ...],
+        knowledge_revision_sha256s: tuple[str, ...],
         matched_at_least: int,
         date_window_applied: bool,
         date_window_empty: bool,
@@ -722,6 +727,7 @@ class MemoryExactProviderSnapshot:
         object.__setattr__(self, "_request", request)
         object.__setattr__(self, "_effective_query", effective_query)
         object.__setattr__(self, "_knowledge_ids", knowledge_ids)
+        object.__setattr__(self, "_knowledge_revision_sha256s", knowledge_revision_sha256s)
         object.__setattr__(self, "_matched_at_least", matched_at_least)
         object.__setattr__(self, "_date_window_applied", date_window_applied)
         object.__setattr__(self, "_date_window_empty", date_window_empty)
@@ -756,6 +762,7 @@ def _provider_material(snapshot: MemoryExactProviderSnapshot) -> dict[str, objec
         "request_identity_sha256": snapshot._request_identity_sha256,
         "effective_query": snapshot._effective_query,
         "knowledge_ids": list(snapshot._knowledge_ids),
+        "knowledge_revision_sha256s": list(snapshot._knowledge_revision_sha256s),
         "matched_at_least": snapshot._matched_at_least,
         "date_window_applied": snapshot._date_window_applied,
         "date_window_empty": snapshot._date_window_empty,
@@ -805,6 +812,7 @@ def _provider_date_window_status(
 def _create_memory_exact_provider_snapshot(
     request: MemoryExactRequest,
     payload: Mapping[str, Any],
+    provider_revisions: Mapping[str, tuple[str, str]],
 ) -> MemoryExactProviderSnapshot:
     """Close the HybridSearcher response before it reaches storage authority."""
 
@@ -820,12 +828,29 @@ def _create_memory_exact_provider_snapshot(
     results = _sequence(raw.get("results"), label="memory exact provider results")
     if len(results) > int(selector["snapshot_limit"]):
         raise MemoryExactStorageError("memory exact provider exceeded the requested snapshot limit")
+    if not isinstance(provider_revisions, Mapping):
+        raise MemoryExactStorageError("memory exact provider revision authority is invalid")
     knowledge_ids: list[str] = []
+    knowledge_revision_sha256s: list[str] = []
     for item in results:
         row = _mapping(item, label="memory exact provider result")
-        knowledge_ids.append(
-            _scope(row.get("id"), label="memory exact provider knowledge identity", maximum=240)
-        )
+        knowledge_id = _scope(row.get("id"), label="memory exact provider knowledge identity", maximum=240)
+        revisions = provider_revisions.get(knowledge_id)
+        if type(revisions) is not tuple or len(revisions) != 2:
+            raise MemoryExactStorageError("memory exact provider result lacks bounded source authority")
+        expected_revision, expected_row_revision = revisions
+        if (
+            not isinstance(expected_revision, str)
+            or not _SHA256.fullmatch(expected_revision)
+            or not isinstance(expected_row_revision, str)
+            or not _SHA256.fullmatch(expected_row_revision)
+        ):
+            raise MemoryExactStorageError("memory exact provider revision authority is invalid")
+        observed_row_revision = _provider_knowledge_revision(row)
+        if not hmac.compare_digest(observed_row_revision, expected_row_revision):
+            raise MemoryExactStorageError("memory exact provider result changed after bounded source read")
+        knowledge_ids.append(knowledge_id)
+        knowledge_revision_sha256s.append(expected_revision)
     if len(knowledge_ids) != len(set(knowledge_ids)):
         raise MemoryExactStorageError("memory exact provider returned duplicate knowledge identities")
     matched_at_least = _integer(
@@ -901,6 +926,7 @@ def _create_memory_exact_provider_snapshot(
         "request_identity_sha256": request_identity_sha256,
         "effective_query": effective_query,
         "knowledge_ids": knowledge_ids,
+        "knowledge_revision_sha256s": knowledge_revision_sha256s,
         "matched_at_least": matched_at_least,
         "date_window_applied": date_window_applied,
         "date_window_empty": date_window_empty,
@@ -916,6 +942,7 @@ def _create_memory_exact_provider_snapshot(
         request=request,
         effective_query=effective_query,
         knowledge_ids=tuple(knowledge_ids),
+        knowledge_revision_sha256s=tuple(knowledge_revision_sha256s),
         matched_at_least=matched_at_least,
         date_window_applied=date_window_applied,
         date_window_empty=date_window_empty,
@@ -1318,17 +1345,22 @@ def _date_filter_sql(
     until = request.until
     if not date_window_applied or (since is None and until is None):
         return "1", ()
-    safe_metadata = (
-        f"CASE WHEN typeof({alias}.metadata_json)='text' "
-        f"AND length(CAST({alias}.metadata_json AS BLOB))<={MEMORY_EXACT_MAX_METADATA_UTF8_BYTES} "
-        f"AND json_valid({alias}.metadata_json) AND json_type({alias}.metadata_json)='object' "
-        f"THEN {alias}.metadata_json ELSE '{{}}' END"
+    # The mandatory preflight rejects every in-scope malformed/oversized value.
+    # Keep the expression locally total as well: SQLite may evaluate this branch
+    # on a row excluded by another WHERE term, and json_each must never parse that
+    # unrelated row before the authoritative preflight can classify the scope.
+    raw_metadata = f"{alias}.metadata_json"
+    metadata = (
+        f"CASE WHEN typeof({raw_metadata})='text' "
+        f"AND length(CAST({raw_metadata} AS BLOB))<={MEMORY_EXACT_MAX_METADATA_UTF8_BYTES} "
+        f"AND json_valid({raw_metadata}) AND json_type({raw_metadata})='object' "
+        f"THEN {raw_metadata} ELSE '{{}}' END"
     )
-    document_date = f"jericho_iso_date(json_extract({safe_metadata},'$.document_date'))"
+    document_date = f"jericho_iso_date(json_extract({metadata},'$.document_date'))"
     own = [f"{document_date} IS NOT NULL"]
     own_parameters: list[object] = []
     mentioned = (
-        f"EXISTS (SELECT 1 FROM json_each({safe_metadata}, '$.dates') date_value "
+        f"EXISTS (SELECT 1 FROM json_each({metadata}, '$.dates') date_value "
         "WHERE jericho_iso_date(date_value.value) IS NOT NULL"
     )
     mentioned_parameters: list[object] = []
@@ -1347,6 +1379,115 @@ def _date_filter_sql(
         f"(({' AND '.join(own)}) OR {mentioned})",
         tuple((*own_parameters, *mentioned_parameters)),
     )
+
+
+def _require_classifiable_date_metadata_in_transaction(
+    conn: sqlite3.Connection,
+    *,
+    request: MemoryExactRequest,
+    date_window_applied: bool,
+) -> None:
+    """Refuse a date total unless every eligible row is safely classifiable."""
+
+    _require_transaction(conn)
+    if not date_window_applied or (request.since is None and request.until is None):
+        return
+    stages = tuple(item.value for item in request.lifecycle_stages)
+    holders = ",".join("?" for _item in stages)
+    common = f"""FROM knowledge_objects knowledge
+                    JOIN raw_objects raw
+                      ON raw.id=knowledge.raw_object_id
+                     AND raw.user_id=knowledge.user_id
+                     AND raw.deleted_at IS NULL
+                     AND {_not_private_raw_dependency("raw")}
+                   WHERE knowledge.user_id=? AND knowledge.deleted_at IS NULL
+                     AND {_not_private_knowledge_dependency("knowledge")}
+                     AND knowledge.lifecycle_stage IN ({holders})"""  # nosec B608
+    parameters: tuple[object, ...] = (request.tenant_id, *stages)
+    oversized = conn.execute(
+        f"""SELECT 1 {common}
+               AND (typeof(knowledge.metadata_json)!='text'
+                    OR length(CAST(knowledge.metadata_json AS BLOB))>?)
+             LIMIT 1""",  # nosec B608
+        (*parameters, MEMORY_EXACT_MAX_METADATA_UTF8_BYTES),
+    ).fetchone()
+    if oversized is not None:
+        raise MemoryExactStorageError("memory exact date metadata exceeds its classification bound")
+    malformed = conn.execute(
+        f"""SELECT 1 {common}
+               AND CASE WHEN json_valid(knowledge.metadata_json)
+                        THEN json_type(knowledge.metadata_json)!='object'
+                        ELSE 1 END
+             LIMIT 1""",  # nosec B608
+        parameters,
+    ).fetchone()
+    if malformed is not None:
+        raise MemoryExactStorageError("memory exact date metadata is not classifiable")
+    duplicate = conn.execute(
+        f"""SELECT 1 {common}
+               AND EXISTS (
+                   SELECT 1 FROM json_each(knowledge.metadata_json) date_member
+                    WHERE date_member.key IN ('document_date','dates')
+                    GROUP BY date_member.key HAVING COUNT(*)>1
+               )
+             LIMIT 1""",  # nosec B608
+        parameters,
+    ).fetchone()
+    if duplicate is not None:
+        raise MemoryExactStorageError("memory exact date metadata is not canonical")
+
+
+def _require_provider_date_metadata_in_transaction(
+    conn: sqlite3.Connection,
+    *,
+    tenant_id: str,
+    uploaded_by: str | None,
+) -> None:
+    """Preflight every row the released provider's date predicates may visit."""
+
+    _require_transaction(conn)
+    tenant = _scope(tenant_id, label="provider date tenant", maximum=240)
+    author_sql = ""
+    parameters: tuple[object, ...] = (tenant,)
+    if uploaded_by is not None:
+        author = _scope(uploaded_by, label="provider date uploader", maximum=240)
+        author_sql = f" AND {_exact_uploader_knowledge_dependency('k')}"
+        parameters = (tenant, author)
+    common = f"""FROM knowledge_objects k
+                  WHERE k.user_id=? AND k.deleted_at IS NULL
+                    AND {_not_private_knowledge_dependency("k")}
+                    {author_sql}"""  # nosec B608
+    oversized = conn.execute(
+        f"""SELECT 1 {common}
+               AND (typeof(k.metadata_json)!='text'
+                    OR length(CAST(k.metadata_json AS BLOB))>?)
+             LIMIT 1""",  # nosec B608
+        (*parameters, MEMORY_EXACT_MAX_METADATA_UTF8_BYTES),
+    ).fetchone()
+    if oversized is not None:
+        raise MemoryExactStorageError("memory exact provider date metadata exceeds its bound")
+    malformed = conn.execute(
+        f"""SELECT 1 {common}
+               AND CASE WHEN json_valid(k.metadata_json)
+                        THEN json_type(k.metadata_json)!='object'
+                        ELSE 1 END
+             LIMIT 1""",  # nosec B608
+        parameters,
+    ).fetchone()
+    if malformed is not None:
+        raise MemoryExactStorageError("memory exact provider date metadata is not classifiable")
+    duplicate = conn.execute(
+        f"""SELECT 1 {common}
+               AND EXISTS (
+                   SELECT 1 FROM json_each(k.metadata_json) date_member
+                    WHERE date_member.key IN ('document_date','dates')
+                    GROUP BY date_member.key HAVING COUNT(*)>1
+               )
+             LIMIT 1""",  # nosec B608
+        parameters,
+    ).fetchone()
+    if duplicate is not None:
+        raise MemoryExactStorageError("memory exact provider date metadata is not canonical")
 
 
 def _eligible_sql(
@@ -1396,6 +1537,23 @@ def _material_size_expression(knowledge: str = "k", raw: str = "r") -> str:
     return " + ".join(f"length(CAST(COALESCE({field},'') AS BLOB))" for field in fields)
 
 
+def _provider_material_size_expression(knowledge: str = "k", raw: str = "r") -> str:
+    """Conservative bound for every dynamically typed provider projection."""
+
+    canonical = _material_size_expression(knowledge, raw)
+    extra = (
+        f"{knowledge}.user_id",
+        f"{knowledge}.importance",
+        f"{knowledge}.quality_score",
+        f"{knowledge}.promotion_score",
+        f"{knowledge}.version",
+        f"{knowledge}.deleted_at",
+        f"{raw}.version",
+    )
+    extra_size = " + ".join(f"length(CAST(COALESCE({field},'') AS BLOB))" for field in extra)
+    return f"({canonical}) + {extra_size}"
+
+
 def _selected_material_sql(
     request: MemoryExactRequest,
     *,
@@ -1424,15 +1582,12 @@ def _selected_material_sql(
           JOIN raw_objects r
             ON r.id=k.raw_object_id AND r.user_id=k.user_id AND r.deleted_at IS NULL
            AND {public_raw}
-         WHERE wanted.graph_source=1
-            OR (wanted.candidate_rank>=0 AND {eligible})
+         WHERE wanted.graph_source=1 OR wanted.candidate_rank>=0
     )"""  # nosec B608 - only module-built predicates and placeholders
-    # ``eligible`` occurs twice; each occurrence owns its own positional binds.
     parameters = (
         *wanted_parameters,
         *eligible_parameters,
         request.tenant_id,
-        *eligible_parameters,
     )
     return sql, parameters
 
@@ -1494,6 +1649,88 @@ def _normalized_instant(value: object, *, label: str) -> str:
     if parsed.tzinfo is None or parsed.utcoffset() is None:
         raise MemoryExactStorageError(f"{label} is invalid")
     return parsed.astimezone(UTC).isoformat()
+
+
+def _provider_knowledge_revision(values: Mapping[str, Any]) -> str:
+    """Digest exactly the content-bearing row the legacy ranker received."""
+
+    if not isinstance(values, Mapping):
+        raise MemoryExactStorageError("memory exact provider source row is invalid")
+    knowledge_id = _scope(values.get("id"), label="provider source identity", maximum=240)
+    tenant_id = _scope(values.get("user_id"), label="provider source tenant", maximum=240)
+    raw_object_id = _scope(values.get("raw_object_id"), label="provider source raw identity", maximum=240)
+    entity_id = _optional_identity(values.get("entity_id"), label="provider source entity")
+    superseded = _optional_identity(
+        values.get("superseded_by_id"), label="provider source superseding knowledge"
+    )
+    content = _private_text(
+        values.get("content"),
+        label="provider source body",
+        maximum=MEMORY_EXACT_MAX_BODY_UTF8_BYTES,
+    )
+    title = _private_text(
+        values.get("title"),
+        label="provider source title",
+        maximum=MEMORY_EXACT_MAX_FIELD_UTF8_BYTES,
+    )
+    summary = _private_text(
+        values.get("summary"),
+        label="provider source summary",
+        maximum=MEMORY_EXACT_MAX_FIELD_UTF8_BYTES,
+    )
+    tags_json = _json_text(values.get("tags_json"), label="provider source tags", expected=list)
+    metadata_json = _json_text(values.get("metadata_json"), label="provider source metadata", expected=dict)
+    content_type = _bounded_text(
+        values.get("content_type"),
+        label="provider source content type",
+        maximum=512,
+        allow_controls=False,
+    )
+    knowledge_kind = _bounded_text(
+        values.get("knowledge_kind"),
+        label="provider source knowledge kind",
+        maximum=320,
+        allow_empty=False,
+        allow_controls=False,
+    )
+    lifecycle_stage = values.get("lifecycle_stage")
+    if lifecycle_stage not in {item.value for item in MemoryExactLifecycleStage}:
+        raise MemoryExactStorageError("provider source lifecycle stage is invalid")
+    version = _integer(values.get("version"), label="provider source version", low=1, high=2**63 - 1)
+    created_at = _normalized_instant(values.get("created_at"), label="provider source creation timestamp")
+    updated_at = _normalized_instant(values.get("updated_at"), label="provider source update timestamp")
+    if values.get("deleted_at") is not None:
+        raise MemoryExactStorageError("provider source is not live")
+    return _sha256(
+        {
+            "schema": _PROVIDER_ROW_REVISION_SCHEMA,
+            "knowledge_id_sha256": hashlib.sha256(knowledge_id.encode("utf-8")).hexdigest(),
+            "tenant_id_sha256": hashlib.sha256(tenant_id.encode("utf-8")).hexdigest(),
+            "raw_object_id_sha256": hashlib.sha256(raw_object_id.encode("utf-8")).hexdigest(),
+            "body_sha256": _bytes_sha256(content),
+            "title_sha256": _bytes_sha256(title),
+            "summary_sha256": _bytes_sha256(summary),
+            "tags_sha256": _bytes_sha256(tags_json),
+            "metadata_sha256": _bytes_sha256(metadata_json),
+            "content_type": content_type,
+            "knowledge_kind": knowledge_kind,
+            "importance": _finite_number(values.get("importance"), label="provider source importance"),
+            "quality_score": _finite_number(values.get("quality_score"), label="provider source quality"),
+            "promotion_score": _finite_number(
+                values.get("promotion_score"), label="provider source promotion"
+            ),
+            "lifecycle_stage": lifecycle_stage,
+            "version": version,
+            "entity_binding_sha256": (
+                None if entity_id is None else hashlib.sha256(entity_id.encode("utf-8")).hexdigest()
+            ),
+            "superseding_binding_sha256": (
+                None if superseded is None else hashlib.sha256(superseded.encode("utf-8")).hexdigest()
+            ),
+            "created_at": created_at,
+            "updated_at": updated_at,
+        }
+    )
 
 
 def _optional_identity(value: object, *, label: str) -> str | None:
@@ -1646,6 +1883,7 @@ def _stored_material(
     knowledge_revision = _sha256(
         {
             "schema": _ROW_REVISION_SCHEMA,
+            "raw_object_id_sha256": hashlib.sha256(raw_object_id.encode("utf-8")).hexdigest(),
             "body_sha256": _bytes_sha256(content),
             "title_sha256": _bytes_sha256(title),
             "summary_sha256": _bytes_sha256(summary),
@@ -1725,6 +1963,710 @@ class _MaterialScan:
     snapshot_bytes: int
 
 
+def _bounded_provider_id_selection(
+    conn: sqlite3.Connection,
+    *,
+    rowid_sql: str,
+    parameters: tuple[object, ...],
+    limit: int,
+    reserve_bytes: Callable[[int], None],
+) -> tuple[str, ...]:
+    """Reserve a rowid-only selection before its stored identities reach Python."""
+
+    if not callable(reserve_bytes):
+        raise MemoryExactStorageError("provider identity reservation is unavailable")
+    raw_rows = conn.execute(rowid_sql, parameters).fetchall()
+    rowids = tuple(row[0] for row in raw_rows)
+    if (
+        len(rowids) > limit
+        or any(isinstance(rowid, bool) or not isinstance(rowid, int) or rowid <= 0 for rowid in rowids)
+        or len(rowids) != len(set(rowids))
+    ):
+        raise MemoryExactStorageError("provider rowid selection is invalid")
+    if not rowids:
+        return ()
+    holders = ",".join("(?,?)" for _rowid in rowids)
+    selected_parameters: list[object] = []
+    for ordinal, rowid in enumerate(rowids):
+        selected_parameters.extend((ordinal, rowid))
+    selected = f"WITH selected(ordinal,knowledge_rowid) AS (VALUES {holders})"  # nosec B608
+    preflight = conn.execute(
+        selected
+        + """ SELECT COUNT(*) AS row_count,
+                     COALESCE(SUM(length(CAST(k.id AS BLOB)) + 64),0) AS storage_bytes,
+                     COALESCE(SUM(CASE
+                         WHEN typeof(k.id)='text'
+                          AND length(CAST(k.id AS BLOB)) BETWEEN 1 AND 240
+                         THEN 0 ELSE 1 END),0) AS invalid_rows
+                FROM selected
+                JOIN knowledge_objects k ON k.rowid=selected.knowledge_rowid""",
+        tuple(selected_parameters),
+    ).fetchone()
+    if preflight is None:
+        raise MemoryExactStorageError("provider identity preflight is unavailable")
+    row_count, storage_bytes, invalid_rows = tuple(preflight)
+    if (
+        isinstance(row_count, bool)
+        or not isinstance(row_count, int)
+        or row_count != len(rowids)
+        or isinstance(storage_bytes, bool)
+        or not isinstance(storage_bytes, int)
+        or storage_bytes < 0
+        or isinstance(invalid_rows, bool)
+        or not isinstance(invalid_rows, int)
+        or invalid_rows != 0
+    ):
+        raise MemoryExactStorageError("provider identity preflight is invalid")
+    reserve_bytes(storage_bytes)
+    rows = conn.execute(
+        selected
+        + """ SELECT k.id FROM selected
+                JOIN knowledge_objects k ON k.rowid=selected.knowledge_rowid
+               ORDER BY selected.ordinal""",
+        tuple(selected_parameters),
+    ).fetchall()
+    identities = tuple(
+        _scope(row[0], label="provider search knowledge identity", maximum=240) for row in rows
+    )
+    if len(identities) != row_count or len(identities) != len(set(identities)):
+        raise MemoryExactStorageError("provider search identity selection changed")
+    return identities
+
+
+def _memory_exact_provider_search_ids_in_transaction(
+    conn: sqlite3.Connection,
+    *,
+    tenant_id: str,
+    query: str,
+    limit: int,
+    uploaded_by: str | None,
+    fts_available: bool,
+    reserve_bytes: Callable[[int], None],
+) -> tuple[str, ...]:
+    """Resolve the legacy FTS/LIKE order without materializing source bodies."""
+
+    _require_transaction(conn)
+    tenant = _scope(tenant_id, label="provider search tenant", maximum=240)
+    text = " ".join((query or "").split()).strip()
+    if not text:
+        return ()
+    bounded_limit = max(1, min(int(limit), 200))
+    scope_where = ""
+    scope_params: tuple[str, ...] = ()
+    if uploaded_by is not None:
+        author = str(uploaded_by)
+        if not author.strip():
+            return ()
+        scope_where = f" AND {_exact_uploader_knowledge_dependency('k')}"
+        scope_params = (author,)
+    identities: tuple[str, ...] = ()
+    if type(fts_available) is not bool:
+        raise MemoryExactStorageError("provider FTS availability is invalid")
+    if fts_available:
+        from friday.storage._knowledge import _fts_terms
+
+        terms = _fts_terms(text)
+        if terms:
+            match_query = " OR ".join(f'"{term.replace(chr(34), chr(34) * 2)}"*' for term in terms)
+            source = f"""FROM knowledge_fts
+                          JOIN knowledge_objects k ON k.rowid=knowledge_fts.rowid
+                         WHERE k.user_id=? AND k.deleted_at IS NULL
+                           AND {_not_private_knowledge_dependency("k")}
+                           {scope_where}
+                           AND knowledge_fts MATCH ?
+                         ORDER BY bm25(knowledge_fts, 1.0, 2.0, 1.5, 0.5) ASC,
+                                  k.importance DESC LIMIT ?"""  # nosec B608
+            parameters: tuple[object, ...] = (
+                tenant,
+                *scope_params,
+                match_query,
+                bounded_limit,
+            )
+            try:
+                identities = _bounded_provider_id_selection(
+                    conn,
+                    rowid_sql=f"SELECT k.rowid AS knowledge_rowid {source}",
+                    parameters=parameters,
+                    limit=bounded_limit,
+                    reserve_bytes=reserve_bytes,
+                )
+            except sqlite3.OperationalError:
+                identities = ()
+    if not identities:
+        escaped = text.replace("%", r"\%").replace("_", r"\_")
+        like = f"%{escaped}%"
+        source = f"""FROM knowledge_objects k
+                 WHERE k.user_id=? AND k.deleted_at IS NULL
+                   AND {_not_private_knowledge_dependency("k")}
+                   {scope_where}
+                   AND (k.title LIKE ? ESCAPE '\\' OR k.summary LIKE ? ESCAPE '\\'
+                        OR k.content LIKE ? ESCAPE '\\' OR k.tags_json LIKE ? ESCAPE '\\')
+                 ORDER BY k.importance DESC, k.updated_at DESC LIMIT ?"""  # nosec B608
+        parameters = (tenant, *scope_params, like, like, like, like, bounded_limit)
+        identities = _bounded_provider_id_selection(
+            conn,
+            rowid_sql=f"SELECT k.rowid AS knowledge_rowid {source}",
+            parameters=parameters,
+            limit=bounded_limit,
+            reserve_bytes=reserve_bytes,
+        )
+    return identities
+
+
+def _memory_exact_provider_live_id_in_transaction(
+    conn: sqlite3.Connection,
+    *,
+    tenant_id: str,
+    knowledge_id: str,
+    uploaded_by: str | None,
+) -> tuple[str, ...]:
+    """Resolve one live graph/dense candidate without reading its body."""
+
+    _require_transaction(conn)
+    tenant = _scope(tenant_id, label="provider source tenant", maximum=240)
+    identity = _scope(knowledge_id, label="provider source identity", maximum=240)
+    scope_where = ""
+    parameters: list[object] = [identity, tenant]
+    if uploaded_by is not None:
+        author = str(uploaded_by)
+        if not author.strip():
+            return ()
+        scope_where = f" AND {_exact_uploader_knowledge_dependency('k')}"
+        parameters.append(author)
+    row = conn.execute(
+        f"""SELECT k.id FROM knowledge_objects k
+             JOIN raw_objects r
+               ON r.id=k.raw_object_id AND r.user_id=k.user_id
+              AND r.deleted_at IS NULL AND {_not_private_raw_dependency("r")}
+            WHERE k.id=? AND k.user_id=? AND k.deleted_at IS NULL
+              AND {_not_private_knowledge_dependency("k")}
+              {scope_where} LIMIT 1""",  # nosec B608
+        tuple(parameters),
+    ).fetchone()
+    return () if row is None else (identity,)
+
+
+class _MemoryExactReadOnlyRelationHistoryView:
+    """Minimal GraphMixin view whose observation edge can only verify."""
+
+    __slots__ = ("_conn",)
+
+    def __init__(self, conn: sqlite3.Connection) -> None:
+        self._conn = conn
+
+    def execute(
+        self,
+        sql: str,
+        params: tuple[object, ...] | None = None,
+    ) -> sqlite3.Cursor:
+        return self._conn.execute(sql, params or ())
+
+    def _observe_relation_history_boundary(self, boundary: str) -> None:
+        canonical = _validated_known_at(
+            boundary,
+            label="memory exact provider known_at boundary",
+            reject_future=False,
+        )
+        row = self._conn.execute(
+            """SELECT batch_id,recorded_at,observed_at
+                 FROM relation_revision_context WHERE singleton=1"""
+        ).fetchone()
+        if row is None:
+            raise MemoryExactStorageError("memory exact provider relation history observation is unavailable")
+        batch_id, recorded_at, raw_observed = tuple(row)
+        if batch_id != "" or recorded_at != "" or type(raw_observed) is not str:
+            raise MemoryExactStorageError("memory exact provider relation history context is not idle")
+        observed = _validated_known_at(
+            raw_observed,
+            label="memory exact provider relation history observation",
+            reject_future=False,
+        )
+        if observed != raw_observed or observed < canonical:
+            raise MemoryExactStorageError("memory exact provider relation history boundary was not observed")
+
+
+def _memory_exact_provider_relation_history_status_in_transaction(
+    conn: sqlite3.Connection,
+    *,
+    tenant_id: str,
+    known_at: str,
+) -> dict[str, Any]:
+    """Run the released history validator without advancing its durable clock."""
+
+    _require_transaction(conn)
+    tenant = _scope(tenant_id, label="provider relation-history tenant", maximum=240)
+    boundary = _validated_known_at(
+        known_at,
+        label="memory exact provider known_at boundary",
+        reject_future=True,
+    )
+    from friday.storage._graph import GraphMixin
+
+    view = _MemoryExactReadOnlyRelationHistoryView(conn)
+    try:
+        raw = GraphMixin.relation_history_status(view, tenant, boundary)
+    except MemoryExactStorageError:
+        raise
+    except Exception:
+        raise MemoryExactStorageError("memory exact provider relation history is unavailable") from None
+    if type(raw) is not dict:
+        raise MemoryExactStorageError("memory exact provider relation history is invalid")
+    expected = {
+        "known_at": boundary,
+        "known_at_floor": raw.get("known_at_floor"),
+        "history_complete": True,
+        "identity_basis": "current_names",
+    }
+    if raw != expected or type(expected["known_at_floor"]) is not str:
+        raise MemoryExactStorageError("memory exact provider relation history is invalid")
+    floor = _validated_known_at(
+        expected["known_at_floor"],
+        label="memory exact provider relation history floor",
+        reject_future=False,
+    )
+    if floor != expected["known_at_floor"] or floor > boundary:
+        raise MemoryExactStorageError("memory exact provider relation history is invalid")
+    return expected
+
+
+def _reserve_provider_object_window_ids(
+    conn: sqlite3.Connection,
+    *,
+    tenant_id: str,
+    limit: int,
+    uploaded_by: str | None,
+    reserve_bytes: Callable[[int], None],
+) -> None:
+    """Charge every ID materialized by the released dense object window."""
+
+    if not callable(reserve_bytes):
+        raise MemoryExactStorageError("provider vector window reservation is unavailable")
+    author_sql = ""
+    parameters: list[object] = [tenant_id]
+    if uploaded_by is not None:
+        author_sql = f" AND {_exact_uploader_knowledge_dependency('window_k')}"
+        parameters.append(uploaded_by)
+    parameters.append(limit)
+    selected = f"""WITH selected AS MATERIALIZED (
+        SELECT window_k.rowid AS knowledge_rowid
+          FROM knowledge_objects window_k INDEXED BY idx_knowledge_chunk_scan_order
+         WHERE window_k.user_id=? AND window_k.deleted_at IS NULL
+           AND {_not_private_knowledge_dependency("window_k")}
+           {author_sql}
+         ORDER BY window_k.created_at DESC,window_k.id ASC LIMIT ?
+    )"""  # nosec B608 - module-owned predicates and placeholders only
+    row = conn.execute(
+        selected
+        + """ SELECT COUNT(*) AS row_count,
+                     COALESCE(SUM(length(CAST(k.id AS BLOB)) + 64),0) AS storage_bytes,
+                     COALESCE(SUM(CASE
+                         WHEN typeof(k.id)='text'
+                          AND length(CAST(k.id AS BLOB)) BETWEEN 1 AND 240
+                         THEN 0 ELSE 1 END),0) AS invalid_rows
+                FROM selected
+                JOIN knowledge_objects k ON k.rowid=selected.knowledge_rowid""",
+        tuple(parameters),
+    ).fetchone()
+    if row is None:
+        raise MemoryExactStorageError("provider vector window preflight is unavailable")
+    row_count, storage_bytes, invalid_rows = tuple(row)
+    if (
+        isinstance(row_count, bool)
+        or not isinstance(row_count, int)
+        or not 0 <= row_count <= limit
+        or isinstance(storage_bytes, bool)
+        or not isinstance(storage_bytes, int)
+        or storage_bytes < 0
+        or isinstance(invalid_rows, bool)
+        or not isinstance(invalid_rows, int)
+        or invalid_rows != 0
+    ):
+        raise MemoryExactStorageError("provider vector window preflight is invalid")
+    reserve_bytes(storage_bytes)
+
+
+def _reserve_memory_exact_provider_embeddings_in_transaction(
+    conn: sqlite3.Connection,
+    *,
+    tenant_id: str,
+    model: str,
+    dim: int,
+    limit: int | None,
+    uploaded_by: str | None,
+    reserve_bytes: Callable[[int], None],
+) -> None:
+    """Reserve whole-object vector material before the released loader sees BLOBs."""
+
+    _require_transaction(conn)
+    tenant = _scope(tenant_id, label="provider vector tenant", maximum=240)
+    model_name = _bounded_text(
+        model,
+        label="provider vector model",
+        maximum=512,
+        allow_empty=False,
+        allow_controls=False,
+    )
+    dimension = _integer(dim, label="provider vector dimension", low=1, high=1_000_000)
+    if not callable(reserve_bytes):
+        raise MemoryExactStorageError("provider vector preflight is unavailable")
+    if limit is not None and (
+        isinstance(limit, bool) or not isinstance(limit, int) or not 0 <= limit <= 1_000_000
+    ):
+        raise MemoryExactStorageError("provider vector limit is invalid")
+    author = None
+    if uploaded_by is not None:
+        author = _scope(uploaded_by, label="provider vector uploader", maximum=240)
+    params: list[object] = [tenant, model_name, dimension]
+    if limit is not None and limit > 0:
+        _reserve_provider_object_window_ids(
+            conn,
+            tenant_id=tenant,
+            limit=limit,
+            uploaded_by=author,
+            reserve_bytes=reserve_bytes,
+        )
+        selected = (
+            "SELECT e.rowid AS embedding_rowid "
+            "FROM knowledge_embeddings e "
+            "WHERE e.user_id=? AND e.model=? AND e.dim=? "
+            "AND e.knowledge_object_id IN ("
+            "SELECT window_k.id FROM knowledge_objects window_k "
+            "INDEXED BY idx_knowledge_chunk_scan_order "
+            "WHERE window_k.user_id=? AND window_k.deleted_at IS NULL "
+            f"AND {_not_private_knowledge_dependency('window_k')}"  # nosec B608
+        )
+        params.append(tenant)
+        if author is not None:
+            selected += f" AND {_exact_uploader_knowledge_dependency('window_k')}"
+            params.append(author)
+        selected += " ORDER BY window_k.created_at DESC,window_k.id ASC LIMIT ?)"
+        params.append(limit)
+    else:
+        selected = (
+            "SELECT e.rowid AS embedding_rowid "
+            "FROM knowledge_embeddings e "
+            "JOIN knowledge_objects k ON k.id=e.knowledge_object_id "
+            "WHERE e.user_id=? AND e.model=? AND e.dim=? "
+            "AND k.user_id=? AND k.deleted_at IS NULL "
+            f"AND {_not_private_knowledge_dependency('k')}"  # nosec B608
+        )
+        params.append(tenant)
+        if author is not None:
+            selected += f" AND {_exact_uploader_knowledge_dependency('k')}"
+            params.append(author)
+    row = conn.execute(
+        f"""SELECT COUNT(*) AS row_count,
+                   COALESCE(SUM(length(CAST(e.knowledge_object_id AS BLOB))
+                                + length(e.vector) + 128),0) AS storage_bytes,
+                   COALESCE(SUM(CASE
+                       WHEN typeof(e.knowledge_object_id)='text'
+                        AND length(CAST(e.knowledge_object_id AS BLOB)) BETWEEN 1 AND 240
+                        AND typeof(e.vector)='blob'
+                        AND length(e.vector)=?
+                       THEN 0 ELSE 1 END),0) AS invalid_rows
+              FROM ({selected}) selected
+              JOIN knowledge_embeddings e ON e.rowid=selected.embedding_rowid""",  # nosec B608
+        (dimension * 4, *params),
+    ).fetchone()
+    if row is None:
+        raise MemoryExactStorageError("provider vector preflight is unavailable")
+    count, storage_bytes, invalid_rows = tuple(row)
+    if (
+        isinstance(count, bool)
+        or not isinstance(count, int)
+        or count < 0
+        or isinstance(storage_bytes, bool)
+        or not isinstance(storage_bytes, int)
+        or storage_bytes < 0
+        or isinstance(invalid_rows, bool)
+        or not isinstance(invalid_rows, int)
+        or invalid_rows != 0
+    ):
+        raise MemoryExactStorageError("provider vector preflight is invalid")
+    reserve_bytes(storage_bytes)
+
+
+def _reserve_memory_exact_provider_chunk_embeddings_in_transaction(
+    conn: sqlite3.Connection,
+    *,
+    tenant_id: str,
+    model: str,
+    dim: int,
+    object_limit: int | None,
+    row_limit: int | None,
+    uploaded_by: str | None,
+    reserve_bytes: Callable[[int], None],
+) -> None:
+    """Reserve passage-vector material before the released loader sees BLOBs."""
+
+    _require_transaction(conn)
+    tenant = _scope(tenant_id, label="provider chunk tenant", maximum=240)
+    model_name = _bounded_text(
+        model,
+        label="provider chunk model",
+        maximum=512,
+        allow_empty=False,
+        allow_controls=False,
+    )
+    dimension = _integer(dim, label="provider chunk dimension", low=1, high=1_000_000)
+    if not callable(reserve_bytes):
+        raise MemoryExactStorageError("provider chunk preflight is unavailable")
+    for value, label in ((object_limit, "object"), (row_limit, "row")):
+        if value is not None and (
+            isinstance(value, bool) or not isinstance(value, int) or not 0 <= value <= 1_000_000
+        ):
+            raise MemoryExactStorageError(f"provider chunk {label} limit is invalid")
+    author = None
+    if uploaded_by is not None:
+        author = _scope(uploaded_by, label="provider chunk uploader", maximum=240)
+    selected = (
+        "SELECT c.rowid AS embedding_rowid "
+        "FROM knowledge_chunk_embeddings c "
+        "JOIN knowledge_objects k ON k.id=c.knowledge_object_id "
+        "WHERE c.user_id=? AND c.model=? AND c.dim=? "
+        "AND k.user_id=? AND k.deleted_at IS NULL "
+        f"AND {_not_private_knowledge_dependency('k')}"  # nosec B608
+    )
+    params: list[object] = [tenant, model_name, dimension, tenant]
+    if author is not None:
+        selected += f" AND {_exact_uploader_knowledge_dependency('k')}"
+        params.append(author)
+    if object_limit is not None and object_limit > 0:
+        _reserve_provider_object_window_ids(
+            conn,
+            tenant_id=tenant,
+            limit=object_limit,
+            uploaded_by=author,
+            reserve_bytes=reserve_bytes,
+        )
+        selected += (
+            " AND c.knowledge_object_id IN ("
+            "SELECT window_k.id FROM knowledge_objects window_k "
+            "INDEXED BY idx_knowledge_chunk_scan_order "
+            "WHERE window_k.user_id=? AND window_k.deleted_at IS NULL "
+            f"AND {_not_private_knowledge_dependency('window_k')}"  # nosec B608
+        )
+        params.append(tenant)
+        if author is not None:
+            selected += f" AND {_exact_uploader_knowledge_dependency('window_k')}"
+            params.append(author)
+        selected += " ORDER BY window_k.created_at DESC,window_k.id ASC LIMIT ?)"
+        params.append(object_limit)
+    selected += " ORDER BY k.created_at DESC,k.id,c.chunk_index"
+    if row_limit is not None and row_limit > 0:
+        selected += " LIMIT ?"
+        params.append(row_limit)
+    row = conn.execute(
+        f"""SELECT COUNT(*) AS row_count,
+                   COALESCE(SUM(length(CAST(c.knowledge_object_id AS BLOB))
+                                + length(CAST(c.chunk_index AS BLOB))
+                                + length(c.vector) + 129),0) AS storage_bytes,
+                   COALESCE(SUM(CASE
+                       WHEN typeof(c.knowledge_object_id)='text'
+                        AND length(CAST(c.knowledge_object_id AS BLOB)) BETWEEN 1 AND 240
+                        AND typeof(c.chunk_index)='integer' AND c.chunk_index>=0
+                        AND typeof(c.vector)='blob'
+                        AND length(c.vector)=?
+                       THEN 0 ELSE 1 END),0) AS invalid_rows
+              FROM ({selected}) selected
+              JOIN knowledge_chunk_embeddings c ON c.rowid=selected.embedding_rowid""",  # nosec B608
+        (dimension * 4, *params),
+    ).fetchone()
+    if row is None:
+        raise MemoryExactStorageError("provider chunk preflight is unavailable")
+    count, storage_bytes, invalid_rows = tuple(row)
+    if (
+        isinstance(count, bool)
+        or not isinstance(count, int)
+        or count < 0
+        or isinstance(storage_bytes, bool)
+        or not isinstance(storage_bytes, int)
+        or storage_bytes < 0
+        or isinstance(invalid_rows, bool)
+        or not isinstance(invalid_rows, int)
+        or invalid_rows != 0
+    ):
+        raise MemoryExactStorageError("provider chunk preflight is invalid")
+    reserve_bytes(storage_bytes)
+
+
+def _load_memory_exact_provider_rows_in_transaction(
+    conn: sqlite3.Connection,
+    *,
+    tenant_id: str,
+    knowledge_ids: tuple[str, ...],
+    reserve_bytes: Callable[[int], None],
+) -> tuple[tuple[dict[str, Any], ...], dict[str, tuple[str, str]]]:
+    """Preflight a complete provider batch, reserve it, then fetch in small batches."""
+
+    _require_transaction(conn)
+    tenant = _scope(tenant_id, label="provider material tenant", maximum=240)
+    if type(knowledge_ids) is not tuple or len(knowledge_ids) > _MEMORY_EXACT_MAX_PROVIDER_MATERIAL_ROWS:
+        raise MemoryExactStorageError("provider material row set is invalid")
+    identities = tuple(
+        _scope(item, label="provider material identity", maximum=240) for item in knowledge_ids
+    )
+    if len(identities) != len(set(identities)):
+        raise MemoryExactStorageError("provider material row set is duplicated")
+    if not identities:
+        return (), {}
+    holders = ",".join("(?,?)" for _item in identities)
+    wanted_parameters: list[object] = []
+    for ordinal, identity in enumerate(identities):
+        wanted_parameters.extend((ordinal, identity))
+    selected = f"""WITH wanted(ordinal, object_id) AS (VALUES {holders}),
+        selected AS MATERIALIZED (
+            SELECT wanted.ordinal, k.rowid AS knowledge_rowid, r.rowid AS raw_rowid
+              FROM wanted
+              JOIN knowledge_objects k
+                ON k.id=wanted.object_id AND k.user_id=? AND k.deleted_at IS NULL
+               AND {_not_private_knowledge_dependency("k")}
+              JOIN raw_objects r
+                ON r.id=k.raw_object_id AND r.user_id=k.user_id AND r.deleted_at IS NULL
+               AND {_not_private_raw_dependency("r")}
+        )"""  # nosec B608 - placeholders and module-owned predicates only
+    size = _provider_material_size_expression()
+    preflight = conn.execute(
+        selected
+        + f""" SELECT COUNT(*) AS row_count,
+                       COALESCE(SUM({size}),0) AS aggregate_bytes,
+                       COALESCE(MAX({size}),0) AS maximum_row_bytes,
+                       COALESCE(MAX(length(CAST(k.content AS BLOB))),0) AS maximum_knowledge_body,
+                       COALESCE(MAX(length(CAST(r.raw_content AS BLOB))),0) AS maximum_raw_body,
+                       COALESCE(MAX(length(CAST(k.metadata_json AS BLOB))),0) AS maximum_knowledge_metadata,
+                       COALESCE(MAX(length(CAST(k.tags_json AS BLOB))),0) AS maximum_tags,
+                       COALESCE(MAX(length(CAST(r.metadata_json AS BLOB))),0) AS maximum_raw_metadata,
+                       COALESCE(MAX(max(length(CAST(COALESCE(k.title,'') AS BLOB)),
+                                        length(CAST(COALESCE(k.summary,'') AS BLOB)),
+                                        length(CAST(COALESCE(r.source,'') AS BLOB)),
+                                        length(CAST(COALESCE(r.source_ref,'') AS BLOB)))),0)
+                           AS maximum_wide_field,
+                       COALESCE(SUM(CASE
+                           WHEN typeof(k.version)='integer' AND k.version BETWEEN 1 AND 9223372036854775807
+                            AND typeof(r.version)='integer' AND r.version BETWEEN 1 AND 9223372036854775807
+                            AND typeof(k.importance) IN ('integer','real')
+                            AND k.importance BETWEEN -1.7976931348623157e308 AND 1.7976931348623157e308
+                            AND typeof(k.quality_score) IN ('integer','real')
+                            AND k.quality_score BETWEEN -1.7976931348623157e308 AND 1.7976931348623157e308
+                            AND typeof(k.promotion_score) IN ('integer','real')
+                            AND k.promotion_score BETWEEN -1.7976931348623157e308 AND 1.7976931348623157e308
+                           THEN 0 ELSE 1 END),0) AS invalid_numeric_rows
+                  FROM selected
+                  JOIN knowledge_objects k ON k.rowid=selected.knowledge_rowid
+                  JOIN raw_objects r ON r.rowid=selected.raw_rowid""",  # nosec B608
+        (*wanted_parameters, tenant),
+    ).fetchone()
+    if preflight is None:
+        raise MemoryExactStorageError("provider material preflight is unavailable")
+    values = tuple(preflight)
+    if any(isinstance(value, bool) or not isinstance(value, int) for value in values):
+        raise MemoryExactStorageError("provider material preflight is invalid")
+    (
+        row_count,
+        aggregate_bytes,
+        maximum_row_bytes,
+        maximum_knowledge_body,
+        maximum_raw_body,
+        maximum_knowledge_metadata,
+        maximum_tags,
+        maximum_raw_metadata,
+        maximum_wide_field,
+        invalid_numeric_rows,
+    ) = values
+    if row_count != len(identities):
+        raise MemoryExactStorageError("provider material source is unavailable")
+    if (
+        aggregate_bytes < 0
+        or not 0 <= maximum_row_bytes <= MEMORY_EXACT_MAX_ROW_UTF8_BYTES
+        or not 0 <= maximum_knowledge_body <= MEMORY_EXACT_MAX_BODY_UTF8_BYTES
+        or not 0 <= maximum_raw_body <= MEMORY_EXACT_MAX_BODY_UTF8_BYTES
+        or not 0 <= maximum_knowledge_metadata <= MEMORY_EXACT_MAX_METADATA_UTF8_BYTES
+        or not 0 <= maximum_tags <= MEMORY_EXACT_MAX_METADATA_UTF8_BYTES
+        or not 0 <= maximum_raw_metadata <= MEMORY_EXACT_MAX_METADATA_UTF8_BYTES
+        or not 0 <= maximum_wide_field <= MEMORY_EXACT_MAX_FIELD_UTF8_BYTES
+        or invalid_numeric_rows != 0
+    ):
+        raise MemoryExactStorageError("provider material exceeds its storage limits")
+    if not callable(reserve_bytes):
+        raise MemoryExactStorageError("provider material reservation is invalid")
+    reserve_bytes(aggregate_bytes)
+
+    fields = """selected.ordinal, 0 AS candidate_rank, 0 AS graph_source,
+                1 AS candidate_eligible,
+                k.id AS knowledge_id, k.user_id AS knowledge_user_id,
+                k.raw_object_id, k.entity_id AS knowledge_entity_id,
+                k.content AS knowledge_content, k.content_type AS knowledge_content_type,
+                k.title AS knowledge_title, k.summary AS knowledge_summary,
+                k.tags_json AS knowledge_tags_json,
+                k.metadata_json AS knowledge_metadata_json,
+                k.knowledge_kind, k.importance AS knowledge_importance,
+                k.quality_score AS knowledge_quality_score,
+                k.promotion_score AS knowledge_promotion_score,
+                k.lifecycle_stage AS knowledge_lifecycle_stage,
+                k.version AS knowledge_version,
+                k.superseded_by_id AS knowledge_superseded_by_id,
+                k.created_at AS knowledge_created_at,
+                k.updated_at AS knowledge_updated_at,
+                k.deleted_at AS knowledge_deleted_at,
+                r.source AS raw_source, r.source_ref AS raw_source_ref,
+                r.raw_content, r.content_type AS raw_content_type,
+                r.metadata_json AS raw_metadata_json,
+                r.content_hash AS raw_content_hash, r.version AS raw_version,
+                r.received_at AS raw_received_at, r.created_at AS raw_created_at"""
+    cursor = conn.execute(
+        selected
+        + f""" SELECT {fields}
+                  FROM selected
+                  JOIN knowledge_objects k ON k.rowid=selected.knowledge_rowid
+                  JOIN raw_objects r ON r.rowid=selected.raw_rowid
+                 ORDER BY selected.ordinal""",  # nosec B608
+        (*wanted_parameters, tenant),
+    )
+    rows: list[dict[str, Any]] = []
+    revisions: dict[str, tuple[str, str]] = {}
+    try:
+        while True:
+            batch = cursor.fetchmany(_FETCH_BATCH)
+            if not batch:
+                break
+            for raw_row in batch:
+                stored_values = _record(cursor, raw_row)
+                material = _stored_material(stored_values, key=_PROVIDER_SEAL_KEY, tenant_id=tenant)
+                row = {
+                    "id": stored_values["knowledge_id"],
+                    "user_id": stored_values["knowledge_user_id"],
+                    "raw_object_id": stored_values["raw_object_id"],
+                    "entity_id": stored_values["knowledge_entity_id"],
+                    "content": stored_values["knowledge_content"],
+                    "content_type": stored_values["knowledge_content_type"],
+                    "title": stored_values["knowledge_title"],
+                    "summary": stored_values["knowledge_summary"],
+                    "tags_json": stored_values["knowledge_tags_json"],
+                    "metadata_json": stored_values["knowledge_metadata_json"],
+                    "knowledge_kind": stored_values["knowledge_kind"],
+                    "importance": stored_values["knowledge_importance"],
+                    "quality_score": stored_values["knowledge_quality_score"],
+                    "promotion_score": stored_values["knowledge_promotion_score"],
+                    "lifecycle_stage": stored_values["knowledge_lifecycle_stage"],
+                    "version": stored_values["knowledge_version"],
+                    "superseded_by_id": stored_values["knowledge_superseded_by_id"],
+                    "created_at": stored_values["knowledge_created_at"],
+                    "updated_at": stored_values["knowledge_updated_at"],
+                    "deleted_at": stored_values["knowledge_deleted_at"],
+                }
+                identity = str(row["id"])
+                rows.append(row)
+                revisions[identity] = (
+                    material.knowledge_revision_sha256,
+                    _provider_knowledge_revision(row),
+                )
+    finally:
+        cursor.close()
+    if len(rows) != len(identities) or tuple(str(row["id"]) for row in rows) != identities:
+        raise MemoryExactStorageError("provider material changed during selection")
+    return tuple(rows), revisions
+
+
 def _count_authorized_rows(
     conn: sqlite3.Connection,
     *,
@@ -1759,6 +2701,7 @@ def _scan_material(
     *,
     request: MemoryExactRequest,
     provider_ids: tuple[str, ...],
+    provider_revision_sha256s: tuple[str, ...],
     graph_ids: tuple[str, ...],
     date_window_applied: bool,
     key: bytes,
@@ -1806,7 +2749,17 @@ def _scan_material(
                            length(CAST(COALESCE(k.updated_at,'') AS BLOB)),
                            length(CAST(COALESCE(r.received_at,'') AS BLOB)),
                            length(CAST(COALESCE(r.created_at,'') AS BLOB))
-                       )),0) AS maximum_timestamp
+                       )),0) AS maximum_timestamp,
+                       COALESCE(SUM(CASE
+                           WHEN typeof(k.version)='integer' AND k.version BETWEEN 1 AND 9223372036854775807
+                            AND typeof(r.version)='integer' AND r.version BETWEEN 1 AND 9223372036854775807
+                            AND typeof(k.importance) IN ('integer','real')
+                            AND k.importance BETWEEN -1.7976931348623157e308 AND 1.7976931348623157e308
+                            AND typeof(k.quality_score) IN ('integer','real')
+                            AND k.quality_score BETWEEN -1.7976931348623157e308 AND 1.7976931348623157e308
+                            AND typeof(k.promotion_score) IN ('integer','real')
+                            AND k.promotion_score BETWEEN -1.7976931348623157e308 AND 1.7976931348623157e308
+                           THEN 0 ELSE 1 END),0) AS invalid_numeric_rows
                   FROM selected
                   JOIN knowledge_objects k ON k.rowid=selected.knowledge_rowid
                   JOIN raw_objects r ON r.rowid=selected.raw_rowid""",  # nosec B608
@@ -1833,6 +2786,7 @@ def _scan_material(
         "maximum_knowledge_kind",
         "maximum_lifecycle",
         "maximum_timestamp",
+        "invalid_numeric_rows",
     )
     if any(
         isinstance(preflight.get(name), bool) or not isinstance(preflight.get(name), int)
@@ -1856,6 +2810,7 @@ def _scan_material(
         or not 0 <= int(preflight["maximum_knowledge_kind"]) <= 320
         or not 0 <= int(preflight["maximum_lifecycle"]) <= 80
         or not 0 <= int(preflight["maximum_timestamp"]) <= 64
+        or int(preflight["invalid_numeric_rows"]) != 0
     ):
         raise MemoryExactStorageError("memory exact material exceeds its storage limits")
 
@@ -1911,6 +2866,21 @@ def _scan_material(
         cursor.close()
     if len(by_id) != int(preflight["row_count"]) or material_bytes != int(preflight["aggregate_bytes"]):
         raise MemoryExactStorageError("memory exact source changed during selection")
+    if len(provider_ids) != len(provider_revision_sha256s):
+        raise MemoryExactStorageError("memory exact provider revision ledger is invalid")
+    for identity, expected_revision in zip(
+        provider_ids,
+        provider_revision_sha256s,
+        strict=True,
+    ):
+        material = by_id.get(identity)
+        if (
+            material is None
+            or not isinstance(expected_revision, str)
+            or not _SHA256.fullmatch(expected_revision)
+            or not hmac.compare_digest(material.knowledge_revision_sha256, expected_revision)
+        ):
+            raise MemoryExactStorageDrift("memory exact provider source changed after ranking")
     missing_graph = set(graph_ids).difference(by_id)
     if missing_graph:
         raise MemoryExactStorageError("memory exact graph knowledge source is unavailable")
@@ -4233,15 +5203,24 @@ def _provider_binding(
     snapshot: MemoryExactProviderSnapshot,
     provider_graph_sha256: str,
 ) -> str:
+    if len(snapshot._knowledge_ids) != len(snapshot._knowledge_revision_sha256s):
+        raise MemoryExactStorageError("memory exact provider revision ledger is invalid")
     ordered_handles = [
         _hmac(
             key,
             domain="friday.memory-exact-provider-source.v1",
             material=_canonical_bytes(
-                {"tenant": request.tenant_id, "knowledge_id": identity, "ordinal": ordinal}
+                {
+                    "tenant": request.tenant_id,
+                    "knowledge_id": identity,
+                    "knowledge_revision_sha256": revision,
+                    "ordinal": ordinal,
+                }
             ),
         )
-        for ordinal, identity in enumerate(snapshot._knowledge_ids)
+        for ordinal, (identity, revision) in enumerate(
+            zip(snapshot._knowledge_ids, snapshot._knowledge_revision_sha256s, strict=True)
+        )
     ]
     return _sha256(
         {
@@ -4375,6 +5354,11 @@ def select_memory_exact_page_in_transaction(
     # label, metadata length and source body read below.
     _probe_tenant(conn, tenant_id=authority._tenant_id)
     try:
+        _require_classifiable_date_metadata_in_transaction(
+            conn,
+            request=selected_request,
+            date_window_applied=provider_snapshot._date_window_applied,
+        )
         graph_knowledge_ids = _graph_knowledge_ids(graph)
         _probe_provider_sources(
             conn,
@@ -4420,6 +5404,7 @@ def select_memory_exact_page_in_transaction(
             conn,
             request=selected_request,
             provider_ids=provider_snapshot._knowledge_ids,
+            provider_revision_sha256s=provider_snapshot._knowledge_revision_sha256s,
             graph_ids=graph_knowledge_ids,
             date_window_applied=provider_snapshot._date_window_applied,
             key=key,
