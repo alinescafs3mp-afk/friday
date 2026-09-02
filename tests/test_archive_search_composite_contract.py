@@ -8,6 +8,7 @@ import importlib
 import inspect
 import json
 import pickle
+import sqlite3
 import time
 from dataclasses import dataclass, replace
 from typing import Any
@@ -651,34 +652,35 @@ async def test_memory_chain_rejects_cursor_and_offset_gap_replay_terminal_append
             )
 
 
-async def test_composite_rejects_genuine_message_snapshot_drift(storage: Any) -> None:
+async def test_composite_rejects_genuine_authority_snapshot_drift(storage: Any) -> None:
     fixture = await _fixture(
         storage,
-        label="snapshot-drift",
+        label="authority-drift",
         include_message=True,
         include_memory=False,
     )
     first = fixture.message_pages[0]
     assert fixture.message_request is not None
-    with storage.transaction() as conn:
-        conn.execute(
-            "UPDATE messages SET content=? WHERE id=?",
-            ("changed pre-boundary snapshot row", first.rows[0].message_id),
-        )
-    with storage.transaction() as conn:
-        changed = fixture.message_adapter.prepare_in_transaction(
-            conn,
-            context=fixture.context,
-            request=fixture.message_request,
-        )
-    assert first._is_process_owned()
-    assert changed._is_process_owned()
-    assert changed.snapshot_handle != first.snapshot_handle
-    with pytest.raises(ArchiveSearchServiceError):
-        compose_prepared_archive_searches(
-            fixture.prepared,
-            message_exact_pages=(first, changed),
-        )
+    fixture.authorization.set_user_preset(PRINCIPAL, "admin")
+    try:
+        with storage.transaction() as conn:
+            changed = fixture.message_adapter.prepare_in_transaction(
+                conn,
+                context=fixture.context,
+                request=fixture.message_request,
+            )
+        assert first._is_process_owned()
+        assert changed._is_process_owned()
+        assert changed.request is first.request is fixture.message_request
+        assert changed.authority_handle != first.authority_handle
+        assert changed.snapshot_handle != first.snapshot_handle
+        with pytest.raises(ArchiveSearchServiceError):
+            compose_prepared_archive_searches(
+                fixture.prepared,
+                message_exact_pages=(first, changed),
+            )
+    finally:
+        fixture.authorization.set_user_preset(PRINCIPAL, "owner")
 
 
 async def test_composite_rejects_cross_scope_real_exact_pages(storage: Any) -> None:
@@ -708,33 +710,36 @@ async def test_composite_rejects_cross_scope_real_exact_pages(storage: Any) -> N
         )
 
 
-async def test_composite_rejects_boundary_mutation_after_archive_preparation(storage: Any) -> None:
+async def test_immutable_boundary_preserves_the_original_valid_composite(storage: Any) -> None:
     fixture = await _fixture(
         storage,
-        label="boundary-mutation",
+        label="immutable-boundary",
         include_message=True,
         include_memory=False,
         message_rows=1,
         message_page_size=2,
     )
-    assert fixture.message_request is not None
+    with pytest.raises(
+        sqlite3.IntegrityError,
+        match=r"текст сообщения чата неизменяем",
+    ):
+        with storage.transaction() as conn:
+            conn.execute(
+                "UPDATE messages SET content=? WHERE id=?",
+                ("mutated accepted boundary", fixture.boundary_id),
+            )
     with storage.transaction() as conn:
-        conn.execute(
-            "UPDATE messages SET content=? WHERE id=?",
-            ("mutated accepted boundary", fixture.boundary_id),
-        )
-    with storage.transaction() as conn:
-        changed_page = fixture.message_adapter.prepare_in_transaction(
-            conn,
-            context=fixture.context,
-            request=fixture.message_request,
-        )
-    assert changed_page._is_process_owned()
-    with pytest.raises(ArchiveSearchServiceError):
-        compose_prepared_archive_searches(
-            fixture.prepared,
-            message_exact_pages=(changed_page,),
-        )
+        boundary = conn.execute(
+            "SELECT content FROM messages WHERE id=?",
+            (fixture.boundary_id,),
+        ).fetchone()
+    assert boundary is not None
+    assert boundary["content"] == "R8H accepted boundary immutable-boundary"
+    composite = compose_prepared_archive_searches(
+        fixture.prepared,
+        message_exact_pages=fixture.message_pages,
+    )
+    assert composite.message_exact_pages == fixture.message_pages
 
 
 async def test_composite_rejects_more_than_32_real_exact_pages(storage: Any) -> None:
