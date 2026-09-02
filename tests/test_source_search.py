@@ -1313,13 +1313,15 @@ def test_raw_replay_keys_cannot_reopen_a_quarantined_source(storage):
 
 
 def test_the_index_is_only_ever_read_through_filtered_storage_helpers():
-    """Every FTS reader owns the full lifecycle/privacy predicate before LIMIT.
+    """Every FTS reader authenticates material before identifiers or bodies.
 
     `raw_fts` holds terms derived from EVERY raw object, rejected ones included — a
     deliberate choice, so that returning an ignored item to pending makes it
     reachable again without an index rebuild. The price is that a second query
     against `raw_fts` without the verdict filter would expose rejected material, so
-    there must not be one.
+    there must not be one. The focused archive lane may bound opaque rowid leads
+    before authorization, but it must join a body-free authorized source set before
+    exposing identifiers and must report that lead coverage as non-exhaustive.
     """
     import ast
     from pathlib import Path
@@ -1332,10 +1334,57 @@ def test_the_index_is_only_ever_read_through_filtered_storage_helpers():
             continue
         # The schema declares it; storage/_intake.py owns every reader plus the
         # exact FTS secure-delete maintenance command validated below.
-        if path.name in {"_base.py", "_core.py", "_intake.py"}:
+        if path.name in {"_base.py", "_core.py", "_intake.py"} or path.relative_to(root) == Path(
+            "storage/_archive_search_documents.py"
+        ):
             continue
         offenders.append(str(path.relative_to(root)))
     assert not offenders, f"raw_fts is queried outside the filtered helper: {offenders}"
+
+    archive = (root / "storage" / "_archive_search_documents.py").read_text(encoding="utf-8")
+    archive_tree = ast.parse(archive)
+    archive_raw_fts_functions = {
+        node.name: node
+        for node in ast.walk(archive_tree)
+        if isinstance(node, ast.FunctionDef)
+        and any(
+            isinstance(item, ast.Constant)
+            and isinstance(item.value, str)
+            and ("FROM raw_fts" in item.value or "JOIN raw_fts" in item.value)
+            for item in ast.walk(node)
+        )
+    }
+    assert set(archive_raw_fts_functions) == {"_focused_document_lexical_rows"}
+    focused = archive_raw_fts_functions["_focused_document_lexical_rows"]
+    sql_values = [
+        node.value
+        for node in ast.walk(focused)
+        if isinstance(node, ast.Assign)
+        and any(isinstance(target, ast.Name) and target.id == "sql" for target in node.targets)
+        and isinstance(node.value, ast.JoinedStr)
+    ]
+    assert len(sql_values) == 1
+    focused_sql = ast.get_source_segment(archive, sql_values[0]) or ""
+    assert focused_sql.count("SELECT rowid AS raw_rowid FROM raw_fts") == 3
+    assert focused_sql.count("JOIN authorized_sources s ON s.raw_rowid=") == 3
+    assert not any(term in focused_sql for term in ("raw_content", "metadata_json", "snippet(", "bm25("))
+    source_cte_calls = [
+        node
+        for node in ast.walk(focused)
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == "_source_cte"
+    ]
+    assert len(source_cte_calls) == 1
+    source_cte_call = source_cte_calls[0]
+    assert [ast.unparse(argument) for argument in source_cte_call.args] == [
+        "ArchiveSearchCorpus.DOCUMENTS",
+        "request",
+    ]
+    assert {keyword.arg: ast.literal_eval(keyword.value) for keyword in source_cte_call.keywords} == {
+        "bounded_material": True,
+        "include_body": False,
+    }
+    assert "raw_fts has no authenticated completeness generation" in archive
+    assert "derivative_mismatches = max(1, derivative_mismatches)" in archive
 
     intake = (root / "storage" / "_intake.py").read_text(encoding="utf-8")
     tree = ast.parse(intake)

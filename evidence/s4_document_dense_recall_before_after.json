@@ -51,19 +51,19 @@
       "paraphrase": {"denominator": 6, "numerator": 6, "ppm": 1000000},
       "synonym": {"denominator": 5, "numerator": 5, "ppm": 1000000}
     },
-    "release_sha256": "7bafc0db7fe1a5820f1e77e1e32b50fae8a8a3f7825ff47b015a5672cc13e1a9",
-    "repeat_output_sha256": "4e83b5662a8b599c519400b1f05a912b55225db5f4668addb1e8ceef23cfc6b0",
+    "release_sha256": "393a335c293e97e8155906109ab09aab59830efaffb1631ea7ef8fb8afd904c2",
+    "repeat_output_sha256": "5e783308c04a6425c1a0961db029ec2fc5d3792533e0f5794c66612451035556",
     "result_sha256": "66e943fda982457e47e06eabc6ab977936646e2cecce8d78e089a7c00cd276a8",
-    "source_commit": "06be86a5738e7a4abce0c21e14918f97c04b5ec9",
+    "source_commit": "c924a3dba8b5fab9a4e2a806edf6eb633c563c55",
     "source_guard": {
       "instrument_sha256_end": "fd489c05b86f680b5cb29b150284add6f025099f59deb048ad1aa0bd8a2c08ec",
       "instrument_sha256_start": "fd489c05b86f680b5cb29b150284add6f025099f59deb048ad1aa0bd8a2c08ec",
-      "release_sha256_end": "7bafc0db7fe1a5820f1e77e1e32b50fae8a8a3f7825ff47b015a5672cc13e1a9",
-      "release_sha256_start": "7bafc0db7fe1a5820f1e77e1e32b50fae8a8a3f7825ff47b015a5672cc13e1a9"
+      "release_sha256_end": "393a335c293e97e8155906109ab09aab59830efaffb1631ea7ef8fb8afd904c2",
+      "release_sha256_start": "393a335c293e97e8155906109ab09aab59830efaffb1631ea7ef8fb8afd904c2"
     },
     "source_worktree_clean": true,
     "source_worktree_status_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-    "stable_envelope_sha256": "f741a6d240358a3ab617e87843866a58f75019c7005b1895d73615190c48c264"
+    "stable_envelope_sha256": "5957819ec402350eee20d9469772efcfe9d35b37509bce58e4970536dcc4f27e"
   },
   "claim": {
     "corpus": "current_code_owned_synthetic_long_form_projection",
@@ -140,7 +140,7 @@
     "baseline_repeat_output_identical": true,
     "baseline_repeat_output_sha256": "4924a3cb68790f755a1fa558aded668d02ab20797d7a093694b4d15b26fae770",
     "candidate_repeat_output_identical": true,
-    "candidate_repeat_output_sha256": "4e83b5662a8b599c519400b1f05a912b55225db5f4668addb1e8ceef23cfc6b0",
+    "candidate_repeat_output_sha256": "5e783308c04a6425c1a0961db029ec2fc5d3792533e0f5794c66612451035556",
     "instrument_sha256": "fd489c05b86f680b5cb29b150284add6f025099f59deb048ad1aa0bd8a2c08ec",
     "network_forbidden": true,
     "path": "tools/document_dense_recall_measurement.py",
