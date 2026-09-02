@@ -1,3 +1,17 @@
+## 0.208.0 — 2026-09-02
+
+### Authenticated exact message windows
+
+- Adds a code-owned queryless conversation-window lane bound to the exact
+  durable ingress row and fresh `conversations.read` plus `search.use`
+  authority before counts, selection or message bodies are read.
+- Preserves stable message/reply identity across bounded pagination and
+  reauthorizes every accepted page inside the final assistant transaction.
+- Fails closed on revoke, drift, lost private carriers and partial-page
+  failures; exact transcript text never reaches irreversible TTS first.
+- Keeps topical and legacy message search unchanged. SQLite remains at schema
+  50; exact `0.207.99` is the predecessor and `0.207.90` the fallback.
+
 ## 0.207.99 — 2026-09-02
 
 ### Focused archive-source parity

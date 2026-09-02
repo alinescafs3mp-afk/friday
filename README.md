@@ -2,7 +2,7 @@
 
 **Friday** (по-русски — **Пятница**; ex codename Jericho) — локальная многопользовательская Knowledge Operating System: она принимает текст и документы, сохраняет первоисточник, строит граф знаний, ищет по личной базе и отвечает через Telegram или HTTP API. Веб-панель предназначена для администрирования, разбора Inbox, работы с сущностями, правами, резервными копиями и диагностикой.
 
-Текущая версия: **0.207.99**; immutable fallback — **0.207.90**. Owner-only
+Текущая версия: **0.208.0**; immutable fallback — **0.207.90**. Owner-only
 Engineer Mode теперь является автономной консолью Пятницы внутри её основной
 VM: модель сама выбирает и
 последовательно запускает установленное ПО от пользователя службы, работает с
@@ -402,7 +402,7 @@ fan-out одной задачи. Иерархическое чтение док�
 `/v1/models`, bounded `/metrics`, `/server_info` и per-process deployment
 witness с code-owned identities и launch graph. Любой drift, неполный
 witness или незамкнутый same-origin proxy оставляют routes в `legacy`.
-Приёмка 0.207.99 должна показать в `/api/health` его точную версию,
+Приёмка 0.208.0 должна показать в `/api/health` его точную версию,
 profile id, `canary_ready`, `live_attestation_clear`,
 `verified_context_tokens=40960` и оба зарегистрированных route; простого HTTP
 `status=ok` недостаточно.
@@ -595,7 +595,7 @@ export FRIDAY_SYNCTHING_AMD64_TARBALL="${FRIDAY_SYNCTHING_AMD64_TARBALL:-$HOME/.
 umask 077
 candidate_sha="$(git rev-parse --verify HEAD^{commit})"
 base_sha="$(git rev-parse --verify "${QUALITY_GATE_BASE_SHA:?set accepted base}^{commit}")"
-GOLDEN_JOURNEY_RELEASE_ROOT="$(readlink -f -- "$HOME/.jericho/wheel-only-releases/a9ef8565c80592275d61c16f293c7df16fb6aa89")" || exit 1
+GOLDEN_JOURNEY_RELEASE_ROOT="$(readlink -f -- "$HOME/.jericho/wheel-only-releases/d751bfc6397c6f750724df1d40e3fb90f7594943")" || exit 1
 test -d "$GOLDEN_JOURNEY_RELEASE_ROOT" || exit 1
 export GOLDEN_JOURNEY_RELEASE_ROOT
 evidence_dir="$(mktemp -d /var/tmp/friday-gate.XXXXXXXX)"

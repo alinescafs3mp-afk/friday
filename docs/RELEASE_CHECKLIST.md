@@ -16,7 +16,7 @@
 export FRIDAY_SYNCTHING_AMD64_TARBALL="${FRIDAY_SYNCTHING_AMD64_TARBALL:-$HOME/.cache/friday/test-assets/syncthing-linux-amd64-v2.1.3.tar.gz}"
 candidate_sha="$(git rev-parse --verify 'HEAD^{commit}')"
 base_sha="$(git rev-parse --verify "${QUALITY_GATE_BASE_SHA:?set accepted base}^{commit}")"
-GOLDEN_JOURNEY_RELEASE_ROOT="$(readlink -f -- "$HOME/.jericho/wheel-only-releases/a9ef8565c80592275d61c16f293c7df16fb6aa89")" || exit 1
+GOLDEN_JOURNEY_RELEASE_ROOT="$(readlink -f -- "$HOME/.jericho/wheel-only-releases/d751bfc6397c6f750724df1d40e3fb90f7594943")" || exit 1
 test -d "$GOLDEN_JOURNEY_RELEASE_ROOT" || exit 1
 export GOLDEN_JOURNEY_RELEASE_ROOT
 evidence_dir="$(mktemp -d -p /var/tmp friday-exact-evidence.XXXXXXXX)"
@@ -202,7 +202,7 @@ failed/error/skipped-тест в любой фазе делает гейт кр�
 Для optional GPT-OSS secondary brain начиная с 0.207.11 дополнительно:
 
 - release принимается и первый раз запускается без `FRIDAY_SECONDARY_LLM_*`:
-  health имеет `status=ok`, `version=0.207.99`, `secondary.mode=disabled`,
+  health имеет `status=ok`, `version=0.208.0`, `secondary.mode=disabled`,
   `secondary.state=disabled` и `secondary.available=false`;
 - `ACCEPTED_SECONDARY_RUNTIME_PROFILES` содержит ровно finalist
   `gptoss20b-2335df123cac7fc0e13e347cde1e1ffa8562daafcaf0fc76ade1a851d2b0ff1f`
@@ -491,7 +491,7 @@ failed/error/skipped-тест в любой фазе делает гейт кр�
 - post-context load допускает bounded convergence не более 20 секунд с шагом
   50 мс только для valid same-epoch busy; invalid/epoch/deadline fail-closed, а
   initial idle и post-cancellation quiet остаются строгими;
-- final startup health имеет `status=ok`, `version=0.207.99`, configured/installed
+- final startup health имеет `status=ok`, `version=0.208.0`, configured/installed
   `canary`, routes `[archive_read, file_read]`, точный `profile_id`,
   `verified_context_tokens=40960` и непустой public `attestation_sha256`;
 - q38 выбирает только минимально достаточный closed tier из
@@ -589,6 +589,8 @@ failed/error/skipped-тест в любой фазе делает гейт кр�
 - `0.207.98/schema50` принимает exact `0.207.97` как previous и сохраняет
   `0.207.90` immutable fallback;
 - `0.207.99/schema50` принимает exact `0.207.98` как previous и сохраняет
+  `0.207.90` immutable fallback;
+- `0.208.0/schema50` принимает exact `0.207.99` как previous и сохраняет
   `0.207.90` immutable fallback;
 - activation не выполняет retention deletion: destructive apply требует exact
   scope, reviewed plan path+digest, максимум 16 candidates на batch,
@@ -815,6 +817,8 @@ fallback. `0.207.98/schema50` использует exact
 `0.207.97/schema50` как previous и exact `0.207.90/schema50` как immutable
 fallback. `0.207.99/schema50` использует exact
 `0.207.98/schema50` как previous и exact `0.207.90/schema50` как immutable
+fallback. `0.208.0/schema50` использует exact
+`0.207.99/schema50` как previous и exact `0.207.90/schema50` как immutable
 fallback. Исторический переход
 `0.207.90` напрямую от `0.207.84`
 сохраняется в legacy bridge и не переопределяется.
