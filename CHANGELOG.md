@@ -1,3 +1,16 @@
+## 0.207.99 — 2026-09-02
+
+### Focused archive-source parity
+
+- Adds an exact query-plus-source-focus contract across authorized lexical and
+  dense document retrieval without exposing source bodies during lead selection.
+- Preserves legacy single-line passage replay while using a conditional
+  multiline carrier for exact focused excerpts and provenance.
+- Reports bounded FTS lead coverage honestly as non-exhaustive and fails closed
+  on stale, ambiguous or unauthenticated derivative state.
+- SQLite remains at schema 50; exact `0.207.98` is the predecessor and
+  `0.207.90` remains the immutable fallback.
+
 ## 0.207.98 — 2026-09-01
 
 ### Internal retrieval authorization

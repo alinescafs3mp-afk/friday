@@ -50,7 +50,7 @@ the isolated gate maps only this named asset into the test environment.
 umask 077
 candidate_sha="$(git rev-parse --verify 'HEAD^{commit}')"
 base_sha="$(git rev-parse --verify "${QUALITY_GATE_BASE_SHA:?set accepted base}^{commit}")"
-GOLDEN_JOURNEY_RELEASE_ROOT="$(readlink -f -- "$HOME/.jericho/wheel-only-releases/ff8c62926e7c7ea9cfcd53c460f9a0608d83621c")" || exit 1
+GOLDEN_JOURNEY_RELEASE_ROOT="$(readlink -f -- "$HOME/.jericho/wheel-only-releases/a9ef8565c80592275d61c16f293c7df16fb6aa89")" || exit 1
 test -d "$GOLDEN_JOURNEY_RELEASE_ROOT" || exit 1
 export GOLDEN_JOURNEY_RELEASE_ROOT
 evidence_dir="$(mktemp -d -p /var/tmp friday-exact-evidence.XXXXXXXX)"

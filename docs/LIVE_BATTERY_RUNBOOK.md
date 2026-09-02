@@ -76,7 +76,7 @@ and run the canonical exact-release tier:
 export FRIDAY_SYNCTHING_AMD64_TARBALL="${FRIDAY_SYNCTHING_AMD64_TARBALL:-$HOME/.cache/friday/test-assets/syncthing-linux-amd64-v2.1.3.tar.gz}"
 candidate_sha="$(git rev-parse --verify 'HEAD^{commit}')"
 base_sha="$(git rev-parse --verify "${QUALITY_GATE_BASE_SHA:?set accepted base}^{commit}")"
-GOLDEN_JOURNEY_RELEASE_ROOT="$(readlink -f -- "$HOME/.jericho/wheel-only-releases/ff8c62926e7c7ea9cfcd53c460f9a0608d83621c")" || exit 1
+GOLDEN_JOURNEY_RELEASE_ROOT="$(readlink -f -- "$HOME/.jericho/wheel-only-releases/a9ef8565c80592275d61c16f293c7df16fb6aa89")" || exit 1
 test -d "$GOLDEN_JOURNEY_RELEASE_ROOT" || exit 1
 export GOLDEN_JOURNEY_RELEASE_ROOT
 evidence_dir="$(mktemp -d -p /var/tmp friday-exact-evidence.XXXXXXXX)"
