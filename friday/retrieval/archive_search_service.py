@@ -80,6 +80,8 @@ from friday.retrieval.contracts import (
     SearchExecutionBinding,
     SearchLane,
 )
+from friday.retrieval.memory_exact_contract import MemoryExactPage, MemoryExactRequest
+from friday.retrieval.message_exact_contract import MessageExactPage, MessageExactRequest
 from friday.storage._archive_search_documents import (
     _materialize_archive_document_lane as search_archive_document_lane,
 )
@@ -103,6 +105,7 @@ from friday.storage._conversation_passages import (
 
 _PROCESS_KEY = secrets.token_bytes(32)
 _PROCESS_AUTHORITY = object()
+MAX_ARCHIVE_EXACT_CHAIN_PAGES = 32
 _INTERNAL_LANE_LIMIT = ARCHIVE_AUTHORITY_MAX_CANDIDATES
 _DOCUMENT_CORPUS = {
     SearchCorpus.RAW_DOCUMENTS: ArchiveSearchCorpus.DOCUMENTS,
@@ -893,6 +896,355 @@ def _new_prepared(
     if not result._is_valid():
         raise _fail()
     return result
+
+
+def _same_message_exact_request(left: object, right: MessageExactRequest) -> bool:
+    try:
+        return bool(
+            type(left) is MessageExactRequest
+            and type(right) is MessageExactRequest
+            and hmac.compare_digest(
+                cast(MessageExactRequest, left).to_private_json().encode("ascii"),
+                right.to_private_json().encode("ascii"),
+            )
+        )
+    except Exception:
+        return False
+
+
+def _same_memory_exact_request(left: object, right: MemoryExactRequest) -> bool:
+    try:
+        return bool(
+            type(left) is MemoryExactRequest
+            and type(right) is MemoryExactRequest
+            and hmac.compare_digest(
+                cast(MemoryExactRequest, left).to_private_json().encode("ascii"),
+                right.to_private_json().encode("ascii"),
+            )
+        )
+    except Exception:
+        return False
+
+
+def _message_exact_chain_is_valid(
+    request: MessageExactRequest | None,
+    pages: tuple[MessageExactPage, ...],
+) -> bool:
+    try:
+        if request is None:
+            return not pages
+        if not 1 <= len(pages) <= MAX_ARCHIVE_EXACT_CHAIN_PAGES:
+            return False
+        if any(type(page) is not MessageExactPage or not page._is_process_owned() for page in pages):
+            return False
+        if not _same_message_exact_request(pages[0].request, request):
+            return False
+        identity = request.to_identity_json().encode("ascii")
+        first = pages[0]
+        selection_handles: set[str] = set()
+        row_ids: set[str] = set()
+        chronological_keys: list[tuple[str, int]] = []
+        for page in pages:
+            if not hmac.compare_digest(page.request.to_identity_json().encode("ascii"), identity):
+                return False
+            if (
+                page.principal_id != first.principal_id
+                or page.authority_handle != first.authority_handle
+                or page.snapshot_handle != first.snapshot_handle
+                or page.total_rows != first.total_rows
+                or page.boundary.message_id != first.boundary.message_id
+                or page.boundary.revision_sha256 != first.boundary.revision_sha256
+            ):
+                return False
+            if page.selection_handle in selection_handles:
+                return False
+            selection_handles.add(page.selection_handle)
+            for row in page.rows:
+                if row.message_id in row_ids:
+                    return False
+                row_ids.add(row.message_id)
+                chronological_keys.append((row.created_at, row.storage_sequence))
+        for previous, current in zip(pages, pages[1:], strict=False):
+            outbound = previous.next_continuation
+            inbound = current.request.continuation
+            if (
+                outbound is None
+                or inbound is None
+                or not hmac.compare_digest(outbound.token, inbound.token)
+                or current.offset != previous.offset + len(previous.rows)
+            ):
+                return False
+        return chronological_keys == sorted(chronological_keys) and len(chronological_keys) == len(
+            set(chronological_keys)
+        )
+    except Exception:
+        return False
+
+
+def _memory_exact_chain_is_valid(
+    request: MemoryExactRequest | None,
+    pages: tuple[MemoryExactPage, ...],
+) -> bool:
+    try:
+        if request is None:
+            return not pages
+        if not 1 <= len(pages) <= MAX_ARCHIVE_EXACT_CHAIN_PAGES:
+            return False
+        if any(type(page) is not MemoryExactPage or not page._is_process_owned() for page in pages):
+            return False
+        if not _same_memory_exact_request(pages[0].request, request):
+            return False
+        identity = request.to_identity_json().encode("ascii")
+        first = pages[0]
+        selection_handles: set[str] = set()
+        knowledge_ids: set[str] = set()
+        revisions: set[str] = set()
+        for page in pages:
+            if not hmac.compare_digest(page.request.to_identity_json().encode("ascii"), identity):
+                return False
+            if (
+                page.authority_handle != first.authority_handle
+                or page.snapshot_handle != first.snapshot_handle
+                or page.graph_source_set_sha256 != first.graph_source_set_sha256
+                or page.total_rows != first.total_rows
+                or page.snapshot_rows != first.snapshot_rows
+                or page.matched_rows != first.matched_rows
+                or page.date_window_status != first.date_window_status
+                or page.temporal_status != first.temporal_status
+            ):
+                return False
+            if page.selection_handle in selection_handles:
+                return False
+            selection_handles.add(page.selection_handle)
+            for candidate in page.candidates:
+                if (
+                    candidate.knowledge_id in knowledge_ids
+                    or candidate.candidate_revision_sha256 in revisions
+                ):
+                    return False
+                knowledge_ids.add(candidate.knowledge_id)
+                revisions.add(candidate.candidate_revision_sha256)
+        for previous, current in zip(pages, pages[1:], strict=False):
+            outbound = previous.next_continuation
+            inbound = current.request.continuation
+            if (
+                outbound is None
+                or inbound is None
+                or not hmac.compare_digest(outbound.token, inbound.token)
+                or current.offset != previous.offset + len(previous.candidates)
+            ):
+                return False
+        return True
+    except Exception:
+        return False
+
+
+def _message_exact_boundary_identity(page: MessageExactPage) -> str:
+    boundary = page.boundary
+    return hashlib.sha256(
+        _canonical_bytes(
+            {
+                "schema": "friday.private-message-window-boundary.v1",
+                "id": boundary.message_id,
+                "conversation_id": boundary.conversation_id,
+                "person_id": boundary.principal_id,
+                "role": boundary.role.value,
+                "content": boundary.content,
+                "created_at": boundary.created_at,
+            }
+        )
+    ).hexdigest()
+
+
+def _composite_scope_is_valid(
+    request: ArchiveSearchRequest,
+    prepared_search: PreparedArchiveSearch,
+    message_exact_pages: tuple[MessageExactPage, ...],
+    memory_exact_pages: tuple[MemoryExactPage, ...],
+) -> bool:
+    try:
+        recipe = prepared_search._recipe
+        if not hmac.compare_digest(
+            recipe.request.to_private_json().encode("ascii"),
+            _storage_request(request).to_private_json().encode("ascii"),
+        ):
+            return False
+        message_request = request.message_exact_request
+        memory_request = request.memory_exact_request
+        if message_request is not None:
+            if (
+                recipe.current_conversation_id != message_request.conversation_id
+                or recipe.boundary_user_message_id
+                != message_request.accepted_boundary_user_message_id
+                or any(page.principal_id != recipe.principal_id for page in message_exact_pages)
+                or recipe.accepted_boundary_identity_sha256 is None
+                or not hmac.compare_digest(
+                    recipe.accepted_boundary_identity_sha256,
+                    _message_exact_boundary_identity(message_exact_pages[0]),
+                )
+            ):
+                return False
+        if memory_request is not None and (
+            memory_request.tenant_id != recipe.tenant_id
+            or memory_request.principal_id != recipe.principal_id
+        ):
+            return False
+        return True
+    except Exception:
+        return False
+
+
+class PreparedArchiveSearchComposite(_ProcessPrivate):
+    """Sealed bounded page-chain segment for one private v3 request.
+
+    This passive carrier grants no retrieval or publication authority.  A last
+    page may retain an outbound continuation; each exact adapter still owns its
+    normal late authorization before any answer can be published.
+    """
+
+    __slots__ = (
+        "_memory_exact_pages",
+        "_message_exact_pages",
+        "_prepared_search",
+        "_process_authority",
+        "_request",
+        "_seal",
+    )
+
+    _memory_exact_pages: tuple[MemoryExactPage, ...]
+    _message_exact_pages: tuple[MessageExactPage, ...]
+    _prepared_search: PreparedArchiveSearch
+    _process_authority: object
+    _request: ArchiveSearchRequest
+    _seal: bytes
+
+    def __init__(self, *_args: object, **_kwargs: object) -> None:
+        raise _fail()
+
+    def __setattr__(self, _name: str, _value: object) -> NoReturn:
+        raise TypeError("prepared archive search composite is immutable")
+
+    def __repr__(self) -> str:
+        return "<PreparedArchiveSearchComposite sealed private>"
+
+    def _material(self) -> dict[str, object]:
+        return {
+            "archive_page_seal": self._prepared_search._seal.hex(),
+            "memory_page_handles": [item.selection_handle for item in self._memory_exact_pages],
+            "message_page_handles": [item.selection_handle for item in self._message_exact_pages],
+            "request_sha256": hashlib.sha256(self._request.to_private_json().encode("ascii")).hexdigest(),
+            "schema": "friday.prepared-archive-search-composite.private.v1",
+        }
+
+    def _is_valid(self) -> bool:
+        try:
+            return bool(
+                type(self) is PreparedArchiveSearchComposite
+                and self._process_authority is _PROCESS_AUTHORITY
+                and type(self._request) is ArchiveSearchRequest
+                and type(self._prepared_search) is PreparedArchiveSearch
+                and self._prepared_search._is_valid()
+                and type(self._message_exact_pages) is tuple
+                and type(self._memory_exact_pages) is tuple
+                and (
+                    self._request.message_exact_request is not None
+                    or self._request.memory_exact_request is not None
+                )
+                and ArchiveSearchRequest.parse_private(self._request.to_private_json()) == self._request
+                and self._prepared_search._run._request is self._request
+                and _message_exact_chain_is_valid(
+                    self._request.message_exact_request,
+                    self._message_exact_pages,
+                )
+                and _memory_exact_chain_is_valid(
+                    self._request.memory_exact_request,
+                    self._memory_exact_pages,
+                )
+                and _composite_scope_is_valid(
+                    self._request,
+                    self._prepared_search,
+                    self._message_exact_pages,
+                    self._memory_exact_pages,
+                )
+                and type(self._seal) is bytes
+                and len(self._seal) == 32
+                and hmac.compare_digest(
+                    self._seal,
+                    _mac(b"friday/prepared-archive-search-composite/v1", self._material()),
+                )
+            )
+        except Exception:
+            return False
+
+    @property
+    def request(self) -> ArchiveSearchRequest:
+        if not self._is_valid():
+            raise _fail()
+        return self._request
+
+    @property
+    def prepared_search(self) -> PreparedArchiveSearch:
+        if not self._is_valid():
+            raise _fail()
+        return self._prepared_search
+
+    @property
+    def message_exact_pages(self) -> tuple[MessageExactPage, ...]:
+        if not self._is_valid():
+            raise _fail()
+        return self._message_exact_pages
+
+    @property
+    def memory_exact_pages(self) -> tuple[MemoryExactPage, ...]:
+        if not self._is_valid():
+            raise _fail()
+        return self._memory_exact_pages
+
+
+def compose_prepared_archive_searches(
+    prepared_search: PreparedArchiveSearch,
+    *,
+    message_exact_pages: tuple[MessageExactPage, ...] = (),
+    memory_exact_pages: tuple[MemoryExactPage, ...] = (),
+) -> PreparedArchiveSearchComposite:
+    """Seal bounded exact-page prefixes without executing or projecting a lane."""
+
+    try:
+        if (
+            type(prepared_search) is not PreparedArchiveSearch
+            or not prepared_search._is_valid()
+            or type(message_exact_pages) is not tuple
+            or type(memory_exact_pages) is not tuple
+        ):
+            raise _fail()
+        request = prepared_search._run._request
+        if type(request) is not ArchiveSearchRequest:
+            raise _fail()
+        result = cast(
+            PreparedArchiveSearchComposite,
+            object.__new__(PreparedArchiveSearchComposite),
+        )
+        for name, value in (
+            ("_request", request),
+            ("_prepared_search", prepared_search),
+            ("_message_exact_pages", message_exact_pages),
+            ("_memory_exact_pages", memory_exact_pages),
+            ("_process_authority", _PROCESS_AUTHORITY),
+            ("_seal", b"0" * 32),
+        ):
+            object.__setattr__(result, name, value)
+        object.__setattr__(
+            result,
+            "_seal",
+            _mac(b"friday/prepared-archive-search-composite/v1", result._material()),
+        )
+        if not result._is_valid():
+            raise _fail()
+        return result
+    except ArchiveSearchServiceError:
+        raise
+    except Exception:
+        raise _fail() from None
 
 
 def _coverage(
@@ -2038,9 +2390,12 @@ def refresh_archive_search_reauthorization_in_transaction(
 
 
 __all__ = [
+    "MAX_ARCHIVE_EXACT_CHAIN_PAGES",
     "ArchiveSearchReauthorizationContext",
     "ArchiveSearchServiceError",
     "PreparedArchiveSearch",
+    "PreparedArchiveSearchComposite",
+    "compose_prepared_archive_searches",
     "prepare_archive_search_in_transaction",
     "reauthorize_archive_search_candidate",
     "reauthorize_archive_search_coverage",

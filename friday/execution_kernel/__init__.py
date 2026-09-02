@@ -82,6 +82,7 @@ from friday.retrieval.archive_search_obsidian_reader import (
 )
 from friday.retrieval.archive_search_service import (
     PreparedArchiveSearch,
+    PreparedArchiveSearchComposite,
     prepare_archive_search_in_transaction,
 )
 from friday.retrieval.contracts import (
@@ -1410,6 +1411,10 @@ class ToolResult:
     # Exact owner/scope/status for an explicitly resolved historical command.
     # Mutually exclusive with an open Work Item continuation and never public.
     engineer_command_ledger_observation: EngineerCommandLedgerObservation | None = None
+    # Passive R8H hand-off for an already sealed multi-lane page chain.  This
+    # final field preserves every released positional constructor slot and is
+    # intentionally absent from model and public serialization.
+    prepared_archive_search_composite: PreparedArchiveSearchComposite | None = None
 
     def archive_model_visible_bytes(self) -> bytes:
         """Return the exact sealed archive bytes, or reject a copied envelope."""

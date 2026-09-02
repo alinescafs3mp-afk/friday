@@ -42,9 +42,15 @@ from friday.retrieval.contracts import (
     TextSpanLocator,
     aggregate_absence_decision,
 )
+from friday.retrieval.memory_exact_contract import MemoryExactRequest
+from friday.retrieval.message_exact_contract import MessageExactRequest
 
 ARCHIVE_SEARCH_REQUEST_SCHEMA: Final = "friday.archive-search-request.private.v2"
 ARCHIVE_SEARCH_REQUEST_IDENTITY_SCHEMA: Final = "friday.archive-search-request-identity.private.v2"
+ARCHIVE_SEARCH_REQUEST_SCHEMA_V3: Final = "friday.archive-search-request.private.v3"
+ARCHIVE_SEARCH_REQUEST_IDENTITY_SCHEMA_V3: Final = (
+    "friday.archive-search-request-identity.private.v3"
+)
 _ARCHIVE_SEARCH_REQUEST_SCHEMA_V1: Final = "friday.archive-search-request.private.v1"
 _ARCHIVE_SEARCH_REQUEST_IDENTITY_SCHEMA_V1: Final = "friday.archive-search-request-identity.private.v1"
 ARCHIVE_SEARCH_CANDIDATE_SCHEMA: Final = "friday.archive-search-candidate.private.v1"
@@ -669,7 +675,25 @@ _PRIVATE_REQUEST_V2_KEYS = frozenset(
     }
 )
 _PRIVATE_REQUEST_V1_KEYS = _PRIVATE_REQUEST_V2_KEYS - {"focus"}
+_PRIVATE_REQUEST_V3_KEYS = _PRIVATE_REQUEST_V2_KEYS | {
+    "memory_exact_request",
+    "message_exact_request",
+}
 _MODEL_REQUEST_KEYS = _PRIVATE_REQUEST_V2_KEYS - {"schema"}
+
+
+def _message_exact_request(value: object) -> MessageExactRequest:
+    try:
+        return MessageExactRequest.from_private_payload(value)
+    except (TypeError, ValueError, UnicodeError, RecursionError):
+        raise RetrievalContractError("exact message selection is outside the closed contract") from None
+
+
+def _memory_exact_request(value: object) -> MemoryExactRequest:
+    try:
+        return MemoryExactRequest.from_private_payload(value)
+    except (TypeError, ValueError, UnicodeError, RecursionError):
+        raise RetrievalContractError("exact memory selection is outside the closed contract") from None
 
 
 @dataclass(frozen=True, slots=True, repr=False)
@@ -688,6 +712,8 @@ class ArchiveSearchRequest:
     context: ArchiveContextWindow
     continuation: str | None
     focus: str = ""
+    message_exact_request: MessageExactRequest | None = None
+    memory_exact_request: MemoryExactRequest | None = None
 
     def __post_init__(self) -> None:
         if any(
@@ -733,6 +759,38 @@ class ArchiveSearchRequest:
             raise RetrievalContractError("request scopes must use closed typed contracts")
         _integer(self.limit, "archive result limit", 1, 20)
         _token(self.continuation)
+        if self.message_exact_request is not None:
+            if type(self.message_exact_request) is not MessageExactRequest:
+                raise RetrievalContractError(
+                    "exact message selection must use the code-owned typed contract"
+                )
+            try:
+                message_exact = MessageExactRequest.parse_private(
+                    self.message_exact_request.to_private_json()
+                )
+            except Exception:
+                raise RetrievalContractError("exact message selection is not canonical") from None
+            if message_exact != self.message_exact_request:
+                raise RetrievalContractError("exact message selection is not canonical")
+            if ArchiveSearchCorpus.MESSAGES not in self.corpora:
+                raise RetrievalContractError("exact message selection requires the messages corpus")
+        if self.memory_exact_request is not None:
+            if type(self.memory_exact_request) is not MemoryExactRequest:
+                raise RetrievalContractError(
+                    "exact memory selection must use the code-owned typed contract"
+                )
+            try:
+                memory_exact = MemoryExactRequest.parse_private(
+                    self.memory_exact_request.to_private_json()
+                )
+            except Exception:
+                raise RetrievalContractError("exact memory selection is not canonical") from None
+            if memory_exact != self.memory_exact_request:
+                raise RetrievalContractError("exact memory selection is not canonical")
+            if ArchiveSearchCorpus.KNOWLEDGE not in self.corpora:
+                raise RetrievalContractError("exact memory selection requires the knowledge corpus")
+            if memory_exact.query != self.query:
+                raise RetrievalContractError("exact memory selection changed the archive query")
         if ArchiveSearchCorpus.MESSAGES not in self.corpora and (
             self.roles
             or self.conversation_scope is ConversationScope.CURRENT
@@ -780,6 +838,8 @@ class ArchiveSearchRequest:
         context: ArchiveContextWindow = ArchiveContextWindow(),
         continuation: str | None = None,
         focus: str = "",
+        message_exact_request: MessageExactRequest | None = None,
+        memory_exact_request: MemoryExactRequest | None = None,
     ) -> ArchiveSearchRequest:
         return cls(
             _query(query),
@@ -796,6 +856,8 @@ class ArchiveSearchRequest:
             context,
             _token(continuation),
             _focus(focus),
+            message_exact_request,
+            memory_exact_request,
         )
 
     def to_private_payload(self) -> dict[str, object]:
@@ -811,12 +873,29 @@ class ArchiveSearchRequest:
             "query": self.query,
             "review_scope": self.review_scope.value,
             "roles": [item.value for item in self.roles],
-            "schema": (ARCHIVE_SEARCH_REQUEST_SCHEMA if self.focus else _ARCHIVE_SEARCH_REQUEST_SCHEMA_V1),
+            "schema": (
+                ARCHIVE_SEARCH_REQUEST_SCHEMA_V3
+                if self.message_exact_request is not None or self.memory_exact_request is not None
+                else ARCHIVE_SEARCH_REQUEST_SCHEMA
+                if self.focus
+                else _ARCHIVE_SEARCH_REQUEST_SCHEMA_V1
+            ),
             "temporal_constraints": [item.to_private_payload() for item in self.temporal_constraints],
             "title_hints": list(self.title_hints),
         }
-        if self.focus:
+        if self.focus or self.message_exact_request is not None or self.memory_exact_request is not None:
             payload["focus"] = self.focus
+        if self.message_exact_request is not None or self.memory_exact_request is not None:
+            payload["message_exact_request"] = (
+                None
+                if self.message_exact_request is None
+                else self.message_exact_request.to_private_payload()
+            )
+            payload["memory_exact_request"] = (
+                None
+                if self.memory_exact_request is None
+                else self.memory_exact_request.to_private_payload()
+            )
         return payload
 
     def to_private_json(self) -> str:
@@ -827,11 +906,24 @@ class ArchiveSearchRequest:
 
         payload = self.to_private_payload()
         del payload["continuation"]
-        payload["schema"] = (
-            ARCHIVE_SEARCH_REQUEST_IDENTITY_SCHEMA
-            if self.focus
-            else _ARCHIVE_SEARCH_REQUEST_IDENTITY_SCHEMA_V1
-        )
+        if self.message_exact_request is not None or self.memory_exact_request is not None:
+            payload["schema"] = ARCHIVE_SEARCH_REQUEST_IDENTITY_SCHEMA_V3
+            payload["message_exact_request"] = (
+                None
+                if self.message_exact_request is None
+                else self.message_exact_request.to_identity_payload()
+            )
+            payload["memory_exact_request"] = (
+                None
+                if self.memory_exact_request is None
+                else self.memory_exact_request.to_identity_payload()
+            )
+        else:
+            payload["schema"] = (
+                ARCHIVE_SEARCH_REQUEST_IDENTITY_SCHEMA
+                if self.focus
+                else _ARCHIVE_SEARCH_REQUEST_IDENTITY_SCHEMA_V1
+            )
         return payload
 
     def to_identity_json(self) -> str:
@@ -839,7 +931,9 @@ class ArchiveSearchRequest:
 
     def identity_digest_material(self) -> bytes:
         domain = (
-            b"friday/archive-search-request-identity/v2\0"
+            b"friday/archive-search-request-identity/v3\0"
+            if self.message_exact_request is not None or self.memory_exact_request is not None
+            else b"friday/archive-search-request-identity/v2\0"
             if self.focus
             else b"friday/archive-search-request-identity/v1\0"
         )
@@ -893,6 +987,16 @@ class ArchiveSearchRequest:
             ),
             continuation=_token(payload.get("continuation")),
             focus=_focus(payload.get("focus", "")),
+            message_exact_request=(
+                None
+                if payload.get("message_exact_request") is None
+                else _message_exact_request(payload.get("message_exact_request"))
+            ),
+            memory_exact_request=(
+                None
+                if payload.get("memory_exact_request") is None
+                else _memory_exact_request(payload.get("memory_exact_request"))
+            ),
         )
 
     @classmethod
@@ -913,6 +1017,10 @@ class ArchiveSearchRequest:
             payload = _exact(value, _PRIVATE_REQUEST_V2_KEYS, "archive request")
             if payload["focus"] == "":
                 raise RetrievalContractError("archive request v2 requires a non-empty focus")
+        elif schema == ARCHIVE_SEARCH_REQUEST_SCHEMA_V3:
+            payload = _exact(value, _PRIVATE_REQUEST_V3_KEYS, "archive request")
+            if payload["message_exact_request"] is None and payload["memory_exact_request"] is None:
+                raise RetrievalContractError("archive request v3 requires an exact selection")
         else:
             raise RetrievalContractError("archive request schema is unsupported")
         return cls._from_fields(payload)
@@ -1592,6 +1700,8 @@ ArchiveSearchPrivateResult = ArchiveSearchResult
 ArchiveSearchPrivatePage = ArchiveSearchPage
 
 __all__ = [
+    "ARCHIVE_SEARCH_REQUEST_IDENTITY_SCHEMA_V3",
+    "ARCHIVE_SEARCH_REQUEST_SCHEMA_V3",
     "ArchiveContextWindow",
     "ArchiveEvidenceAuthority",
     "ArchiveLifecycleConstraint",
