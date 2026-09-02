@@ -10,6 +10,7 @@ import json
 import pickle
 import sqlite3
 import time
+from contextlib import suppress
 from dataclasses import replace
 from typing import Any
 
@@ -384,61 +385,76 @@ def _seed_known_at_graph(
     return knowledge, alpha, beta, relation, query, known_at
 
 
-def _seed_merged_known_at_graph(
+def _seed_additional_known_at_graph(
     storage: FridayStorage,
     *,
     suffix: str,
 ) -> tuple[Entity, Entity, Entity, str, str]:
-    query = "как связан MergeBoundAlphaR8E с MergeBoundBetaR8E"
+    query = "как связан AdditionalBoundAlphaR8E с AdditionalBoundBetaR8E"
     _raw, knowledge = _seed(
         storage,
         suffix=suffix,
-        query="R8EMERGEBOUNDHISTORY",
-        body=f"R8EMERGEBOUNDHISTORY: {query}",
+        query="R8EADDITIONALBOUNDHISTORY",
+        body=f"R8EADDITIONALBOUNDHISTORY: {query}",
     )
-    alpha = Entity(new_id("ent"), TENANT, "MergeBoundAlphaR8E", EntityType.PERSON)
+    alpha = Entity(
+        new_id("ent"),
+        TENANT,
+        "AdditionalBoundAlphaR8E",
+        EntityType.PERSON,
+    )
     beta = Entity(
         new_id("ent"),
         TENANT,
-        "MergeBoundBetaR8E",
+        "AdditionalBoundBetaR8E",
         EntityType.ORGANIZATION,
     )
-    merged = Entity(
+    additional = Entity(
         new_id("ent"),
         TENANT,
-        "MergeBoundLegacyBetaR8E",
+        "AdditionalBoundDeletedR8E",
         EntityType.ORGANIZATION,
     )
-    for entity in (alpha, beta, merged):
+    for entity in (alpha, beta, additional):
         storage.create_entity(entity)
-    for entity in (alpha, beta):
         storage.link_knowledge_entity(
             TENANT,
             knowledge.id,
             entity.id,
             status="accepted",
-            evidence={"basis": "merged-known-at-bound"},
+            evidence={"basis": "additional-known-at-bound"},
             reviewed_by=PRINCIPAL,
         )
-    relation = Relation(
+    visible_relation = Relation(
         new_id("rel"),
         TENANT,
         alpha.id,
-        merged.id,
+        beta.id,
         RelationType.RELATED_TO,
         weight=0.8,
         valid_from="2020-01-01",
         metadata_json={"evidence": {"knowledge_object_id": knowledge.id}},
     )
-    storage.create_relation(relation)
-    storage.merge_entities(TENANT, merged.id, beta.id, merged_by=TENANT)
-    revision = storage.execute(
-        """SELECT recorded_at FROM relation_revisions
-             WHERE relation_id=? ORDER BY event_seq DESC LIMIT 1""",
-        (relation.id,),
+    additional_relation = Relation(
+        new_id("rel"),
+        TENANT,
+        alpha.id,
+        additional.id,
+        RelationType.DEPENDS_ON,
+        weight=0.7,
+        valid_from="2020-01-01",
+        metadata_json={"evidence": {"knowledge_object_id": knowledge.id}},
+    )
+    storage.create_relation(visible_relation)
+    storage.create_relation(additional_relation)
+    assert storage.soft_delete_entity(additional.id, TENANT) is True
+    deletion_version = storage.execute(
+        """SELECT created_at FROM entity_versions
+             WHERE entity_id=? ORDER BY version DESC LIMIT 1""",
+        (additional.id,),
     ).fetchone()
-    assert revision is not None
-    return alpha, beta, merged, query, str(revision[0])
+    assert deletion_version is not None
+    return alpha, beta, additional, query, str(deletion_version[0])
 
 
 def test_observer_open_failure_exposes_only_the_fixed_public_error(
@@ -476,6 +492,150 @@ def test_observer_open_failure_exposes_only_the_fixed_public_error(
     assert str(captured.value) == "memory-exact provider connection is unavailable"
     assert private_body not in str(captured.value)
     assert str(storage.settings.database_path) not in str(captured.value)
+
+
+def test_observer_misdirection_at_open_is_body_free(
+    storage: Any,
+    tmp_path: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    private_body = "R8E-PRIVATE-OBSERVER-MISDIRECTION-BODY"
+    _seed(
+        storage,
+        suffix="observer-misdirection",
+        query="R8EOBSERVERMISDIRECTION",
+        body=private_body,
+    )
+    storage.ensure_user(PRINCIPAL, preset_key="owner")
+    authorization = AuthorizationService(storage, shared_tenant=TENANT)
+    actor = authorization.actor_for_user(PRINCIPAL, source="memory-exact-adversarial-test")
+    issuer, _context = _turn(actor, label="observer-misdirection")
+
+    source_path = storage.settings.database_path.resolve(strict=True)
+    decoy_path = tmp_path / "observer-private-decoy.sqlite3"
+    real_connect = sqlite3.connect
+    decoy = real_connect(
+        str(decoy_path),
+        check_same_thread=False,
+        isolation_level=None,
+    )
+    try:
+        storage.conn.backup(decoy)
+
+        def misdirected_observer(*_args: object, **_kwargs: object) -> sqlite3.Connection:
+            return decoy
+
+        monkeypatch.setattr(memory_exact_internal.sqlite3, "connect", misdirected_observer)
+        with pytest.raises(MemoryExactInternalError) as captured:
+            MemoryExactInternalAdapter(
+                authorization,
+                issuer,
+                storage,
+                HybridSearcher(storage, record_usage=False),
+                KnowledgeGraph(storage),
+            )
+    finally:
+        decoy.close()
+
+    assert str(captured.value) == "memory-exact provider connection is unavailable"
+    assert captured.value.__cause__ is None
+    exposed = f"{captured.value!s}\n{captured.value!r}"
+    for private in (private_body, str(source_path), str(decoy_path)):
+        assert private not in exposed
+
+
+def test_same_path_inode_replacement_before_adapter_is_body_free(
+    settings: Any,
+    tmp_path: Any,
+) -> None:
+    live_path = tmp_path / "memory-exact-preseal-live.sqlite3"
+    configured = replace(
+        settings,
+        database_path=live_path,
+        database_must_exist=False,
+    )
+    dedicated = FridayStorage(configured)
+    private_body = "R8E-PRIVATE-PRESEAL-DATABASE-PROVENANCE-BODY"
+    replacement_path = tmp_path / "memory-exact-preseal-replacement.sqlite3"
+    displaced_path = tmp_path / "memory-exact-preseal-displaced.sqlite3"
+    swapped_copy_path = tmp_path / "memory-exact-preseal-swapped-copy.sqlite3"
+    original_displaced = False
+    replacement_installed = False
+    adapter: MemoryExactInternalAdapter | None = None
+    try:
+        _seed(
+            dedicated,
+            suffix="preseal-database-provenance",
+            query="R8EPRESEALDATABASEPROVENANCE",
+            body=private_body,
+        )
+        dedicated.ensure_user(PRINCIPAL, preset_key="owner")
+        authorization = AuthorizationService(dedicated, shared_tenant=TENANT)
+        actor = authorization.actor_for_user(
+            PRINCIPAL,
+            source="memory-exact-adversarial-test",
+        )
+        issuer, _context = _turn(actor, label="preseal-database-provenance")
+        searcher = HybridSearcher(dedicated, record_usage=False)
+        graph = KnowledgeGraph(dedicated)
+
+        # The source connection is already open on A before B is cloned and
+        # installed at the same canonical pathname.
+        source = dedicated.conn
+        original_stat = live_path.stat()
+        original_identity = (original_stat.st_dev, original_stat.st_ino)
+        replacement = sqlite3.connect(str(replacement_path), isolation_level=None)
+        try:
+            source.backup(replacement)
+        finally:
+            replacement.close()
+        replacement_stat = replacement_path.stat()
+        replacement_identity = (replacement_stat.st_dev, replacement_stat.st_ino)
+        assert replacement_identity != original_identity
+
+        live_path.replace(displaced_path)
+        original_displaced = True
+        replacement_path.replace(live_path)
+        replacement_installed = True
+        assert dedicated.conn is source
+        assert (live_path.stat().st_dev, live_path.stat().st_ino) == replacement_identity
+
+        with pytest.raises(MemoryExactInternalError) as captured:
+            adapter = MemoryExactInternalAdapter(
+                authorization,
+                issuer,
+                dedicated,
+                searcher,
+                graph,
+            )
+        assert str(captured.value) == "memory-exact provider connection is unavailable"
+        assert captured.value.__cause__ is None
+        exposed = f"{captured.value!s}\n{captured.value!r}"
+        for private in (
+            private_body,
+            str(live_path),
+            str(replacement_path),
+            str(displaced_path),
+            str(swapped_copy_path),
+        ):
+            assert private not in exposed
+    finally:
+        if adapter is not None:
+            observer = getattr(adapter, "_dependency_observer", None)
+            if type(observer) is sqlite3.Connection:
+                with suppress(sqlite3.Error):
+                    observer.close()
+        try:
+            if replacement_installed and live_path.exists():
+                live_path.replace(swapped_copy_path)
+                replacement_installed = False
+        finally:
+            try:
+                if original_displaced and displaced_path.exists():
+                    displaced_path.replace(live_path)
+                    original_displaced = False
+            finally:
+                dedicated.close(final=True)
 
 
 @pytest.mark.parametrize(
@@ -872,11 +1032,9 @@ async def test_provider_time_revocation_precedes_every_exact_source_read(
                 if security_id in normalized:
                     events.append(("authorization", security_id))
                     break
-        elif normalized.startswith(("select", "with")):
+        elif normalized.startswith(("select", "with")) and ("from temp.sqlite_schema" not in normalized):
             markers = ",".join(
-                candidate
-                for candidate in _PROVIDER_SOURCE_SQL_MARKERS
-                if candidate in normalized
+                candidate for candidate in _PROVIDER_SOURCE_SQL_MARKERS if candidate in normalized
             )
             if markers:
                 events.append(("source", markers))
@@ -945,10 +1103,7 @@ async def test_provider_time_revocation_precedes_every_exact_source_read(
     if denied_security_id is None:
         assert source_queries > 0
         first_source_markers = {
-            marker
-            for kind, value in transaction_events[0]
-            if kind == "source"
-            for marker in value.split(",")
+            marker for kind, value in transaction_events[0] if kind == "source" for marker in value.split(",")
         }
         assert {"knowledge_objects", "raw_objects"} <= first_source_markers
     else:
@@ -1482,9 +1637,7 @@ async def test_feedback_order_change_after_authorized_refresh_is_burned(
             )
         )
     changed = await adapter.prepare(context=context, request=turn_request)
-    assert tuple(candidate.knowledge_id for candidate in changed.candidates) == tuple(
-        reversed(before)
-    )
+    assert tuple(candidate.knowledge_id for candidate in changed.candidates) == tuple(reversed(before))
     assert decision.authorized is True
 
     with storage.transaction() as conn:
@@ -1572,6 +1725,125 @@ async def test_provider_dependency_ledger_reuses_one_source_thread_epoch(
         )
 
 
+async def test_same_path_inode_replacement_after_refresh_is_burned(
+    settings: Any,
+    tmp_path: Any,
+) -> None:
+    live_path = tmp_path / "memory-exact-provenance-live.sqlite3"
+    configured = replace(
+        settings,
+        database_path=live_path,
+        database_must_exist=False,
+    )
+    dedicated = FridayStorage(configured)
+    private_body = "R8E-PRIVATE-DATABASE-PROVENANCE-BODY"
+    replacement_path = tmp_path / "memory-exact-provenance-replacement.sqlite3"
+    displaced_path = tmp_path / "memory-exact-provenance-displaced.sqlite3"
+    swapped_copy_path = tmp_path / "memory-exact-provenance-swapped-copy.sqlite3"
+    original_displaced = False
+    replacement_installed = False
+    adapter: MemoryExactInternalAdapter | None = None
+    try:
+        try:
+            _seed(
+                dedicated,
+                suffix="database-provenance-replacement",
+                query="R8EDATABASEPROVENANCE",
+                body=private_body,
+            )
+            _authorization, actor, context, _searcher, adapter = _stack(
+                dedicated,
+                label="database-provenance-replacement",
+            )
+            page = await adapter.prepare(
+                context=context,
+                request=_request(actor, context, "R8EDATABASEPROVENANCE"),
+            )
+            decision = await adapter.reauthorize_for_publication(context=context, page=page)
+            refresh = await adapter.refresh_publication_authority(
+                context=context,
+                page=page,
+                decision=decision,
+            )
+            assert decision.authorized is True
+            assert refresh.status is MemoryExactPublicationStatus.AUTHORIZED
+
+            replacement = sqlite3.connect(str(replacement_path), isolation_level=None)
+            try:
+                dedicated.conn.backup(replacement)
+            finally:
+                replacement.close()
+            original_stat = live_path.stat()
+            replacement_stat = replacement_path.stat()
+            original_identity = (original_stat.st_dev, original_stat.st_ino)
+            replacement_identity = (replacement_stat.st_dev, replacement_stat.st_ino)
+            assert replacement_identity != original_identity
+
+            live_path.replace(displaced_path)
+            original_displaced = True
+            replacement_path.replace(live_path)
+            replacement_installed = True
+            assert live_path.resolve(strict=True) == configured.database_path.resolve(strict=True)
+            live_stat = live_path.stat()
+            assert (live_stat.st_dev, live_stat.st_ino) == replacement_identity
+
+            with dedicated.transaction() as conn:
+                assert (
+                    adapter.consume_publication_authority_in_transaction(
+                        conn,
+                        context=context,
+                        page=page,
+                        decision=decision,
+                        refresh=refresh,
+                    )
+                    is False
+                )
+        finally:
+            try:
+                if replacement_installed and live_path.exists():
+                    live_path.replace(swapped_copy_path)
+                    replacement_installed = False
+            finally:
+                if original_displaced and displaced_path.exists():
+                    displaced_path.replace(live_path)
+                    original_displaced = False
+
+        assert decision.status is MemoryExactPublicationStatus.AUTHORIZED
+        assert decision.authorized is False
+        assert decision.to_public_payload()["authorized"] is False
+        with dedicated.transaction() as conn:
+            assert (
+                adapter.consume_publication_authority_in_transaction(
+                    conn,
+                    context=context,
+                    page=page,
+                    decision=decision,
+                    refresh=refresh,
+                )
+                is False
+            )
+        public_surface = "\n".join(
+            (
+                repr(refresh),
+                repr(decision),
+                json.dumps(decision.to_public_payload(), sort_keys=True),
+            )
+        )
+        for private in (
+            private_body,
+            str(live_path),
+            str(displaced_path),
+            str(replacement_path),
+            str(swapped_copy_path),
+        ):
+            assert private not in public_surface
+    finally:
+        if adapter is not None:
+            with suppress(Exception):
+                adapter._dependency_observer.close()  # noqa: SLF001
+        dedicated.close(final=True)
+
+
 @pytest.mark.parametrize("mutation", ("feedback", "embedding", "accepted-link"))
 async def test_committed_provider_dependency_change_after_refresh_is_burned(
     storage: Any,
@@ -1628,9 +1900,7 @@ async def test_committed_provider_dependency_change_after_refresh_is_burned(
                     "model": "memory-exact-adversarial",
                     "dim": 2,
                     "source_version": knowledge.version,
-                    "content_hash": hashlib.sha256(
-                        knowledge.content.encode("utf-8")
-                    ).hexdigest(),
+                    "content_hash": hashlib.sha256(knowledge.content.encode("utf-8")).hexdigest(),
                     "vector": b"\x00\x00\x00\x00\x00\x00\x00\x00",
                 }
             ]
@@ -1692,9 +1962,7 @@ async def test_uncommitted_provider_dependency_change_burns_through_rollback(
                     "model": "memory-exact-adversarial",
                     "dim": 2,
                     "source_version": knowledge.version,
-                    "content_hash": hashlib.sha256(
-                        knowledge.content.encode("utf-8")
-                    ).hexdigest(),
+                    "content_hash": hashlib.sha256(knowledge.content.encode("utf-8")).hexdigest(),
                     "vector": baseline_vector,
                 }
             ]
@@ -1716,39 +1984,38 @@ async def test_uncommitted_provider_dependency_change_burns_through_rollback(
     assert decision.authorized is True
     assert refresh.status is MemoryExactPublicationStatus.AUTHORIZED
 
-    with pytest.raises(RuntimeError, match="roll back hostile dependency"):
-        with storage.transaction() as conn:
-            if mutation == "feedback-dml":
-                cursor = conn.execute(
-                    """UPDATE feedback_state SET score=?,comment=?
+    with pytest.raises(RuntimeError, match="roll back hostile dependency"), storage.transaction() as conn:
+        if mutation == "feedback-dml":
+            cursor = conn.execute(
+                """UPDATE feedback_state SET score=?,comment=?
                          WHERE user_id=? AND target_type=? AND target_id=?
                            AND feedback_type=?""",
-                    (
-                        0.75,
-                        "uncommitted",
-                        TENANT,
-                        "knowledge_object",
-                        knowledge.id,
-                        FeedbackType.SEARCH_QUALITY.value,
-                    ),
-                )
-            else:
-                cursor = conn.execute(
-                    "UPDATE knowledge_embeddings SET vector=? WHERE knowledge_object_id=?",
-                    (b"\x01\x00\x00\x00\x01\x00\x00\x00", knowledge.id),
-                )
-            assert cursor.rowcount == 1
-            assert (
-                adapter.consume_publication_authority_in_transaction(
-                    conn,
-                    context=context,
-                    page=page,
-                    decision=decision,
-                    refresh=refresh,
-                )
-                is False
+                (
+                    0.75,
+                    "uncommitted",
+                    TENANT,
+                    "knowledge_object",
+                    knowledge.id,
+                    FeedbackType.SEARCH_QUALITY.value,
+                ),
             )
-            raise RuntimeError("roll back hostile dependency")
+        else:
+            cursor = conn.execute(
+                "UPDATE knowledge_embeddings SET vector=? WHERE knowledge_object_id=?",
+                (b"\x01\x00\x00\x00\x01\x00\x00\x00", knowledge.id),
+            )
+        assert cursor.rowcount == 1
+        assert (
+            adapter.consume_publication_authority_in_transaction(
+                conn,
+                context=context,
+                page=page,
+                decision=decision,
+                refresh=refresh,
+            )
+            is False
+        )
+        raise RuntimeError("roll back hostile dependency")
 
     if mutation == "feedback-dml":
         restored = storage.execute(
@@ -1881,6 +2148,409 @@ async def test_graph_read_set_cap_preserves_bounded_or_omits_saturated_current(
         assert "graph_context_for_query" not in witness_kinds
         assert graph_rankings == 0
     assert graph_context_calls == 0
+
+
+@pytest.mark.parametrize(
+    "count_kind",
+    ("relations", "knowledge-links"),
+)
+def test_provider_graph_rank_count_is_exact_at_cap_and_refuses_cap_plus_one(
+    storage: Any,
+    monkeypatch: pytest.MonkeyPatch,
+    count_kind: str,
+) -> None:
+    import friday.storage._memory_exact_internal as memory_storage
+
+    cap = 2
+    monkeypatch.setattr(
+        memory_storage,
+        "_MEMORY_EXACT_MAX_PROVIDER_MATERIAL_ROWS",
+        cap,
+    )
+    storage.ensure_user(TENANT, preset_key="owner")
+    target = Entity(
+        new_id("ent"),
+        TENANT,
+        f"R8E{count_kind.replace('-', '')}CountTarget",
+        EntityType.CONCEPT,
+    )
+    storage.create_entity(target)
+    dependency_ids: list[str] = []
+
+    def add_dependency(index: int) -> None:
+        if count_kind == "relations":
+            endpoint = Entity(
+                new_id("ent"),
+                TENANT,
+                f"OpaqueCountEndpoint{index}Zulu",
+                EntityType.CONCEPT,
+            )
+            storage.create_entity(endpoint)
+            source_id, target_id = (endpoint.id, target.id) if index % 2 == 0 else (target.id, endpoint.id)
+            relation = Relation(
+                new_id("rel"),
+                TENANT,
+                source_id,
+                target_id,
+                RelationType.RELATED_TO,
+                valid_from="2020-01-01",
+            )
+            storage.create_relation(relation)
+            dependency_ids.append(relation.id)
+            return
+        _raw, knowledge = _seed(
+            storage,
+            suffix=f"graph-knowledge-count-{index}",
+            query=f"R8EGRAPHKNOWLEDGECOUNT{index}",
+        )
+        storage.link_knowledge_entity(
+            TENANT,
+            knowledge.id,
+            target.id,
+            status="accepted",
+            evidence={"basis": "bounded-count"},
+            reviewed_by=PRINCIPAL,
+        )
+        dependency_ids.append(knowledge.id)
+
+    def replay(conn: sqlite3.Connection) -> tuple[object, str]:
+        return memory_storage._replay_memory_exact_provider_graph_operation_in_transaction(  # noqa: SLF001
+            conn,
+            storage=storage,
+            allow_active_managed_context=True,
+            kind="graph_search_entities",
+            arguments=(TENANT, target.name, 1, None),
+            candidate_entity_ids=(target.id,),
+            reserve_bytes=lambda _size: None,
+        )
+
+    for index in range(cap):
+        add_dependency(index)
+    with storage.transaction() as conn:
+        value, proof_sha256 = replay(conn)
+    assert type(value) is list
+    assert len(value) == 1
+    assert value[0]["id"] == target.id
+    expected_field = "_relation_count" if count_kind == "relations" else "_knowledge_count"
+    assert value[0][expected_field] == cap
+    assert type(proof_sha256) is str
+    assert len(proof_sha256) == 64
+
+    if count_kind == "relations":
+        with storage.transaction() as conn:
+            changed = conn.execute(
+                "UPDATE relations SET deleted_at=? WHERE id=? AND user_id=?",
+                (BASE_TIME, dependency_ids[0], TENANT),
+            )
+            assert changed.rowcount == 1
+    else:
+        assert storage.soft_delete_knowledge_object(dependency_ids[0], TENANT) is True
+
+    filtered_sql: list[str] = []
+    storage.conn.set_trace_callback(filtered_sql.append)
+    try:
+        with storage.transaction() as conn:
+            filtered_value, _filtered_proof = replay(conn)
+    finally:
+        storage.conn.set_trace_callback(None)
+    assert type(filtered_value) is list
+    assert filtered_value[0][expected_field] == cap - 1
+    normalized_filtered = [" ".join(statement.casefold().split()) for statement in filtered_sql]
+    if count_kind == "relations":
+        selected_counts = [
+            statement
+            for statement in normalized_filtered
+            if "with selected(relation_rowid) as materialized (values (" in statement
+            and "select count(*)" in statement
+            and "join relations relation" in statement
+        ]
+        assert len(selected_counts) == 1
+        assert "join entities source_entity" in selected_counts[0]
+        assert "join entities target_entity" in selected_counts[0]
+        assert "relation.deleted_at is null" in selected_counts[0]
+    else:
+        selected_counts = [
+            statement
+            for statement in normalized_filtered
+            if "with selected(link_rowid) as materialized (values (" in statement
+            and "select count(*)" in statement
+            and "join knowledge_entity_links link" in statement
+        ]
+        assert len(selected_counts) == 1
+        assert "join knowledge_objects knowledge" in selected_counts[0]
+        assert "knowledge.deleted_at is null" in selected_counts[0]
+
+    add_dependency(cap)
+    traced_sql: list[str] = []
+    storage.conn.set_trace_callback(traced_sql.append)
+    try:
+        with storage.transaction() as conn, pytest.raises(MemoryExactStorageError) as captured:
+            replay(conn)
+    finally:
+        storage.conn.set_trace_callback(None)
+    expected_error = (
+        "provider graph relation count is saturated"
+        if count_kind == "relations"
+        else "provider graph knowledge count is saturated"
+    )
+    assert str(captured.value) == expected_error
+    assert target.id not in str(captured.value)
+    assert target.name not in str(captured.value)
+
+    normalized_sql = [" ".join(statement.casefold().split()) for statement in traced_sql]
+    if count_kind == "relations":
+        source_reads = [
+            statement
+            for statement in normalized_sql
+            if "select relation.rowid from relations relation" in statement
+            and "relation.source_entity_id=" in statement
+        ]
+        target_reads = [
+            statement
+            for statement in normalized_sql
+            if "select relation.rowid from relations relation" in statement
+            and "relation.target_entity_id=" in statement
+            and "relation.source_entity_id<>" in statement
+        ]
+        assert len(source_reads) == 1
+        assert len(target_reads) == 1
+        assert f"limit {cap + 1}" in source_reads[0]
+        assert "limit 2" in target_reads[0]
+        assert "indexed by idx_relations_source" in source_reads[0]
+        assert "indexed by idx_relations_target" in target_reads[0]
+        assert target.id.casefold() in source_reads[0]
+        assert target.id.casefold() in target_reads[0]
+        assert " join " not in source_reads[0]
+        assert " join " not in target_reads[0]
+    else:
+        bounded_reads = [
+            statement
+            for statement in normalized_sql
+            if "select link.rowid from knowledge_entity_links link" in statement
+        ]
+        assert len(bounded_reads) == 1
+        assert f"order by link.rowid limit {cap + 1}" in bounded_reads[0]
+        assert "indexed by idx_links_entity" in bounded_reads[0]
+        assert target.id.casefold() in bounded_reads[0]
+        assert " join " not in bounded_reads[0]
+    assert not any(
+        "select count(*) as count from relations r" in statement
+        or "select count(*) as count from knowledge_entity_links l" in statement
+        for statement in normalized_sql
+    )
+
+
+@pytest.mark.parametrize("count_kind", ("relations", "knowledge-links"))
+def test_provider_graph_raw_count_cap_plus_one_refuses_before_eligibility_joins(
+    storage: Any,
+    monkeypatch: pytest.MonkeyPatch,
+    count_kind: str,
+) -> None:
+    import friday.storage._memory_exact_internal as memory_storage
+
+    cap = 2
+    monkeypatch.setattr(
+        memory_storage,
+        "_MEMORY_EXACT_MAX_PROVIDER_MATERIAL_ROWS",
+        cap,
+    )
+    storage.ensure_user(TENANT, preset_key="owner")
+    target = Entity(
+        new_id("ent"),
+        TENANT,
+        f"R8ERaw{count_kind.replace('-', '')}CapTarget",
+        EntityType.CONCEPT,
+    )
+    storage.create_entity(target)
+    ineligible_ids: list[str] = []
+    for index in range(cap + 1):
+        if count_kind == "relations":
+            endpoint = Entity(
+                new_id("ent"),
+                TENANT,
+                f"RawDeletedRelationEndpoint{index}Zulu",
+                EntityType.CONCEPT,
+            )
+            storage.create_entity(endpoint)
+            relation = Relation(
+                new_id("rel"),
+                TENANT,
+                target.id,
+                endpoint.id,
+                RelationType.RELATED_TO,
+                valid_from="2020-01-01",
+            )
+            storage.create_relation(relation)
+            ineligible_ids.append(relation.id)
+        else:
+            _raw, knowledge = _seed(
+                storage,
+                suffix=f"raw-deleted-knowledge-count-{index}",
+                query=f"R8ERAWDELETEDKNOWLEDGE{index}",
+            )
+            link = storage.link_knowledge_entity(
+                TENANT,
+                knowledge.id,
+                target.id,
+                status="accepted",
+                evidence={"basis": "raw-count-before-eligibility"},
+                reviewed_by=PRINCIPAL,
+            )
+            assert storage.soft_delete_knowledge_object(knowledge.id, TENANT) is True
+            ineligible_ids.append(str(link["id"]))
+    if count_kind == "relations":
+        with storage.transaction() as conn:
+            conn.executemany(
+                "UPDATE relations SET deleted_at=? WHERE id=? AND user_id=?",
+                ((BASE_TIME, relation_id, TENANT) for relation_id in ineligible_ids),
+            )
+
+    traced_sql: list[str] = []
+    storage.conn.set_trace_callback(traced_sql.append)
+    try:
+        with storage.transaction() as conn, pytest.raises(MemoryExactStorageError) as captured:
+            memory_storage._replay_memory_exact_provider_graph_operation_in_transaction(  # noqa: SLF001
+                conn,
+                storage=storage,
+                allow_active_managed_context=True,
+                kind="graph_search_entities",
+                arguments=(TENANT, target.name, 1, None),
+                candidate_entity_ids=(target.id,),
+                reserve_bytes=lambda _size: None,
+            )
+    finally:
+        storage.conn.set_trace_callback(None)
+
+    expected_error = (
+        "provider graph relation count is saturated"
+        if count_kind == "relations"
+        else "provider graph knowledge count is saturated"
+    )
+    assert str(captured.value) == expected_error
+    assert target.id not in str(captured.value)
+    assert target.name not in str(captured.value)
+    assert all(identity not in str(captured.value) for identity in ineligible_ids)
+
+    normalized_sql = [" ".join(statement.casefold().split()) for statement in traced_sql]
+    if count_kind == "relations":
+        raw_reads = [
+            statement
+            for statement in normalized_sql
+            if "select relation.rowid from relations relation" in statement
+        ]
+        assert len(raw_reads) == 1
+        assert "indexed by idx_relations_source" in raw_reads[0]
+        assert "relation.deleted_at" not in raw_reads[0]
+        eligible_marker = "join entities source_entity"
+    else:
+        raw_reads = [
+            statement
+            for statement in normalized_sql
+            if "select link.rowid from knowledge_entity_links link" in statement
+        ]
+        assert len(raw_reads) == 1
+        assert "indexed by idx_links_entity" in raw_reads[0]
+        assert "link.status='accepted'" in raw_reads[0]
+        eligible_marker = "join knowledge_objects knowledge"
+    assert f"limit {cap + 1}" in raw_reads[0]
+    assert target.id.casefold() in raw_reads[0]
+    assert " join " not in raw_reads[0]
+    assert not any(
+        eligible_marker in statement
+        and ("from relations relation" in statement or "from knowledge_entity_links link" in statement)
+        for statement in normalized_sql
+    )
+
+
+async def test_graph_count_saturation_is_replayed_as_current_unknown_and_temporal_closed(
+    storage: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import friday.storage._memory_exact_internal as memory_storage
+
+    query = "R8EGraphCountSaturation"
+    _seed(storage, suffix="graph-count-saturation", query=query)
+    target = Entity(new_id("ent"), TENANT, query, EntityType.CONCEPT)
+    endpoint = Entity(
+        new_id("ent"),
+        TENANT,
+        "GraphCountSaturationEndpoint",
+        EntityType.CONCEPT,
+    )
+    storage.create_entity(target)
+    storage.create_entity(endpoint)
+    for relation_type in (
+        RelationType.RELATED_TO,
+        RelationType.DEPENDS_ON,
+        RelationType.WORKS_ON,
+    ):
+        storage.create_relation(
+            Relation(
+                new_id("rel"),
+                TENANT,
+                target.id,
+                endpoint.id,
+                relation_type,
+                valid_from="2020-01-01",
+            )
+        )
+    monkeypatch.setattr(
+        memory_storage,
+        "_MEMORY_EXACT_MAX_PROVIDER_MATERIAL_ROWS",
+        2,
+    )
+
+    _authorization, actor, context, searcher, adapter = _stack(
+        storage,
+        label="graph-count-saturation-current",
+    )
+    searcher._pool_max = 2  # noqa: SLF001 - align the provider pool with the patched cap
+    page = await adapter.prepare(
+        context=context,
+        request=_request(actor, context, query),
+    )
+    assert page.candidates
+    assert page.graph_projection.nodes_coverage is MemoryExactGraphCoverage.UNKNOWN
+    decision = await adapter.reauthorize_for_publication(context=context, page=page)
+    refresh = await adapter.refresh_publication_authority(
+        context=context,
+        page=page,
+        decision=decision,
+    )
+    assert refresh.status is MemoryExactPublicationStatus.AUTHORIZED
+    ledger = refresh._dependency_ledger  # noqa: SLF001
+    assert ledger is not None
+    read_set = ledger._read_set  # noqa: SLF001
+    witness_kinds = tuple(
+        witness._kind  # noqa: SLF001
+        for witness in read_set._witnesses  # noqa: SLF001
+    )
+    assert witness_kinds.count("graph_search_entities") == 1
+    assert read_set._graph_suppressed_at == witness_kinds.index(  # noqa: SLF001
+        "graph_search_entities"
+    )
+    with storage.transaction() as conn:
+        assert (
+            adapter.consume_publication_authority_in_transaction(
+                conn,
+                context=context,
+                page=page,
+                decision=decision,
+                refresh=refresh,
+            )
+            is True
+        )
+
+    _authorization, actor, context, searcher, adapter = _stack(
+        storage,
+        label="graph-count-saturation-temporal",
+    )
+    searcher._pool_max = 2  # noqa: SLF001 - align the provider pool with the patched cap
+    with pytest.raises(MemoryExactInternalError, match="memory-exact provider is unavailable"):
+        await adapter.prepare(
+            context=context,
+            request=_request(actor, context, query, as_of="2024-01-01"),
+        )
 
 
 async def test_saturated_temporal_graph_is_unavailable_before_graph_ranking(
@@ -2131,16 +2801,14 @@ def test_whole_graph_operation_holds_read_only_lease_through_materialization(
             except sqlite3.DatabaseError:
                 denied = True
 
-        released, proof_sha256 = (
-            memory_storage._replay_memory_exact_provider_graph_operation_in_transaction(  # noqa: SLF001
-                conn,
-                storage=storage,
-                allow_active_managed_context=True,
-                kind="graph_search_entities",
-                arguments=(TENANT, "R8EGraphReadOnlyLease", 10, None),
-                candidate_entity_ids=candidate_ids,
-                reserve_bytes=hostile_reservation,
-            )
+        released, proof_sha256 = memory_storage._replay_memory_exact_provider_graph_operation_in_transaction(  # noqa: SLF001
+            conn,
+            storage=storage,
+            allow_active_managed_context=True,
+            kind="graph_search_entities",
+            arguments=(TENANT, "R8EGraphReadOnlyLease", 10, None),
+            candidate_entity_ids=candidate_ids,
+            reserve_bytes=hostile_reservation,
         )
         assert type(released) is list
         assert type(proof_sha256) is str
@@ -2200,9 +2868,7 @@ def test_oversized_temp_ddl_refuses_before_sql_body_materialization(
 ) -> None:
     ddl_marker = "R8E_OVERSIZED_TEMP_DDL"
     storage.conn.execute(  # nosec B608 - fixed test DDL plus bounded filler
-        f"CREATE TEMP VIEW r8e_oversized_temp_ddl AS SELECT 1 /*{ddl_marker}"
-        + ("x" * 1_048_577)
-        + "*/"
+        f"CREATE TEMP VIEW r8e_oversized_temp_ddl AS SELECT 1 /*{ddl_marker}" + ("x" * 1_048_577) + "*/"
     )
     materialized_body = False
 
@@ -2303,8 +2969,7 @@ async def test_oversized_consumed_graph_link_field_refuses_before_materializatio
         nonlocal materialized
         rows = released_links(view, *args, **kwargs)
         if any(
-            type(row.get("created_at")) in (str, bytes)
-            and len(row["created_at"]) >= oversized_bytes
+            type(row.get("created_at")) in (str, bytes) and len(row["created_at"]) >= oversized_bytes
             for row in rows
         ):
             materialized = True
@@ -2334,8 +2999,7 @@ async def test_oversized_consumed_graph_link_field_refuses_before_materializatio
         " ".join(statement.casefold().split())
         for statement in traced_sql
         if "from knowledge_entity_links" in " ".join(statement.casefold().split())
-        and "length(cast(link.created_at as blob))"
-        in " ".join(statement.casefold().split())
+        and "length(cast(link.created_at as blob))" in " ".join(statement.casefold().split())
     ]
     assert link_preflights
 
@@ -2377,14 +3041,19 @@ async def test_active_transaction_known_at_replay_is_bound_and_drift_sensitive(
     ledger = refresh._dependency_ledger  # noqa: SLF001
     assert ledger is not None
 
-    def consume(conn: sqlite3.Connection) -> bool:
+    def consume(
+        conn: sqlite3.Connection,
+        *,
+        require_matching_history_context: bool = True,
+    ) -> bool:
         active = conn.execute(
             """SELECT batch_id,recorded_at,observed_at
                  FROM relation_revision_context WHERE singleton=1"""
         ).fetchone()
         assert active is not None
         assert str(active[0])
-        assert active[1] == active[2]
+        if require_matching_history_context:
+            assert active[1] == active[2]
         return adapter.consume_publication_authority_in_transaction(
             conn,
             context=context,
@@ -2424,37 +3093,41 @@ async def test_active_transaction_known_at_replay_is_bound_and_drift_sensitive(
                  FROM relation_revision_context WHERE singleton=1"""
         ).fetchone()
         assert idle_context is not None
-        with pytest.raises(RuntimeError, match="roll back active history drift"):
-            with storage.transaction() as conn:
-                expected_total_changes = ledger._total_changes + 1  # noqa: SLF001
-                assert conn.total_changes == expected_total_changes
-                active = conn.execute(
-                    """SELECT recorded_at,observed_at
-                         FROM relation_revision_context WHERE singleton=1"""
-                ).fetchone()
-                assert active is not None
-                assert active[0] == active[1]
-                baseline = str(active[1]).encode("utf-8")
-                digit_offset = max(
-                    index
-                    for index, value in enumerate(baseline)
-                    if 48 <= value <= 57
+        with (
+            pytest.raises(RuntimeError, match="roll back active history drift"),
+            storage.transaction() as conn,
+        ):
+            expected_total_changes = ledger._total_changes + 1  # noqa: SLF001
+            assert conn.total_changes == expected_total_changes
+            active = conn.execute(
+                """SELECT recorded_at,observed_at
+                     FROM relation_revision_context WHERE singleton=1"""
+            ).fetchone()
+            assert active is not None
+            assert active[0] == active[1]
+            baseline = str(active[1]).encode("utf-8")
+            digit_offset = max(index for index, value in enumerate(baseline) if 48 <= value <= 57)
+            replacement = b"0" if baseline[digit_offset] != ord("0") else b"1"
+            with conn.blobopen(
+                "relation_revision_context",
+                "observed_at",
+                1,
+                readonly=False,
+            ) as blob:
+                blob.seek(digit_offset)
+                assert blob.read(1) == baseline[digit_offset : digit_offset + 1]
+                blob.seek(digit_offset)
+                blob.write(replacement)
+            assert conn.total_changes == expected_total_changes
+            assert (
+                consume(
+                    conn,
+                    require_matching_history_context=False,
                 )
-                replacement = b"0" if baseline[digit_offset] != ord("0") else b"1"
-                with conn.blobopen(
-                    "relation_revision_context",
-                    "observed_at",
-                    1,
-                    readonly=False,
-                ) as blob:
-                    blob.seek(digit_offset)
-                    assert blob.read(1) == baseline[digit_offset : digit_offset + 1]
-                    blob.seek(digit_offset)
-                    blob.write(replacement)
-                assert conn.total_changes == expected_total_changes
-                assert consume(conn) is False
-                assert conn.total_changes == expected_total_changes
-                raise RuntimeError("roll back active history drift")
+                is False
+            )
+            assert conn.total_changes == expected_total_changes
+            raise RuntimeError("roll back active history drift")
         restored_context = storage.execute(
             """SELECT batch_id,recorded_at,observed_at
                  FROM relation_revision_context WHERE singleton=1"""
@@ -2475,7 +3148,7 @@ async def test_historical_additional_endpoint_scope_is_bounded_and_witnessed(
     monkeypatch: pytest.MonkeyPatch,
     endpoint_case: str,
 ) -> None:
-    alpha, beta, merged, query, known_at = _seed_merged_known_at_graph(
+    alpha, beta, additional, query, known_at = _seed_additional_known_at_graph(
         storage,
         suffix=f"historical-additional-endpoint-{endpoint_case}",
     )
@@ -2491,7 +3164,7 @@ async def test_historical_additional_endpoint_scope_is_bounded_and_witnessed(
     elif endpoint_case == "incomplete":
         storage.execute(
             "DELETE FROM entity_versions WHERE entity_id=?",
-            (merged.id,),
+            (additional.id,),
         )
         storage.commit()
 
@@ -2507,8 +3180,11 @@ async def test_historical_additional_endpoint_scope_is_bounded_and_witnessed(
         known_at=known_at,
     )
     if endpoint_case in {"overflow", "incomplete"}:
-        with pytest.raises(MemoryExactInternalError):
+        with pytest.raises(MemoryExactInternalError) as captured:
             await adapter.prepare(context=context, request=request)
+        encoded_error = str(captured.value)
+        assert query not in encoded_error
+        assert additional.id not in encoded_error
         return
 
     page = await adapter.prepare(context=context, request=request)
@@ -2550,38 +3226,40 @@ async def test_historical_additional_endpoint_scope_is_bounded_and_witnessed(
         version_row = storage.execute(
             """SELECT rowid,snapshot_json FROM entity_versions
                  WHERE entity_id=? ORDER BY version DESC LIMIT 1""",
-            (merged.id,),
+            (additional.id,),
         ).fetchone()
         assert version_row is not None
         rowid = int(version_row[0])
         baseline = str(version_row[1]).encode("utf-8")
         assert baseline.startswith(b"{")
-        with pytest.raises(RuntimeError, match="roll back additional endpoint drift"):
-            with storage.transaction() as conn:
-                expected_total_changes = ledger._total_changes + 1  # noqa: SLF001
-                assert conn.total_changes == expected_total_changes
-                with conn.blobopen(
-                    "entity_versions",
-                    "snapshot_json",
-                    rowid,
-                    readonly=False,
-                ) as blob:
-                    assert blob.read(1) == b"{"
-                    blob.seek(0)
-                    blob.write(b"[")
-                assert conn.total_changes == expected_total_changes
-                assert (
-                    adapter.consume_publication_authority_in_transaction(
-                        conn,
-                        context=context,
-                        page=page,
-                        decision=decision,
-                        refresh=refresh,
-                    )
-                    is False
+        with (
+            pytest.raises(RuntimeError, match="roll back additional endpoint drift"),
+            storage.transaction() as conn,
+        ):
+            expected_total_changes = ledger._total_changes + 1  # noqa: SLF001
+            assert conn.total_changes == expected_total_changes
+            with conn.blobopen(
+                "entity_versions",
+                "snapshot_json",
+                rowid,
+                readonly=False,
+            ) as blob:
+                assert blob.read(1) == b"{"
+                blob.seek(0)
+                blob.write(b"[")
+            assert conn.total_changes == expected_total_changes
+            assert (
+                adapter.consume_publication_authority_in_transaction(
+                    conn,
+                    context=context,
+                    page=page,
+                    decision=decision,
+                    refresh=refresh,
                 )
-                assert conn.total_changes == expected_total_changes
-                raise RuntimeError("roll back additional endpoint drift")
+                is False
+            )
+            assert conn.total_changes == expected_total_changes
+            raise RuntimeError("roll back additional endpoint drift")
         restored = storage.execute(
             "SELECT snapshot_json FROM entity_versions WHERE rowid=?",
             (rowid,),
@@ -2699,9 +3377,9 @@ async def test_historical_incident_cap_counts_only_latest_public_relations(
             known_at=known_at,
         ),
     )
-    assert tuple(
-        relation.relation_type for relation in page.graph_projection.relations
-    ) == (RelationType.RELATED_TO.value,)
+    assert tuple(relation.relation_type for relation in page.graph_projection.relations) == (
+        RelationType.RELATED_TO.value,
+    )
 
     decision = await adapter.reauthorize_for_publication(context=context, page=page)
     refresh = await adapter.refresh_publication_authority(
@@ -2794,19 +3472,30 @@ async def test_large_unrelated_history_stays_outside_bounded_known_at_ledger(
     ]
     assert history_reads
     assert all(unrelated.id.casefold() not in statement for statement in history_reads)
-    assert all(
-        alpha.id.casefold() in statement or beta.id.casefold() in statement
-        for statement in history_reads
+    assert any(
+        alpha.id.casefold() in statement or beta.id.casefold() in statement for statement in history_reads
     )
     normalized_sql = [" ".join(statement.casefold().split()) for statement in traced_sql]
     assert not any("coalesce(max(rr.event_seq)" in statement for statement in normalized_sql)
     historical_rankings = [
         statement
         for statement in normalized_sql
-        if "row_number() over" in statement and "relation_revisions" in statement
+        if "row_number() over" in statement
+        and ("partition by rr.relation_id" in statement or "join relation_revisions rr" in statement)
     ]
     assert historical_rankings
-    assert all(" values " in statement for statement in historical_rankings)
+    assert any("values (" in statement for statement in historical_rankings)
+    unsafe_rankings = [
+        statement
+        for statement in historical_rankings
+        if "values (" not in statement
+        and not (
+            "source_entity_id" in statement
+            and "target_entity_id" in statement
+            and (alpha.id.casefold() in statement or beta.id.casefold() in statement)
+        )
+    ]
+    assert not unsafe_rankings, unsafe_rankings[:2]
 
     decision = await adapter.reauthorize_for_publication(context=context, page=page)
     refresh = await adapter.refresh_publication_authority(
@@ -2851,16 +3540,604 @@ async def test_large_unrelated_history_stays_outside_bounded_known_at_ledger(
         )
 
 
+@pytest.mark.parametrize(
+    ("authority", "history_kind"),
+    (
+        ("provider", "entity_versions"),
+        ("provider", "entity_merge_history"),
+        ("final", "entity_versions"),
+        ("final", "entity_merge_history"),
+    ),
+)
+def test_topology_history_cap_plus_one_refuses_after_bounded_keyed_preflight(
+    storage: Any,
+    monkeypatch: pytest.MonkeyPatch,
+    authority: str,
+    history_kind: str,
+) -> None:
+    _knowledge, alpha, beta, _relation, _query, known_at = _seed_known_at_graph(
+        storage,
+        suffix=f"topology-cap-{authority}-{history_kind}",
+    )
+    import friday.storage._memory_exact_internal as memory_storage
+
+    marker = f"R8E_TOPOLOGY_CAP_{authority}_{history_kind}"
+    if history_kind == "entity_versions":
+        existing = storage.execute(
+            "SELECT COUNT(*) FROM entity_versions WHERE entity_id=?",
+            (alpha.id,),
+        ).fetchone()
+        assert existing is not None
+        cap = int(existing[0]) + 1
+        alpha.metadata_json["r8e_bounded_preflight_marker"] = marker
+        storage.update_entity(alpha)
+        storage.update_entity(alpha)
+        monkeypatch.setattr(memory_storage, "MEMORY_EXACT_MAX_ENTITY_VERSION_ROWS", cap)
+        expected_limit = cap + 1
+        expected_error = (
+            "provider topology version history exceeds its limits"
+            if authority == "provider"
+            else "memory exact entity topology history exceeds its limits"
+        )
+        full_projection = (
+            "select version.id,version.entity_id,version.version,version.created_at"
+            if authority == "provider"
+            else "select version.id as version_id, version.entity_id"
+        )
+    else:
+        cap = 2
+        expected_limit = cap + 1
+        monkeypatch.setattr(memory_storage, "MEMORY_EXACT_MAX_ENTITY_MERGE_ROWS", cap)
+        with storage.transaction() as conn:
+            conn.executemany(
+                """INSERT INTO entity_merge_history
+                   (id,user_id,source_entity_id,target_entity_id,
+                    source_snapshot_json,target_before_json,target_after_json,
+                    transfer_json,merged_by,created_at,undone_at,undone_by)
+                   VALUES(?,?,?,?,?,?,?,?,?,?,NULL,NULL)""",
+                (
+                    (
+                        f"merge_{marker}_{index}",
+                        TENANT,
+                        alpha.id,
+                        beta.id,
+                        "{}",
+                        "{}",
+                        "{}",
+                        "{}",
+                        PRINCIPAL,
+                        known_at,
+                    )
+                    for index in range(expected_limit)
+                ),
+            )
+        expected_error = (
+            "provider topology merge history exceeds its limits"
+            if authority == "provider"
+            else "memory exact entity merge history exceeds its row limit"
+        )
+        stable_order = "order by history.source_entity_id,history.created_at,history.id"
+        full_projection = (
+            "select history.id,history.source_entity_id,history.target_entity_id"
+            if authority == "provider"
+            else "select history.id as merge_id, history.source_entity_id"
+        )
+
+    materialized_marker = False
+
+    def tracking_text_factory(value: bytes) -> str:
+        nonlocal materialized_marker
+        if marker.encode("ascii") in value:
+            materialized_marker = True
+        return value.decode("utf-8", errors="strict")
+
+    traced_sql: list[str] = []
+    storage.conn.text_factory = tracking_text_factory
+    storage.conn.set_trace_callback(traced_sql.append)
+    try:
+        with storage.transaction() as conn, pytest.raises(MemoryExactStorageError) as captured:
+            if authority == "provider":
+                memory_storage._memory_exact_provider_scoped_topology_proof_in_transaction(  # noqa: SLF001
+                    conn,
+                    tenant_id=TENANT,
+                    entity_ids=(alpha.id,),
+                    known_at=known_at,
+                    reserve_bytes=lambda _size: None,
+                    maximum_identities=memory_storage.MEMORY_EXACT_MAX_GRAPH_ENTITY_SOURCE_ROWS,
+                    allow_later_unwitnessed=False,
+                )
+            else:
+                memory_storage._historical_entity_topology(  # noqa: SLF001
+                    conn,
+                    tenant_id=TENANT,
+                    entity_ids=(alpha.id,),
+                    boundary=known_at,
+                    key=b"k" * 32,
+                )
+    finally:
+        storage.conn.set_trace_callback(None)
+        storage.conn.text_factory = str
+
+    assert str(captured.value) == expected_error
+    assert marker not in str(captured.value)
+    assert alpha.id not in str(captured.value)
+    assert beta.id not in str(captured.value)
+    assert materialized_marker is False
+    normalized_sql = [" ".join(statement.casefold().split()) for statement in traced_sql]
+    if history_kind == "entity_versions":
+        version_probes = [
+            statement
+            for statement in normalized_sql
+            if "select version.rowid from entity_versions version" in statement
+            and "indexed by sqlite_autoindex_entity_versions_2" in statement
+        ]
+        assert len(version_probes) == 1
+        version_probe = version_probes[0]
+        assert f"limit {expected_limit}" in version_probe
+        assert alpha.id.casefold() in version_probe
+        assert "where version.entity_id=" in version_probe
+        assert "version.user_id" not in version_probe
+        assert "order by version.version" in version_probe
+        assert not any(
+            "select count(*) as row_count" in statement and "entity_versions version" in statement
+            for statement in normalized_sql
+        )
+        assert not any(full_projection in statement for statement in normalized_sql)
+        plan = storage.execute(
+            "EXPLAIN QUERY PLAN " + version_probe  # nosec B608 - EXPLAINing the exact traced SELECT
+        ).fetchall()
+        plan_details = tuple(" ".join(str(row[3]).casefold().split()) for row in plan)
+        assert any(
+            "search version using" in detail and "sqlite_autoindex_entity_versions_2" in detail
+            for detail in plan_details
+        )
+        assert not any("scan " in detail or "temp b-tree" in detail for detail in plan_details)
+        return
+
+    preflights = [
+        statement
+        for statement in normalized_sql
+        if f"join {history_kind}" in statement
+        and "select count(*) as row_count" in statement
+        and "as materialized" in statement
+    ]
+    assert len(preflights) == 1
+    preflight = preflights[0]
+    assert "with wanted(entity_id) as (values (" in preflight
+    assert alpha.id.casefold() in preflight
+    assert stable_order in preflight
+    assert f"limit {expected_limit}" in preflight
+    assert "from selected join" in preflight
+    assert preflight.index(f"limit {expected_limit}") < preflight.index("select count(*) as row_count")
+    assert not any(full_projection in statement for statement in normalized_sql)
+    global_probes = [
+        statement
+        for statement in normalized_sql
+        if "select rowid from entity_merge_history" in statement and "order by rowid" in statement
+    ]
+    assert len(global_probes) == 1
+    assert normalized_sql.index(global_probes[0]) < normalized_sql.index(preflight)
+
+
+@pytest.mark.parametrize("authority", ("provider", "final"))
+def test_topology_entity_version_cap_is_cumulative_across_entities(
+    storage: Any,
+    monkeypatch: pytest.MonkeyPatch,
+    authority: str,
+) -> None:
+    _knowledge, alpha, beta, _relation, _query, known_at = _seed_known_at_graph(
+        storage,
+        suffix=f"topology-version-cumulative-{authority}",
+    )
+    import friday.storage._memory_exact_internal as memory_storage
+
+    selected_ids = tuple(sorted((alpha.id, beta.id)))
+    entities = {alpha.id: alpha, beta.id: beta}
+    version_counts: list[int] = []
+    for identity in selected_ids:
+        row = storage.execute(
+            "SELECT COUNT(*) FROM entity_versions WHERE entity_id=?",
+            (identity,),
+        ).fetchone()
+        assert row is not None
+        version_counts.append(int(row[0]))
+    assert version_counts == [1, 1]
+    marker = f"R8E_CUMULATIVE_VERSION_CAP_{authority}"
+    first = entities[selected_ids[0]]
+    first.metadata_json["r8e_cumulative_preflight_marker"] = marker
+    storage.update_entity(first)
+
+    cap = 2
+    monkeypatch.setattr(memory_storage, "MEMORY_EXACT_MAX_ENTITY_VERSION_ROWS", cap)
+    marker_materialized = False
+
+    def tracking_text_factory(value: bytes) -> str:
+        nonlocal marker_materialized
+        if marker.encode("ascii") in value:
+            marker_materialized = True
+        return value.decode("utf-8", errors="strict")
+
+    traced_sql: list[str] = []
+    storage.conn.text_factory = tracking_text_factory
+    storage.conn.set_trace_callback(traced_sql.append)
+    try:
+        with storage.transaction() as conn, pytest.raises(MemoryExactStorageError) as captured:
+            if authority == "provider":
+                memory_storage._memory_exact_provider_scoped_topology_proof_in_transaction(  # noqa: SLF001
+                    conn,
+                    tenant_id=TENANT,
+                    entity_ids=selected_ids,
+                    known_at=known_at,
+                    reserve_bytes=lambda _size: None,
+                    maximum_identities=(memory_storage.MEMORY_EXACT_MAX_GRAPH_ENTITY_SOURCE_ROWS),
+                    allow_later_unwitnessed=False,
+                )
+            else:
+                memory_storage._historical_entity_topology(  # noqa: SLF001
+                    conn,
+                    tenant_id=TENANT,
+                    entity_ids=selected_ids,
+                    boundary=known_at,
+                    key=b"k" * 32,
+                )
+    finally:
+        storage.conn.set_trace_callback(None)
+        storage.conn.text_factory = str
+
+    expected_error = (
+        "provider topology version history exceeds its limits"
+        if authority == "provider"
+        else "memory exact entity topology history exceeds its limits"
+    )
+    assert str(captured.value) == expected_error
+    assert marker not in str(captured.value)
+    assert marker_materialized is False
+    normalized_sql = [" ".join(statement.casefold().split()) for statement in traced_sql]
+    version_probes = [
+        statement
+        for statement in normalized_sql
+        if "select version.rowid from entity_versions version" in statement
+        and "indexed by sqlite_autoindex_entity_versions_2" in statement
+    ]
+    assert len(version_probes) == 2
+    for probe, identity, limit in zip(
+        version_probes,
+        selected_ids,
+        (cap + 1, 1),
+        strict=True,
+    ):
+        predicate = probe.split(" where ", 1)[1].split(" order by ", 1)[0]
+        assert predicate == f"version.entity_id='{identity.casefold()}'"
+        assert "order by version.version" in probe
+        assert f"limit {limit}" in probe
+    assert not any(
+        "select count(*) as row_count" in statement and "entity_versions version" in statement
+        for statement in normalized_sql
+    )
+    assert not any(
+        "select version.id" in statement and "entity_versions version" in statement
+        for statement in normalized_sql
+    )
+
+
+def test_known_at_graph_batches_share_one_global_merge_bound_proof(
+    storage: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import friday.storage._memory_exact_internal as memory_storage
+
+    storage.ensure_user(TENANT, preset_key="owner")
+    root = Entity(
+        new_id("ent"),
+        TENANT,
+        "R8EBatchedTopologyRoot",
+        EntityType.CONCEPT,
+    )
+    endpoints = [
+        Entity(
+            new_id("ent"),
+            TENANT,
+            f"R8EBatchedTopologyEndpoint{index:02d}",
+            EntityType.CONCEPT,
+        )
+        for index in range(12)
+    ]
+    for entity in (root, *endpoints):
+        storage.create_entity(entity)
+    for endpoint in endpoints:
+        storage.create_relation(
+            Relation(
+                new_id("rel"),
+                TENANT,
+                root.id,
+                endpoint.id,
+                RelationType.RELATED_TO,
+                valid_from="2020-01-01",
+            )
+        )
+    boundary_row = storage.execute(
+        "SELECT MAX(recorded_at) FROM relation_revisions WHERE user_id=?",
+        (TENANT,),
+    ).fetchone()
+    assert boundary_row is not None
+    assert type(boundary_row[0]) is str
+    known_at = boundary_row[0]
+    candidates = tuple(sorted((root.id, *(entity.id for entity in endpoints))))
+
+    released_global_probe = memory_storage._memory_exact_global_entity_merge_bound_in_transaction
+    released_scoped_proof = memory_storage._memory_exact_provider_scoped_topology_proof_in_transaction
+    global_probe_calls = 0
+    global_probe_reservations: list[int] = []
+    scoped_calls: list[tuple[tuple[str, ...], object | None]] = []
+
+    def observed_global_probe(
+        conn: sqlite3.Connection,
+        *,
+        reserve_bytes: Any,
+    ) -> bool:
+        nonlocal global_probe_calls
+        global_probe_calls += 1
+
+        def observed_reservation(size: int) -> None:
+            global_probe_reservations.append(size)
+            reserve_bytes(size)
+
+        return released_global_probe(conn, reserve_bytes=observed_reservation)
+
+    def observed_scoped_proof(
+        conn: sqlite3.Connection,
+        **kwargs: Any,
+    ) -> tuple[str, tuple[str, ...]]:
+        identities = kwargs["entity_ids"]
+        if identities:
+            scoped_calls.append(
+                (
+                    identities,
+                    kwargs.get("global_entity_merge_bound_proof"),
+                )
+            )
+        return released_scoped_proof(conn, **kwargs)
+
+    monkeypatch.setattr(memory_storage, "_FETCH_BATCH", 2)
+    monkeypatch.setattr(
+        memory_storage,
+        "_memory_exact_global_entity_merge_bound_in_transaction",
+        observed_global_probe,
+    )
+    monkeypatch.setattr(
+        memory_storage,
+        "_memory_exact_provider_scoped_topology_proof_in_transaction",
+        observed_scoped_proof,
+    )
+    reservations: list[int] = []
+    traced_sql: list[str] = []
+    storage.conn.set_trace_callback(traced_sql.append)
+    try:
+        with storage.transaction() as conn:
+            value, proof_sha256 = memory_storage._replay_memory_exact_provider_graph_operation_in_transaction(  # noqa: SLF001
+                conn,
+                storage=storage,
+                allow_active_managed_context=True,
+                kind="graph_context_for_query",
+                arguments=(
+                    TENANT,
+                    root.name,
+                    1,
+                    len(candidates),
+                    30,
+                    None,
+                    "2024-01-01",
+                    known_at,
+                ),
+                candidate_entity_ids=candidates,
+                reserve_bytes=reservations.append,
+            )
+    finally:
+        storage.conn.set_trace_callback(None)
+
+    assert type(value) is dict
+    assert type(proof_sha256) is str
+    assert len(proof_sha256) == 64
+    assert global_probe_calls == 1
+    assert global_probe_reservations == [0]
+    normalized_sql = [" ".join(statement.casefold().split()) for statement in traced_sql]
+    global_probes = [
+        statement
+        for statement in normalized_sql
+        if "select rowid from entity_merge_history" in statement and "order by rowid" in statement
+    ]
+    assert len(global_probes) == 1
+    assert len(scoped_calls) > 1
+    discovered = {identity for identities, _proof in scoped_calls for identity in identities}
+    assert len(discovered) >= 9
+    assert all(
+        proof is memory_storage._GLOBAL_ENTITY_MERGE_BOUND_PROOF  # noqa: SLF001
+        for _identities, proof in scoped_calls
+    )
+
+
+@pytest.mark.parametrize("authority", ("provider", "final"))
+def test_global_merge_history_probe_physically_bounds_large_unrelated_history(
+    storage: Any,
+    monkeypatch: pytest.MonkeyPatch,
+    authority: str,
+) -> None:
+    _knowledge, alpha, _beta, _relation, _query, known_at = _seed_known_at_graph(
+        storage,
+        suffix=f"global-merge-bound-{authority}",
+    )
+    import friday.storage._memory_exact_internal as memory_storage
+
+    unrelated_source = Entity(
+        new_id("ent"),
+        TENANT,
+        "UnrelatedGlobalMergeSource",
+        EntityType.CONCEPT,
+    )
+    unrelated_target = Entity(
+        new_id("ent"),
+        TENANT,
+        "UnrelatedGlobalMergeTarget",
+        EntityType.CONCEPT,
+    )
+    storage.create_entity(unrelated_source)
+    storage.create_entity(unrelated_target)
+    global_cap = 2
+    noise_rows = 2_048
+    marker = f"R8E_GLOBAL_MERGE_NOISE_{authority}"
+    marker_json = json.dumps({"marker": marker}, separators=(",", ":"))
+    with storage.transaction() as conn:
+        conn.executemany(
+            """INSERT INTO entity_merge_history
+               (id,user_id,source_entity_id,target_entity_id,
+                source_snapshot_json,target_before_json,target_after_json,
+                transfer_json,merged_by,created_at,undone_at,undone_by)
+               VALUES(?,?,?,?,?,?,?,?,?,?,NULL,NULL)""",
+            (
+                (
+                    f"merge_{marker}_{index:04d}",
+                    TENANT,
+                    unrelated_source.id,
+                    unrelated_target.id,
+                    marker_json,
+                    "{}",
+                    "{}",
+                    "{}",
+                    PRINCIPAL,
+                    known_at,
+                )
+                for index in range(noise_rows)
+            ),
+        )
+    stored_noise = storage.execute(
+        "SELECT COUNT(*) FROM entity_merge_history WHERE source_entity_id=?",
+        (unrelated_source.id,),
+    ).fetchone()
+    assert stored_noise is not None
+    assert stored_noise[0] == noise_rows
+    monkeypatch.setattr(
+        memory_storage,
+        "_MEMORY_EXACT_MAX_GLOBAL_ENTITY_MERGE_ROWS",
+        global_cap,
+    )
+
+    callback_budget = 512
+    progress_callbacks = 0
+
+    def finite_progress_budget() -> int:
+        nonlocal progress_callbacks
+        progress_callbacks += 1
+        return int(progress_callbacks > callback_budget)
+
+    reserved_bytes: list[int] = []
+    probe_reservation = reserved_bytes.append if authority == "provider" else None
+    with storage.transaction() as conn:
+        conn.set_progress_handler(finite_progress_budget, 1)
+        try:
+            assert (
+                memory_storage._memory_exact_global_entity_merge_bound_in_transaction(  # noqa: SLF001
+                    conn,
+                    reserve_bytes=probe_reservation,
+                )
+                is False
+            )
+        finally:
+            conn.set_progress_handler(None, 0)
+    assert 0 < progress_callbacks <= callback_budget
+    if authority == "provider":
+        assert reserved_bytes == [(global_cap + 1) * 72]
+    else:
+        assert reserved_bytes == []
+
+    materialized_marker = False
+
+    def tracking_text_factory(value: bytes) -> str:
+        nonlocal materialized_marker
+        if marker.encode("ascii") in value:
+            materialized_marker = True
+        return value.decode("utf-8", errors="strict")
+
+    traced_sql: list[str] = []
+    storage.conn.text_factory = tracking_text_factory
+    storage.conn.set_trace_callback(traced_sql.append)
+    try:
+        with storage.transaction() as conn, pytest.raises(MemoryExactStorageError) as captured:
+            if authority == "provider":
+                memory_storage._memory_exact_provider_scoped_topology_proof_in_transaction(  # noqa: SLF001
+                    conn,
+                    tenant_id=TENANT,
+                    entity_ids=(alpha.id,),
+                    known_at=known_at,
+                    reserve_bytes=lambda _size: None,
+                    maximum_identities=(memory_storage.MEMORY_EXACT_MAX_GRAPH_ENTITY_SOURCE_ROWS),
+                    allow_later_unwitnessed=False,
+                )
+            else:
+                memory_storage._historical_entity_topology(  # noqa: SLF001
+                    conn,
+                    tenant_id=TENANT,
+                    entity_ids=(alpha.id,),
+                    boundary=known_at,
+                    key=b"k" * 32,
+                )
+    finally:
+        storage.conn.set_trace_callback(None)
+        storage.conn.text_factory = str
+
+    expected_error = (
+        "provider topology merge history exceeds its limits"
+        if authority == "provider"
+        else "memory exact entity merge history exceeds its row limit"
+    )
+    assert str(captured.value) == expected_error
+    assert marker not in str(captured.value)
+    assert unrelated_source.id not in str(captured.value)
+    assert unrelated_target.id not in str(captured.value)
+    assert alpha.id not in str(captured.value)
+    assert materialized_marker is False
+
+    normalized_sql = [" ".join(statement.casefold().split()) for statement in traced_sql]
+    global_probes = [
+        statement
+        for statement in normalized_sql
+        if "select rowid from entity_merge_history" in statement and "order by rowid" in statement
+    ]
+    assert len(global_probes) == 1
+    assert f"limit {global_cap + 1}" in global_probes[0]
+    assert " where " not in global_probes[0]
+    candidate_scoped_merge_reads = [
+        statement
+        for statement in normalized_sql
+        if "with wanted(entity_id) as (values (" in statement
+        and "join entity_merge_history history" in statement
+    ]
+    assert candidate_scoped_merge_reads == []
+    merge_history_reads = [statement for statement in normalized_sql if "entity_merge_history" in statement]
+    epoch_probes = [
+        statement
+        for statement in merge_history_reads
+        if "latest_merge_created_at" in statement
+        and "latest_merge_undone_at" in statement
+        and "order by created_at desc, rowid desc limit 1" in statement
+        and "order by undone_at desc, rowid desc limit 1" in statement
+    ]
+    assert len(epoch_probes) == 1
+    assert merge_history_reads == [*epoch_probes, *global_probes]
+
+
 def test_provider_read_set_fixed_operation_cap_refuses_cap_plus_one() -> None:
     operation_cap = memory_exact_internal._PROVIDER_READ_SET_MAX_OPERATIONS  # noqa: SLF001
     assert operation_cap == 1_024
     read_set = memory_exact_internal._ProviderReadSet()  # noqa: SLF001
     for index in range(operation_cap):
-        assert read_set.observe(
-            "known_vocabulary",
-            ((f"r8e-read-set-{index}",),),
-            set(),
-        ) == set()
+        assert (
+            read_set.observe(
+                "known_vocabulary",
+                ((f"r8e-read-set-{index}",),),
+                set(),
+            )
+            == set()
+        )
     with pytest.raises(memory_exact_internal._ProviderResourceExceeded):  # noqa: SLF001
         read_set.observe(
             "known_vocabulary",
@@ -2876,7 +4153,7 @@ def test_provider_read_set_fixed_operation_cap_refuses_cap_plus_one() -> None:
 async def test_graph_search_blobopen_promotes_unreturned_card_and_burns_receipt(
     storage: Any,
 ) -> None:
-    query = "R8EGraphCard"
+    query = "Graph Card"
     _seed(storage, suffix="graph-search-blob", query=query)
     _seed_graph_cards(storage, count=5, label=query)
     target = Entity(
@@ -2922,34 +4199,38 @@ async def test_graph_search_blobopen_promotes_unreturned_card_and_burns_receipt(
     replacement = query.encode("utf-8")
     assert len(replacement) == len(baseline)
 
-    with pytest.raises(RuntimeError, match="roll back graph search blob"):
-        with storage.transaction() as conn:
-            expected_total_changes = ledger._total_changes + 1  # noqa: SLF001
-            assert conn.total_changes == expected_total_changes
-            with conn.blobopen("entities", "name", rowid, readonly=False) as blob:
-                assert blob.read() == baseline
-                blob.seek(0)
-                blob.write(replacement)
-            assert conn.total_changes == expected_total_changes
-            changed_matches = KnowledgeGraph(storage).search_entities(
-                TENANT,
-                query,
-                limit=5,
+    with pytest.raises(RuntimeError, match="roll back graph search blob"), storage.transaction() as conn:
+        expected_total_changes = ledger._total_changes + 1  # noqa: SLF001
+        assert conn.total_changes == expected_total_changes
+        with conn.blobopen(
+            "entities",
+            "name",
+            rowid,
+            readonly=False,
+        ) as blob:
+            assert blob.read() == baseline
+            blob.seek(0)
+            blob.write(replacement)
+        assert conn.total_changes == expected_total_changes
+        changed_matches = KnowledgeGraph(storage).search_entities(
+            TENANT,
+            query,
+            limit=5,
+        )
+        assert target.id in {str(item["id"]) for item in changed_matches}
+        assert conn.total_changes == expected_total_changes
+        assert (
+            adapter.consume_publication_authority_in_transaction(
+                conn,
+                context=context,
+                page=page,
+                decision=decision,
+                refresh=refresh,
             )
-            assert target.id in {str(item["id"]) for item in changed_matches}
-            assert conn.total_changes == expected_total_changes
-            assert (
-                adapter.consume_publication_authority_in_transaction(
-                    conn,
-                    context=context,
-                    page=page,
-                    decision=decision,
-                    refresh=refresh,
-                )
-                is False
-            )
-            assert conn.total_changes == expected_total_changes
-            raise RuntimeError("roll back graph search blob")
+            is False
+        )
+        assert conn.total_changes == expected_total_changes
+        raise RuntimeError("roll back graph search blob")
 
     restored = storage.execute(
         "SELECT name FROM entities WHERE rowid=?",
@@ -3039,45 +4320,43 @@ async def test_graph_context_blobopen_dependency_is_burned_through_rollback(
     assert baseline == b"2020-01-01"
     assert len(replacement) == len(baseline)
 
-    with pytest.raises(RuntimeError, match="roll back graph context blob"):
-        with storage.transaction() as conn:
-            expected_total_changes = ledger._total_changes + 1  # noqa: SLF001
-            assert conn.total_changes == expected_total_changes
-            with conn.blobopen("relations", "valid_from", rowid, readonly=False) as blob:
-                assert blob.read() == baseline
-                blob.seek(0)
-                blob.write(replacement)
-            assert conn.total_changes == expected_total_changes
+    with pytest.raises(RuntimeError, match="roll back graph context blob"), storage.transaction() as conn:
+        expected_total_changes = ledger._total_changes + 1  # noqa: SLF001
+        assert conn.total_changes == expected_total_changes
+        with conn.blobopen("relations", "valid_from", rowid, readonly=False) as blob:
+            assert blob.read() == baseline
+            blob.seek(0)
+            blob.write(replacement)
+        assert conn.total_changes == expected_total_changes
 
-            arguments = context_witnesses[0]._arguments  # noqa: SLF001
-            seeds = None if arguments[5] is None else list(arguments[5])
-            changed_context = KnowledgeGraph(storage).context_for_query(
-                arguments[0],
-                arguments[1],
-                depth=arguments[2],
-                entity_limit=arguments[3],
-                knowledge_limit=arguments[4],
-                seed_knowledge_ids=seeds,
-                as_of=arguments[6],
-                known_at=arguments[7],
+        arguments = context_witnesses[0]._arguments  # noqa: SLF001
+        seeds = None if arguments[5] is None else list(arguments[5])
+        changed_context = KnowledgeGraph(storage).context_for_query(
+            arguments[0],
+            arguments[1],
+            depth=arguments[2],
+            entity_limit=arguments[3],
+            knowledge_limit=arguments[4],
+            seed_knowledge_ids=seeds,
+            as_of=arguments[6],
+            known_at=arguments[7],
+        )
+        assert any(
+            item.get("valid_from") == replacement.decode("ascii") for item in changed_context["relations"]
+        )
+        assert conn.total_changes == expected_total_changes
+        assert (
+            adapter.consume_publication_authority_in_transaction(
+                conn,
+                context=context,
+                page=page,
+                decision=decision,
+                refresh=refresh,
             )
-            assert any(
-                item.get("valid_from") == replacement.decode("ascii")
-                for item in changed_context["relations"]
-            )
-            assert conn.total_changes == expected_total_changes
-            assert (
-                adapter.consume_publication_authority_in_transaction(
-                    conn,
-                    context=context,
-                    page=page,
-                    decision=decision,
-                    refresh=refresh,
-                )
-                is False
-            )
-            assert conn.total_changes == expected_total_changes
-            raise RuntimeError("roll back graph context blob")
+            is False
+        )
+        assert conn.total_changes == expected_total_changes
+        raise RuntimeError("roll back graph context blob")
 
     restored = storage.execute(
         "SELECT valid_from FROM relations WHERE rowid=?",
@@ -3209,50 +4488,43 @@ async def test_writable_blobopen_rank_dependency_is_burned_through_rollback(
         ).fetchone()
     assert target is not None
     rowid = int(target[0])
-    baseline = (
-        target[1].encode("utf-8") if isinstance(target[1], str) else bytes(target[1])
-    )
+    baseline = target[1].encode("utf-8") if isinstance(target[1], str) else bytes(target[1])
     assert baseline
     changed = bytes((baseline[0] ^ 1,)) + baseline[1:]
 
-    with pytest.raises(RuntimeError, match="roll back blob dependency"):
-        with storage.transaction() as conn:
-            # Friday's publication transaction owns exactly one local context
-            # update. Incremental BLOB I/O is deliberately absent from
-            # Connection.total_changes, so only the bounded read-set can close
-            # this same-connection mutation gap.
-            expected_total_changes = ledger._total_changes + 1  # noqa: SLF001
-            assert conn.total_changes == expected_total_changes
-            with conn.blobopen(table, column, rowid, readonly=False) as blob:
-                assert blob.read() == baseline
-                blob.seek(0)
-                blob.write(changed)
-                blob.seek(0)
-                assert blob.read() == changed
-            assert conn.total_changes == expected_total_changes
-            assert (
-                adapter.consume_publication_authority_in_transaction(
-                    conn,
-                    context=context,
-                    page=page,
-                    decision=decision,
-                    refresh=refresh,
-                )
-                is False
+    with pytest.raises(RuntimeError, match="roll back blob dependency"), storage.transaction() as conn:
+        # Friday's publication transaction owns exactly one local context
+        # update. Incremental BLOB I/O is deliberately absent from
+        # Connection.total_changes, so only the bounded read-set can close
+        # this same-connection mutation gap.
+        expected_total_changes = ledger._total_changes + 1  # noqa: SLF001
+        assert conn.total_changes == expected_total_changes
+        with conn.blobopen(table, column, rowid, readonly=False) as blob:
+            assert blob.read() == baseline
+            blob.seek(0)
+            blob.write(changed)
+            blob.seek(0)
+            assert blob.read() == changed
+        assert conn.total_changes == expected_total_changes
+        assert (
+            adapter.consume_publication_authority_in_transaction(
+                conn,
+                context=context,
+                page=page,
+                decision=decision,
+                refresh=refresh,
             )
-            assert conn.total_changes == expected_total_changes
-            raise RuntimeError("roll back blob dependency")
+            is False
+        )
+        assert conn.total_changes == expected_total_changes
+        raise RuntimeError("roll back blob dependency")
 
     restored = storage.execute(
         f"SELECT {column} FROM {table} WHERE rowid=?",  # nosec B608 - fixed parametrization
         (rowid,),
     ).fetchone()
     assert restored is not None
-    restored_bytes = (
-        restored[0].encode("utf-8")
-        if isinstance(restored[0], str)
-        else bytes(restored[0])
-    )
+    restored_bytes = restored[0].encode("utf-8") if isinstance(restored[0], str) else bytes(restored[0])
     assert restored_bytes == baseline
     assert raw.raw_content == knowledge.content
     assert decision.status is MemoryExactPublicationStatus.AUTHORIZED
@@ -3397,16 +4669,20 @@ async def test_publication_replay_is_bounded_to_exact_witnessed_operations(
         normalized = " ".join(statement.casefold().split())
         if not normalized.startswith(("select", "with")):
             continue
+        if "from temp.sqlite_schema" in normalized:
+            continue
         if any(marker in normalized for marker in _PROVIDER_SOURCE_SQL_MARKERS):
             dependency_reads.append(normalized)
     assert dependency_reads
     # A former corpus fingerprint selected dependency tables without an exact
     # key/range. Every remaining source read is fenced by a witnessed WHERE or
     # a code-owned VALUES keyset; there is no whole dependency-table sweep.
-    assert all(
-        " where " in statement or " values " in statement
+    unbounded_dependency_reads = [
+        statement
         for statement in dependency_reads
-    )
+        if " where " not in statement and "values (" not in statement
+    ]
+    assert not unbounded_dependency_reads, unbounded_dependency_reads[:2]
 
 
 async def test_fts_capability_change_after_authorized_refresh_is_burned(
