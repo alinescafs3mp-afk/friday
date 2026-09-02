@@ -64,6 +64,7 @@ if TYPE_CHECKING:
 _AUTHORITY_FACTORY = object()
 _PROVIDER_FACTORY = object()
 _PROVIDER_SEAL_KEY = secrets.token_bytes(32)
+_GLOBAL_ENTITY_MERGE_BOUND_PROOF = object()
 
 _SHA256 = re.compile(r"[0-9a-f]{64}\Z")
 _TURN_ID = re.compile(r"turn_[0-9a-f]{64}\Z")
@@ -108,6 +109,7 @@ MEMORY_EXACT_MAX_ENTITY_MERGE_DEPTH: Final = 16
 MEMORY_EXACT_MAX_IMPLICIT_LINK_ROWS: Final = 30
 _MEMORY_EXACT_MAX_PROVIDER_MATERIAL_ROWS: Final = 400
 _MEMORY_EXACT_MAX_HISTORICAL_RELATION_IDS: Final = 802
+_MEMORY_EXACT_MAX_GLOBAL_ENTITY_MERGE_ROWS: Final = 4_096
 _MAX_GRAPH_TEXT_BYTES = 1024
 _MAX_QUERY_BYTES = 16_384
 _FETCH_BATCH = 8
@@ -2218,6 +2220,118 @@ def _execute_memory_exact_provider_select(
         _install_private_material_authorizer(conn)
 
 
+def _memory_exact_global_entity_merge_bound_in_transaction(
+    conn: sqlite3.Connection,
+    *,
+    reserve_bytes: Callable[[int], None] | None,
+) -> bool:
+    """Prove a physical table bound before an unindexed scoped merge read."""
+
+    _require_transaction(conn)
+    cap = _MEMORY_EXACT_MAX_GLOBAL_ENTITY_MERGE_ROWS
+    if (
+        isinstance(cap, bool)
+        or not isinstance(cap, int)
+        or cap < 1
+        or (reserve_bytes is not None and not callable(reserve_bytes))
+    ):
+        raise MemoryExactStorageError("memory exact entity merge history bound is invalid")
+    cursor = conn.execute(
+        f"""SELECT rowid
+              FROM entity_merge_history
+             ORDER BY rowid
+             LIMIT {cap + 1}"""  # nosec B608 - fixed integer cap
+    )
+    row_count = 0
+    previous_rowid: int | None = None
+    try:
+        while True:
+            batch = cursor.fetchmany(_FETCH_BATCH)
+            if not batch:
+                break
+            for row in batch:
+                values = tuple(row)
+                if len(values) != 1:
+                    raise MemoryExactStorageError("memory exact entity merge history bound is invalid")
+                rowid = values[0]
+                if (
+                    isinstance(rowid, bool)
+                    or not isinstance(rowid, int)
+                    or (previous_rowid is not None and rowid <= previous_rowid)
+                ):
+                    raise MemoryExactStorageError("memory exact entity merge history bound is invalid")
+                previous_rowid = rowid
+                row_count += 1
+                if row_count > cap + 1:
+                    raise MemoryExactStorageError("memory exact entity merge history bound is invalid")
+    finally:
+        cursor.close()
+    if reserve_bytes is not None:
+        reserve_bytes(row_count * 72)
+    return row_count <= cap
+
+
+def _memory_exact_entity_version_rowids_in_transaction(
+    conn: sqlite3.Connection,
+    *,
+    entity_ids: tuple[str, ...],
+    maximum_rows: int,
+    reserve_bytes: Callable[[int], None] | None,
+) -> tuple[bool, tuple[int, ...]]:
+    """Probe each entity's UNIQUE-index history without a temp sort."""
+
+    _require_transaction(conn)
+    if (
+        type(entity_ids) is not tuple
+        or isinstance(maximum_rows, bool)
+        or not isinstance(maximum_rows, int)
+        or maximum_rows < 1
+        or (reserve_bytes is not None and not callable(reserve_bytes))
+    ):
+        raise MemoryExactStorageError("memory exact entity version scope is invalid")
+    identities = tuple(
+        _scope(identity, label="memory exact entity version identity", maximum=240) for identity in entity_ids
+    )
+    if len(identities) != len(set(identities)):
+        raise MemoryExactStorageError("memory exact entity version scope is invalid")
+
+    rowids: list[int] = []
+    seen: set[int] = set()
+    for identity in sorted(identities):
+        remaining = maximum_rows - len(rowids) + 1
+        cursor = conn.execute(
+            f"""SELECT version.rowid
+                  FROM entity_versions version
+                       INDEXED BY sqlite_autoindex_entity_versions_2
+                 WHERE version.entity_id=?
+                 ORDER BY version.version
+                 LIMIT {remaining}""",  # nosec B608 - fixed integer remainder
+            (identity,),
+        )
+        try:
+            rows = cursor.fetchall()
+        finally:
+            cursor.close()
+        for row in rows:
+            values = tuple(row)
+            if len(values) != 1:
+                raise MemoryExactStorageError("memory exact entity version scope is invalid")
+            rowid = values[0]
+            if isinstance(rowid, bool) or not isinstance(rowid, int) or rowid in seen:
+                raise MemoryExactStorageError("memory exact entity version scope is invalid")
+            seen.add(rowid)
+            rowids.append(rowid)
+        if len(rowids) >= maximum_rows + 1:
+            if len(rowids) != maximum_rows + 1:
+                raise MemoryExactStorageError("memory exact entity version scope is invalid")
+            if reserve_bytes is not None:
+                reserve_bytes(len(rowids) * 72)
+            return True, tuple(rowids)
+    if reserve_bytes is not None:
+        reserve_bytes(len(rowids) * 72)
+    return False, tuple(rowids)
+
+
 def _memory_exact_provider_scoped_topology_proof_in_transaction(
     conn: sqlite3.Connection,
     *,
@@ -2227,6 +2341,7 @@ def _memory_exact_provider_scoped_topology_proof_in_transaction(
     reserve_bytes: Callable[[int], None],
     maximum_identities: int,
     allow_later_unwitnessed: bool,
+    global_entity_merge_bound_proof: object | None = None,
 ) -> tuple[str, tuple[str, ...]]:
     """Validate only keyed topology scalars needed by one historical graph read."""
 
@@ -2245,11 +2360,13 @@ def _memory_exact_provider_scoped_topology_proof_in_transaction(
         or len(entity_ids) > maximum_identities
         or not callable(reserve_bytes)
         or type(allow_later_unwitnessed) is not bool
+        or (
+            global_entity_merge_bound_proof is not None
+            and global_entity_merge_bound_proof is not _GLOBAL_ENTITY_MERGE_BOUND_PROOF
+        )
     ):
         raise MemoryExactStorageError("provider topology source set is invalid")
-    identities = tuple(
-        _scope(item, label="provider topology identity", maximum=240) for item in entity_ids
-    )
+    identities = tuple(_scope(item, label="provider topology identity", maximum=240) for item in entity_ids)
     if identities != tuple(sorted(identities)) or len(identities) != len(set(identities)):
         raise MemoryExactStorageError("provider topology source set is invalid")
     if not identities:
@@ -2270,9 +2387,7 @@ def _memory_exact_provider_scoped_topology_proof_in_transaction(
     public_merge_entity = _not_private_entity_material_dependency("entity")
     for depth in range(MEMORY_EXACT_MAX_ENTITY_MERGE_DEPTH + 1):
         frontier_values = ",".join("(?)" for _identity in frontier)
-        frontier_wanted = (
-            f"WITH wanted(entity_id) AS (VALUES {frontier_values})"  # nosec B608
-        )
+        frontier_wanted = f"WITH wanted(entity_id) AS (VALUES {frontier_values})"  # nosec B608
         closure_preflight = conn.execute(
             frontier_wanted
             + f""" SELECT COUNT(*) AS row_count,
@@ -2406,11 +2521,11 @@ def _memory_exact_provider_scoped_topology_proof_in_transaction(
                          JOIN entities source_entity
                            ON source_entity.id=revision.source_entity_id
                           AND source_entity.user_id=revision.user_id
-                          AND {_not_private_entity_material_dependency('source_entity')}
+                          AND {_not_private_entity_material_dependency("source_entity")}
                          JOIN entities target_entity
                            ON target_entity.id=revision.target_entity_id
                           AND target_entity.user_id=revision.user_id
-                          AND {_not_private_entity_material_dependency('target_entity')}
+                          AND {_not_private_entity_material_dependency("target_entity")}
                         WHERE revision.user_id=? AND revision.recorded_at<=?
                           AND (revision.source_entity_id=entity.id
                                OR revision.target_entity_id=entity.id)
@@ -2438,8 +2553,7 @@ def _memory_exact_provider_scoped_topology_proof_in_transaction(
             reject_future=False,
         )
         coarse_same_second = (
-            not re.search(r"T\d{2}:\d{2}:\d{2}\.\d+", first_raw)
-            and first[:19] == boundary[:19]
+            not re.search(r"T\d{2}:\d{2}:\d{2}\.\d+", first_raw) and first[:19] == boundary[:19]
         )
         later = not bool(row[2]) and (first > boundary or coarse_same_second)
         if later and not allow_later_unwitnessed:
@@ -2465,12 +2579,20 @@ def _memory_exact_provider_scoped_topology_proof_in_transaction(
     recorded_tails: dict[str, tuple[bool, str, bool]] = {}
     if relevant:
         relevant_tuple = tuple(sorted(relevant))
-        relevant_values = ",".join("(?)" for _identity in relevant_tuple)
-        version_wanted = (
-            f"WITH wanted(entity_id) AS (VALUES {relevant_values})"  # nosec B608
+        version_saturated, version_rowids = _memory_exact_entity_version_rowids_in_transaction(
+            conn,
+            entity_ids=relevant_tuple,
+            maximum_rows=MEMORY_EXACT_MAX_ENTITY_VERSION_ROWS,
+            reserve_bytes=reserve_bytes,
         )
+        if version_saturated:
+            raise MemoryExactStorageError("provider topology version history exceeds its limits")
+        if not version_rowids:
+            raise MemoryExactStorageError("provider topology version history is incomplete")
+        version_values = ",".join("(?)" for _rowid in version_rowids)
+        version_selected = f"WITH selected(version_rowid) AS MATERIALIZED (VALUES {version_values})"  # nosec B608 - bounded integer placeholders only
         version_preflight = conn.execute(
-            version_wanted
+            version_selected
             + f""" SELECT COUNT(*) AS row_count,
                          COALESCE(MAX(length(CAST(version.snapshot_json AS BLOB))),0)
                              AS maximum_json,
@@ -2506,13 +2628,14 @@ def _memory_exact_provider_scoped_topology_proof_in_transaction(
                                OR json_type(version.snapshot_json,'$.deleted_at')
                                       NOT IN ('null','text')
                              THEN 1 ELSE 0 END),0) AS invalid_rows
-                    FROM wanted
+                    FROM selected
                     JOIN entity_versions version
-                      ON version.entity_id=wanted.entity_id AND version.user_id=?
+                      ON version.rowid=selected.version_rowid
                     JOIN entities entity
                       ON entity.id=version.entity_id AND entity.user_id=version.user_id
-                     AND {public_entity}""",  # nosec B608 - fixed private predicate
-            (*relevant_tuple, tenant),
+                     AND {public_entity}
+                   WHERE version.user_id=?""",  # nosec B608 - fixed private predicate
+            (*version_rowids, tenant),
         ).fetchone()
         if (
             version_preflight is None
@@ -2527,19 +2650,20 @@ def _memory_exact_provider_scoped_topology_proof_in_transaction(
             raise MemoryExactStorageError("provider topology version history exceeds its limits")
         reserve_bytes(int(version_preflight[2]) + int(version_preflight[4]))
         version_cursor = conn.execute(
-            version_wanted
+            version_selected
             + f""" SELECT version.id,version.entity_id,version.version,version.created_at,
                          json_extract(version.snapshot_json,'$.canonical') AS canonical,
                          json_extract(version.snapshot_json,'$.merged_into_id') AS merged_into_id,
                          json_extract(version.snapshot_json,'$.deleted_at') IS NOT NULL AS deleted
-                    FROM wanted
+                    FROM selected
                     JOIN entity_versions version
-                      ON version.entity_id=wanted.entity_id AND version.user_id=?
+                      ON version.rowid=selected.version_rowid
                     JOIN entities entity
                       ON entity.id=version.entity_id AND entity.user_id=version.user_id
                      AND {public_entity}
+                   WHERE version.user_id=?
                    ORDER BY version.entity_id,version.version,version.created_at,version.id""",  # nosec B608
-            (*relevant_tuple, tenant),
+            (*version_rowids, tenant),
         )
         version_rows = version_cursor.fetchall()
         version_cursor.close()
@@ -2568,12 +2692,9 @@ def _memory_exact_provider_scoped_topology_proof_in_transaction(
             topology = (bool(row[4]), merged, bool(row[6]))
             earlier = previous.get(identity)
             coarse_same_second = (
-                not re.search(r"T\d{2}:\d{2}:\d{2}\.\d+", raw_recorded)
-                and recorded[:19] == boundary[:19]
+                not re.search(r"T\d{2}:\d{2}:\d{2}\.\d+", raw_recorded) and recorded[:19] == boundary[:19]
             )
-            if earlier is not None and topology != earlier and (
-                recorded > boundary or coarse_same_second
-            ):
+            if earlier is not None and topology != earlier and (recorded > boundary or coarse_same_second):
                 raise MemoryExactStorageError("provider known_at crosses an entity topology change")
             previous[identity] = topology
             version_proof.append(
@@ -2609,11 +2730,30 @@ def _memory_exact_provider_scoped_topology_proof_in_transaction(
     merge_proof: list[dict[str, object]] = []
     active_merges: set[tuple[str, str]] = set()
     if relevant:
+        if (
+            global_entity_merge_bound_proof is None
+            and not _memory_exact_global_entity_merge_bound_in_transaction(
+                conn,
+                reserve_bytes=reserve_bytes,
+            )
+        ):
+            raise MemoryExactStorageError("provider topology merge history exceeds its limits")
         relevant_tuple = tuple(sorted(relevant))
         relevant_values = ",".join("(?)" for _identity in relevant_tuple)
         merge_wanted = f"WITH wanted(entity_id) AS (VALUES {relevant_values})"  # nosec B608
-        merge_preflight = conn.execute(
+        merge_selected = (
             merge_wanted
+            + f""", selected(history_rowid) AS MATERIALIZED (
+            SELECT history.rowid
+              FROM wanted
+              JOIN entity_merge_history history
+                ON history.source_entity_id=wanted.entity_id AND history.user_id=?
+             ORDER BY history.source_entity_id,history.created_at,history.id
+             LIMIT {MEMORY_EXACT_MAX_ENTITY_MERGE_ROWS + 1}
+        )"""
+        )  # nosec B608 - placeholders and integer cap only
+        merge_preflight = conn.execute(
+            merge_selected
             + """ SELECT COUNT(*) AS row_count,
                          COALESCE(MAX(max(
                              length(CAST(history.id AS BLOB)),
@@ -2629,27 +2769,29 @@ def _memory_exact_provider_scoped_topology_proof_in_transaction(
                              + length(CAST(history.created_at AS BLOB))
                              + length(CAST(COALESCE(history.undone_at,'') AS BLOB)) + 128
                          ),0) AS storage_bytes
-                    FROM wanted
+                    FROM selected
                     JOIN entity_merge_history history
-                      ON history.source_entity_id=wanted.entity_id AND history.user_id=?""",
+                      ON history.rowid=selected.history_rowid""",
             (*relevant_tuple, tenant),
         ).fetchone()
         if (
             merge_preflight is None
             or any(isinstance(item, bool) or not isinstance(item, int) for item in merge_preflight)
-            or not 0 <= int(merge_preflight[0]) <= MEMORY_EXACT_MAX_ENTITY_MERGE_ROWS
+            or not 0 <= int(merge_preflight[0]) <= MEMORY_EXACT_MAX_ENTITY_MERGE_ROWS + 1
             or not 0 <= int(merge_preflight[1]) <= 240
             or int(merge_preflight[2]) < 0
         ):
             raise MemoryExactStorageError("provider topology merge history exceeds its limits")
+        if int(merge_preflight[0]) == MEMORY_EXACT_MAX_ENTITY_MERGE_ROWS + 1:
+            raise MemoryExactStorageError("provider topology merge history exceeds its limits")
         reserve_bytes(int(merge_preflight[2]))
         merge_cursor = conn.execute(
-            merge_wanted
+            merge_selected
             + """ SELECT history.id,history.source_entity_id,history.target_entity_id,
                          history.created_at,history.undone_at
-                    FROM wanted
+                    FROM selected
                     JOIN entity_merge_history history
-                      ON history.source_entity_id=wanted.entity_id AND history.user_id=?
+                      ON history.rowid=selected.history_rowid
                    ORDER BY history.source_entity_id,history.created_at,history.id""",
             (*relevant_tuple, tenant),
         )
@@ -2714,19 +2856,14 @@ def _memory_exact_provider_scoped_topology_proof_in_transaction(
                         material=_canonical_bytes({"tenant": tenant, "entity_id": target}),
                     ),
                     "created_at_sha256": _bytes_sha256(created_raw),
-                    "undone_at_sha256": (
-                        None if undone_raw is None else _bytes_sha256(undone_raw)
-                    ),
+                    "undone_at_sha256": (None if undone_raw is None else _bytes_sha256(undone_raw)),
                 }
             )
 
     for identity, recorded in recorded_tails.items():
         actual = current[identity]
         recorded_merge = (
-            not actual[0]
-            and bool(actual[1])
-            and actual[2]
-            and (identity, actual[1]) in active_merges
+            not actual[0] and bool(actual[1]) and actual[2] and (identity, actual[1]) in active_merges
         )
         if recorded != actual and not recorded_merge:
             raise MemoryExactStorageError("provider current topology differs from its history")
@@ -3613,9 +3750,7 @@ def _memory_exact_provider_incident_relation_ids_in_transaction(
     )
     cap = _MEMORY_EXACT_MAX_HISTORICAL_RELATION_IDS
     selected = (
-        "WITH eligible AS MATERIALIZED (SELECT id AS relation_id FROM ("
-        + scoped_sql
-        + f") LIMIT {cap + 1})"
+        "WITH eligible AS MATERIALIZED (SELECT id AS relation_id FROM (" + scoped_sql + f") LIMIT {cap + 1})"
     )
     preflight = conn.execute(
         selected
@@ -3748,10 +3883,7 @@ class _MemoryExactProviderGraphSelectView(_MemoryExactProviderSelectView):
                 relation_values = ",".join("(?)" for _identity in relation_ids)
                 incident = f"incident(relation_id) AS ( VALUES {relation_values}), "  # nosec B608
             else:
-                incident = (
-                    "incident(relation_id) AS "
-                    "(SELECT CAST(NULL AS TEXT) WHERE 0), "
-                )
+                incident = "incident(relation_id) AS (SELECT CAST(NULL AS TEXT) WHERE 0), "
             sql = (
                 "WITH "
                 + incident
@@ -3770,8 +3902,7 @@ class _MemoryExactProviderGraphSelectView(_MemoryExactProviderSelectView):
             bound = (*relation_ids, *bound)
             normalized = " ".join(sql.upper().split())
         track_plain_id = (
-            "FROM ENTITIES E WHERE ID=? AND USER_ID=?" in normalized
-            or "AS FIRST_RECORDED_AT" in normalized
+            "FROM ENTITIES E WHERE ID=? AND USER_ID=?" in normalized or "AS FIRST_RECORDED_AT" in normalized
         )
         return _MemoryExactProviderGraphCursor(
             super().execute(sql, bound),
@@ -3799,22 +3930,160 @@ class _MemoryExactProviderGraphSelectView(_MemoryExactProviderSelectView):
         )
 
     def count_entity_relations(self, entity_id: str, user_id: str | None = None) -> int:
-        from friday.storage._graph import GraphMixin
-
-        return GraphMixin.count_entity_relations(  # type: ignore[arg-type]
-            self,
+        tenant = _scope(user_id, label="provider graph relation tenant", maximum=240)
+        endpoint = _scope(
             entity_id,
-            user_id,
+            label="provider graph relation endpoint",
+            maximum=240,
         )
+        if tenant != self._tenant_id:
+            raise MemoryExactStorageError("provider graph relation count is unavailable")
+        self._collector.add((endpoint,))
+        cap = _MEMORY_EXACT_MAX_PROVIDER_MATERIAL_ROWS
+        public_relation = _not_private_relation_dependency("relation")
+        public_source = _not_private_entity_material_dependency("source_entity")
+        public_target = _not_private_entity_material_dependency("target_entity")
+
+        def select_rowids(
+            *,
+            index_name: str,
+            predicate: str,
+            params: tuple[object, ...],
+            limit: int,
+        ) -> tuple[int, ...]:
+            cursor = self._conn.execute(
+                f"""SELECT relation.rowid
+                      FROM relations relation INDEXED BY {index_name}
+                     WHERE relation.user_id=? AND {predicate}
+                     ORDER BY relation.rowid
+                     LIMIT {limit}""",  # nosec B608 - fixed keyed predicates/integer cap
+                params,
+            )
+            try:
+                rows = cursor.fetchall()
+            finally:
+                cursor.close()
+            rowids = tuple(row[0] for row in rows)
+            if (
+                any(isinstance(rowid, bool) or not isinstance(rowid, int) for rowid in rowids)
+                or len(rowids) != len(set(rowids))
+                or any(left >= right for left, right in zip(rowids, rowids[1:], strict=False))
+            ):
+                raise MemoryExactStorageError("provider graph relation count is invalid")
+            self._reserve_bytes(len(rowids) * 72)
+            return rowids
+
+        source_rowids = select_rowids(
+            index_name="idx_relations_source",
+            predicate="relation.source_entity_id=?",
+            params=(tenant, endpoint),
+            limit=cap + 1,
+        )
+        if len(source_rowids) == cap + 1:
+            raise MemoryExactStorageError("provider graph relation count is saturated")
+        target_rowids = select_rowids(
+            index_name="idx_relations_target",
+            predicate="relation.target_entity_id=? AND relation.source_entity_id<>?",
+            params=(tenant, endpoint, endpoint),
+            limit=cap - len(source_rowids) + 1,
+        )
+        count = len(source_rowids) + len(target_rowids)
+        if count > cap:
+            raise MemoryExactStorageError("provider graph relation count is saturated")
+        relation_rowids = (*source_rowids, *target_rowids)
+        if not relation_rowids:
+            return 0
+        relation_values = ",".join("(?)" for _rowid in relation_rowids)
+        count_row = self._conn.execute(
+            f"""WITH selected(relation_rowid) AS MATERIALIZED (VALUES {relation_values})
+                SELECT COUNT(*)
+                  FROM selected
+                  JOIN relations relation ON relation.rowid=selected.relation_rowid
+                  JOIN entities source_entity
+                    ON source_entity.id=relation.source_entity_id
+                   AND source_entity.user_id=relation.user_id
+                   AND {public_source}
+                  JOIN entities target_entity
+                    ON target_entity.id=relation.target_entity_id
+                   AND target_entity.user_id=relation.user_id
+                   AND {public_target}
+                 WHERE relation.user_id=?
+                   AND (relation.source_entity_id=? OR relation.target_entity_id=?)
+                   AND relation.deleted_at IS NULL
+                   AND {public_relation}""",  # nosec B608 - bounded integer placeholders
+            (*relation_rowids, tenant, endpoint, endpoint),
+        ).fetchone()
+        if (
+            count_row is None
+            or len(tuple(count_row)) != 1
+            or isinstance(count_row[0], bool)
+            or not isinstance(count_row[0], int)
+            or not 0 <= int(count_row[0]) <= len(relation_rowids)
+        ):
+            raise MemoryExactStorageError("provider graph relation count is invalid")
+        return int(count_row[0])
 
     def count_entity_knowledge(self, user_id: str, entity_id: str) -> int:
-        from friday.storage._knowledge import KnowledgeMixin
-
-        return KnowledgeMixin.count_entity_knowledge(  # type: ignore[arg-type]
-            self,
-            user_id,
+        tenant = _scope(user_id, label="provider graph knowledge tenant", maximum=240)
+        endpoint = _scope(
             entity_id,
+            label="provider graph knowledge endpoint",
+            maximum=240,
         )
+        if tenant != self._tenant_id:
+            raise MemoryExactStorageError("provider graph knowledge count is unavailable")
+        self._collector.add((endpoint,))
+        cap = _MEMORY_EXACT_MAX_PROVIDER_MATERIAL_ROWS
+        cursor = self._conn.execute(
+            f"""SELECT link.rowid
+                  FROM knowledge_entity_links link INDEXED BY idx_links_entity
+                 WHERE link.user_id=? AND link.entity_id=? AND link.status='accepted'
+                 ORDER BY link.rowid
+                 LIMIT {cap + 1}""",  # nosec B608 - fixed keyed predicates/integer cap
+            (tenant, endpoint),
+        )
+        try:
+            rows = cursor.fetchall()
+        finally:
+            cursor.close()
+        rowids = tuple(row[0] for row in rows)
+        if (
+            any(isinstance(rowid, bool) or not isinstance(rowid, int) for rowid in rowids)
+            or len(rowids) != len(set(rowids))
+            or any(left >= right for left, right in zip(rowids, rowids[1:], strict=False))
+        ):
+            raise MemoryExactStorageError("provider graph knowledge count is invalid")
+        self._reserve_bytes(len(rowids) * 72)
+        if len(rowids) == cap + 1:
+            raise MemoryExactStorageError("provider graph knowledge count is saturated")
+        if not rowids:
+            return 0
+        link_values = ",".join("(?)" for _rowid in rowids)
+        count_row = self._conn.execute(
+            f"""WITH selected(link_rowid) AS MATERIALIZED (VALUES {link_values})
+                SELECT COUNT(*)
+                  FROM selected
+                  JOIN knowledge_entity_links link ON link.rowid=selected.link_rowid
+                  JOIN knowledge_objects knowledge
+                    ON knowledge.id=link.knowledge_object_id
+                   AND knowledge.user_id=link.user_id
+                  JOIN entities entity
+                    ON entity.id=link.entity_id AND entity.user_id=link.user_id
+                   AND {_not_private_entity_material_dependency("entity")}
+                 WHERE link.user_id=? AND link.entity_id=? AND link.status='accepted'
+                   AND knowledge.deleted_at IS NULL
+                   AND {_not_private_knowledge_dependency("knowledge")}""",  # nosec B608
+            (*rowids, tenant, endpoint),
+        ).fetchone()
+        if (
+            count_row is None
+            or len(tuple(count_row)) != 1
+            or isinstance(count_row[0], bool)
+            or not isinstance(count_row[0], int)
+            or not 0 <= int(count_row[0]) <= len(rowids)
+        ):
+            raise MemoryExactStorageError("provider graph knowledge count is invalid")
+        return int(count_row[0])
 
     def list_knowledge_entity_links(
         self,
@@ -3847,8 +4116,8 @@ class _MemoryExactProviderGraphSelectView(_MemoryExactProviderSelectView):
               JOIN knowledge_objects knowledge
                 ON knowledge.id=link.knowledge_object_id AND knowledge.user_id=link.user_id
              WHERE link.user_id=? AND link.knowledge_object_id=? AND link.status='accepted'
-               AND {_not_private_entity_material_dependency('entity')}
-               AND {_not_private_knowledge_dependency('knowledge')}
+               AND {_not_private_entity_material_dependency("entity")}
+               AND {_not_private_knowledge_dependency("knowledge")}
              ORDER BY CASE link.status WHEN 'suggested' THEN 0
                                        WHEN 'accepted' THEN 1 ELSE 2 END,
                       link.confidence DESC,link.created_at DESC LIMIT 30
@@ -4007,8 +4276,7 @@ def _replay_memory_exact_provider_graph_operation_in_transaction(
     ):
         raise MemoryExactStorageError("provider graph operation is invalid")
     candidates = tuple(
-        _scope(item, label="provider graph candidate identity", maximum=240)
-        for item in candidate_entity_ids
+        _scope(item, label="provider graph candidate identity", maximum=240) for item in candidate_entity_ids
     )
     if (
         len(candidates) > _MEMORY_EXACT_MAX_PROVIDER_MATERIAL_ROWS
@@ -4053,6 +4321,15 @@ def _replay_memory_exact_provider_graph_operation_in_transaction(
     else:
         raise MemoryExactStorageError("provider graph operation is unavailable")
 
+    global_entity_merge_bound_proof: object | None = None
+    if known_at:
+        if not _memory_exact_global_entity_merge_bound_in_transaction(
+            conn,
+            reserve_bytes=reserve_bytes,
+        ):
+            raise MemoryExactStorageError("provider topology merge history exceeds its limits")
+        global_entity_merge_bound_proof = _GLOBAL_ENTITY_MERGE_BOUND_PROOF
+
     def validate_new_topology(
         identities: tuple[str, ...],
     ) -> tuple[str, tuple[str, ...]]:
@@ -4065,9 +4342,7 @@ def _replay_memory_exact_provider_graph_operation_in_transaction(
                             _hmac(
                                 _PROVIDER_SEAL_KEY,
                                 domain="friday.memory-exact-provider-topology-entity.v1",
-                                material=_canonical_bytes(
-                                    {"tenant": tenant, "entity_id": identity}
-                                ),
+                                material=_canonical_bytes({"tenant": tenant, "entity_id": identity}),
                             )
                             for identity in identities
                         ],
@@ -4083,6 +4358,7 @@ def _replay_memory_exact_provider_graph_operation_in_transaction(
             reserve_bytes=reserve_bytes,
             maximum_identities=MEMORY_EXACT_MAX_GRAPH_ENTITY_SOURCE_ROWS,
             allow_later_unwitnessed=False,
+            global_entity_merge_bound_proof=global_entity_merge_bound_proof,
         )
 
     collector = _MemoryExactProviderTopologyCollector(
@@ -4101,12 +4377,7 @@ def _replay_memory_exact_provider_graph_operation_in_transaction(
     try:
         conn.execute("PRAGMA query_only=ON")
         enabled = conn.execute("PRAGMA query_only").fetchone()
-        if (
-            enabled is None
-            or len(tuple(enabled)) != 1
-            or type(enabled[0]) is not int
-            or enabled[0] != 1
-        ):
+        if enabled is None or len(tuple(enabled)) != 1 or type(enabled[0]) is not int or enabled[0] != 1:
             raise MemoryExactStorageError("provider graph read-only lease is unavailable")
         _install_memory_exact_provider_select_authorizer(conn)
         graph = _memory_exact_provider_graph_in_transaction(
@@ -4160,9 +4431,7 @@ def _replay_memory_exact_provider_graph_operation_in_transaction(
                     _hmac(
                         _PROVIDER_SEAL_KEY,
                         domain="friday.memory-exact-provider-topology-entity.v1",
-                        material=_canonical_bytes(
-                            {"tenant": tenant, "entity_id": identity}
-                        ),
+                        material=_canonical_bytes({"tenant": tenant, "entity_id": identity}),
                     )
                     for identity in candidates
                 ],
@@ -4170,9 +4439,7 @@ def _replay_memory_exact_provider_graph_operation_in_transaction(
                     _hmac(
                         _PROVIDER_SEAL_KEY,
                         domain="friday.memory-exact-provider-topology-entity.v1",
-                        material=_canonical_bytes(
-                            {"tenant": tenant, "entity_id": identity}
-                        ),
+                        material=_canonical_bytes({"tenant": tenant, "entity_id": identity}),
                     )
                     for identity in topology_ids
                 ],
@@ -4220,7 +4487,7 @@ def _memory_exact_provider_graph_candidates_in_transaction(
     if not callable(reserve_bytes):
         raise MemoryExactStorageError("provider graph reservation is unavailable")
     public_entity = _not_private_entity_material_dependency("e")
-    cap = 400
+    cap = _MEMORY_EXACT_MAX_PROVIDER_MATERIAL_ROWS
     raw_rows = conn.execute(
         f"""SELECT e.rowid FROM entities e
              WHERE e.user_id=? AND e.deleted_at IS NULL AND e.canonical=1
@@ -4232,10 +4499,7 @@ def _memory_exact_provider_graph_candidates_in_transaction(
     rowids = tuple(row[0] for row in raw_rows)
     if (
         len(rowids) > cap + 1
-        or any(
-            isinstance(rowid, bool) or not isinstance(rowid, int) or rowid <= 0
-            for rowid in rowids
-        )
+        or any(isinstance(rowid, bool) or not isinstance(rowid, int) or rowid <= 0 for rowid in rowids)
         or len(rowids) != len(set(rowids))
     ):
         raise MemoryExactStorageError("provider graph candidate probe is invalid")
@@ -4394,9 +4658,7 @@ def _memory_exact_provider_list_ids_in_transaction(
                ORDER BY k.importance DESC, k.updated_at DESC, k.id DESC""",
         selected_parameters,
     ).fetchall()
-    identities = tuple(
-        _scope(row[0], label="provider list knowledge identity", maximum=240) for row in rows
-    )
+    identities = tuple(_scope(row[0], label="provider list knowledge identity", maximum=240) for row in rows)
     if len(identities) != row_count or len(identities) != len(set(identities)):
         raise MemoryExactStorageError("provider list identity selection changed")
     return identities
@@ -4484,9 +4746,7 @@ def _memory_exact_provider_window_ids_in_transaction(
                 JOIN knowledge_objects k ON k.rowid=selected.knowledge_rowid""",
         selected_parameters,
     ).fetchall()
-    identities = {
-        _scope(row[0], label="provider window knowledge identity", maximum=240) for row in rows
-    }
+    identities = {_scope(row[0], label="provider window knowledge identity", maximum=240) for row in rows}
     if len(rows) != row_count or len(identities) != row_count:
         raise MemoryExactStorageError("provider window identity selection changed")
     return identities
@@ -4506,8 +4766,7 @@ def _memory_exact_provider_entity_links_in_transaction(
     if type(knowledge_ids) is not tuple or len(knowledge_ids) > 400:
         raise MemoryExactStorageError("provider entity-link source set is invalid")
     identities = tuple(
-        _scope(item, label="provider entity-link knowledge identity", maximum=240)
-        for item in knowledge_ids
+        _scope(item, label="provider entity-link knowledge identity", maximum=240) for item in knowledge_ids
     )
     if not identities:
         return {}
@@ -4616,8 +4875,7 @@ def _memory_exact_provider_feedback_in_transaction(
     if type(knowledge_ids) is not tuple or len(knowledge_ids) > 400:
         raise MemoryExactStorageError("provider feedback source set is invalid")
     identities = tuple(
-        _scope(item, label="provider feedback knowledge identity", maximum=240)
-        for item in knowledge_ids
+        _scope(item, label="provider feedback knowledge identity", maximum=240) for item in knowledge_ids
     )
     if not identities:
         return {}
@@ -5751,9 +6009,24 @@ def _historical_entity_topology(
             {"schema": "friday.memory-exact-entity-topology-proof.v1", "merges": [], "versions": []}
         )
     holders = ",".join("?" for _item in entity_ids)
+    values = ",".join("(?)" for _item in entity_ids)
+    wanted = f"WITH wanted(entity_id) AS (VALUES {values})"  # nosec B608 - placeholders only
     public = _not_private_entity_material_dependency("entity")
+    version_saturated, version_rowids = _memory_exact_entity_version_rowids_in_transaction(
+        conn,
+        entity_ids=entity_ids,
+        maximum_rows=MEMORY_EXACT_MAX_ENTITY_VERSION_ROWS,
+        reserve_bytes=None,
+    )
+    if version_saturated:
+        raise MemoryExactStorageError("memory exact entity topology history exceeds its limits")
+    if not version_rowids:
+        raise MemoryExactStorageError("memory exact entity existence history is incomplete")
+    version_values = ",".join("(?)" for _rowid in version_rowids)
+    version_selected = f"WITH selected(version_rowid) AS MATERIALIZED (VALUES {version_values})"  # nosec B608 - bounded integer placeholders only
     preflight = conn.execute(
-        f"""SELECT COUNT(*) AS row_count,
+        version_selected
+        + f""" SELECT COUNT(*) AS row_count,
                    COALESCE(MAX(length(CAST(version.snapshot_json AS BLOB))),0) AS maximum_json,
                    COALESCE(SUM(length(CAST(version.snapshot_json AS BLOB))),0) AS aggregate_json,
                    COALESCE(MAX(max(
@@ -5762,12 +6035,13 @@ def _historical_entity_topology(
                    )),0) AS maximum_identity,
                    COALESCE(MAX(length(CAST(COALESCE(version.created_at,'') AS BLOB))),0)
                        AS maximum_timestamp
-              FROM entity_versions version
+              FROM selected
+              JOIN entity_versions version ON version.rowid=selected.version_rowid
               JOIN entities entity
                 ON entity.id=version.entity_id AND entity.user_id=version.user_id
                AND {public}
-             WHERE version.user_id=? AND version.entity_id IN ({holders})""",  # nosec B608
-        (tenant_id, *entity_ids),
+             WHERE version.user_id=?""",  # nosec B608 - fixed private predicate
+        (*version_rowids, tenant_id),
     ).fetchone()
     if (
         preflight is None
@@ -5780,7 +6054,8 @@ def _historical_entity_topology(
     ):
         raise MemoryExactStorageError("memory exact entity topology history exceeds its limits")
     cursor = conn.execute(
-        f"""SELECT version.id AS version_id, version.entity_id, version.version,
+        version_selected
+        + f""" SELECT version.id AS version_id, version.entity_id, version.version,
                    version.snapshot_json, version.created_at,
                    json_valid(version.snapshot_json) AS snapshot_valid,
                    CASE WHEN json_valid(version.snapshot_json)
@@ -5795,13 +6070,14 @@ def _historical_entity_topology(
                         THEN json_type(version.snapshot_json,'$.deleted_at') END AS deleted_type,
                    CASE WHEN json_valid(version.snapshot_json)
                         THEN json_extract(version.snapshot_json,'$.deleted_at') END AS deleted_value
-              FROM entity_versions version
+              FROM selected
+              JOIN entity_versions version ON version.rowid=selected.version_rowid
               JOIN entities entity
                 ON entity.id=version.entity_id AND entity.user_id=version.user_id
                AND {public}
-             WHERE version.user_id=? AND version.entity_id IN ({holders})
+             WHERE version.user_id=?
              ORDER BY version.entity_id, version.version, version.created_at, version.id""",  # nosec B608
-        (tenant_id, *entity_ids),
+        (*version_rowids, tenant_id),
     )
     rows: list[dict[str, Any]] = []
     try:
@@ -5939,55 +6215,75 @@ def _historical_entity_topology(
         )
         if witnessed is None and (first_recorded > boundary or first_coarse):
             raise MemoryExactStorageError("memory exact known_at precedes a selected entity")
+    if not _memory_exact_global_entity_merge_bound_in_transaction(
+        conn,
+        reserve_bytes=None,
+    ):
+        raise MemoryExactStorageError("memory exact entity merge history exceeds its row limit")
+    merge_selected = (
+        wanted
+        + f""", selected(history_rowid) AS MATERIALIZED (
+        SELECT history.rowid
+          FROM wanted
+          JOIN entity_merge_history history
+            ON history.source_entity_id=wanted.entity_id AND history.user_id=?
+         ORDER BY history.source_entity_id,history.created_at,history.id
+         LIMIT {MEMORY_EXACT_MAX_ENTITY_MERGE_ROWS + 1}
+    )"""
+    )  # nosec B608 - placeholders and integer cap only
     merge_preflight = conn.execute(
-        f"""SELECT COUNT(*) AS row_count,
+        merge_selected
+        + """ SELECT COUNT(*) AS row_count,
                    COALESCE(MAX(max(
-                       length(CAST(COALESCE(id,'') AS BLOB)),
-                       length(CAST(COALESCE(source_entity_id,'') AS BLOB)),
-                       length(CAST(COALESCE(target_entity_id,'') AS BLOB)),
-                       length(CAST(COALESCE(merged_by,'') AS BLOB)),
-                       length(CAST(COALESCE(undone_by,'') AS BLOB))
+                       length(CAST(COALESCE(history.id,'') AS BLOB)),
+                       length(CAST(COALESCE(history.source_entity_id,'') AS BLOB)),
+                       length(CAST(COALESCE(history.target_entity_id,'') AS BLOB)),
+                       length(CAST(COALESCE(history.merged_by,'') AS BLOB)),
+                       length(CAST(COALESCE(history.undone_by,'') AS BLOB))
                    )),0) AS maximum_identity,
                    COALESCE(MAX(max(
-                       length(CAST(COALESCE(created_at,'') AS BLOB)),
-                       length(CAST(COALESCE(undone_at,'') AS BLOB))
+                       length(CAST(COALESCE(history.created_at,'') AS BLOB)),
+                       length(CAST(COALESCE(history.undone_at,'') AS BLOB))
                    )),0) AS maximum_timestamp,
                    COALESCE(MAX(max(
-                       length(CAST(COALESCE(source_snapshot_json,'') AS BLOB)),
-                       length(CAST(COALESCE(target_before_json,'') AS BLOB)),
-                       length(CAST(COALESCE(target_after_json,'') AS BLOB)),
-                       length(CAST(COALESCE(transfer_json,'') AS BLOB))
+                       length(CAST(COALESCE(history.source_snapshot_json,'') AS BLOB)),
+                       length(CAST(COALESCE(history.target_before_json,'') AS BLOB)),
+                       length(CAST(COALESCE(history.target_after_json,'') AS BLOB)),
+                       length(CAST(COALESCE(history.transfer_json,'') AS BLOB))
                    )),0) AS maximum_json,
                    COALESCE(SUM(
-                       length(CAST(COALESCE(source_snapshot_json,'') AS BLOB)) +
-                       length(CAST(COALESCE(target_before_json,'') AS BLOB)) +
-                       length(CAST(COALESCE(target_after_json,'') AS BLOB)) +
-                       length(CAST(COALESCE(transfer_json,'') AS BLOB))
+                       length(CAST(COALESCE(history.source_snapshot_json,'') AS BLOB)) +
+                       length(CAST(COALESCE(history.target_before_json,'') AS BLOB)) +
+                       length(CAST(COALESCE(history.target_after_json,'') AS BLOB)) +
+                       length(CAST(COALESCE(history.transfer_json,'') AS BLOB))
                    ),0) AS aggregate_json
-              FROM entity_merge_history
-             WHERE user_id=?
-               AND source_entity_id IN ({holders})""",  # nosec B608
-        (tenant_id, *entity_ids),
+              FROM selected
+              JOIN entity_merge_history history ON history.rowid=selected.history_rowid""",
+        (*entity_ids, tenant_id),
     ).fetchone()
     if (
         merge_preflight is None
         or any(isinstance(item, bool) or not isinstance(item, int) for item in merge_preflight)
-        or not 0 <= int(merge_preflight[0]) <= MEMORY_EXACT_MAX_ENTITY_MERGE_ROWS
+        or not 0 <= int(merge_preflight[0]) <= MEMORY_EXACT_MAX_ENTITY_MERGE_ROWS + 1
         or not 0 <= int(merge_preflight[1]) <= 240
         or not 0 <= int(merge_preflight[2]) <= 64
         or not 0 <= int(merge_preflight[3]) <= MEMORY_EXACT_MAX_METADATA_UTF8_BYTES
         or not 0 <= int(merge_preflight[4]) <= MEMORY_EXACT_MAX_ENTITY_HISTORY_UTF8_BYTES
     ):
         raise MemoryExactStorageError("memory exact entity merge history exceeds its row limit")
+    if int(merge_preflight[0]) == MEMORY_EXACT_MAX_ENTITY_MERGE_ROWS + 1:
+        raise MemoryExactStorageError("memory exact entity merge history exceeds its row limit")
     merge_cursor = conn.execute(
-        f"""SELECT id AS merge_id, source_entity_id, target_entity_id,
-                   source_snapshot_json, target_before_json, target_after_json,
-                   transfer_json, merged_by, created_at, undone_at, undone_by
-              FROM entity_merge_history
-             WHERE user_id=?
-               AND source_entity_id IN ({holders})
-             ORDER BY created_at, id""",  # nosec B608
-        (tenant_id, *entity_ids),
+        merge_selected
+        + """ SELECT history.id AS merge_id, history.source_entity_id,
+                   history.target_entity_id, history.source_snapshot_json,
+                   history.target_before_json, history.target_after_json,
+                   history.transfer_json, history.merged_by, history.created_at,
+                   history.undone_at, history.undone_by
+              FROM selected
+              JOIN entity_merge_history history ON history.rowid=selected.history_rowid
+             ORDER BY history.created_at, history.id""",
+        (*entity_ids, tenant_id),
     )
     merge_rows: list[dict[str, Any]] = []
     try:
