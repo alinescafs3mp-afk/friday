@@ -14,20 +14,20 @@ either merged here or discarded before that source is removed.
 ## Current production identity
 
 - Branch: `main`
-- Deployed implementation head: `d751bfc6397c6f750724df1d40e3fb90f7594943`.
-- Live: Friday `0.207.99` / `d751bfc6397c6f750724df1d40e3fb90f7594943`;
-  tree `fcee3f670cdeb0b02dd67b10b03f751758a656772c1f27db1d294fdeda183720`;
-  wheel `3ce9144b544d99a7c50671f7ca7a239d128b2eb8c0f0ef46c9c2f3d0fc9c6dd4`.
-- Immediate runtime predecessor: Friday `0.207.98` /
-  `a9ef8565c80592275d61c16f293c7df16fb6aa89`; tree
-  `783758596cc527dd0406fcec274e7d2b3e62d298bdf0ffda1becd50f404bbb62`.
+- Deployed implementation head: `75b165a23809dfcc7445311e2dc896c98ce3df00`.
+- Live: Friday `0.208.0` / `75b165a23809dfcc7445311e2dc896c98ce3df00`;
+  tree `9d1c49da576e58e73ec1570d3e4c7e1ea7ebca2d44cc1e7482ef418c9ec89315`;
+  wheel `1354792971eb50b792c6a65ea7f86db47f0b9a643b7fb113dbbaddd733078490`.
+- Immediate runtime predecessor: Friday `0.207.99` /
+  `d751bfc6397c6f750724df1d40e3fb90f7594943`; tree
+  `fcee3f670cdeb0b02dd67b10b03f751758a656772c1f27db1d294fdeda183720`.
   Schema-capable fallback: Friday `0.207.90` /
   `7abb3c5e3fb29bdc7c53bf923f8b218fa26f07e9`; tree
   `c1c29331db489ad1c56080d70a8c37d4051b4752f1309dba9c0a012099ebcae5`.
 - Database schema: 50 in deployed production and the fallback.
 - Production: immutable activation `clear`; backend and Telegram bridge active;
   trusted-CA health `200`. The post-activation DR lifecycle is published at
-  index revision 44 with `0.207.99` current, `0.207.98` older and the
+  index revision 48 with `0.208.0` current, `0.207.99` older and the
   pre-activation anchor retained; retention admission is honestly
   `review_required` and grants no apply/delete authority.
   V12
@@ -56,7 +56,8 @@ either merged here or discarded before that source is removed.
 
 S4-R6 bounded conversation lexical refill, R7 five-contour document recall,
 fail-soft dense document passage recall, R8A model-control compatibility, the
-R8B internal retrieval foundation and R8C exact focused-source parity are live.
+R8B internal retrieval foundation, R8C exact focused-source parity and R8D
+authenticated exact-message windows are live.
 The inbox-advice worker now
 selects eligible privacy-safe rows before
 its finite page, so current, exhausted or excluded rows cannot starve later
@@ -412,8 +413,9 @@ R5 measured conversation recall is deployed in `0.207.83`; R6 bounded lexical
 refill and R7 five-contour document recall are deployed in `0.207.93`; the R8A
 compatibility/model-control slice is deployed in `0.207.95`; fail-soft dense
 document passage recall is deployed in `0.207.96`; the R8B internal retrieval
-foundation is deployed in `0.207.98`; and R8C exact focused-source parity is
-deployed in `0.207.99`. R8 sole dialogue-facade retirement is not deployed.
+foundation is deployed in `0.207.98`; R8C exact focused-source parity is
+deployed in `0.207.99`; and R8D authenticated exact-message windows are
+deployed in `0.208.0`. R8 sole dialogue-facade retirement is not deployed.
 
 1. Add reader-first `document_passages` with a schema-capable fallback, bounded
    writer, restart-safe resumable backfill and honest `index_incomplete`.
@@ -629,6 +631,25 @@ read-only bundle is verified under binding
 `d7c01df8270985f13a0b50932cedfa9e5e20a1e0bef5ca9ed0f0a10d20022af7`,
 and the signed private-owner smoke passed all 11 checks.
 
+R8D acceptance: queryless exact conversation windows now enter through one
+authenticated code-owned lane with durable ingress bounds, stable page-chain
+identity, full source reauthorization and atomic final publication. Partial
+page failure retains only the accepted witnessed prefix; carrier loss, replay,
+late permission drift and SQLite snapshot drift fail closed without exposing
+message bodies to the dialogue tool catalog, TTS or durable Work Items. The
+exact release gate passed 25,324 non-UI plus 32 UI tests with zero failures or
+skips; summary SHA-256
+`4194a2cf0499099ebccc47d567857fc6d92099024a75f537bcbeaf51d6dd1c2a`.
+Two independent private-clone builds and a clean source-ZIP rebuild reproduced
+wheel
+`1354792971eb50b792c6a65ea7f86db47f0b9a643b7fb113dbbaddd733078490`.
+Immutable activation ended `clear`; DR lifecycle revision 48 retains `0.208.0`
+current and `0.207.99` older with retention `review_required`. Trusted-CA
+health reports `0.208.0`/`ok` with the V12 gate `canary_ready`; the authenticated
+production read-only bundle is verified under binding
+`b02177bb427c5ff5aa537ffb7460a69aec897a8ac9eb573f5a272eb0105c68e8`,
+and the signed private-owner smoke passed all 11 checks.
+
 Estimate: 4–10 clean-work days across the remaining separately reversible releases.
 
 ### S5 — measured cognition and installation budgets
@@ -774,8 +795,8 @@ checks.
 2. Keep released `EngineerWorkItem v1` stable; do not expand its scope.
 3. Keep the released bounded S3 advisor in shadow until a genuine eligible turn
    creates its exact production witness; do not fabricate activation evidence.
-4. Keep the released S4-R6/R7/R8C recall paths green; integrate R8D exact-message
-   and R8E bitemporal/graph lanes before retiring any dialogue-facing adapter.
+4. Keep the released S4-R6/R7/R8C/R8D recall paths green; integrate R8E
+   bitemporal/graph lanes before retiring any dialogue-facing adapter.
 5. Keep the released S5 measured-lease contract green; extend cognition only
    through another measured, reversible journey release.
 6. Keep released S6-R4 exact clean/restart/production evidence green while P0G
@@ -821,7 +842,7 @@ are no `READY` claims at this checkpoint.
 | `conversation_recall` | Conversation recall | `DEGRADED` | `AVAILABLE`<br>[friday/interaction_control_plane/work_item_contract.py](../friday/interaction_control_plane/work_item_contract.py)<br>[tests/test_message_window_runtime_integration.py::test_promoted_exact_window_is_deterministic_scoped_and_receipted](../tests/test_message_window_runtime_integration.py) | `AVAILABLE`<br>[friday/orchestration/message_window_outcome.py](../friday/orchestration/message_window_outcome.py)<br>[tests/test_message_window_runtime_integration.py::test_promoted_exact_window_is_deterministic_scoped_and_receipted](../tests/test_message_window_runtime_integration.py)<br>[tests/test_archive_search_runtime_publication.py::test_selected_message_archive_evidence_replays_after_restart_then_fails_closed](../tests/test_archive_search_runtime_publication.py) | `STALE`<br>[evidence/golden_journeys/manifests/conversation_recall--clean_artifact--verified--f7a7ab8311b413d9beb6b349144a589d560b5a49c61c0892ebbb333c5284042b.json](../evidence/golden_journeys/manifests/conversation_recall--clean_artifact--verified--f7a7ab8311b413d9beb6b349144a589d560b5a49c61c0892ebbb333c5284042b.json) | `MISSING` | `MISSING` | `NOT_APPLICABLE` | `AVAILABLE`<br>[tests/test_message_window_work_item_runtime.py::test_restart_temporal_followup_reuses_identity_role_and_zone_with_one_cas_update](../tests/test_message_window_work_item_runtime.py)<br>[tests/test_archive_search_runtime_publication.py::test_selected_message_archive_evidence_replays_after_restart_then_fails_closed](../tests/test_archive_search_runtime_publication.py) | `MISSING` | `MISSING` | `semantic_recall_missing`<br>`cross_lane_coverage_missing` |
 | `document_recall_answer` | Document recall and answer | `DEGRADED` | `AVAILABLE`<br>[friday/file_evidence_reader.py](../friday/file_evidence_reader.py)<br>[tests/test_v12_file_evidence_reader.py::test_current_turn_native_files_form_one_process_owned_bundle](../tests/test_v12_file_evidence_reader.py) | `AVAILABLE`<br>[friday/orchestration/file_read.py](../friday/orchestration/file_read.py)<br>[tests/test_v12_file_evidence_reader.py::test_reader_contract_matches_real_ingestion_projections](../tests/test_v12_file_evidence_reader.py)<br>[tests/test_archive_search_runtime_publication.py::test_selected_canonical_archive_evidence_replays_exactly_after_runtime_restart](../tests/test_archive_search_runtime_publication.py)<br>[tests/test_archive_search_runtime_publication.py::test_locate_select_and_explain_document_survives_both_runtime_restarts](../tests/test_archive_search_runtime_publication.py) | `STALE`<br>[evidence/golden_journeys/manifests/document_recall_answer--clean_artifact--verified--f7a7ab8311b413d9beb6b349144a589d560b5a49c61c0892ebbb333c5284042b.json](../evidence/golden_journeys/manifests/document_recall_answer--clean_artifact--verified--f7a7ab8311b413d9beb6b349144a589d560b5a49c61c0892ebbb333c5284042b.json) | `AVAILABLE`<br>[tools/document_contour_live_battery.py](../tools/document_contour_live_battery.py)<br>[tests/test_document_contour_live_battery.py::test_manifest_is_exactly_ten_unique_document_scenarios](../tests/test_document_contour_live_battery.py) | `MISSING` | `NOT_APPLICABLE` | `AVAILABLE`<br>[tests/test_archive_search_runtime_publication.py::test_selected_canonical_archive_evidence_replays_exactly_after_runtime_restart](../tests/test_archive_search_runtime_publication.py)<br>[tests/test_archive_search_runtime_publication.py::test_locate_select_and_explain_document_survives_both_runtime_restarts](../tests/test_archive_search_runtime_publication.py)<br>[tests/test_archive_search_runtime_publication.py::test_selected_archive_replay_failure_is_source_free_and_suspends](../tests/test_archive_search_runtime_publication.py) | `MISSING` | `MISSING` | `cross_lane_coverage_missing` |
 | `obsidian_write_sync` | Obsidian write and synchronization | `UNVERIFIED` | `AVAILABLE`<br>[friday/organs/obsidian/contracts.py](../friday/organs/obsidian/contracts.py)<br>[friday/orchestration/effect_outcome.py](../friday/orchestration/effect_outcome.py)<br>[tests/test_effect_outcome.py::test_effect_outcome_is_immutable_canonical_closed_and_round_trips](../tests/test_effect_outcome.py)<br>[tests/test_obsidian_structured_acceptance_core.py::test_conflict_preview_is_non_destructive_and_contains_both_versions](../tests/test_obsidian_structured_acceptance_core.py) | `AVAILABLE`<br>[friday/organs/obsidian/runtime.py](../friday/organs/obsidian/runtime.py)<br>[tests/test_agent_obsidian_acceptance_message_matrix.py::test_every_exact_tier_a_b_message_routes_through_full_chat_once](../tests/test_agent_obsidian_acceptance_message_matrix.py)<br>[tests/test_agent_obsidian_production_composition.py::test_note_create_append_and_daily_exact_messages_mutate_the_real_vault](../tests/test_agent_obsidian_production_composition.py) | `MISSING` | `AVAILABLE`<br>[tests/test_obsidian_syncthing_live.py::test_pinned_syncthing_generates_and_accepts_the_managed_rest_contract](../tests/test_obsidian_syncthing_live.py) | `MISSING` | `MISSING` | `AVAILABLE`<br>[tests/test_obsidian_runtime.py::test_resume_reuses_daily_operation_identity_without_duplicate_text](../tests/test_obsidian_runtime.py)<br>[tests/test_obsidian_operations.py::test_unproved_append_stays_uncertain_and_never_mutates_the_vault](../tests/test_obsidian_operations.py) | `MISSING` | `MISSING` | `physical_android_round_trip_missing`<br>`real_conflict_evidence_missing` |
-| `durable_scheduled_work` | Durable scheduled work | `DEGRADED` | `AVAILABLE`<br>[friday/reminder_schedule.py](../friday/reminder_schedule.py)<br>[tests/test_a_reminder_is_set_before_the_model_speaks.py::test_the_tool_is_removed_so_nobody_is_woken_twice](../tests/test_a_reminder_is_set_before_the_model_speaks.py) | `AVAILABLE`<br>[friday/storage/_missions.py](../friday/storage/_missions.py)<br>[tests/test_a_reminder_is_set_before_the_model_speaks.py::test_the_reminder_is_set_without_asking_the_model](../tests/test_a_reminder_is_set_before_the_model_speaks.py) | `STALE`<br>[evidence/golden_journeys/manifests/durable_scheduled_work--clean_artifact--verified--f7a7ab8311b413d9beb6b349144a589d560b5a49c61c0892ebbb333c5284042b.json](../evidence/golden_journeys/manifests/durable_scheduled_work--clean_artifact--verified--f7a7ab8311b413d9beb6b349144a589d560b5a49c61c0892ebbb333c5284042b.json) | `AVAILABLE`<br>[tools/synthetic_live_battery.py](../tools/synthetic_live_battery.py)<br>[tests/test_synthetic_live_battery.py::test_exact_reminder_oracle_owns_the_model_boundary](../tests/test_synthetic_live_battery.py) | `VERIFIED`<br>[evidence/golden_journeys/manifests/durable_scheduled_work--production_read_only--verified--d7c01df8270985f13a0b50932cedfa9e5e20a1e0bef5ca9ed0f0a10d20022af7.json](../evidence/golden_journeys/manifests/durable_scheduled_work--production_read_only--verified--d7c01df8270985f13a0b50932cedfa9e5e20a1e0bef5ca9ed0f0a10d20022af7.json) | `NOT_APPLICABLE` | `STALE`<br>[evidence/golden_journeys/manifests/durable_scheduled_work--restart_recovery--verified--f7a7ab8311b413d9beb6b349144a589d560b5a49c61c0892ebbb333c5284042b.json](../evidence/golden_journeys/manifests/durable_scheduled_work--restart_recovery--verified--f7a7ab8311b413d9beb6b349144a589d560b5a49c61c0892ebbb333c5284042b.json) | `MISSING` | `MISSING` | `journey_specific_rollback_backup_evidence_missing` |
+| `durable_scheduled_work` | Durable scheduled work | `DEGRADED` | `AVAILABLE`<br>[friday/reminder_schedule.py](../friday/reminder_schedule.py)<br>[tests/test_a_reminder_is_set_before_the_model_speaks.py::test_the_tool_is_removed_so_nobody_is_woken_twice](../tests/test_a_reminder_is_set_before_the_model_speaks.py) | `AVAILABLE`<br>[friday/storage/_missions.py](../friday/storage/_missions.py)<br>[tests/test_a_reminder_is_set_before_the_model_speaks.py::test_the_reminder_is_set_without_asking_the_model](../tests/test_a_reminder_is_set_before_the_model_speaks.py) | `STALE`<br>[evidence/golden_journeys/manifests/durable_scheduled_work--clean_artifact--verified--f7a7ab8311b413d9beb6b349144a589d560b5a49c61c0892ebbb333c5284042b.json](../evidence/golden_journeys/manifests/durable_scheduled_work--clean_artifact--verified--f7a7ab8311b413d9beb6b349144a589d560b5a49c61c0892ebbb333c5284042b.json) | `AVAILABLE`<br>[tools/synthetic_live_battery.py](../tools/synthetic_live_battery.py)<br>[tests/test_synthetic_live_battery.py::test_exact_reminder_oracle_owns_the_model_boundary](../tests/test_synthetic_live_battery.py) | `VERIFIED`<br>[evidence/golden_journeys/manifests/durable_scheduled_work--production_read_only--verified--b02177bb427c5ff5aa537ffb7460a69aec897a8ac9eb573f5a272eb0105c68e8.json](../evidence/golden_journeys/manifests/durable_scheduled_work--production_read_only--verified--b02177bb427c5ff5aa537ffb7460a69aec897a8ac9eb573f5a272eb0105c68e8.json) | `NOT_APPLICABLE` | `STALE`<br>[evidence/golden_journeys/manifests/durable_scheduled_work--restart_recovery--verified--f7a7ab8311b413d9beb6b349144a589d560b5a49c61c0892ebbb333c5284042b.json](../evidence/golden_journeys/manifests/durable_scheduled_work--restart_recovery--verified--f7a7ab8311b413d9beb6b349144a589d560b5a49c61c0892ebbb333c5284042b.json) | `MISSING` | `MISSING` | `journey_specific_rollback_backup_evidence_missing` |
 | `honest_degradation` | Honest degradation | `DEGRADED` | `AVAILABLE`<br>[friday/orchestration/capability_outcome.py](../friday/orchestration/capability_outcome.py)<br>[tests/test_search_provider_refusal_is_not_emptiness.py::test_202_from_duckduckgo_is_a_refusal_not_an_empty_result](../tests/test_search_provider_refusal_is_not_emptiness.py) | `AVAILABLE`<br>[tests/test_search_provider_refusal_is_not_emptiness.py::test_the_chain_moves_on_when_the_first_provider_refuses](../tests/test_search_provider_refusal_is_not_emptiness.py)<br>[tests/test_message_window_runtime_integration.py::test_final_message_snapshot_drift_is_unavailable_source_free_and_not_retried](../tests/test_message_window_runtime_integration.py) | `STALE`<br>[evidence/golden_journeys/manifests/honest_degradation--clean_artifact--verified--f7a7ab8311b413d9beb6b349144a589d560b5a49c61c0892ebbb333c5284042b.json](../evidence/golden_journeys/manifests/honest_degradation--clean_artifact--verified--f7a7ab8311b413d9beb6b349144a589d560b5a49c61c0892ebbb333c5284042b.json) | `AVAILABLE`<br>[tools/synthetic_live_battery.py](../tools/synthetic_live_battery.py)<br>[tests/test_synthetic_live_battery.py::test_full_package_a_oracle_accepts_natural_honest_refusals](../tests/test_synthetic_live_battery.py) | `MISSING` | `NOT_APPLICABLE` | `STALE`<br>[evidence/golden_journeys/manifests/honest_degradation--restart_recovery--verified--f7a7ab8311b413d9beb6b349144a589d560b5a49c61c0892ebbb333c5284042b.json](../evidence/golden_journeys/manifests/honest_degradation--restart_recovery--verified--f7a7ab8311b413d9beb6b349144a589d560b5a49c61c0892ebbb333c5284042b.json) | `MISSING` | `MISSING` | `product_multi_lane_coverage_missing` |
 | `current_file_web_comparison` | Current file and web comparison | `UNVERIFIED` | `AVAILABLE`<br>[tests/test_compare_current_file_web_work_graph_schema45.py::test_schema45_exact_binding_is_durable_immutable_and_revision_cas](../tests/test_compare_current_file_web_work_graph_schema45.py) | `AVAILABLE`<br>[tests/test_supervisor_assist_controller.py::test_review_and_web_recovery_are_strictly_bounded](../tests/test_supervisor_assist_controller.py) | `MISSING` | `MISSING` | `MISSING` | `NOT_APPLICABLE` | `AVAILABLE`<br>[tests/test_supervisor_assist_graph_adapter.py::test_terminal_cancel_and_startup_reconcile_publish_closed_receipts](../tests/test_supervisor_assist_graph_adapter.py) | `MISSING` | `MISSING` | `assist_promotion_evidence_missing`<br>`clean_release_artifact_missing`<br>`activation_rollback_evidence_missing` |
 
