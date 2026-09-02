@@ -504,15 +504,9 @@ def test_v3_outer_and_child_cursors_are_independent_transport_identity() -> None
         ),
     )
     assert all(item.to_private_json() != request.to_private_json() for item in variants)
-    assert all(
-        ArchiveSearchRequest.parse_private(item.to_private_json()) == item
-        for item in variants
-    )
+    assert all(ArchiveSearchRequest.parse_private(item.to_private_json()) == item for item in variants)
     assert all(item.to_identity_json() == request.to_identity_json() for item in variants)
-    assert all(
-        item.identity_digest_material() == request.identity_digest_material()
-        for item in variants
-    )
+    assert all(item.identity_digest_material() == request.identity_digest_material() for item in variants)
     assert "continuation" not in request.to_identity_json()
 
 
@@ -652,38 +646,35 @@ async def test_memory_chain_rejects_cursor_and_offset_gap_replay_terminal_append
             )
 
 
-async def test_composite_rejects_genuine_authority_snapshot_drift(storage: Any) -> None:
+async def test_composite_rejects_authority_drift_after_valid_page_continuity(
+    storage: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     fixture = await _fixture(
         storage,
         label="authority-drift",
         include_message=True,
         include_memory=False,
     )
-    first = fixture.message_pages[0]
-    assert fixture.message_request is not None
-    fixture.authorization.set_user_preset(PRINCIPAL, "admin")
-    try:
-        with storage.transaction() as conn:
-            changed = fixture.message_adapter.prepare_in_transaction(
-                conn,
-                context=fixture.context,
-                request=fixture.message_request,
-            )
-        assert first._is_process_owned()
-        assert changed._is_process_owned()
-        assert changed.request is first.request is fixture.message_request
-        assert changed.authority_handle != first.authority_handle
-        assert changed.snapshot_handle != first.snapshot_handle
-        with pytest.raises(ArchiveSearchServiceError):
-            compose_prepared_archive_searches(
-                fixture.prepared,
-                message_exact_pages=(first, changed),
-            )
-    finally:
-        fixture.authorization.set_user_preset(PRINCIPAL, "owner")
+    first, second, _terminal = fixture.message_pages
+    assert first.next_continuation is not None
+    assert second.offset == first.offset + len(first.rows)
+    assert second.request.continuation is not None
+    assert second.request.continuation.token == first.next_continuation.token
+    assert {item.message_id for item in second.rows}.isdisjoint(item.message_id for item in first.rows)
+    object.__setattr__(second, "authority_handle", "f" * 64)
+    monkeypatch.setattr(MessageExactPage, "_is_process_owned", lambda _self: True)
+    with pytest.raises(ArchiveSearchServiceError):
+        compose_prepared_archive_searches(
+            fixture.prepared,
+            message_exact_pages=(first, second),
+        )
 
 
-async def test_composite_rejects_cross_scope_real_exact_pages(storage: Any) -> None:
+async def test_composite_rejects_cross_scope_real_exact_pages(
+    storage: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     first = await _fixture(
         storage,
         label="scope-first",
@@ -696,12 +687,19 @@ async def test_composite_rejects_cross_scope_real_exact_pages(storage: Any) -> N
         include_message=True,
         include_memory=True,
     )
+    # Isolate the outer scope/boundary check from the independently tested
+    # page-chain request check.
+    monkeypatch.setattr(
+        "friday.retrieval.archive_search_service._message_exact_chain_is_valid",
+        lambda *_args: True,
+    )
     with pytest.raises(ArchiveSearchServiceError):
         compose_prepared_archive_searches(
             first.prepared,
             message_exact_pages=second.message_pages,
             memory_exact_pages=first.memory_pages,
         )
+    monkeypatch.undo()
     with pytest.raises(ArchiveSearchServiceError):
         compose_prepared_archive_searches(
             first.prepared,
@@ -719,15 +717,17 @@ async def test_immutable_boundary_preserves_the_original_valid_composite(storage
         message_rows=1,
         message_page_size=2,
     )
-    with pytest.raises(
-        sqlite3.IntegrityError,
-        match=r"текст сообщения чата неизменяем",
+    with (
+        pytest.raises(
+            sqlite3.IntegrityError,
+            match=r"текст сообщения чата неизменяем",
+        ),
+        storage.transaction() as conn,
     ):
-        with storage.transaction() as conn:
-            conn.execute(
-                "UPDATE messages SET content=? WHERE id=?",
-                ("mutated accepted boundary", fixture.boundary_id),
-            )
+        conn.execute(
+            "UPDATE messages SET content=? WHERE id=?",
+            ("mutated accepted boundary", fixture.boundary_id),
+        )
     with storage.transaction() as conn:
         boundary = conn.execute(
             "SELECT content FROM messages WHERE id=?",
@@ -742,7 +742,10 @@ async def test_immutable_boundary_preserves_the_original_valid_composite(storage
     assert composite.message_exact_pages == fixture.message_pages
 
 
-async def test_composite_rejects_more_than_32_real_exact_pages(storage: Any) -> None:
+async def test_composite_rejects_more_than_32_real_exact_pages(
+    storage: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     fixture = await _fixture(
         storage,
         label="bounded-prefix",
@@ -753,11 +756,50 @@ async def test_composite_rejects_more_than_32_real_exact_pages(storage: Any) -> 
     )
     assert len(fixture.message_pages) == MAX_ARCHIVE_EXACT_CHAIN_PAGES + 1
     assert all(page._is_process_owned() for page in fixture.message_pages)
+    material_calls = 0
+
+    def observe_material(_self: PreparedArchiveSearchComposite) -> dict[str, object]:
+        nonlocal material_calls
+        material_calls += 1
+        return {}
+
+    monkeypatch.setattr(PreparedArchiveSearchComposite, "_material", observe_material)
     with pytest.raises(ArchiveSearchServiceError):
         compose_prepared_archive_searches(
             fixture.prepared,
             message_exact_pages=fixture.message_pages,
         )
+    assert material_calls == 0
+
+
+async def test_composite_seal_request_prepared_and_page_tuple_tamper_fail_closed(
+    storage: Any,
+) -> None:
+    fixture = await _fixture(
+        storage,
+        label="carrier-tamper",
+        include_message=True,
+        include_memory=True,
+    )
+
+    def fresh() -> PreparedArchiveSearchComposite:
+        return compose_prepared_archive_searches(
+            fixture.prepared,
+            message_exact_pages=fixture.message_pages,
+            memory_exact_pages=fixture.memory_pages,
+        )
+
+    mutations: tuple[tuple[str, object], ...] = (
+        ("_seal", b"x" * 32),
+        ("_request", replace(fixture.request, continuation="r8h-tampered-outer-cursor")),
+        ("_prepared_search", object()),
+        ("_message_exact_pages", (*fixture.message_pages, fixture.message_pages[0])),
+    )
+    for field, value in mutations:
+        composite = fresh()
+        object.__setattr__(composite, field, value)
+        with pytest.raises(ArchiveSearchServiceError):
+            _ = composite.request
 
 
 async def test_composite_repr_copy_deepcopy_and_pickle_are_private(storage: Any) -> None:
@@ -788,15 +830,23 @@ async def test_tool_result_serializers_omit_composite_and_private_fields(storage
         storage,
         label="tool-result",
         include_message=True,
-        include_memory=False,
-        message_rows=1,
-        message_page_size=2,
+        include_memory=True,
+        message_rows=3,
+        message_page_size=1,
+        memory_rows=3,
+        memory_page_size=1,
     )
     composite = compose_prepared_archive_searches(
         fixture.prepared,
         message_exact_pages=fixture.message_pages,
+        memory_exact_pages=fixture.memory_pages,
     )
     visible = fixture.prepared.authorized_batch.model_visible_canonical_bytes.decode("ascii")
+    assert fixture.message_pages[0].next_continuation is not None
+    assert fixture.memory_pages[0].next_continuation is not None
+    boundary_body = fixture.message_pages[0].boundary.content
+    assert boundary_body == "R8H accepted boundary tool-result"
+    assert boundary_body not in visible
     result = ToolResult(
         "archive_search",
         True,
@@ -811,6 +861,63 @@ async def test_tool_result_serializers_omit_composite_and_private_fields(storage
         assert "message_exact_request" not in rendered
         assert fixture.boundary_id not in rendered
         assert fixture.context.turn_id not in rendered
+        assert fixture.message_pages[0].next_continuation.token not in rendered
+        assert fixture.memory_pages[0].next_continuation.token not in rendered
+        assert boundary_body not in rendered
+
+
+async def test_tool_result_requires_one_matching_authoritative_prepared_search(storage: Any) -> None:
+    first = await _fixture(
+        storage,
+        label="tool-authority-first",
+        include_message=True,
+        include_memory=False,
+        message_rows=1,
+        message_page_size=2,
+    )
+    second = await _fixture(
+        storage,
+        label="tool-authority-second",
+        include_message=True,
+        include_memory=False,
+        message_rows=1,
+        message_page_size=2,
+    )
+    first_composite = compose_prepared_archive_searches(
+        first.prepared,
+        message_exact_pages=first.message_pages,
+    )
+    second_composite = compose_prepared_archive_searches(
+        second.prepared,
+        message_exact_pages=second.message_pages,
+    )
+    visible = first.prepared.authorized_batch.model_visible_canonical_bytes.decode("ascii")
+    invalid = (
+        ToolResult(
+            "archive_search",
+            True,
+            data=visible,
+            prepared_archive_search=first.prepared,
+            prepared_archive_search_composite=second_composite,
+        ),
+        ToolResult(
+            "archive_search",
+            True,
+            data=visible,
+            prepared_archive_search_composite=first_composite,
+        ),
+    )
+    for result in invalid:
+        with pytest.raises(ValueError, match="archive search result is unavailable"):
+            result.archive_model_visible_bytes()
+        assert result.to_dict() == {
+            "tool": "archive_search",
+            "success": False,
+            "error": "Archive search result failed private validation",
+        }
+        assert result.to_llm_message() == (
+            "Ошибка инструмента archive_search: результат не прошёл приватную проверку"
+        )
 
 
 def test_r8h_import_surface_is_passive_and_backward_compatible() -> None:
@@ -818,15 +925,11 @@ def test_r8h_import_surface_is_passive_and_backward_compatible() -> None:
     service = importlib.import_module("friday.retrieval.archive_search_service")
     kernel = importlib.import_module("friday.execution_kernel")
     assert ARCHIVE_SEARCH_REQUEST_SCHEMA == "friday.archive-search-request.private.v2"
-    assert contract.ARCHIVE_SEARCH_REQUEST_SCHEMA_V3 == (
-        "friday.archive-search-request.private.v3"
-    )
+    assert contract.ARCHIVE_SEARCH_REQUEST_SCHEMA_V3 == ("friday.archive-search-request.private.v3")
     assert service.MAX_ARCHIVE_EXACT_CHAIN_PAGES == 32
     assert service.PreparedArchiveSearchComposite is PreparedArchiveSearchComposite
     assert service.compose_prepared_archive_searches is compose_prepared_archive_searches
-    assert tuple(kernel.ToolResult.__dataclass_fields__)[-1] == (
-        "prepared_archive_search_composite"
-    )
+    assert tuple(kernel.ToolResult.__dataclass_fields__)[-1] == ("prepared_archive_search_composite")
     archive_parameters = inspect.signature(kernel.ExecutionKernel._archive_search).parameters
     assert "message_exact_request" not in archive_parameters
     assert "memory_exact_request" not in archive_parameters

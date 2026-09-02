@@ -1071,25 +1071,21 @@ def _composite_scope_is_valid(
             return False
         message_request = request.message_exact_request
         memory_request = request.memory_exact_request
-        if message_request is not None:
-            if (
-                recipe.current_conversation_id != message_request.conversation_id
-                or recipe.boundary_user_message_id
-                != message_request.accepted_boundary_user_message_id
-                or any(page.principal_id != recipe.principal_id for page in message_exact_pages)
-                or recipe.accepted_boundary_identity_sha256 is None
-                or not hmac.compare_digest(
-                    recipe.accepted_boundary_identity_sha256,
-                    _message_exact_boundary_identity(message_exact_pages[0]),
-                )
-            ):
-                return False
-        if memory_request is not None and (
-            memory_request.tenant_id != recipe.tenant_id
-            or memory_request.principal_id != recipe.principal_id
+        if message_request is not None and (
+            recipe.current_conversation_id != message_request.conversation_id
+            or recipe.boundary_user_message_id != message_request.accepted_boundary_user_message_id
+            or any(page.principal_id != recipe.principal_id for page in message_exact_pages)
+            or recipe.accepted_boundary_identity_sha256 is None
+            or not hmac.compare_digest(
+                recipe.accepted_boundary_identity_sha256,
+                _message_exact_boundary_identity(message_exact_pages[0]),
+            )
         ):
             return False
-        return True
+        return memory_request is None or (
+            memory_request.tenant_id == recipe.tenant_id
+            and memory_request.principal_id == recipe.principal_id
+        )
     except Exception:
         return False
 
@@ -1215,6 +1211,8 @@ def compose_prepared_archive_searches(
             or not prepared_search._is_valid()
             or type(message_exact_pages) is not tuple
             or type(memory_exact_pages) is not tuple
+            or len(message_exact_pages) > MAX_ARCHIVE_EXACT_CHAIN_PAGES
+            or len(memory_exact_pages) > MAX_ARCHIVE_EXACT_CHAIN_PAGES
         ):
             raise _fail()
         request = prepared_search._run._request

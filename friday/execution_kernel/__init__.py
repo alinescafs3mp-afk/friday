@@ -1421,11 +1421,19 @@ class ToolResult:
 
         try:
             prepared = self.prepared_archive_search
+            composite = self.prepared_archive_search_composite
             if (
                 self.tool_name != "archive_search"
                 or self.success is not True
                 or type(prepared) is not PreparedArchiveSearch
                 or type(self.data) is not str
+                or (
+                    composite is not None
+                    and (
+                        type(composite) is not PreparedArchiveSearchComposite
+                        or composite.prepared_search is not prepared
+                    )
+                )
                 or (
                     self.archive_exact_file_reader is not None
                     and (
@@ -1448,20 +1456,19 @@ class ToolResult:
 
     def to_dict(self) -> dict[str, Any]:
         result: dict[str, Any] = {"tool": self.tool_name, "success": self.success}
-        if self.data is not None:
-            if self.prepared_archive_search is not None:
-                try:
-                    encoded = self.archive_model_visible_bytes().decode("ascii", errors="strict")
-                except ValueError:
-                    return {
-                        "tool": self.tool_name,
-                        "success": False,
-                        "error": "Archive search result failed private validation",
-                    }
-            else:
-                encoded = (
-                    self.data if isinstance(self.data, str) else json.dumps(self.data, ensure_ascii=False)
-                )
+        encoded: str | None = None
+        if self.prepared_archive_search is not None or self.prepared_archive_search_composite is not None:
+            try:
+                encoded = self.archive_model_visible_bytes().decode("ascii", errors="strict")
+            except ValueError:
+                return {
+                    "tool": self.tool_name,
+                    "success": False,
+                    "error": "Archive search result failed private validation",
+                }
+        elif self.data is not None:
+            encoded = self.data if isinstance(self.data, str) else json.dumps(self.data, ensure_ascii=False)
+        if encoded is not None:
             if len(encoded) > 8_000:
                 encoded = encoded[:7_900] + "\n… (truncated)"
                 self.truncated = True
@@ -1473,7 +1480,7 @@ class ToolResult:
     def to_llm_message(self) -> str:
         if not self.success:
             return f"Ошибка инструмента {self.tool_name}: {self.error}"
-        if self.tool_name == "archive_search" and self.prepared_archive_search is not None:
+        if self.prepared_archive_search is not None or self.prepared_archive_search_composite is not None:
             try:
                 # This body is admitted to the private turn ledger byte-for-byte.
                 # Prefixing, pretty-printing or generic round-budget truncation
