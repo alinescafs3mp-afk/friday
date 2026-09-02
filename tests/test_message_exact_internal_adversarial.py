@@ -45,6 +45,8 @@ from friday.storage._message_exact_internal import (
 from friday.turn_intent_policy import TurnIntent, TurnPolicyDecision
 
 OWNER = "message-exact-adversarial-owner"
+FOREIGN = "message-exact-adversarial-foreign"
+SHARED_TENANT = "message-exact-adversarial-tenant"
 BASE_TIME = "2026-09-01T10:00:00+00:00"
 
 
@@ -122,9 +124,11 @@ def _adapter(
     conversation_id: str,
     *,
     label: str,
+    principal_id: str = OWNER,
+    shared_tenant: str = "",
 ) -> tuple[AuthorizationService, MessageExactInternalAdapter, AuthenticatedTurnContext]:
-    authorization = AuthorizationService(storage)
-    actor = authorization.actor_for_user(OWNER, source="message-exact-adversarial-test")
+    authorization = AuthorizationService(storage, shared_tenant=shared_tenant)
+    actor = authorization.actor_for_user(principal_id, source="message-exact-adversarial-test")
     issuer, context = _turn(actor, conversation_id, label=label)
     return authorization, MessageExactInternalAdapter(authorization, issuer), context
 
@@ -199,6 +203,15 @@ def _token_text(token: str) -> str:
 
 def _opaque(text: str) -> str:
     return base64.urlsafe_b64encode(text.encode("ascii")).rstrip(b"=").decode("ascii")
+
+
+def _scope_sql(statements: list[str]) -> tuple[str, ...]:
+    normalized = tuple(" ".join(statement.casefold().split()) for statement in statements)
+    return tuple(
+        statement
+        for statement in normalized
+        if " conversations " in f" {statement} " or " messages " in f" {statement} "
+    )
 
 
 @pytest.mark.parametrize(
@@ -358,6 +371,91 @@ def test_cursor_is_bound_to_conversation_boundary_roles_time_and_content_mode(
                 context=scoped_context,
                 request=scoped_request,
             )
+
+
+@pytest.mark.parametrize("crossing", ("turn", "person", "tenant", "authorization"))
+def test_cursor_replay_is_bound_to_turn_person_tenant_and_authorization(
+    adversarial_storage: Any,
+    crossing: str,
+) -> None:
+    conversation, _rows, boundary = _seed_cursor(adversarial_storage)
+    authorization, adapter, context = _adapter(
+        adversarial_storage,
+        str(conversation["id"]),
+        label=f"cursor-binding-origin-{crossing}",
+        shared_tenant=SHARED_TENANT,
+    )
+    with adversarial_storage.transaction() as conn:
+        first = adapter.prepare_in_transaction(
+            conn,
+            context=context,
+            request=_request(str(conversation["id"]), str(boundary["id"])),
+        )
+    assert first.next_continuation is not None
+
+    envelope = json.loads(_token_text(first.next_continuation.token))
+    payload = envelope.get("payload")
+    assert isinstance(payload, dict)
+    hex_characters = frozenset("0123456789abcdef")
+    for binding in (
+        "authority_context_sha256",
+        "turn_id_sha256",
+        "turn_authority_sha256",
+        "context_authority_sha256",
+        "tenant_binding_sha256",
+        "person_binding_sha256",
+        "authorization_binding_sha256",
+    ):
+        digest = payload.get(binding)
+        assert type(digest) is str
+        assert len(digest) == 64 and set(digest) <= hex_characters
+
+    if crossing == "turn":
+        _replay_authorization, replay_adapter, replay_context = _adapter(
+            adversarial_storage,
+            str(conversation["id"]),
+            label="cursor-binding-new-turn",
+            shared_tenant=SHARED_TENANT,
+        )
+    elif crossing == "person":
+        adversarial_storage.ensure_user(FOREIGN, preset_key="owner")
+        _replay_authorization, replay_adapter, replay_context = _adapter(
+            adversarial_storage,
+            str(conversation["id"]),
+            label="cursor-binding-other-person",
+            principal_id=FOREIGN,
+            shared_tenant=SHARED_TENANT,
+        )
+    elif crossing == "tenant":
+        _replay_authorization, replay_adapter, replay_context = _adapter(
+            adversarial_storage,
+            str(conversation["id"]),
+            label="cursor-binding-other-tenant",
+            shared_tenant=f"{SHARED_TENANT}-other",
+        )
+    else:
+        authorization.set_user_preset(OWNER, "user")
+        replay_adapter = adapter
+        replay_context = context
+
+    replay = _request(
+        str(conversation["id"]),
+        str(boundary["id"]),
+        continuation=first.next_continuation,
+    )
+    traced: list[str] = []
+    with adversarial_storage.transaction() as conn:
+        conn.set_trace_callback(traced.append)
+        try:
+            with pytest.raises(MessageExactStorageError, match="continuation"):
+                replay_adapter.prepare_in_transaction(
+                    conn,
+                    context=replay_context,
+                    request=replay,
+                )
+        finally:
+            conn.set_trace_callback(None)
+    assert _scope_sql(traced) == ()
 
 
 def test_overflow_numeric_metadata_fails_closed_before_projection(

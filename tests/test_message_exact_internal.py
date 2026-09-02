@@ -167,6 +167,15 @@ def _request(
     return MessageExactRequest.create(**values)
 
 
+def _scope_sql(statements: list[str]) -> tuple[str, ...]:
+    normalized = tuple(" ".join(statement.casefold().split()) for statement in statements)
+    return tuple(
+        statement
+        for statement in normalized
+        if " conversations " in f" {statement} " or " messages " in f" {statement} "
+    )
+
+
 def _seed_owner(storage: Any, title: str = "exact current conversation") -> dict[str, Any]:
     storage.ensure_user(OWNER, preset_key="owner")
     return storage.create_conversation(OWNER, title)
@@ -261,6 +270,69 @@ def test_queryless_current_scope_preserves_message_and_reply_identity(storage: A
         "SYSTEM-CANARY",
     ):
         assert private not in projected
+
+
+def test_sqlite_rowids_above_one_billion_remain_valid_exact_sequences(storage: Any) -> None:
+    conversation = _seed_owner(storage, "high SQLite rowid")
+    source_id = "msg_1000000000000001"
+    boundary_id = "msg_1000000000000002"
+    source_sequence = 1_000_000_001
+    boundary_sequence = 1_000_000_002
+    with storage.transaction() as conn:
+        conn.execute(
+            """INSERT INTO messages(
+                   rowid,id,conversation_id,user_id,role,content,
+                   metadata_json,reply_to,created_at
+               ) VALUES(?,?,?,?,?,?,?,?,?)""",
+            (
+                source_sequence,
+                source_id,
+                conversation["id"],
+                OWNER,
+                "assistant",
+                "HIGH-ROWID-SOURCE",
+                "{}",
+                None,
+                BASE_TIME,
+            ),
+        )
+        conn.execute(
+            """INSERT INTO messages(
+                   rowid,id,conversation_id,user_id,role,content,
+                   metadata_json,reply_to,created_at
+               ) VALUES(?,?,?,?,?,?,?,?,?)""",
+            (
+                boundary_sequence,
+                boundary_id,
+                conversation["id"],
+                OWNER,
+                "user",
+                "HIGH-ROWID-BOUNDARY",
+                "{}",
+                None,
+                "2026-09-01T08:00:01+00:00",
+            ),
+        )
+
+    _authorization, _actor_value, adapter, context = _adapter(
+        storage,
+        principal_id=OWNER,
+        conversation_id=str(conversation["id"]),
+        label="high-sqlite-rowid",
+    )
+    with storage.transaction() as conn:
+        page = adapter.prepare_in_transaction(
+            conn,
+            context=context,
+            request=_request(str(conversation["id"]), boundary_id),
+        )
+
+    assert page.total_rows == 1
+    assert page.boundary.message_id == boundary_id
+    assert page.boundary.storage_sequence == boundary_sequence
+    assert [row.message_id for row in page.rows] == [source_id]
+    assert [row.storage_sequence for row in page.rows] == [source_sequence]
+    assert [row.content for row in page.rows] == ["HIGH-ROWID-SOURCE"]
 
 
 def test_role_and_microsecond_half_open_window_are_exact(storage: Any) -> None:
@@ -415,20 +487,51 @@ def test_foreign_actor_conversation_and_boundary_fail_closed(storage: Any) -> No
         conversation_id=str(current["id"]),
         label="foreign-scope-owner",
     )
-    with storage.transaction() as conn, pytest.raises(MessageExactInternalError):
-        adapter.prepare_in_transaction(
-            conn,
-            context=current_context,
-            request=_request(str(other["id"]), str(other_boundary["id"])),
-        )
+
+    def reject_and_trace(
+        scoped_adapter: MessageExactInternalAdapter,
+        scoped_context: AuthenticatedTurnContext,
+        scoped_request: MessageExactRequest,
+        expected_error: type[Exception],
+    ) -> tuple[Exception, tuple[str, ...]]:
+        traced: list[str] = []
+        with storage.transaction() as conn:
+            conn.set_trace_callback(traced.append)
+            try:
+                with pytest.raises(expected_error) as raised:
+                    scoped_adapter.prepare_in_transaction(
+                        conn,
+                        context=scoped_context,
+                        request=scoped_request,
+                    )
+            finally:
+                conn.set_trace_callback(None)
+        return raised.value, _scope_sql(traced)
+
+    _raised, scope_reads = reject_and_trace(
+        adapter,
+        current_context,
+        _request(str(other["id"]), str(other_boundary["id"])),
+        MessageExactInternalError,
+    )
+    assert scope_reads == ()
     for invalid_boundary in (other_boundary["id"], foreign_boundary["id"], assistant["id"]):
-        with storage.transaction() as conn, pytest.raises(MessageExactStorageError) as raised:
-            adapter.prepare_in_transaction(
-                conn,
-                context=current_context,
-                request=_request(str(current["id"]), str(invalid_boundary)),
-            )
-        assert "BOUNDARY" not in str(raised.value)
+        raised, scope_reads = reject_and_trace(
+            adapter,
+            current_context,
+            _request(str(current["id"]), str(invalid_boundary)),
+            MessageExactStorageError,
+        )
+        assert "BOUNDARY" not in str(raised)
+        assert len(scope_reads) == 1
+        ownership_probe = scope_reads[0]
+        assert "select boundary.rowid from users principal" in ownership_probe
+        assert "join conversations owned" in ownership_probe
+        assert "join messages boundary" in ownership_probe
+        assert all(
+            forbidden not in ownership_probe
+            for forbidden in ("count(", ".content", "metadata_json", "length(")
+        )
 
     _foreign_auth, _foreign_actor, foreign_adapter, foreign_context = _adapter(
         storage,
@@ -436,14 +539,20 @@ def test_foreign_actor_conversation_and_boundary_fail_closed(storage: Any) -> No
         conversation_id=str(current["id"]),
         label="foreign-scope-actor",
     )
-    with storage.transaction() as conn, pytest.raises(MessageExactStorageError) as raised:
-        foreign_adapter.prepare_in_transaction(
-            conn,
-            context=foreign_context,
-            request=_request(str(current["id"]), str(current_boundary["id"])),
-        )
-    assert OWNER not in str(raised.value)
-    assert FOREIGN not in str(raised.value)
+    raised, scope_reads = reject_and_trace(
+        foreign_adapter,
+        foreign_context,
+        _request(str(current["id"]), str(current_boundary["id"])),
+        MessageExactStorageError,
+    )
+    assert OWNER not in str(raised)
+    assert FOREIGN not in str(raised)
+    assert len(scope_reads) == 1
+    assert "select boundary.rowid from users principal" in scope_reads[0]
+    assert all(
+        forbidden not in scope_reads[0]
+        for forbidden in ("count(", ".content", "metadata_json", "length(")
+    )
 
 
 def test_equal_timestamp_restart_paging_is_chronological_and_never_deduplicates(
@@ -539,11 +648,19 @@ def test_equal_timestamp_restart_paging_is_chronological_and_never_deduplicates(
 
 
 @pytest.mark.parametrize(
-    ("bodies", "page_size", "expected_rows", "expected_content", "truncated"),
+    (
+        "bodies",
+        "page_size",
+        "visible_lengths",
+        "expected_rows",
+        "expected_content",
+        "truncated",
+    ),
     (
         (
             ("R" * MESSAGE_EXACT_MAX_FULL_ROW_CHARS,),
             100,
+            (MESSAGE_EXACT_MAX_FULL_ROW_CHARS,),
             MessageExactRowCoverage.COMPLETE,
             MessageExactContentCoverage.COMPLETE,
             0,
@@ -551,6 +668,7 @@ def test_equal_timestamp_restart_paging_is_chronological_and_never_deduplicates(
         (
             ("R" * (MESSAGE_EXACT_MAX_FULL_ROW_CHARS + 1),),
             100,
+            (MESSAGE_EXACT_MAX_FULL_ROW_CHARS,),
             MessageExactRowCoverage.COMPLETE,
             MessageExactContentCoverage.TRUNCATED,
             1,
@@ -558,6 +676,7 @@ def test_equal_timestamp_restart_paging_is_chronological_and_never_deduplicates(
         (
             tuple("P" * MESSAGE_EXACT_MAX_FULL_ROW_CHARS for _ in range(10)),
             100,
+            tuple(MESSAGE_EXACT_MAX_FULL_ROW_CHARS for _ in range(10)),
             MessageExactRowCoverage.COMPLETE,
             MessageExactContentCoverage.COMPLETE,
             0,
@@ -565,6 +684,8 @@ def test_equal_timestamp_restart_paging_is_chronological_and_never_deduplicates(
         (
             tuple("P" * MESSAGE_EXACT_MAX_FULL_ROW_CHARS for _ in range(11)),
             100,
+            tuple(MESSAGE_EXACT_MAX_FULL_ROW_CHARS for _ in range(9))
+            + (MESSAGE_EXACT_MAX_FULL_ROW_CHARS - 1, 1),
             MessageExactRowCoverage.COMPLETE,
             MessageExactContentCoverage.TRUNCATED,
             2,
@@ -572,6 +693,7 @@ def test_equal_timestamp_restart_paging_is_chronological_and_never_deduplicates(
         (
             ("short-one", "short-two"),
             1,
+            (len("short-one"),),
             MessageExactRowCoverage.PARTIAL,
             MessageExactContentCoverage.COMPLETE,
             0,
@@ -582,6 +704,7 @@ def test_full_content_8k_80k_budgets_and_row_coverage_are_independent(
     storage: Any,
     bodies: tuple[str, ...],
     page_size: int,
+    visible_lengths: tuple[int, ...],
     expected_rows: MessageExactRowCoverage,
     expected_content: MessageExactContentCoverage,
     truncated: int,
@@ -615,9 +738,24 @@ def test_full_content_8k_80k_budgets_and_row_coverage_are_independent(
     assert projection.row_coverage is expected_rows
     assert projection.content_coverage is expected_content
     assert projection.truncated_rows == truncated
+    assert len(projection.rows) == len(page.rows) == len(visible_lengths)
+    assert tuple(len(row.text) for row in projection.rows) == visible_lengths
+    for source, projected, visible_length in zip(
+        page.rows,
+        projection.rows,
+        visible_lengths,
+        strict=True,
+    ):
+        assert projected.content_chars == len(source.content)
+        if visible_length == len(source.content):
+            assert projected.truncated is False
+            assert projected.text == source.content
+        else:
+            assert projected.truncated is True
+            assert projected.text == source.content[: visible_length - 1] + "…"
     assert all(len(row.text) <= MESSAGE_EXACT_MAX_FULL_ROW_CHARS for row in projection.rows)
     assert sum(len(row.text) for row in projection.rows) <= MESSAGE_EXACT_MAX_FULL_PAGE_CHARS
-    if len(bodies) == 10:
+    if len(bodies) in {10, 11}:
         assert sum(len(row.text) for row in projection.rows) == MESSAGE_EXACT_MAX_FULL_PAGE_CHARS
 
 
@@ -694,6 +832,65 @@ def test_late_revoke_returns_a_source_free_denial(
         " conversations " in f" {statement.casefold()} " or " messages " in f" {statement.casefold()} "
         for statement in traced
     )
+
+
+def test_publication_decision_is_bound_to_exact_page_selection(storage: Any) -> None:
+    conversation = _seed_owner(storage, "publication page binding")
+    _store(storage, str(conversation["id"]), OWNER, "user", "PAGE-BINDING-FIRST")
+    _store(storage, str(conversation["id"]), OWNER, "assistant", "PAGE-BINDING-SECOND")
+    boundary = _store(storage, str(conversation["id"]), OWNER, "user", "PAGE-BINDING-BOUNDARY")
+    _authorization, _actor_value, adapter, context = _adapter(
+        storage,
+        principal_id=OWNER,
+        conversation_id=str(conversation["id"]),
+        label="publication-page-binding",
+    )
+    first_request = _request(
+        str(conversation["id"]),
+        str(boundary["id"]),
+        page_size=1,
+    )
+    with storage.transaction() as conn:
+        first = adapter.prepare_in_transaction(
+            conn,
+            context=context,
+            request=first_request,
+        )
+    assert first.next_continuation is not None
+    second_request = _request(
+        str(conversation["id"]),
+        str(boundary["id"]),
+        page_size=1,
+        continuation=first.next_continuation,
+    )
+    with storage.transaction() as conn:
+        second = adapter.prepare_in_transaction(
+            conn,
+            context=context,
+            request=second_request,
+        )
+
+    assert first.authority_handle == second.authority_handle
+    assert first.selection_handle != second.selection_handle
+    with storage.transaction() as conn:
+        first_decision = adapter.reauthorize_for_publication_in_transaction(
+            conn,
+            context=context,
+            page=first,
+        )
+    with storage.transaction() as conn:
+        second_decision = adapter.reauthorize_for_publication_in_transaction(
+            conn,
+            context=context,
+            page=second,
+        )
+
+    assert first_decision.status is MessageExactPublicationStatus.AUTHORIZED
+    assert second_decision.status is MessageExactPublicationStatus.AUTHORIZED
+    assert first_decision.authorizes(first)
+    assert first_decision.authorizes(second) is False
+    assert second_decision.authorizes(second)
+    assert second_decision.authorizes(first) is False
 
 
 def test_page_rows_and_decisions_are_immutable_process_private_carriers(storage: Any) -> None:
