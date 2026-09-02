@@ -78,6 +78,8 @@ _RAW_LITERAL_ID: Final = "raw_a100000000000001"
 _RAW_LITERAL_DECOY_ID: Final = "raw_a100000000000004"
 _RAW_PENDING_ID: Final = "raw_a100000000000002"
 _RAW_KNOWLEDGE_ID: Final = "raw_a100000000000003"
+_RAW_FOCUSED_ID: Final = "raw_a100000000000005"
+_RAW_FOCUSED_DECOY_ID: Final = "raw_a100000000000006"
 _KNOWLEDGE_ID: Final = "ko_a100000000000001"
 _MESSAGE_LITERAL_CONVERSATION_ID: Final = "conv_a100000000000001"
 _MESSAGE_LITERAL_ID: Final = "msg_a100000000000001"
@@ -94,6 +96,8 @@ _MESSAGE_ORDER_RECENT_ID: Final = "msg_a100000000000006"
 _RAW_LITERAL_QUERY: Final = "saffronneedle"
 _RAW_PENDING_QUERY: Final = "quartzpendingneedle"
 _KNOWLEDGE_QUERY: Final = "cobaltpromotedneedle"
+_RAW_FOCUSED_QUERY: Final = "orionfocusneedle"
+_RAW_FOCUSED_FOCUS: Final = "orionfocusneedle role"
 _MESSAGE_LITERAL_QUERY: Final = "lanternmessageneedle"
 _MESSAGE_LAYOUT_QUERY: Final = "Uhfabr lt;ehcnd"
 _MESSAGE_ORDER_QUERY: Final = "фдзрф иуеф"
@@ -102,6 +106,8 @@ _RAW_LITERAL_BODY: Final = "saffronneedle evidence alpha."
 _RAW_LITERAL_DECOY_BODY: Final = "saffronneedle evidence bravo."
 _RAW_PENDING_BODY: Final = "The pending source contains quartzpendingneedle evidence."
 _RAW_KNOWLEDGE_BODY: Final = "The raw source precedes its promoted projection."
+_RAW_FOCUSED_BODY: Final = "orionfocusneedle role commander."
+_RAW_FOCUSED_DECOY_BODY: Final = "orionfocusneedle role"
 _KNOWLEDGE_BODY: Final = "The promoted knowledge contains cobaltpromotedneedle evidence."
 _MESSAGE_LITERAL_BODY: Final = "The chat contains lanternmessageneedle evidence."
 _MESSAGE_LITERAL_SECOND_BODY: Final = "A second lanternmessageneedle passage."
@@ -122,7 +128,6 @@ _UNCLASSIFIED_MISMATCH_REASON: Final = "unclassified_candidate_membership_mismat
 UNSUPPORTED_REASON_CODES: Final = {
     "bitemporal_graph": "bitemporal_graph_snapshot_not_seeded",
     "dense_semantic": "offline_dense_semantic_dependencies_disabled",
-    "focused_source": "focused_source_not_representable_by_archive_request",
     "queryless_message_window": "archive_query_contract_requires_nonempty_query",
 }
 
@@ -135,6 +140,8 @@ _PRIVATE_OUTPUT_SENTINELS: Final = (
     _RAW_LITERAL_DECOY_ID,
     _RAW_PENDING_ID,
     _RAW_KNOWLEDGE_ID,
+    _RAW_FOCUSED_ID,
+    _RAW_FOCUSED_DECOY_ID,
     _KNOWLEDGE_ID,
     _MESSAGE_LITERAL_CONVERSATION_ID,
     _MESSAGE_LITERAL_ID,
@@ -150,6 +157,8 @@ _PRIVATE_OUTPUT_SENTINELS: Final = (
     _RAW_LITERAL_QUERY,
     _RAW_PENDING_QUERY,
     _KNOWLEDGE_QUERY,
+    _RAW_FOCUSED_QUERY,
+    _RAW_FOCUSED_FOCUS,
     _MESSAGE_LITERAL_QUERY,
     _MESSAGE_LAYOUT_QUERY,
     _MESSAGE_ORDER_QUERY,
@@ -157,6 +166,8 @@ _PRIVATE_OUTPUT_SENTINELS: Final = (
     _RAW_LITERAL_DECOY_BODY,
     _RAW_PENDING_BODY,
     _RAW_KNOWLEDGE_BODY,
+    _RAW_FOCUSED_BODY,
+    _RAW_FOCUSED_DECOY_BODY,
     _KNOWLEDGE_BODY,
     _MESSAGE_LITERAL_BODY,
     _MESSAGE_LITERAL_SECOND_BODY,
@@ -169,6 +180,8 @@ _PRIVATE_OUTPUT_SENTINELS: Final = (
     "literal-source-decoy.txt",
     "pending-source.txt",
     "promoted-source.txt",
+    "focused-source.txt",
+    "focused-source-decoy.txt",
     "Promoted record",
     "Literal parity conversation",
     "Literal parity decoy conversation",
@@ -396,7 +409,7 @@ class ParityReportV1:
         _require_digest(self.report_sha256, label="parity report digest")
         if (
             type(self.cases) is not tuple
-            or len(self.cases) != 6
+            or len(self.cases) != 7
             or any(type(item) is not ParityCaseResultV1 for item in self.cases)
             or tuple(item.case_id for item in self.cases)
             != tuple(sorted(item.case_id for item in self.cases))
@@ -613,6 +626,18 @@ def _probes() -> tuple[_ParityProbe, ...]:
             "message_search",
             _message_source(_MESSAGE_ORDER_RELEVANT_CONVERSATION_ID),
         ),
+        _ParityProbe(
+            7,
+            "parity.case.0007",
+            ArchiveSearchRequest.create(
+                query=_RAW_FOCUSED_QUERY,
+                corpora=(ArchiveSearchCorpus.DOCUMENTS,),
+                focus=_RAW_FOCUSED_FOCUS,
+                limit=20,
+            ),
+            "source_search",
+            _document_source(_RAW_FOCUSED_ID),
+        ),
     )
 
 
@@ -722,6 +747,34 @@ def _seed_parity_storage(storage: FridayStorage) -> None:
                 status=InboxStatus.CLASSIFIED,
                 timestamp="2026-05-03T10:00:00+00:00",
                 knowledge_id=_KNOWLEDGE_ID,
+            ),
+        ),
+        (
+            _raw(
+                _RAW_FOCUSED_ID,
+                body=_RAW_FOCUSED_BODY,
+                filename="focused-source.txt",
+                timestamp="2026-05-03T12:00:00+00:00",
+            ),
+            _inbox(
+                "inbox_a100000000000005",
+                _RAW_FOCUSED_ID,
+                status=InboxStatus.CLASSIFIED,
+                timestamp="2026-05-03T12:00:00+00:00",
+            ),
+        ),
+        (
+            _raw(
+                _RAW_FOCUSED_DECOY_ID,
+                body=_RAW_FOCUSED_DECOY_BODY,
+                filename="focused-source-decoy.txt",
+                timestamp="2026-05-03T11:00:00+00:00",
+            ),
+            _inbox(
+                "inbox_a100000000000006",
+                _RAW_FOCUSED_DECOY_ID,
+                status=InboxStatus.CLASSIFIED,
+                timestamp="2026-05-03T11:00:00+00:00",
             ),
         ),
     )
@@ -996,6 +1049,10 @@ async def _adapter_identities(
     arguments: dict[str, Any] = {"query": probe.request.query, "limit": 20}
     if probe.adapter == "message_search":
         arguments["before_message_id"] = _BOUNDARY_MESSAGE_ID
+    if probe.request.focus:
+        if probe.adapter != "source_search" or probe.request.corpora != (ArchiveSearchCorpus.DOCUMENTS,):
+            raise ParityHarnessError("focused source parity probe is invalid")
+        arguments["focus"] = probe.request.focus
     # The legacy adapters remain dialogue-visible until measured cutover, but
     # parity is a code-owned caller and must exercise their durable internal
     # surface explicitly.  Relying on the dialogue default would let a later
@@ -1089,7 +1146,11 @@ def _case_result(
     )
 
 
-def _dimensions(cases: tuple[ParityCaseResultV1, ...]) -> tuple[ParityDimensionV1, ...]:
+def _dimensions(
+    cases: tuple[ParityCaseResultV1, ...],
+    *,
+    focused_source_case_ids: frozenset[str],
+) -> tuple[ParityDimensionV1, ...]:
     membership_mismatches = tuple(item for item in cases if item.membership_status == "mismatch")
     membership_reasons = tuple(sorted({cast(str, item.reason_code) for item in membership_mismatches}))
     order_cases = tuple(item for item in cases if item.order_status != "not_comparable")
@@ -1105,6 +1166,27 @@ def _dimensions(cases: tuple[ParityCaseResultV1, ...]) -> tuple[ParityDimensionV
     else:
         order_status = "parity"
         order_reasons = ()
+    focused_source_cases = tuple(item for item in cases if item.case_id in focused_source_case_ids)
+    if len(focused_source_cases) != 1 or len(focused_source_case_ids) != 1:
+        raise ParityHarnessError("focused source parity matrix is invalid")
+    focused_source_mismatches = tuple(
+        item
+        for item in focused_source_cases
+        if item.membership_status == "mismatch" or item.order_status == "mismatch"
+    )
+    focused_source_reasons = tuple(
+        sorted(
+            {
+                reason
+                for item in focused_source_mismatches
+                for reason in (
+                    cast(str, item.reason_code)
+                    if item.membership_status == "mismatch"
+                    else "candidate_order_mismatch",
+                )
+            }
+        )
+    )
     dimensions = [
         ParityDimensionV1(
             "candidate_membership",
@@ -1137,6 +1219,17 @@ def _dimensions(cases: tuple[ParityCaseResultV1, ...]) -> tuple[ParityDimensionV
             0,
             0,
             ("legacy_adapters_do_not_share_typed_archive_coverage",),
+        ),
+        ParityDimensionV1(
+            "focused_source",
+            # This closes only focused candidate membership/order for the one
+            # synthetic documents probe.  The independent partial dimensions
+            # below deliberately keep legacy-adapter retirement unsupported.
+            "mismatch" if focused_source_mismatches else "parity",
+            len(focused_source_cases),
+            len(focused_source_cases) - len(focused_source_mismatches),
+            len(focused_source_mismatches),
+            focused_source_reasons,
         ),
         ParityDimensionV1(
             "passage_locator",
@@ -1217,12 +1310,19 @@ async def _run_parity_ephemeral() -> ParityReportV1:
     return ParityReportV1.create(
         release_sha256=release_sha256,
         cases=cases,
-        dimensions=_dimensions(cases),
+        dimensions=_dimensions(
+            cases,
+            focused_source_case_ids=frozenset(
+                probe.opaque_case_id
+                for probe in probes
+                if probe.adapter == "source_search" and bool(probe.request.focus)
+            ),
+        ),
     )
 
 
 def run_parity_ephemeral() -> ParityReportV1:
-    """Run the isolated literal matrix without claiming unsupported parity."""
+    """Run the isolated matrix without promoting focused parity into retirement."""
 
     try:
         return asyncio.run(_run_parity_ephemeral())

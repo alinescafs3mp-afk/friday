@@ -219,7 +219,11 @@ def _passage_union(
     payloads: dict[str, str] = {}
     for item in (*left, *right):
         identity = item.passage_ref.to_private_json()
-        payload = _canonical_bytes(item.to_private_payload()).decode("ascii")
+        # Candidates were already frozen through their explicitly versioned
+        # carrier.  Compare the exact nested value directly here; calling the
+        # released standalone passage serializer would incorrectly re-enter its
+        # intentionally single-line v1 domain for a candidate-v2 passage.
+        payload = _canonical_bytes((identity, item.excerpt)).decode("ascii")
         if identity in payloads and not hmac.compare_digest(payloads[identity], payload):
             raise _fail()
         values[identity] = item

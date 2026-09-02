@@ -46,6 +46,11 @@ def test_exact_ten_class_taxonomy() -> None:
 
 def test_case_round_trip_and_manifest_are_permutation_invariant() -> None:
     cases = synthetic_cases()
+    legacy_payload = cases[0].to_payload()
+    request_payload = legacy_payload["request"]
+    assert isinstance(request_payload, dict)
+    assert request_payload["schema"] == "friday.archive-search-request.private.v1"
+    assert "focus" not in request_payload
     assert RecallCaseV1.parse(cases[0].to_json()) == cases[0]
     assert case_manifest_sha256(cases) == case_manifest_sha256(reversed(cases))
 

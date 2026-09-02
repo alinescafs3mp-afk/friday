@@ -10,15 +10,40 @@ import pytest
 
 import friday.retrieval.archive_search_dense as dense_plan_module
 import friday.retrieval.archive_search_service as service_module
+import friday.storage._archive_search_documents as archive_document_storage
+from friday.document_catalog import (
+    document_passage_set_sha256,
+    register_document_passage_connection_functions,
+)
 from friday.execution_kernel import ExecutionKernel
 from friday.ingestion import IngestionPipeline
 from friday.knowledge_graph import KnowledgeGraph
 from friday.permissions import ActorContext, AuthorizationService
 from friday.retrieval import HybridSearcher, knowledge_chunk_units, pack_vector
+from friday.retrieval.archive_evidence_replay import (
+    ArchiveEvidenceReplayCoverageGrade,
+    ArchiveEvidenceReplayStatus,
+    replay_archive_evidence_in_transaction,
+)
+from friday.retrieval.archive_evidence_snapshot import archive_selected_evidence_snapshot_sha256
 from friday.retrieval.archive_search_authority import create_archive_model_batch_ledger
 from friday.retrieval.archive_search_contract import ArchiveSearchCorpus, ArchiveSearchRequest
+from friday.retrieval.archive_search_document_locator import (
+    DOCUMENT_STORED_PASSAGE_INDEX_VERSION,
+    LEGACY_DOCUMENT_PASSAGE_INDEX_VERSION,
+)
 from friday.retrieval.archive_search_service import prepare_archive_search_in_transaction
-from friday.retrieval.contracts import EmbeddingCompatibility, RevisionKind, SearchLane
+from friday.retrieval.contracts import (
+    AuthorityScope,
+    CoverageState,
+    EmbeddingCompatibility,
+    RevisionKind,
+    SearchCorpus,
+    SearchExecutionBinding,
+    SearchLane,
+    TextSpanLocator,
+)
+from friday.storage._archive_search_documents import search_archive_document_lane
 from friday.storage.models import InboxItem, InboxStatus, KnowledgeObject, RawObject
 from friday.web_surfer import WebSurfer
 
@@ -66,6 +91,278 @@ class _DeterministicEmbeddings:
         return [self.query_vector]
 
 
+@pytest.mark.asyncio
+async def test_archive_dense_plan_preparation_never_loads_knowledge_bodies(
+    settings: Any,
+    storage: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    storage.ensure_user(TENANT)
+    storage.ensure_user(OWNER)
+    _seed_document(
+        storage,
+        suffix="9310",
+        owner=OWNER,
+        concept_vector=[1.0, 0.0],
+        body_override="dense plan body-free proof " * 4_000,
+    )
+
+    def forbidden_body_load(*_args: object, **_kwargs: object) -> None:
+        raise AssertionError("archive dense plan preparation loaded a KO body")
+
+    monkeypatch.setattr(type(storage), "get_knowledge_object", forbidden_body_load)
+    plan = await HybridSearcher(
+        storage,
+        _DeterministicEmbeddings(settings),
+        dense_evidence_min=0.35,
+    ).prepare_archive_dense_query_plan(
+        TENANT,
+        QUERY,
+        principal_id=OWNER,
+    )
+    projection = dense_plan_module.project_archive_dense_query_plan(
+        plan,
+        principal_id=OWNER,
+        query=QUERY,
+    )
+    assert projection is not None
+    assert projection.candidates
+
+
+@pytest.mark.asyncio
+async def test_archive_dense_plan_filters_hostile_vector_blobs_before_projection(
+    settings: Any,
+    storage: Any,
+) -> None:
+    storage.ensure_user(TENANT)
+    storage.ensure_user(OWNER)
+    _seed_document(
+        storage,
+        suffix="9311",
+        owner=OWNER,
+        concept_vector=[1.0, 0.0],
+    )
+    _bad_raw, bad_knowledge = _seed_document(
+        storage,
+        suffix="9312",
+        owner=OWNER,
+        concept_vector=[1.0, 0.0],
+    )
+    with storage.transaction() as conn:
+        conn.execute(
+            "UPDATE knowledge_embeddings SET vector=zeroblob(4000000) WHERE knowledge_object_id=?",
+            (bad_knowledge,),
+        )
+        conn.execute(
+            "UPDATE knowledge_chunk_embeddings SET vector=zeroblob(4000000) WHERE knowledge_object_id=?",
+            (bad_knowledge,),
+        )
+
+    document_rows = storage.get_user_embeddings(
+        TENANT,
+        MODEL,
+        2,
+        limit=100,
+        uploaded_by=OWNER,
+    )
+    chunk_rows = storage.get_user_chunk_embeddings(
+        TENANT,
+        MODEL,
+        2,
+        object_limit=100,
+        row_limit=1_000,
+        uploaded_by=OWNER,
+    )
+    assert all(row_id != bad_knowledge for row_id, _vector in document_rows)
+    assert all(not row_id.startswith(f"{bad_knowledge}#") for row_id, _vector in chunk_rows)
+
+    plan = await HybridSearcher(
+        storage,
+        _DeterministicEmbeddings(settings),
+        dense_evidence_min=0.35,
+    ).prepare_archive_dense_query_plan(TENANT, QUERY, principal_id=OWNER)
+    projection = dense_plan_module.project_archive_dense_query_plan(
+        plan,
+        principal_id=OWNER,
+        query=QUERY,
+    )
+    assert projection is not None
+    assert projection.candidates
+    assert all(item.knowledge_object_id != bad_knowledge for item in projection.candidates)
+
+
+def test_shared_vector_readers_keep_bounded_legacy_ids_and_timestamps(storage: Any) -> None:
+    """Archive validation must not narrow the shared legacy vector API."""
+    storage.ensure_user(TENANT)
+    storage.ensure_user(OWNER)
+    _raw_id, canonical_id = _seed_document(
+        storage,
+        suffix="9313",
+        owner=OWNER,
+        concept_vector=[1.0, 0.0],
+    )
+    legacy_id = "ko-old"
+    legacy_timestamp = "2026-08-30 10:01:00"
+    with storage.transaction() as conn:
+        conn.execute(
+            """INSERT INTO knowledge_objects(
+                   id,user_id,raw_object_id,entity_id,content,content_type,title,summary,
+                   tags_json,metadata_json,knowledge_kind,importance,quality_score,
+                   promotion_score,lifecycle_stage,version,superseded_by_id,created_at,
+                   updated_at,deleted_at
+               )
+               SELECT ?,user_id,raw_object_id,entity_id,content,content_type,title,summary,
+                      tags_json,metadata_json,knowledge_kind,importance,quality_score,
+                      promotion_score,lifecycle_stage,version,superseded_by_id,?,?,deleted_at
+                 FROM knowledge_objects WHERE id=?""",
+            (legacy_id, legacy_timestamp, legacy_timestamp, canonical_id),
+        )
+        conn.execute(
+            """INSERT INTO knowledge_embeddings(
+                   knowledge_object_id,user_id,model,dim,source_version,content_hash,
+                   chunk_scheme,vector,updated_at
+               )
+               SELECT ?,user_id,model,dim,source_version,content_hash,chunk_scheme,
+                      vector,?
+                 FROM knowledge_embeddings WHERE knowledge_object_id=?""",
+            (legacy_id, legacy_timestamp, canonical_id),
+        )
+        conn.execute(
+            """INSERT INTO knowledge_chunk_embeddings(
+                   knowledge_object_id,chunk_index,user_id,model,dim,source_version,
+                   chunk_scheme,start_char,end_char,content_hash,vector,updated_at
+               )
+               SELECT ?,chunk_index,user_id,model,dim,source_version,chunk_scheme,
+                      start_char,end_char,content_hash,vector,?
+                 FROM knowledge_chunk_embeddings WHERE knowledge_object_id=?""",
+            (legacy_id, legacy_timestamp, canonical_id),
+        )
+
+    document_ids = {
+        row_id
+        for row_id, _vector in storage.get_user_embeddings(
+            TENANT,
+            MODEL,
+            2,
+            limit=100,
+            uploaded_by=OWNER,
+        )
+    }
+    chunk_ids = {
+        row_id
+        for row_id, _vector in storage.get_user_chunk_embeddings(
+            TENANT,
+            MODEL,
+            2,
+            object_limit=100,
+            row_limit=1_000,
+            uploaded_by=OWNER,
+        )
+    }
+    assert legacy_id in document_ids
+    assert any(row_id.startswith(f"{legacy_id}#") for row_id in chunk_ids)
+
+
+@pytest.mark.asyncio
+async def test_archive_dense_materialization_reads_only_bounded_winning_spans(
+    settings: Any,
+    storage: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    storage.ensure_user(TENANT)
+    storage.ensure_user(OWNER)
+    knowledge_ids: list[str] = []
+    for ordinal in range(12):
+        _raw_id, knowledge_id = _seed_document(
+            storage,
+            suffix=f"94{ordinal:02d}",
+            owner=OWNER,
+            concept_vector=[1.0, 0.0],
+            body_override=(f"bounded dense source {ordinal:02d}\n" + "large inert source payload. " * 5_000),
+        )
+        knowledge_ids.append(knowledge_id)
+    with storage.transaction() as conn:
+        conn.execute(
+            "UPDATE knowledge_objects SET title=?, summary=? WHERE id=?",
+            ("H" * 1_500_000, "S" * 1_500_000, knowledge_ids[-1]),
+        )
+    request = ArchiveSearchRequest.create(
+        query=QUERY,
+        corpora=(ArchiveSearchCorpus.DOCUMENTS,),
+        limit=20,
+    )
+    plan = await HybridSearcher(
+        storage,
+        _DeterministicEmbeddings(settings),
+        dense_evidence_min=0.35,
+    ).prepare_archive_dense_query_plan(
+        TENANT,
+        QUERY,
+        principal_id=OWNER,
+    )
+    assert plan is not None
+
+    per_source = 20_000
+    aggregate = 42_000
+    monkeypatch.setattr(archive_document_storage, "_DENSE_CHUNK_BODY_MAX_BYTES", per_source)
+    monkeypatch.setattr(archive_document_storage, "_DENSE_CHUNK_BODY_BUDGET_BYTES", aggregate)
+    original_reader = archive_document_storage._read_dense_chunk_body  # noqa: SLF001
+    material_sizes: list[int] = []
+
+    def monitored_reader(*args: object, **kwargs: object):
+        selected = original_reader(*args, **kwargs)
+        if selected is not None:
+            body, material_bytes, _title, _header, _full_focus_source, _text_digest = selected
+            assert len(body.encode("utf-8")) <= material_bytes
+            material_sizes.append(material_bytes)
+        return selected
+
+    monkeypatch.setattr(archive_document_storage, "_read_dense_chunk_body", monitored_reader)
+    statements: list[str] = []
+    snapshot = "dense-bounded-spans"
+    binding = _dense_binding(request, snapshot)
+    storage.conn.set_trace_callback(statements.append)
+    try:
+        with storage.transaction() as conn:
+            page = search_archive_document_lane(
+                conn,
+                tenant_id=TENANT,
+                owner_id=OWNER,
+                request=request,
+                corpus=ArchiveSearchCorpus.DOCUMENTS,
+                lane=SearchLane.DENSE,
+                execution_binding=binding,
+                snapshot_discriminator=snapshot,
+                snapshot_current=True,
+                dense_query_plan=plan,
+            )
+    finally:
+        storage.conn.set_trace_callback(None)
+
+    assert material_sizes
+    assert sum(material_sizes) <= aggregate
+    assert all(item <= per_source for item in material_sizes)
+    coverage = page.to_coverage(
+        execution_binding=binding,
+        tenant_id=TENANT,
+        owner_id=OWNER,
+        request=request,
+        snapshot_discriminator=snapshot,
+    )
+    assert CoverageState.CAPPED in coverage.states
+    assert CoverageState.UNAVAILABLE in coverage.states
+    lead = next(item for item in statements if "dense_candidates AS MATERIALIZED" in item)
+    assert "SELECT s.*" not in lead
+    assert "s.knowledge_title" not in lead
+    reads = [item for item in statements if "AS dense_chunk_body" in item]
+    assert reads
+    assert all("k.content IS r.raw_content" not in item for item in reads)
+    assert all("substr(k.content" in item and "substr(r.raw_content" in item for item in reads)
+    assert all("k.title AS knowledge_title" not in item for item in reads)
+    assert all("length(CAST(COALESCE(k.title" not in item for item in reads)
+    assert all("substr(COALESCE(k.title" in item for item in reads)
+
+
 def _seed_document(
     storage: Any,
     *,
@@ -73,6 +370,8 @@ def _seed_document(
     owner: str,
     concept_vector: list[float],
     with_chunks: bool = True,
+    body_override: str | None = None,
+    passage_ready: bool = False,
 ) -> tuple[str, str]:
     raw_id = f"raw_{suffix:0>16}"
     ko_id = f"ko_dense{suffix:0>8}"
@@ -81,7 +380,7 @@ def _seed_document(
         if concept_vector[0] > concept_vector[1]
         else "Порядок инвентаризации серверных стоек описан в этом закрытом отчёте. "
     )
-    body = "\n".join(sentence for _item in range(18))
+    body = "\n".join(sentence for _item in range(18)) if body_override is None else body_override
     storage.store_raw_object(
         RawObject(
             id=raw_id,
@@ -95,8 +394,16 @@ def _seed_document(
                 "media_kind": "document",
                 "mime_type": "application/pdf",
                 "uploaded_by": owner,
+                **(
+                    {
+                        "extraction_success": True,
+                        "text_extraction_success": True,
+                    }
+                    if passage_ready
+                    else {}
+                ),
             },
-            content_hash=hashlib.sha256(body.encode()).hexdigest(),
+            content_hash=hashlib.sha256(f"source-bytes-{suffix}".encode()).hexdigest(),
             received_at="2026-08-30T10:00:00+00:00",
             created_at="2026-08-30T10:00:00+00:00",
         )
@@ -162,6 +469,39 @@ def _seed_document(
     return raw_id, ko_id
 
 
+def _force_dense_winning_span(
+    storage: Any,
+    knowledge_id: str,
+    body: str,
+    start: int,
+    end: int,
+) -> None:
+    row = storage.conn.execute(
+        "SELECT title,summary,knowledge_kind FROM knowledge_objects WHERE id=?",
+        (knowledge_id,),
+    ).fetchone()
+    assert row is not None
+    header = " ".join(str(row[key] or "") for key in ("title", "summary", "knowledge_kind") if row[key])[:50]
+    embedded = f"{header}\n\n{body[start:end]}"
+    with storage.transaction() as conn:
+        conn.execute(
+            "UPDATE knowledge_chunk_embeddings SET vector=? WHERE knowledge_object_id=?",
+            (pack_vector([0.0, 1.0]), knowledge_id),
+        )
+        conn.execute(
+            """UPDATE knowledge_chunk_embeddings
+                  SET start_char=?, end_char=?, content_hash=?, vector=?
+                WHERE knowledge_object_id=? AND chunk_index=0""",
+            (
+                start,
+                end,
+                hashlib.sha256(embedded.encode()).hexdigest(),
+                pack_vector([1.0, 0.0]),
+                knowledge_id,
+            ),
+        )
+
+
 def _actor() -> ActorContext:
     return ActorContext(
         user_id=TENANT,
@@ -169,6 +509,19 @@ def _actor() -> ActorContext:
         source="archive-dense-test",
         shared_tenant=True,
         person_id=OWNER,
+    )
+
+
+def _dense_binding(request: ArchiveSearchRequest, snapshot: str) -> SearchExecutionBinding:
+    return SearchExecutionBinding.create(
+        normalized_private_request_json=request.to_identity_json(),
+        authority_scope=AuthorityScope.TENANT_PRINCIPAL,
+        tenant_id=TENANT,
+        principal_id=OWNER,
+        requested_targets=((SearchCorpus.RAW_DOCUMENTS, SearchLane.DENSE),),
+        snapshot_discriminator=snapshot,
+        run_discriminator=f"{snapshot}-run",
+        privacy_key=b"d" * 32,
     )
 
 
@@ -417,6 +770,766 @@ async def test_corpus_dense_recall_is_deterministic_principal_scoped_and_cited(
     assert dense_coverage["states"] == ["backfill_pending", "partial"]
     lexical_coverage = next(item for item in first["coverage"] if item["lane"] == SearchLane.LEXICAL.value)
     assert lexical_coverage["matched_at_least"] == 0
+
+
+@pytest.mark.asyncio
+async def test_dense_plan_identity_binds_query_and_focus_as_one_exact_recall_input(
+    settings: Any,
+    storage: Any,
+) -> None:
+    storage.ensure_user(TENANT)
+    storage.ensure_user(OWNER)
+    _seed_document(
+        storage,
+        suffix="9300",
+        owner=OWNER,
+        concept_vector=[1.0, 0.0],
+    )
+    request = ArchiveSearchRequest.create(
+        query="Иванов",
+        focus="должность",
+        corpora=(ArchiveSearchCorpus.DOCUMENTS,),
+    )
+    changed_focus = ArchiveSearchRequest.create(
+        query=request.query,
+        focus="роль",
+        corpora=request.corpora,
+    )
+    searcher = HybridSearcher(storage, _DeterministicEmbeddings(settings))
+    plan = await searcher.prepare_archive_dense_query_plan(
+        TENANT,
+        request.dense_query,
+        principal_id=OWNER,
+    )
+    changed_plan = await searcher.prepare_archive_dense_query_plan(
+        TENANT,
+        changed_focus.dense_query,
+        principal_id=OWNER,
+    )
+    assert plan is not None
+    assert changed_plan is not None
+
+    projection = dense_plan_module.project_archive_dense_query_plan(
+        plan,
+        principal_id=OWNER,
+        query=request.dense_query,
+    )
+    changed_projection = dense_plan_module.project_archive_dense_query_plan(
+        changed_plan,
+        principal_id=OWNER,
+        query=changed_focus.dense_query,
+    )
+    assert projection is not None
+    assert changed_projection is not None
+    assert projection.identity_sha256 != changed_projection.identity_sha256
+    assert (
+        dense_plan_module.project_archive_dense_query_plan(
+            plan,
+            principal_id=OWNER,
+            query=request.query,
+        )
+        is None
+    )
+    assert (
+        dense_plan_module.project_archive_dense_query_plan(
+            plan,
+            principal_id=OWNER,
+            query=changed_focus.dense_query,
+        )
+        is None
+    )
+
+
+@pytest.mark.asyncio
+async def test_focused_dense_passage_is_one_exact_anchor_bound_body_slice(
+    settings: Any,
+    storage: Any,
+) -> None:
+    storage.ensure_user(TENANT)
+    storage.ensure_user(OWNER)
+    expected = "Иванов\nДолжность: ведущий инженер"
+    body = (
+        f"Кадровая ведомость подразделения.\n\n{expected}\n\n" + "Техническое примечание к ведомости. " * 24
+    )
+    raw_id, _knowledge_id = _seed_document(
+        storage,
+        suffix="9301",
+        owner=OWNER,
+        concept_vector=[1.0, 0.0],
+        body_override=body,
+    )
+    request = ArchiveSearchRequest.create(
+        query="Иванов",
+        focus="должность",
+        corpora=(ArchiveSearchCorpus.DOCUMENTS,),
+        limit=5,
+    )
+    plan = await HybridSearcher(
+        storage,
+        _DeterministicEmbeddings(settings),
+        dense_evidence_min=0.35,
+    ).prepare_archive_dense_query_plan(
+        TENANT,
+        request.dense_query,
+        principal_id=OWNER,
+    )
+    assert plan is not None
+
+    with storage.transaction() as conn:
+        prepared = prepare_archive_search_in_transaction(
+            conn,
+            authorization=AuthorizationService(storage, shared_tenant=TENANT),
+            actor=_actor(),
+            tenant_id=TENANT,
+            principal_id=OWNER,
+            request=request,
+            snapshot_discriminator="focused-dense-exact-snapshot",
+            run_discriminator="focused-dense-exact",
+            turn_ledger=create_archive_model_batch_ledger(
+                tenant_id=TENANT,
+                principal_id=OWNER,
+                turn_discriminator="turn-focused-dense-exact",
+            ),
+            dense_query_plan=plan,
+        )
+
+    selected = [
+        result.candidate
+        for result in prepared.authorized_batch._page.results  # noqa: SLF001
+        if result.candidate.resolved_source.source_ref.canonical_object_id == raw_id
+    ]
+    assert len(selected) == 1
+    assert ArchiveSearchCorpus.DOCUMENTS is selected[0].corpus
+    assert any(match.channel.value == "dense" for match in selected[0].matches)
+    assert len(selected[0].passages) == 1
+    [passage] = selected[0].passages
+    locator = passage.passage_ref.locator
+    assert type(locator) is TextSpanLocator
+    assert passage.excerpt == expected
+    assert body[locator.start_char : locator.end_char] == passage.excerpt
+    assert locator.start_char == body.index(expected)
+    assert locator.end_char == locator.start_char + len(expected)
+    assert passage.passage_ref.source_revision.kind is RevisionKind.RAW_CONTENT_SHA256
+    assert passage.passage_ref.passage_index_version == LEGACY_DOCUMENT_PASSAGE_INDEX_VERSION
+    assert passage.passage_ref.embedding.compatibility is EmbeddingCompatibility.NOT_APPLICABLE
+
+
+@pytest.mark.asyncio
+async def test_focused_dense_projects_inside_the_authenticated_winning_chunk(
+    settings: Any,
+    storage: Any,
+) -> None:
+    storage.ensure_user(TENANT)
+    storage.ensure_user(OWNER)
+    first = "Иванов\nДолжность: генеральный директор по эксплуатации"
+    second = "Иванов\nДолжность: инженер"
+    body = f"{first}\n\n{'нейтральный контекст. ' * 24}\n\n{second}"
+    raw_id, knowledge_id = _seed_document(
+        storage,
+        suffix="9303",
+        owner=OWNER,
+        concept_vector=[1.0, 0.0],
+        body_override=body,
+    )
+    second_start = body.rindex(second)
+    chunks = tuple(
+        storage.conn.execute(
+            """SELECT chunk_index,start_char,end_char
+                 FROM knowledge_chunk_embeddings
+                WHERE knowledge_object_id=? ORDER BY chunk_index""",
+            (knowledge_id,),
+        ).fetchall()
+    )
+    winning_chunk = next(
+        row
+        for row in chunks
+        if int(row["start_char"]) <= second_start and second_start + len(second) <= int(row["end_char"])
+    )
+    with storage.transaction() as conn:
+        conn.execute(
+            "UPDATE knowledge_chunk_embeddings SET vector=? WHERE knowledge_object_id=?",
+            (pack_vector([0.0, 1.0]), knowledge_id),
+        )
+        conn.execute(
+            """UPDATE knowledge_chunk_embeddings SET vector=?
+                  WHERE knowledge_object_id=? AND chunk_index=?""",
+            (pack_vector([1.0, 0.0]), knowledge_id, int(winning_chunk["chunk_index"])),
+        )
+    request = ArchiveSearchRequest.create(
+        query="Иванов",
+        focus="должность",
+        corpora=(ArchiveSearchCorpus.DOCUMENTS,),
+        limit=5,
+    )
+    plan = await HybridSearcher(
+        storage,
+        _DeterministicEmbeddings(settings),
+        dense_evidence_min=0.35,
+    ).prepare_archive_dense_query_plan(
+        TENANT,
+        request.dense_query,
+        principal_id=OWNER,
+    )
+    assert plan is not None
+
+    snapshot = "focused-dense-second-record"
+    with storage.transaction() as conn:
+        page = search_archive_document_lane(
+            conn,
+            tenant_id=TENANT,
+            owner_id=OWNER,
+            request=request,
+            corpus=ArchiveSearchCorpus.DOCUMENTS,
+            lane=SearchLane.DENSE,
+            execution_binding=_dense_binding(request, snapshot),
+            snapshot_discriminator=snapshot,
+            snapshot_current=True,
+            dense_query_plan=plan,
+        )
+
+    assert len(page.candidates) == 1
+    candidate = page.candidates[0]
+    assert candidate.resolved_source.source_ref.canonical_object_id == raw_id
+    assert len(candidate.passages) == 1
+    passage = candidate.passages[0]
+    locator = passage.passage_ref.locator
+    assert type(locator) is TextSpanLocator
+    assert passage.excerpt == second
+    assert (locator.start_char, locator.end_char) == (second_start, second_start + len(second))
+    assert body[locator.start_char : locator.end_char] == second
+
+
+@pytest.mark.parametrize(
+    ("suffix", "body", "selected"),
+    (
+        (
+            "9360",
+            "Foreign record\nSmith\nRole: engineer\n\n" + "neutral appendix. " * 30,
+            "Smith\nRole: engineer",
+        ),
+        (
+            "9361",
+            "Prelude\n\nSmith\nRole: engineer\nNext record\n\n" + "neutral appendix. " * 30,
+            "Smith\nRole: engineer",
+        ),
+        (
+            "9362",
+            "XXSmith\nRole: engineer\n\n" + "neutral appendix. " * 30,
+            "Smith\nRole: engineer",
+        ),
+        (
+            "9363",
+            "Smith\nRole: engineerX\n\n" + "neutral appendix. " * 30,
+            "Smith\nRole: engineer",
+        ),
+    ),
+)
+@pytest.mark.asyncio
+async def test_focused_dense_rejects_false_chunk_boundaries(
+    suffix: str,
+    body: str,
+    selected: str,
+    settings: Any,
+    storage: Any,
+) -> None:
+    storage.ensure_user(TENANT)
+    storage.ensure_user(OWNER)
+    _raw_id, knowledge_id = _seed_document(
+        storage,
+        suffix=suffix,
+        owner=OWNER,
+        concept_vector=[0.0, 1.0],
+        body_override=body,
+    )
+    start = body.index(selected)
+    _force_dense_winning_span(storage, knowledge_id, body, start, start + len(selected))
+    request = ArchiveSearchRequest.create(
+        query="Smith",
+        focus="role",
+        corpora=(ArchiveSearchCorpus.DOCUMENTS,),
+        limit=5,
+    )
+    plan = await HybridSearcher(
+        storage,
+        _DeterministicEmbeddings(settings),
+        dense_evidence_min=0.35,
+    ).prepare_archive_dense_query_plan(TENANT, request.dense_query, principal_id=OWNER)
+    assert plan is not None
+
+    snapshot = f"focused-dense-boundary-{suffix}"
+    with storage.transaction() as conn:
+        page = search_archive_document_lane(
+            conn,
+            tenant_id=TENANT,
+            owner_id=OWNER,
+            request=request,
+            corpus=ArchiveSearchCorpus.DOCUMENTS,
+            lane=SearchLane.DENSE,
+            execution_binding=_dense_binding(request, snapshot),
+            snapshot_discriminator=snapshot,
+            snapshot_current=True,
+            dense_query_plan=plan,
+        )
+
+    assert page.candidates == ()
+    assert page.matched == 0
+
+
+@pytest.mark.asyncio
+async def test_focused_dense_refuses_an_oversized_raw_source_before_projection(
+    settings: Any,
+    storage: Any,
+) -> None:
+    storage.ensure_user(TENANT)
+    storage.ensure_user(OWNER)
+    body = (
+        "Smith\nRole: engineer\n\n" + "x" * (archive_document_storage._DENSE_CHUNK_BODY_MAX_BYTES + 64)  # noqa: SLF001
+    )
+    _seed_document(
+        storage,
+        suffix="9364",
+        owner=OWNER,
+        concept_vector=[1.0, 0.0],
+        body_override=body,
+    )
+    request = ArchiveSearchRequest.create(
+        query="Smith",
+        focus="role",
+        corpora=(ArchiveSearchCorpus.DOCUMENTS,),
+        limit=5,
+    )
+    plan = await HybridSearcher(
+        storage,
+        _DeterministicEmbeddings(settings),
+        dense_evidence_min=0.35,
+    ).prepare_archive_dense_query_plan(TENANT, request.dense_query, principal_id=OWNER)
+    assert plan is not None
+
+    snapshot = "focused-dense-oversized-source"
+    binding = _dense_binding(request, snapshot)
+    with storage.transaction() as conn:
+        page = search_archive_document_lane(
+            conn,
+            tenant_id=TENANT,
+            owner_id=OWNER,
+            request=request,
+            corpus=ArchiveSearchCorpus.DOCUMENTS,
+            lane=SearchLane.DENSE,
+            execution_binding=binding,
+            snapshot_discriminator=snapshot,
+            snapshot_current=True,
+            dense_query_plan=plan,
+        )
+
+    assert page.candidates == ()
+    coverage = page.to_coverage(
+        execution_binding=binding,
+        tenant_id=TENANT,
+        owner_id=OWNER,
+        request=request,
+        snapshot_discriminator=snapshot,
+    )
+    assert CoverageState.CAPPED in coverage.states
+    assert CoverageState.UNAVAILABLE in coverage.states
+
+
+@pytest.mark.asyncio
+async def test_focused_dense_failed_full_source_reads_consume_the_attempt_budget(
+    settings: Any,
+    storage: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    storage.ensure_user(TENANT)
+    storage.ensure_user(OWNER)
+    for ordinal in range(8):
+        _seed_document(
+            storage,
+            suffix=f"937{ordinal}",
+            owner=OWNER,
+            concept_vector=[1.0, 0.0],
+            body_override=(f"Smith {ordinal}\nRole: engineer\n\n" + "oversized dense source\n" * 40),
+        )
+    monkeypatch.setattr(archive_document_storage, "_DENSE_CHUNK_BODY_MAX_BYTES", 512)
+    monkeypatch.setattr(archive_document_storage, "_DENSE_CHUNK_BODY_BUDGET_BYTES", 2_048)
+    projector_calls = 0
+
+    def forbidden_projector(*_args: object, **_kwargs: object) -> None:
+        nonlocal projector_calls
+        projector_calls += 1
+        raise AssertionError("oversized dense source reached the exact projector")
+
+    monkeypatch.setattr(
+        archive_document_storage,
+        "_project_focused_dense_source",
+        forbidden_projector,
+    )
+    request = ArchiveSearchRequest.create(
+        query="Smith",
+        focus="role",
+        corpora=(ArchiveSearchCorpus.DOCUMENTS,),
+        limit=10,
+    )
+    plan = await HybridSearcher(
+        storage,
+        _DeterministicEmbeddings(settings),
+        dense_evidence_min=0.35,
+    ).prepare_archive_dense_query_plan(TENANT, request.dense_query, principal_id=OWNER)
+    assert plan is not None
+    snapshot = "focused-dense-failed-read-budget"
+    binding = _dense_binding(request, snapshot)
+    statements: list[str] = []
+    storage.conn.set_trace_callback(statements.append)
+    try:
+        with storage.transaction() as conn:
+            page = search_archive_document_lane(
+                conn,
+                tenant_id=TENANT,
+                owner_id=OWNER,
+                request=request,
+                corpus=ArchiveSearchCorpus.DOCUMENTS,
+                lane=SearchLane.DENSE,
+                execution_binding=binding,
+                snapshot_discriminator=snapshot,
+                snapshot_current=True,
+                dense_query_plan=plan,
+            )
+    finally:
+        storage.conn.set_trace_callback(None)
+
+    body_queries = [item for item in statements if "AS dense_chunk_body" in item]
+    assert projector_calls == 0
+    assert len(body_queries) == 4
+    assert all("length(CAST(r.raw_content AS BLOB)) BETWEEN 1 AND 512" in item for item in body_queries)
+    assert page.candidates == ()
+    coverage = page.to_coverage(
+        execution_binding=binding,
+        tenant_id=TENANT,
+        owner_id=OWNER,
+        request=request,
+        snapshot_discriminator=snapshot,
+    )
+    assert CoverageState.CAPPED in coverage.states
+    assert CoverageState.UNAVAILABLE in coverage.states
+
+
+@pytest.mark.parametrize("stored_sidecar", (False, True))
+@pytest.mark.asyncio
+async def test_focused_dense_selection_replays_as_exact_raw_evidence(
+    stored_sidecar: bool,
+    settings: Any,
+    storage: Any,
+) -> None:
+    storage.ensure_user(TENANT)
+    storage.ensure_user(OWNER)
+    expected = "Артемьев\nДолжность: ведущий инженер"
+    body = expected + "\n\n" + "Техническое приложение к анкете. " * 24
+    raw_id, _knowledge_id = _seed_document(
+        storage,
+        suffix="9304" if stored_sidecar else "9305",
+        owner=OWNER,
+        concept_vector=[1.0, 0.0],
+        body_override=body,
+        passage_ready=stored_sidecar,
+    )
+    if stored_sidecar:
+        backfill = storage.backfill_document_catalog(
+            TENANT,
+            after_raw_object_id=None,
+            limit=10,
+            include_document_passages=True,
+        )
+        assert backfill["passage_changed"] == 1
+    conversation = storage.create_conversation(OWNER, "focused dense replay")
+    boundary = storage.store_message(
+        conversation["id"],
+        OWNER,
+        "user",
+        "accepted focused source request",
+    )
+    request = ArchiveSearchRequest.create(
+        query="Артемьева",
+        focus="должность",
+        corpora=(ArchiveSearchCorpus.DOCUMENTS,),
+        limit=5,
+    )
+    plan = await HybridSearcher(
+        storage,
+        _DeterministicEmbeddings(settings),
+        dense_evidence_min=0.35,
+    ).prepare_archive_dense_query_plan(
+        TENANT,
+        request.dense_query,
+        principal_id=OWNER,
+    )
+    assert plan is not None
+    authorization = AuthorizationService(storage, shared_tenant=TENANT)
+    snapshot = f"focused-dense-replay-{stored_sidecar}"
+
+    with storage.transaction() as conn:
+        page = search_archive_document_lane(
+            conn,
+            tenant_id=TENANT,
+            owner_id=OWNER,
+            request=request,
+            corpus=ArchiveSearchCorpus.DOCUMENTS,
+            lane=SearchLane.DENSE,
+            execution_binding=_dense_binding(request, snapshot),
+            snapshot_discriminator=snapshot,
+            snapshot_current=True,
+            dense_query_plan=plan,
+        )
+        assert len(page.candidates) == 1
+        candidate = page.candidates[0]
+        assert candidate.resolved_source.source_ref.canonical_object_id == raw_id
+        assert len(candidate.passages) == 1
+        passage = candidate.passages[0]
+        passage_ref = passage.passage_ref
+        assert passage.excerpt == expected
+        assert passage_ref.source_revision.kind is RevisionKind.RAW_CONTENT_SHA256
+        assert passage_ref.embedding.compatibility is EmbeddingCompatibility.NOT_APPLICABLE
+        assert passage_ref.passage_index_version == (
+            DOCUMENT_STORED_PASSAGE_INDEX_VERSION if stored_sidecar else LEGACY_DOCUMENT_PASSAGE_INDEX_VERSION
+        )
+        selected_snapshot = archive_selected_evidence_snapshot_sha256(
+            candidate.resolved_source,
+            (passage_ref,),
+            (passage.excerpt,),
+        )
+        exact = replay_archive_evidence_in_transaction(
+            conn,
+            authorization=authorization,
+            actor=_actor(),
+            tenant_id=TENANT,
+            principal_id=OWNER,
+            origin_boundary_user_message_id=boundary["id"],
+            corpus=ArchiveSearchCorpus.DOCUMENTS,
+            source_ref=candidate.resolved_source.source_ref,
+            passage_refs=(passage_ref,),
+            expected_source_snapshot_sha256=selected_snapshot,
+            expected_coverage_grade=ArchiveEvidenceReplayCoverageGrade.PARTIAL,
+        )
+        assert exact.status is ArchiveEvidenceReplayStatus.EXACT
+        assert exact.excerpts[0].text == expected
+
+        locator = passage_ref.locator
+        assert type(locator) is TextSpanLocator
+        shifted = replace(
+            passage_ref,
+            locator=TextSpanLocator(
+                locator.chunk_index,
+                locator.start_char + 1,
+                locator.end_char,
+            ),
+        )
+        locator_drift = replay_archive_evidence_in_transaction(
+            conn,
+            authorization=authorization,
+            actor=_actor(),
+            tenant_id=TENANT,
+            principal_id=OWNER,
+            origin_boundary_user_message_id=boundary["id"],
+            corpus=ArchiveSearchCorpus.DOCUMENTS,
+            source_ref=candidate.resolved_source.source_ref,
+            passage_refs=(shifted,),
+            expected_source_snapshot_sha256=selected_snapshot,
+            expected_coverage_grade=ArchiveEvidenceReplayCoverageGrade.PARTIAL,
+        )
+        assert locator_drift.status is ArchiveEvidenceReplayStatus.DRIFTED
+
+        conn.execute("UPDATE raw_objects SET content_hash=? WHERE id=?", ("f" * 64, raw_id))
+        revision_drift = replay_archive_evidence_in_transaction(
+            conn,
+            authorization=authorization,
+            actor=_actor(),
+            tenant_id=TENANT,
+            principal_id=OWNER,
+            origin_boundary_user_message_id=boundary["id"],
+            corpus=ArchiveSearchCorpus.DOCUMENTS,
+            source_ref=candidate.resolved_source.source_ref,
+            passage_refs=(passage_ref,),
+            expected_source_snapshot_sha256=selected_snapshot,
+            expected_coverage_grade=ArchiveEvidenceReplayCoverageGrade.PARTIAL,
+        )
+        assert revision_drift.status is ArchiveEvidenceReplayStatus.DRIFTED
+
+
+@pytest.mark.asyncio
+async def test_focused_dense_noncanonical_passage_topology_stays_legacy(
+    settings: Any,
+    storage: Any,
+) -> None:
+    storage.ensure_user(TENANT)
+    storage.ensure_user(OWNER)
+    expected = "Сидоров\nДолжность: ведущий инженер"
+    body = expected + "\n\n" + "Большое техническое приложение. " * 180
+    raw_id, _knowledge_id = _seed_document(
+        storage,
+        suffix="9306",
+        owner=OWNER,
+        concept_vector=[1.0, 0.0],
+        body_override=body,
+        passage_ready=True,
+    )
+    backfill = storage.backfill_document_catalog(
+        TENANT,
+        after_raw_object_id=None,
+        limit=10,
+        include_document_passages=True,
+    )
+    assert backfill["passage_changed"] == 1
+    stored_rows = storage.conn.execute(
+        """SELECT chunk_index,start_char,end_char,content_sha256
+             FROM document_passages WHERE raw_object_id=? ORDER BY chunk_index""",
+        (raw_id,),
+    ).fetchall()
+    assert len(stored_rows) >= 2
+    first = stored_rows[0]
+    second = stored_rows[1]
+    replacement_end = max(int(first["start_char"]) + 1, int(second["start_char"]))
+    assert replacement_end < int(first["end_char"])
+    mutated_rows = [
+        (
+            int(row["chunk_index"]),
+            int(row["start_char"]),
+            replacement_end if index == 0 else int(row["end_char"]),
+            (
+                hashlib.sha256(body[int(row["start_char"]) : replacement_end].encode()).hexdigest()
+                if index == 0
+                else str(row["content_sha256"])
+            ),
+        )
+        for index, row in enumerate(stored_rows)
+    ]
+    mutated_set_digest = document_passage_set_sha256(tuple(mutated_rows))
+    with storage.transaction() as conn:
+        conn.create_function(
+            "friday_document_passage_projection_valid",
+            14,
+            lambda *_args: 1,
+            deterministic=True,
+        )
+        conn.create_function(
+            "friday_document_passage_span_valid",
+            6,
+            lambda *_args: 1,
+            deterministic=True,
+        )
+        try:
+            conn.execute(
+                """UPDATE document_passages SET end_char=?,content_sha256=?
+                     WHERE raw_object_id=? AND chunk_index=0""",
+                (replacement_end, mutated_rows[0][3], raw_id),
+            )
+            conn.execute(
+                """UPDATE document_passage_projections SET passage_set_sha256=?
+                     WHERE raw_object_id=?""",
+                (mutated_set_digest, raw_id),
+            )
+        finally:
+            register_document_passage_connection_functions(conn)
+
+    request = ArchiveSearchRequest.create(
+        query="Сидорова",
+        focus="должность",
+        corpora=(ArchiveSearchCorpus.DOCUMENTS,),
+        limit=5,
+    )
+    plan = await HybridSearcher(
+        storage,
+        _DeterministicEmbeddings(settings),
+        dense_evidence_min=0.35,
+    ).prepare_archive_dense_query_plan(TENANT, request.dense_query, principal_id=OWNER)
+    assert plan is not None
+    snapshot = "focused-dense-noncanonical-sidecar"
+    with storage.transaction() as conn:
+        page = search_archive_document_lane(
+            conn,
+            tenant_id=TENANT,
+            owner_id=OWNER,
+            request=request,
+            corpus=ArchiveSearchCorpus.DOCUMENTS,
+            lane=SearchLane.DENSE,
+            execution_binding=_dense_binding(request, snapshot),
+            snapshot_discriminator=snapshot,
+            snapshot_current=True,
+            dense_query_plan=plan,
+        )
+
+    assert len(page.candidates) == 1
+    passage = page.candidates[0].passages[0]
+    assert passage.excerpt == expected
+    assert passage.passage_ref.passage_index_version == LEGACY_DOCUMENT_PASSAGE_INDEX_VERSION
+
+
+@pytest.mark.asyncio
+async def test_focused_dense_rejects_a_passage_with_a_remote_foreign_predicate(
+    settings: Any,
+    storage: Any,
+) -> None:
+    storage.ensure_user(TENANT)
+    storage.ensure_user(OWNER)
+    body = (
+        "Иванов\n\n"
+        + "нейтральный раздел без кадровых сведений\n" * 30
+        + "Петров\nДолжность: генеральный директор\n"
+    )
+    raw_id, _knowledge_id = _seed_document(
+        storage,
+        suffix="9302",
+        owner=OWNER,
+        concept_vector=[1.0, 0.0],
+        body_override=body,
+    )
+    request = ArchiveSearchRequest.create(
+        query="Иванов",
+        focus="должность",
+        corpora=(ArchiveSearchCorpus.DOCUMENTS,),
+        limit=5,
+    )
+    plan = await HybridSearcher(
+        storage,
+        _DeterministicEmbeddings(settings),
+        dense_evidence_min=0.35,
+    ).prepare_archive_dense_query_plan(
+        TENANT,
+        request.dense_query,
+        principal_id=OWNER,
+    )
+    projection = dense_plan_module.project_archive_dense_query_plan(
+        plan,
+        principal_id=OWNER,
+        query=request.dense_query,
+    )
+    assert projection is not None
+    assert projection.candidates
+
+    with storage.transaction() as conn:
+        prepared = prepare_archive_search_in_transaction(
+            conn,
+            authorization=AuthorizationService(storage, shared_tenant=TENANT),
+            actor=_actor(),
+            tenant_id=TENANT,
+            principal_id=OWNER,
+            request=request,
+            snapshot_discriminator="focused-dense-remote-snapshot",
+            run_discriminator="focused-dense-remote",
+            turn_ledger=create_archive_model_batch_ledger(
+                tenant_id=TENANT,
+                principal_id=OWNER,
+                turn_discriminator="turn-focused-dense-remote",
+            ),
+            dense_query_plan=plan,
+        )
+
+    payload = json.loads(prepared.authorized_batch.model_visible_canonical_bytes)
+    dense = next(item for item in payload["coverage"] if item["lane"] == "dense")
+    assert dense["matched_at_least"] == 0
+    assert all(
+        passage.passage_ref.embedding.compatibility is not EmbeddingCompatibility.CURRENT
+        for result in prepared.authorized_batch._page.results  # noqa: SLF001
+        if result.candidate.resolved_source.source_ref.canonical_object_id == raw_id
+        for passage in result.candidate.passages
+    )
 
 
 @pytest.mark.asyncio

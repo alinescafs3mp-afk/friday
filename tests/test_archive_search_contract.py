@@ -181,6 +181,69 @@ def _request(**overrides: object) -> ArchiveSearchRequest:
     return ArchiveSearchRequest.parse(payload)
 
 
+def test_multiline_passage_requires_explicit_candidate_v2_and_v1_stays_closed() -> None:
+    snapshot, revision, _knowledge_revision = _snapshot()
+    passage = _passage(snapshot, revision, excerpt="Иванов\nДолжность: инженер")
+    assert passage.excerpt == "Иванов\nДолжность: инженер"
+    with pytest.raises(RetrievalContractError, match="explicitly versioned"):
+        passage.to_private_payload()
+    standalone_payload = {
+        "excerpt": passage.excerpt,
+        "passage_ref": passage.passage_ref.to_private_payload(),
+    }
+    with pytest.raises(RetrievalContractError, match="passage excerpt"):
+        ArchiveSearchPassage.from_private_payload(standalone_payload)
+
+    candidate = ArchiveSearchCandidate.create(
+        corpus=ArchiveSearchCorpus.DOCUMENTS,
+        resolved_source=snapshot,
+        review_state=ArchiveReviewState.CONFIRMED,
+        evidence_authority=ArchiveEvidenceAuthority.CANONICAL,
+        lifecycle_state=LifecycleState.ACTIVE,
+        matches=(ArchiveMatchRank(ArchiveMatchChannel.LEXICAL, 1),),
+        passages=(passage,),
+    )
+    payload = candidate.to_private_payload()
+    assert payload["schema"] == "friday.archive-search-candidate.private.v2"
+    assert ArchiveSearchCandidate.parse_private(candidate.to_private_json()) == candidate
+
+    legacy_lie = dict(payload)
+    legacy_lie["schema"] = "friday.archive-search-candidate.private.v1"
+    with pytest.raises(RetrievalContractError, match="passage excerpt"):
+        ArchiveSearchCandidate.from_private_payload(legacy_lie)
+
+    empty_v2 = _factual_candidate().to_private_payload()
+    empty_v2["schema"] = "friday.archive-search-candidate.private.v2"
+    with pytest.raises(RetrievalContractError, match="semantically canonical"):
+        ArchiveSearchCandidate.from_private_payload(empty_v2)
+
+    request = _request()
+    page = ArchiveSearchPage.create(
+        request=request,
+        candidates=(candidate,),
+        coverage=_coverage(request),
+    )
+    assert page.to_public_payload(_KEY)["schema"] == "friday.archive-search-page.public.v2"
+
+    legacy_candidate = _factual_candidate()
+    assert legacy_candidate.to_private_payload()["schema"] == "friday.archive-search-candidate.private.v1"
+    legacy_page = ArchiveSearchPage.create(
+        request=request,
+        candidates=(legacy_candidate,),
+        coverage=_coverage(request),
+    )
+    assert legacy_page.to_public_payload(_KEY)["schema"] == "friday.archive-search-page.public.v1"
+
+    standalone = _passage(snapshot, revision)
+    standalone_payload = standalone.to_private_payload()
+    assert tuple(standalone_payload) == ("excerpt", "passage_ref")
+    assert ArchiveSearchPassage.from_private_payload(standalone_payload) == standalone
+
+    for invalid in ("Иванов\r\nИнженер", "Иванов\tИнженер", "Иванов\0Инженер"):
+        with pytest.raises(RetrievalContractError, match="passage excerpt"):
+            _passage(snapshot, revision, excerpt=invalid)
+
+
 def _coverage(
     request: ArchiveSearchRequest,
     *,
@@ -294,6 +357,73 @@ def test_model_request_is_closed_normalized_sorted_and_private_round_trips() -> 
     assert "continuation" not in request.to_identity_payload()
     assert "secret query" not in repr(request)
     assert "opaque_token-17" not in repr(request)
+
+
+def test_source_focus_is_optional_canonical_private_and_identity_bound() -> None:
+    default = ArchiveSearchRequest.parse({"query": "needle", "corpora": ["documents"]})
+    assert default.focus == ""
+    assert "focus" not in default.to_private_payload()
+    assert default.to_private_payload()["schema"] == "friday.archive-search-request.private.v1"
+    assert default.to_identity_payload()["schema"] == ("friday.archive-search-request-identity.private.v1")
+    assert ArchiveSearchRequest.parse_private(default.to_private_json()) == default
+
+    focused = ArchiveSearchRequest.parse(
+        {
+            "query": "needle",
+            "corpora": ["documents"],
+            "focus": "commander platoon",
+        }
+    )
+    assert focused.focus == "commander platoon"
+    assert focused.dense_query == "needle commander platoon"
+    assert ArchiveSearchRequest.parse_private(focused.to_private_json()) == focused
+    assert focused.to_identity_json() != default.to_identity_json()
+    assert focused.identity_digest_material() != default.identity_digest_material()
+
+    empty_v2 = focused.to_private_payload()
+    empty_v2["focus"] = ""
+    with pytest.raises(RetrievalContractError, match="v2 requires a non-empty focus"):
+        ArchiveSearchRequest.from_private_payload(empty_v2)
+
+    resumed = ArchiveSearchRequest.parse(
+        {
+            **{
+                key: value
+                for key, value in focused.to_private_payload().items()
+                if key not in {"schema", "continuation"}
+            },
+            "continuation": "page_two",
+        }
+    )
+    assert resumed.to_identity_json() == focused.to_identity_json()
+
+
+def test_source_focus_enforces_canonical_bounds_and_documents_corpus() -> None:
+    assert _request(corpora=["documents"], focus="x" * 480).focus == "x" * 480
+    for invalid in (
+        "x" * 481,
+        " padded",
+        "padded ",
+        "two  spaces",
+        "\t",
+        "line\nbreak",
+        "control\0byte",
+    ):
+        with pytest.raises(RetrievalContractError, match="focus"):
+            _request(corpora=["documents"], focus=invalid)
+
+    with pytest.raises(RetrievalContractError, match="documents-only"):
+        ArchiveSearchRequest.parse({"query": "needle", "corpora": ["knowledge"], "focus": "commander"})
+    with pytest.raises(RetrievalContractError, match="documents-only"):
+        ArchiveSearchRequest.parse(
+            {
+                "query": "needle",
+                "corpora": ["documents", "knowledge"],
+                "focus": "commander",
+            }
+        )
+    with pytest.raises(RetrievalContractError, match="240"):
+        _request(corpora=["documents"], query="q" * 241, focus="commander")
 
 
 @pytest.mark.parametrize(

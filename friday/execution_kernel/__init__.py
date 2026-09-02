@@ -71,7 +71,11 @@ from friday.reminder_schedule import reminder_clock, reminder_clock_description,
 from friday.reports import SUPPORTED_KINDS, render, spec_from_payload
 from friday.retrieval import _public_graph_context, best_snippet, is_relational_query, tokens_of
 from friday.retrieval.archive_search_authority import ArchiveModelBatchLedger
-from friday.retrieval.archive_search_contract import ArchiveSearchCorpus, ArchiveSearchRequest
+from friday.retrieval.archive_search_contract import (
+    MAX_FOCUS_CHARS,
+    ArchiveSearchCorpus,
+    ArchiveSearchRequest,
+)
 from friday.retrieval.archive_search_dense import ArchiveDenseQueryPlan
 from friday.retrieval.archive_search_obsidian_reader import (
     BoundArchiveObsidianExactFileReader,
@@ -6268,6 +6272,7 @@ class ExecutionKernel:
         limit: int = 10,
         context: dict[str, Any] | None = None,
         continuation: str | None = None,
+        focus: str = "",
         _archive_invocation: object | None = None,
     ) -> _ArchiveSearchHandlerResult:
         """Run the federated archive facade inside one private turn scope."""
@@ -6288,6 +6293,7 @@ class ExecutionKernel:
             "conversation_scope": conversation_scope,
             "review_scope": review_scope,
             "limit": limit,
+            "focus": focus,
         }
         for key, value in (
             ("title_hints", title_hints),
@@ -6343,7 +6349,7 @@ class ExecutionKernel:
             try:
                 candidate_dense_plan = await dense_prepare(
                     actor.user_id,
-                    request.query,
+                    request.dense_query,
                     principal_id=actor.own_id,
                 )
                 if type(candidate_dense_plan) is ArchiveDenseQueryPlan:
@@ -9703,6 +9709,15 @@ class ExecutionKernel:
                     "items": {"type": "string", "maxLength": 260},
                     "maxItems": 8,
                     "uniqueItems": True,
+                },
+                "focus": {
+                    "type": "string",
+                    "maxLength": MAX_FOCUS_CHARS,
+                    "description": (
+                        "Необязательно и только для documents-only запроса: слова поля/вопроса "
+                        "выбирают выдержку внутри найденного по query исходника, не расширяя "
+                        "авторизацию источников"
+                    ),
                 },
                 "entity_hints": {
                     "type": "array",

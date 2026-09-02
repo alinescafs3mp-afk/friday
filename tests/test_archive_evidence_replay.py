@@ -59,6 +59,7 @@ from friday.retrieval.contracts import (
     AuthorityScope,
     MessageRole,
     PassageRef,
+    RetrievalContractError,
     SearchCorpus,
     SearchExecutionBinding,
     SearchLane,
@@ -282,6 +283,66 @@ def test_document_and_knowledge_exact_replay_preserves_partial_grade_and_private
         )
         assert tampered.status is ArchiveEvidenceReplayStatus.DRIFTED
         assert tampered.excerpts == ()
+    finally:
+        conn.rollback()
+
+
+def test_focused_multiline_candidate_v2_replays_as_one_atomic_exact_span(storage) -> None:
+    body = "Иванов\nДолжность: инженер"
+    _raw_id, _knowledge_id, boundary_id = _seed_document_source(
+        storage,
+        document_body=body,
+    )
+    corpus = ArchiveSearchCorpus.DOCUMENTS
+    request = ArchiveSearchRequest.create(
+        query="Иванов",
+        focus="Должность",
+        corpora=(corpus,),
+        limit=1,
+    )
+    snapshot = "replay-focused-multiline"
+    binding = _binding(request, (SearchCorpus.RAW_DOCUMENTS, SearchLane.LEXICAL), snapshot=snapshot)
+    conn = storage.conn
+    authorization = AuthorizationService(storage)
+    conn.execute("BEGIN")
+    try:
+        page = search_archive_document_lane(
+            conn,
+            tenant_id=TENANT,
+            owner_id=PRINCIPAL,
+            request=request,
+            corpus=corpus,
+            lane=SearchLane.LEXICAL,
+            execution_binding=binding,
+            snapshot_discriminator=snapshot,
+            snapshot_current=True,
+        )
+        candidate = page.candidates[0]
+        assert candidate.passages[0].excerpt == body
+        assert candidate.to_private_payload()["schema"] == ("friday.archive-search-candidate.private.v2")
+
+        passage_refs = tuple(item.passage_ref for item in candidate.passages)
+        assert len(passage_refs) == 1
+        result = replay_archive_evidence_in_transaction(
+            conn,
+            authorization=authorization,
+            actor=_actor(),
+            tenant_id=TENANT,
+            principal_id=PRINCIPAL,
+            origin_boundary_user_message_id=boundary_id,
+            corpus=corpus,
+            source_ref=candidate.resolved_source.source_ref,
+            passage_refs=passage_refs,
+            expected_source_snapshot_sha256=_selected_snapshot(candidate),
+            expected_coverage_grade=ArchiveEvidenceReplayCoverageGrade.PARTIAL,
+        )
+        assert result.status is ArchiveEvidenceReplayStatus.EXACT
+        assert tuple(item.text for item in result.excerpts) == (body,)
+
+        legacy_carrier = candidate.to_private_payload()
+        legacy_carrier["schema"] = "friday.archive-search-candidate.private.v1"
+        with pytest.raises(RetrievalContractError, match="passage excerpt"):
+            type(candidate).from_private_payload(legacy_carrier)
     finally:
         conn.rollback()
 

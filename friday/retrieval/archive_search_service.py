@@ -667,7 +667,7 @@ class _ArchiveSearchRecipe:
         dense_projection = project_archive_dense_query_plan(
             self.dense_query_plan,
             principal_id=self.principal_id,
-            query=self.request.query,
+            query=self.request.dense_query,
         )
         return {
             "accepted_boundary_identity_sha256": self.accepted_boundary_identity_sha256,
@@ -691,7 +691,7 @@ class _ArchiveSearchRecipe:
             dense_projection = project_archive_dense_query_plan(
                 self.dense_query_plan,
                 principal_id=self.principal_id,
-                query=self.request.query,
+                query=self.request.dense_query,
             )
             return bool(
                 type(self) is _ArchiveSearchRecipe
@@ -1819,7 +1819,7 @@ def prepare_archive_search_in_transaction(
             and project_archive_dense_query_plan(
                 dense_query_plan,
                 principal_id=principal,
-                query=storage_request.query,
+                query=storage_request.dense_query,
             )
             is None
         ):

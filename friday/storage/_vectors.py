@@ -67,7 +67,15 @@ class VectorsMixin(StorageShared):
         author = str(uploaded_by) if uploaded_by is not None else None
         if author is not None and not author.strip():
             return []
-        params: list[Any] = [user_id, model, int(dim)]
+        dimension = int(dim)
+        if not 1 <= dimension <= 1_000_000:
+            return []
+        params: list[Any] = [user_id, model, dimension, dimension * 4]
+        bounded_vector = (
+            "AND typeof(e.vector)='blob' AND length(e.vector)=? "
+            "AND typeof(e.knowledge_object_id)='text' "
+            "AND length(CAST(e.knowledge_object_id AS BLOB)) BETWEEN 1 AND 200 "
+        )
         if limit is not None and limit > 0:
             # The window is chosen FIRST, by id, and only then are vectors fetched.
             #
@@ -83,10 +91,15 @@ class VectorsMixin(StorageShared):
                 "SELECT e.knowledge_object_id AS id, e.vector AS vector "
                 "FROM knowledge_embeddings e "
                 "WHERE e.user_id = ? AND e.model = ? AND e.dim = ? "
+                f"{bounded_vector}"
                 "AND e.knowledge_object_id IN ("
                 "  SELECT window_k.id FROM knowledge_objects window_k "
                 "  INDEXED BY idx_knowledge_chunk_scan_order"
                 "  WHERE window_k.user_id = ? AND window_k.deleted_at IS NULL "
+                " AND typeof(window_k.id)='text' "
+                " AND length(CAST(window_k.id AS BLOB)) BETWEEN 1 AND 200 "
+                " AND typeof(window_k.created_at)='text' "
+                " AND length(CAST(window_k.created_at AS BLOB)) BETWEEN 1 AND 64 "
                 f" AND {_not_private_knowledge_dependency('window_k')}"  # nosec B608
             )
             params.append(user_id)
@@ -101,6 +114,7 @@ class VectorsMixin(StorageShared):
                 "FROM knowledge_embeddings e "
                 "JOIN knowledge_objects k ON k.id = e.knowledge_object_id "
                 "WHERE e.user_id = ? AND e.model = ? AND e.dim = ? "
+                f"{bounded_vector}"
                 "AND k.user_id = ? AND k.deleted_at IS NULL "
                 f"AND {_not_private_knowledge_dependency('k')}"  # nosec B608
             )

@@ -6484,6 +6484,9 @@ class KnowledgeMixin(StorageShared):
         author = str(uploaded_by) if uploaded_by is not None else None
         if author is not None and not author.strip():
             return []
+        dimension = int(dim)
+        if not 1 <= dimension <= 1_000_000:
+            return []
         profile = self.execute(
             """SELECT
                  (SELECT COUNT(*) FROM knowledge_chunk_embeddings
@@ -6492,7 +6495,7 @@ class KnowledgeMixin(StorageShared):
                    WHERE user_id=? AND model=? AND dim=?) AS active_chunks,
                  (SELECT COUNT(*) FROM knowledge_objects
                    WHERE user_id=? AND deleted_at IS NULL) AS live_objects""",
-            (user_id, user_id, model, int(dim), user_id),
+            (user_id, user_id, model, dimension, user_id),
         ).fetchone()
         total_chunks = int(profile["total_chunks"] if profile else 0)
         active_chunks = int(profile["active_chunks"] if profile else 0)
@@ -6529,7 +6532,7 @@ class KnowledgeMixin(StorageShared):
                 query += f"AND {_exact_uploader_knowledge_dependency('k')} "
                 params.append(author)
             query += "AND c.user_id = ? AND c.model = ? AND c.dim = ?"
-            params.extend([user_id, model, int(dim)])
+            params.extend([user_id, model, dimension])
         else:
             query = (
                 "SELECT c.knowledge_object_id || '#' || c.chunk_index AS id, c.vector AS vector "
@@ -6542,10 +6545,20 @@ class KnowledgeMixin(StorageShared):
             # The denormalised chunk owner is not an FK to the parent owner.  Both
             # sides are therefore tenant predicates: malformed rows fail closed in
             # the sparse branch exactly as they do in the parent-first branch.
-            params = [user_id, model, int(dim), user_id]
+            params = [user_id, model, dimension, user_id]
             if author is not None:
                 query += f" AND {_exact_uploader_knowledge_dependency('k')}"
                 params.append(author)
+        query += (
+            " AND typeof(c.vector)='blob' AND length(c.vector)=?"
+            " AND typeof(c.knowledge_object_id)='text'"
+            " AND length(CAST(c.knowledge_object_id AS BLOB)) BETWEEN 1 AND 200"
+            " AND typeof(c.chunk_index)='integer'"
+            " AND c.chunk_index BETWEEN 0 AND 1000000"
+            " AND typeof(k.created_at)='text'"
+            " AND length(CAST(k.created_at AS BLOB)) BETWEEN 1 AND 64"
+        )
+        params.append(dimension * 4)
         if object_limit is not None and object_limit > 0:
             if use_index_order:
                 # rowid is only the membership key; selection itself has the explicit
@@ -6556,6 +6569,10 @@ class KnowledgeMixin(StorageShared):
                     "SELECT window_k.rowid FROM knowledge_objects window_k "
                     "INDEXED BY idx_knowledge_chunk_scan_order "
                     "WHERE window_k.user_id = ? AND window_k.deleted_at IS NULL "
+                    "AND typeof(window_k.id)='text' "
+                    "AND length(CAST(window_k.id AS BLOB)) BETWEEN 1 AND 200 "
+                    "AND typeof(window_k.created_at)='text' "
+                    "AND length(CAST(window_k.created_at AS BLOB)) BETWEEN 1 AND 64 "
                     f"AND {_not_private_knowledge_dependency('window_k')} "  # nosec B608
                 )
             else:
@@ -6564,6 +6581,10 @@ class KnowledgeMixin(StorageShared):
                     "SELECT window_k.id FROM knowledge_objects window_k "
                     "INDEXED BY idx_knowledge_chunk_scan_order "
                     "WHERE window_k.user_id = ? AND window_k.deleted_at IS NULL "
+                    "AND typeof(window_k.id)='text' "
+                    "AND length(CAST(window_k.id AS BLOB)) BETWEEN 1 AND 200 "
+                    "AND typeof(window_k.created_at)='text' "
+                    "AND length(CAST(window_k.created_at AS BLOB)) BETWEEN 1 AND 64 "
                     f"AND {_not_private_knowledge_dependency('window_k')} "  # nosec B608
                 )
             params.append(user_id)

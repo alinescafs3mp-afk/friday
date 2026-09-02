@@ -146,11 +146,11 @@ def test_parity_calls_every_legacy_adapter_through_internal_scope(
 
     report = run_parity_ephemeral()
 
-    assert len(report.cases) == 6
+    assert len(report.cases) == 7
     assert Counter(calls) == Counter(
         {
             ("memory_search", "internal"): 1,
             ("message_search", "internal"): 3,
-            ("source_search", "internal"): 2,
+            ("source_search", "internal"): 3,
         }
     )

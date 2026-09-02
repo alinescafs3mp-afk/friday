@@ -40,14 +40,17 @@ def _not_audio_document(alias: str = "r") -> str:
     """
 
     raw_metadata = f"{alias}.metadata_json"
+    bounded_metadata = (
+        f"typeof({raw_metadata})='text' "
+        f"AND length(CAST({raw_metadata} AS BLOB))<={RAW_FILE_METADATA_MAX_BYTES}"
+    )
     # SQLite may reorder WHERE predicates, so a neighbouring ``json_valid``
     # guard cannot make direct ``json_extract(raw_metadata, ...)`` safe.  Use a
     # locally total JSON expression: caller-specific provenance/privacy gates
     # still decide whether malformed metadata is admissible, while this media
     # classifier can never abort the whole catalog on one legacy row.
     metadata = (
-        f"(CASE WHEN typeof({raw_metadata})='text' AND json_valid({raw_metadata}) "
-        f"THEN {raw_metadata} ELSE '{{}}' END)"
+        f"(CASE WHEN {bounded_metadata} AND json_valid({raw_metadata}) THEN {raw_metadata} ELSE '{{}}' END)"
     )
     filename = f"lower(COALESCE(json_extract({metadata},'$.filename'),''))"
     mime = (
@@ -74,7 +77,8 @@ def _not_audio_document(alias: str = "r") -> str:
     )
     suffix_guard = " AND ".join(f"{filename} NOT LIKE '%{suffix}'" for suffix in audio_suffixes)
     return (
-        f"({raw_content_type} NOT IN ('voice','audio') "
+        f"(({bounded_metadata}) "
+        f"AND {raw_content_type} NOT IN ('voice','audio') "
         f"AND {raw_content_type} NOT LIKE 'audio/%' "
         f"AND {raw_content_type} NOT LIKE 'voice/%' "
         f"AND {media_kind} NOT IN ('voice','audio') "

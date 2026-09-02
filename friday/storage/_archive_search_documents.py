@@ -73,7 +73,14 @@ from friday.retrieval.contracts import (
     TemporalValueKind,
     TextSpanLocator,
 )
-from friday.storage._knowledge import _fts_terms
+from friday.retrieval.source_focus import (
+    MAX_SOURCE_FOCUS_ANCHOR_TERMS,
+    SourceFocusMatchKind,
+    SourceFocusProjection,
+    project_source_focus,
+    source_focus_fts_tokens,
+)
+from friday.storage._knowledge import _fts_term_groups, _fts_terms
 from friday.storage._privacy import (
     _not_audio_document,
     _not_private_inbox_dependency,
@@ -91,6 +98,11 @@ _DOCUMENT_PASSAGE_MAX_COUNT: Final = 64
 _MAX_ACTOR_BYTES = 200
 _MAX_SNAPSHOT_BYTES = 256
 _MAX_EXCERPT_CHARS = 720
+_FOCUSED_DOCUMENT_LEAD_CAP = 100
+_FOCUSED_DOCUMENT_BODY_MAX_BYTES = 1 * 1024 * 1024
+_FOCUSED_DOCUMENT_BODY_BUDGET_BYTES = 4 * 1024 * 1024
+_DENSE_CHUNK_BODY_MAX_BYTES = 1 * 1024 * 1024
+_DENSE_CHUNK_BODY_BUDGET_BYTES = 4 * 1024 * 1024
 _RAW_ID = re.compile(r"raw_[0-9a-f]{16}\Z")
 _KO_ID = re.compile(r"ko_[A-Za-z0-9_-]{8,120}\Z")
 _INBOX_ID = re.compile(r"inbox_[0-9a-f]{16}\Z")
@@ -647,6 +659,7 @@ def _page_seal_material(page: ArchiveDocumentLanePage) -> bytes:
         "authority_scope_complete": page.authority_scope_complete,
         "authority_rechecked": page.authority_rechecked,
         "available": page.available,
+        "applied_limit": page.applied_limit,
         "binding": page._execution_handle,
         "catalog_projection_current": page.catalog_projection_current,
         "candidates": candidate_digests,
@@ -678,6 +691,7 @@ class ArchiveDocumentLanePage:
     returned: int
     has_more: bool
     available: bool
+    applied_limit: int
     derivative_current: bool | None
     derivative_backfill_pending: bool | None
     derivative_unavailable: bool | None
@@ -719,6 +733,9 @@ class ArchiveDocumentLanePage:
             or self.returned != len(self.candidates)
             or type(self.has_more) is not bool
             or type(self.available) is not bool
+            or type(self.applied_limit) is not int
+            or not 1 <= self.applied_limit <= _MAX_ARCHIVE_DOCUMENT_MATERIALIZED_RESULTS
+            or self.returned > self.applied_limit
             or type(self.authority_scope_complete) is not bool
             or type(self.authority_rechecked) is not bool
             or type(self.snapshot_current) is not bool
@@ -895,7 +912,7 @@ class ArchiveDocumentLanePage:
             examined=self.examined,
             matched_at_least=self.matched,
             returned=self.returned,
-            limit=self.returned if self.has_more else None,
+            limit=self.applied_limit if self.has_more else None,
             next_cursor_available=False,
             authority_rechecked=self.authority_rechecked,
             snapshot_current=self.snapshot_current,
@@ -912,6 +929,7 @@ def _new_page(
     matched: int,
     has_more: bool,
     available: bool,
+    applied_limit: int,
     derivative_current: bool | None,
     derivative_backfill_pending: bool | None,
     derivative_unavailable: bool | None,
@@ -951,6 +969,7 @@ def _new_page(
         ("returned", len(candidates)),
         ("has_more", has_more),
         ("available", available),
+        ("applied_limit", applied_limit),
         ("derivative_current", derivative_current),
         ("derivative_backfill_pending", derivative_backfill_pending),
         ("derivative_unavailable", derivative_unavailable),
@@ -987,6 +1006,7 @@ def _unavailable_page(
     snapshot_discriminator: str,
     snapshot_current: bool,
     authority_rechecked: bool,
+    applied_limit: int,
 ) -> ArchiveDocumentLanePage:
     return _new_page(
         corpus=corpus,
@@ -997,6 +1017,7 @@ def _unavailable_page(
         matched=0,
         has_more=False,
         available=False,
+        applied_limit=applied_limit,
         derivative_current=False if lane in {SearchLane.LEXICAL, SearchLane.DENSE} else None,
         derivative_backfill_pending=False if lane in {SearchLane.LEXICAL, SearchLane.DENSE} else None,
         derivative_unavailable=True if lane in {SearchLane.LEXICAL, SearchLane.DENSE} else None,
@@ -1354,6 +1375,211 @@ def _common_raw_authority(
     )"""
 
 
+def _bounded_common_raw_authority(
+    corpus: ArchiveSearchCorpus,
+    *,
+    include_document_date: bool,
+) -> str:
+    """Authority CTE whose materialized rows contain bounded scalars only."""
+
+    tenant_scope = "AND r.content_type='file'" if corpus is ArchiveSearchCorpus.DOCUMENTS else ""
+    principal_scope = "AND raw_not_audio=1" if corpus is ArchiveSearchCorpus.DOCUMENTS else ""
+    document_date = _document_date_expression("r") if include_document_date else "NULL"
+    raw_id_ready = """(
+        typeof(r.id)='text' AND length(r.id)=20 AND substr(r.id,1,4)='raw_'
+        AND substr(r.id,5)<>'' AND substr(r.id,5) NOT GLOB '*[^0-9a-f]*'
+    )"""
+    raw_material_ready = f"""(
+        {raw_id_ready}
+        AND typeof(r.source)='text' AND length(CAST(r.source AS BLOB)) BETWEEN 1 AND 64
+        AND typeof(r.content_type)='text'
+        AND length(CAST(r.content_type AS BLOB)) BETWEEN 1 AND 64
+        AND typeof(r.content_hash)='text' AND length(r.content_hash)=64
+        AND r.content_hash NOT GLOB '*[^0-9a-f]*'
+        AND typeof(r.version)='integer' AND r.version BETWEEN 1 AND 1000000000
+        AND typeof(r.received_at)='text'
+        AND length(CAST(r.received_at AS BLOB)) BETWEEN 1 AND 64
+        AND typeof(r.created_at)='text'
+        AND length(CAST(r.created_at AS BLOB)) BETWEEN 1 AND 64
+    )"""
+    raw_filename = _filename_expression("r")
+    raw_principal = _principal_raw_authority(corpus, alias="r")
+    raw_owner_valid = _raw_owner_attribution_valid(corpus, alias="r")
+    raw_attribution_valid = _raw_attribution_valid(corpus, alias="r")
+    raw_not_audio = _not_audio_document("r") if corpus is ArchiveSearchCorpus.DOCUMENTS else "1"
+    return f"""principal_authority(owner_id) AS MATERIALIZED (SELECT ?),
+    tenant_raw AS MATERIALIZED (
+        SELECT r.rowid AS raw_rowid,
+               CASE WHEN {raw_id_ready} THEN r.id END AS raw_id,
+               r.user_id,
+               CASE WHEN typeof(r.source)='text'
+                          AND length(CAST(r.source AS BLOB)) BETWEEN 1 AND 64
+                    THEN r.source END AS source,
+               CASE WHEN typeof(r.content_type)='text'
+                          AND length(CAST(r.content_type AS BLOB)) BETWEEN 1 AND 64
+                    THEN r.content_type END AS content_type,
+               CASE WHEN typeof(r.content_hash)='text' AND length(r.content_hash)=64
+                          AND r.content_hash NOT GLOB '*[^0-9a-f]*'
+                    THEN r.content_hash END AS content_hash,
+               CASE WHEN typeof(r.version)='integer' AND r.version BETWEEN 1 AND 1000000000
+                    THEN r.version END AS raw_version,
+               CASE WHEN typeof(r.received_at)='text'
+                          AND length(CAST(r.received_at AS BLOB)) BETWEEN 1 AND 64
+                    THEN r.received_at END AS received_at,
+               CASE WHEN typeof(r.created_at)='text'
+                          AND length(CAST(r.created_at AS BLOB)) BETWEEN 1 AND 64
+                    THEN r.created_at END AS created_at,
+               {raw_filename} AS raw_filename,
+               {document_date} AS raw_document_date,
+               CASE WHEN {raw_principal} THEN 1 ELSE 0 END AS raw_principal_authorized,
+               CASE WHEN {raw_owner_valid} THEN 1 ELSE 0 END AS raw_owner_valid,
+               CASE WHEN {raw_attribution_valid} THEN 1 ELSE 0 END AS raw_attribution_valid,
+               CASE WHEN {raw_not_audio} THEN 1 ELSE 0 END AS raw_not_audio,
+               CASE WHEN {raw_material_ready} THEN 1 ELSE 0 END AS raw_material_ready
+          FROM raw_objects r
+          JOIN principal_authority ON 1=1
+         WHERE r.user_id=?
+           AND EXISTS (SELECT 1 FROM users tenant_authority
+                        WHERE tenant_authority.id=? AND tenant_authority.status='active')
+           AND EXISTS (SELECT 1 FROM users owner_authority
+                        WHERE owner_authority.id=principal_authority.owner_id
+                          AND owner_authority.status='active')
+           AND r.deleted_at IS NULL
+           {tenant_scope}
+           AND {_not_private_raw_dependency("r")}
+    ),
+    principal_scoped_raw AS MATERIALIZED (
+        SELECT raw_rowid, raw_id, user_id, source, content_type, content_hash,
+               raw_version, received_at, created_at, raw_filename, raw_document_date
+          FROM tenant_raw
+         WHERE raw_principal_authorized=1 AND raw_material_ready=1 {principal_scope}
+    ),
+    raw_authority_backfill(value) AS MATERIALIZED (
+        SELECT CASE WHEN EXISTS (
+            SELECT 1 FROM tenant_raw
+             WHERE raw_owner_valid<>1
+                OR (raw_principal_authorized=1
+                    AND (raw_attribution_valid<>1 OR raw_material_ready<>1))
+        ) THEN 1 ELSE 0 END
+    ),
+    authorized_raw AS MATERIALIZED (
+        SELECT raw_rowid, raw_id, user_id, source, content_type, content_hash,
+               raw_version, received_at, created_at, raw_filename, raw_document_date
+          FROM principal_scoped_raw
+    ),
+    current_inbox_all AS MATERIALIZED (
+        SELECT inbox_id, raw_object_id, status, ordering_ready FROM (
+            SELECT CASE WHEN typeof(i.id)='text'
+                                  AND length(CAST(i.id AS BLOB)) BETWEEN 1 AND 200
+                        THEN i.id END AS inbox_id,
+                   i.raw_object_id,
+                   CASE WHEN typeof(i.status)='text'
+                                  AND length(CAST(i.status AS BLOB)) BETWEEN 1 AND 32
+                        THEN i.status END AS status,
+                   CASE WHEN {_canonical_utc_sql("i.created_at")}
+                              AND (i.reviewed_at IS NULL OR {_canonical_utc_sql("i.reviewed_at")})
+                        THEN 1 ELSE 0 END AS ordering_ready,
+                   ROW_NUMBER() OVER (
+                       PARTITION BY i.raw_object_id
+                       ORDER BY CASE WHEN {_canonical_utc_sql("i.created_at")}
+                                     THEN i.created_at END DESC,
+                                CASE WHEN i.reviewed_at IS NULL
+                                          OR {_canonical_utc_sql("i.reviewed_at")}
+                                     THEN COALESCE(i.reviewed_at,'') END DESC,
+                                CASE WHEN typeof(i.id)='text'
+                                          AND length(CAST(i.id AS BLOB))<=200
+                                     THEN i.id END DESC
+                   ) AS choice
+              FROM inbox i
+              JOIN authorized_raw ar
+                ON ar.raw_id=i.raw_object_id AND ar.user_id=i.user_id
+             WHERE {_not_private_inbox_dependency("i")}
+        ) WHERE choice=1
+    ),
+    current_inbox AS MATERIALIZED (
+        SELECT inbox_id, raw_object_id, status, ordering_ready
+          FROM current_inbox_all
+         WHERE status IN ('pending','classified','archived','ignored')
+    ),
+    inbox_scope_backfill(value) AS MATERIALIZED (
+        SELECT CASE WHEN EXISTS (
+            SELECT 1 FROM current_inbox_all
+             WHERE status NOT IN ('pending','classified','archived','ignored')
+                OR status IS NULL OR inbox_id IS NULL OR ordering_ready<>1
+        ) OR EXISTS (
+            SELECT 1 FROM inbox i
+              JOIN authorized_raw ar
+                ON ar.raw_id=i.raw_object_id AND ar.user_id=i.user_id
+             WHERE NOT {_canonical_utc_sql("i.created_at")}
+                OR (i.reviewed_at IS NOT NULL AND NOT {_canonical_utc_sql("i.reviewed_at")})
+        ) THEN 1 ELSE 0 END
+    ),
+    knowledge_source_rows AS MATERIALIZED (
+        SELECT k.rowid AS knowledge_rowid,
+               CASE WHEN typeof(k.id)='text'
+                          AND length(CAST(k.id AS BLOB)) BETWEEN 11 AND 123
+                          AND substr(k.id,1,3)='ko_'
+                          AND substr(k.id,4) NOT GLOB '*[^A-Za-z0-9_-]*'
+                    THEN k.id END AS knowledge_id,
+               k.raw_object_id,
+               CASE WHEN typeof(k.version)='integer' AND k.version BETWEEN 1 AND 1000000000
+                    THEN k.version END AS knowledge_version,
+               CASE WHEN typeof(k.lifecycle_stage)='text'
+                          AND length(CAST(k.lifecycle_stage AS BLOB)) BETWEEN 1 AND 32
+                    THEN k.lifecycle_stage END AS knowledge_lifecycle,
+               CASE WHEN k.superseded_by_id IS NULL THEN 0 ELSE 1 END
+                    AS knowledge_superseded,
+               NULL AS knowledge_title, NULL AS knowledge_summary,
+               NULL AS knowledge_tags_json, NULL AS knowledge_kind,
+               CASE WHEN typeof(k.created_at)='text'
+                          AND length(CAST(k.created_at AS BLOB)) BETWEEN 1 AND 64
+                    THEN k.created_at END AS knowledge_created_at,
+               CASE WHEN typeof(k.updated_at)='text'
+                          AND length(CAST(k.updated_at AS BLOB)) BETWEEN 1 AND 64
+                    THEN k.updated_at END AS knowledge_updated_at,
+               CASE WHEN typeof(k.id)='text'
+                          AND length(CAST(k.id AS BLOB)) BETWEEN 11 AND 123
+                          AND substr(k.id,1,3)='ko_'
+                          AND substr(k.id,4) NOT GLOB '*[^A-Za-z0-9_-]*'
+                          AND typeof(k.version)='integer' AND k.version BETWEEN 1 AND 1000000000
+                          AND typeof(k.lifecycle_stage)='text'
+                          AND length(CAST(k.lifecycle_stage AS BLOB)) BETWEEN 1 AND 32
+                          AND typeof(k.created_at)='text'
+                          AND length(CAST(k.created_at AS BLOB)) BETWEEN 1 AND 64
+                          AND typeof(k.updated_at)='text'
+                          AND length(CAST(k.updated_at AS BLOB)) BETWEEN 1 AND 64
+                    THEN 1 ELSE 0 END AS knowledge_material_ready
+          FROM knowledge_objects k
+          JOIN authorized_raw ar ON ar.raw_id=k.raw_object_id AND ar.user_id=k.user_id
+         WHERE k.deleted_at IS NULL
+           AND {_not_private_knowledge_dependency("k")}
+    ),
+    knowledge_sources AS MATERIALIZED (
+        SELECT knowledge_rowid, knowledge_id, raw_object_id, knowledge_version,
+               knowledge_lifecycle, knowledge_superseded,
+               knowledge_title, knowledge_summary, knowledge_tags_json, knowledge_kind,
+               knowledge_created_at, knowledge_updated_at
+          FROM knowledge_source_rows
+         WHERE knowledge_material_ready=1
+           AND knowledge_lifecycle IN ('active','archived','deprecated')
+           AND (knowledge_superseded=0 OR knowledge_lifecycle='deprecated')
+    ),
+    knowledge_scope_backfill(value) AS MATERIALIZED (
+        SELECT CASE WHEN EXISTS (
+            SELECT 1 FROM knowledge_source_rows
+             WHERE knowledge_material_ready<>1
+                OR knowledge_lifecycle NOT IN ('active','archived','deprecated')
+                OR (knowledge_superseded=1 AND knowledge_lifecycle<>'deprecated')
+        ) THEN 1 ELSE 0 END
+    ),
+    authority_backfill(value) AS MATERIALIZED (
+        SELECT CASE WHEN (SELECT value FROM raw_authority_backfill)=1
+                          OR (SELECT value FROM inbox_scope_backfill)=1
+                          OR (SELECT value FROM knowledge_scope_backfill)=1
+                    THEN 1 ELSE 0 END
+    )"""
+
+
 _DOCUMENT_LIFECYCLE = "CASE WHEN ci.inbox_id IS NULL THEN COALESCE(ck.knowledge_lifecycle,'active') WHEN ci.status='pending' THEN 'pending' WHEN ci.status='classified' THEN 'classified' WHEN ci.status='archived' THEN 'archived' ELSE NULL END"
 _DOCUMENT_REVIEW = "CASE WHEN ci.inbox_id IS NULL THEN CASE ck.knowledge_lifecycle WHEN 'active' THEN 'confirmed' WHEN 'archived' THEN 'archived' WHEN 'deprecated' THEN 'archived' ELSE NULL END WHEN ci.status='pending' THEN 'pending' WHEN ci.status='classified' THEN 'confirmed' WHEN ci.status='archived' THEN 'archived' ELSE NULL END"
 _KNOWLEDGE_LIFECYCLE = "ck.knowledge_lifecycle"
@@ -1365,11 +1591,26 @@ def _source_cte(
     request: ArchiveSearchRequest,
     *,
     include_body: bool,
+    bounded_material: bool = False,
 ) -> tuple[str, tuple[object, ...]]:
-    common = _common_raw_authority(corpus, include_body=include_body)
+    if bounded_material and include_body:
+        raise _fail("bounded archive source contour cannot include bodies")
+    common = (
+        _bounded_common_raw_authority(
+            corpus,
+            include_document_date=any(
+                item.role is TemporalRole.LEGACY_UNCLASSIFIED_DOCUMENT_DATE
+                for item in _temporal_constraints(request, corpus)
+            ),
+        )
+        if bounded_material
+        else _common_raw_authority(corpus, include_body=include_body)
+    )
     if corpus is ArchiveSearchCorpus.DOCUMENTS:
         document_date = (
-            _document_date_expression("ar")
+            "ar.raw_document_date"
+            if bounded_material
+            else _document_date_expression("ar")
             if any(
                 item.role is TemporalRole.LEGACY_UNCLASSIFIED_DOCUMENT_DATE
                 for item in _temporal_constraints(request, corpus)
@@ -1492,15 +1733,16 @@ def _authority_parameters(tenant_id: str, owner_id: str) -> tuple[object, ...]:
 
 
 def _filename_expression(alias: str = "s") -> str:
+    metadata = _safe_raw_metadata(alias)
     return f"""CASE
-        WHEN json_type({alias}.metadata_json,'$.filename')='text'
-         AND length(json_extract({alias}.metadata_json,'$.filename')) BETWEEN 1 AND 260
-         AND trim(json_extract({alias}.metadata_json,'$.filename'))=
-             json_extract({alias}.metadata_json,'$.filename')
-         AND instr(json_extract({alias}.metadata_json,'$.filename'),char(0))=0
-         AND instr(json_extract({alias}.metadata_json,'$.filename'),char(10))=0
-         AND instr(json_extract({alias}.metadata_json,'$.filename'),char(13))=0
-        THEN json_extract({alias}.metadata_json,'$.filename') ELSE '' END"""
+        WHEN json_type({metadata},'$.filename')='text'
+         AND length(json_extract({metadata},'$.filename')) BETWEEN 1 AND 260
+         AND trim(json_extract({metadata},'$.filename'))=
+             json_extract({metadata},'$.filename')
+         AND instr(json_extract({metadata},'$.filename'),char(0))=0
+         AND instr(json_extract({metadata},'$.filename'),char(10))=0
+         AND instr(json_extract({metadata},'$.filename'),char(13))=0
+        THEN json_extract({metadata},'$.filename') ELSE '' END"""
 
 
 def _format_expression(alias: str = "s") -> str:
@@ -1808,6 +2050,23 @@ def _select_rows(
         raise _fail("archive document storage read is unavailable") from None
 
 
+def _dense_chunk_slice(row: dict[str, Any]) -> tuple[str, int, int] | None:
+    """Return one exact, bounded body slice with its absolute source offsets."""
+
+    body = row.get("dense_chunk_body")
+    start = row.get("dense_start_char")
+    end = row.get("dense_end_char")
+    if (
+        type(body) is not str
+        or type(start) is not int
+        or type(end) is not int
+        or not 0 <= start < end
+        or len(body) != end - start
+    ):
+        return None
+    return body, start, end
+
+
 def _dense_chunk_text(row: dict[str, Any], projection: ArchiveDenseQueryProjection) -> str | None:
     """Rebuild the exact text whose hash is stored beside one chunk vector."""
 
@@ -1817,33 +2076,17 @@ def _dense_chunk_text(row: dict[str, Any], projection: ArchiveDenseQueryProjecti
     max_chars, overlap_chars, max_chunks = (int(item) for item in match.groups())
     if max_chars > 1_000_000 or overlap_chars >= max_chars or max_chunks > 1_000_000:
         return None
-    # Both corpora expose the exact body being cited as ``passage_body``.  The
-    # document contour separately proves that its promoted KO body is byte-equal
-    # to the Raw body before reaching this reconstruction; Knowledge already
-    # projects the KO body directly under this name.
-    body = row.get("passage_body")
-    start = row.get("dense_start_char")
-    end = row.get("dense_end_char")
-    if (
-        type(body) is not str
-        or type(start) is not int
-        or type(end) is not int
-        or not 0 <= start < end <= len(body)
-    ):
+    selected = _dense_chunk_slice(row)
+    if selected is None:
         return None
+    body, _start, _end = selected
     chunk_index = row.get("dense_chunk_index")
     if type(chunk_index) is not int or not 0 <= chunk_index < max_chunks:
         return None
-    header = " ".join(
-        item
-        for item in (
-            str(row.get("knowledge_title") or ""),
-            str(row.get("knowledge_summary") or ""),
-            str(row.get("knowledge_kind") or ""),
-        )
-        if item.strip()
-    )[: max(0, max_chars // 4)]
-    return f"{header}\n\n{body[start:end]}"
+    header = row.get("dense_header")
+    if type(header) is not str or len(header) > max(0, max_chars // 4):
+        return None
+    return f"{header}\n\n{body}"
 
 
 def _dense_score(blob: object, projection: ArchiveDenseQueryProjection) -> float | None:
@@ -1867,21 +2110,18 @@ def _dense_score(blob: object, projection: ArchiveDenseQueryProjection) -> float
 
 
 def _dense_excerpt(row: dict[str, Any]) -> tuple[str, int, int] | None:
-    body = row.get("passage_body")
-    start = row.get("dense_start_char")
-    end = row.get("dense_end_char")
-    if type(body) is not str or type(start) is not int or type(end) is not int:
+    selected = _dense_chunk_slice(row)
+    if selected is None:
         return None
-    if not 0 <= start < end <= len(body):
-        return None
+    body, absolute_start, absolute_end = selected
     # Archive passages cannot contain control characters.  Extracted documents
     # commonly contain newlines, so rejecting the whole winning chunk would make
     # dense recall disappear on ordinary PDFs.  Select the longest exact bounded
     # control-free run; ties stay at the earliest stable offset.
-    best_start = best_end = start
-    run_start = start
-    for index in range(start, end + 1):
-        if index < end and not unicodedata.category(body[index]).startswith("C"):
+    best_start = best_end = 0
+    run_start = 0
+    for index in range(0, len(body) + 1):
+        if index < len(body) and not unicodedata.category(body[index]).startswith("C"):
             continue
         run_end = index
         while run_start < run_end and body[run_start].isspace():
@@ -1902,7 +2142,240 @@ def _dense_excerpt(row: dict[str, Any]) -> tuple[str, int, int] | None:
         or any(unicodedata.category(character).startswith("C") for character in text)
     ):
         return None
-    return text, excerpt_start, excerpt_end
+    start = absolute_start + excerpt_start
+    end = absolute_start + excerpt_end
+    if not absolute_start <= start < end <= absolute_end:
+        return None
+    return text, start, end
+
+
+def _dense_header_from_prefixes(
+    prefixes: tuple[str, str, str],
+    *,
+    maximum: int,
+) -> str | None:
+    """Rebuild the exact code-owned header from bounded field prefixes."""
+
+    if type(maximum) is not int or not 0 <= maximum <= 250_000:
+        return None
+    if maximum == 0:
+        return ""
+    included: list[str] = []
+    for prefix in prefixes:
+        if type(prefix) is not str or len(prefix) > maximum + 1:
+            return None
+        material = " ".join(included)
+        if len(material) >= maximum:
+            break
+        truncated = len(prefix) == maximum + 1
+        if truncated and not prefix.strip():
+            # The unseen suffix could either keep this field blank (excluded)
+            # or make it nonblank (included); fail closed instead of guessing.
+            return None
+        if prefix.strip():
+            included.append(prefix)
+    return " ".join(included)[:maximum]
+
+
+def _read_dense_chunk_body(
+    conn: sqlite3.Connection,
+    source: dict[str, Any],
+    *,
+    corpus: ArchiveSearchCorpus,
+    max_bytes: int,
+) -> tuple[str, int, str | None, str, str | None, str | None] | None:
+    """Read one exact winning span after body-free authority admission.
+
+    The lead row binds both parent revisions and the embedding child.  This
+    second SELECT repeats those immutable identities in the same snapshot and
+    returns only ``[start:end]``.  For documents, the promoted KO and Raw slices
+    must still be byte-for-byte equal before the Raw span can be cited; neither
+    complete TEXT value is projected or compared.
+    """
+
+    raw_rowid = source.get("raw_rowid")
+    raw_id = source.get("raw_id")
+    user_id = source.get("user_id")
+    raw_version = source.get("raw_version")
+    raw_digest = source.get("content_hash")
+    knowledge_rowid = source.get("knowledge_rowid")
+    knowledge_id = source.get("knowledge_id")
+    knowledge_version = source.get("knowledge_version")
+    start = source.get("dense_start_char")
+    end = source.get("dense_end_char")
+    if (
+        type(max_bytes) is not int
+        or max_bytes <= 0
+        or type(raw_rowid) is not int
+        or raw_rowid <= 0
+        or type(raw_id) is not str
+        or _RAW_ID.fullmatch(raw_id) is None
+        or type(user_id) is not str
+        or not user_id
+        or type(raw_version) is not int
+        or raw_version < 1
+        or type(raw_digest) is not str
+        or _SHA256.fullmatch(raw_digest) is None
+        or type(knowledge_rowid) is not int
+        or knowledge_rowid <= 0
+        or type(knowledge_id) is not str
+        or _KO_ID.fullmatch(knowledge_id) is None
+        or type(knowledge_version) is not int
+        or knowledge_version < 1
+        or type(start) is not int
+        or type(end) is not int
+        or not 0 <= start < end
+        or end - start > 1_000_000
+    ):
+        return None
+    span_chars = end - start
+    header_char_cap = source.get("dense_header_char_cap")
+    if type(header_char_cap) is not int or not 0 <= header_char_cap <= 250_000:
+        return None
+    header_prefix_chars = header_char_cap + 1
+    title_prefix_chars = max(header_char_cap, 260) + 1
+    full_focus_required = bool(
+        corpus is ArchiveSearchCorpus.DOCUMENTS and source.get("dense_full_focus_required") is True
+    )
+    full_focus_cap = min(_DENSE_CHUNK_BODY_MAX_BYTES, max_bytes)
+    if type(full_focus_cap) is not int or full_focus_cap <= 0:
+        return None
+    focus_source_expression = "substr(CAST(r.raw_content AS BLOB),1,?)" if full_focus_required else "x''"
+    focus_source_parameters: tuple[object, ...] = (full_focus_cap + 1,) if full_focus_required else ()
+    focus_source_guard = (
+        "AND length(CAST(r.raw_content AS BLOB)) BETWEEN 1 AND ?" if full_focus_required else ""
+    )
+    focus_source_guard_parameters: tuple[object, ...] = (full_focus_cap,) if full_focus_required else ()
+    focus_source_min_bytes = 1 if full_focus_required else 0
+    focus_source_max_bytes = full_focus_cap if full_focus_required else 0
+    selected_body = "r.raw_content" if corpus is ArchiveSearchCorpus.DOCUMENTS else "k.content"
+    if corpus is ArchiveSearchCorpus.DOCUMENTS:
+        representation_guard = """AND typeof(r.raw_content)='text'
+              AND typeof(k.content)='text'
+              AND substr(k.content,?,?) IS substr(r.raw_content,?,?)"""
+        representation_parameters: tuple[object, ...] = (
+            start + 1,
+            span_chars,
+            start + 1,
+            span_chars,
+        )
+    else:
+        representation_guard = "AND typeof(k.content)='text'"
+        representation_parameters = ()
+    rows = _select_rows(
+        conn,
+        f"""WITH bounded_material AS MATERIALIZED (
+                   SELECT substr({selected_body},?,?) AS dense_chunk_body,
+                          substr(COALESCE(k.title,''),1,?) AS dense_title_prefix,
+                          substr(COALESCE(k.summary,''),1,?) AS dense_summary_prefix,
+                          substr(COALESCE(k.knowledge_kind,''),1,?) AS dense_kind_prefix,
+                          {focus_source_expression} AS dense_focus_source_blob
+                     FROM raw_objects r
+                     JOIN knowledge_objects k
+                       ON k.rowid=? AND k.id=? AND k.user_id=?
+                      AND k.raw_object_id=r.id AND k.deleted_at IS NULL
+                      AND k.version=?
+                    WHERE r.rowid=? AND r.id=? AND r.user_id=?
+                      AND r.deleted_at IS NULL AND r.version=? AND r.content_hash=?
+                      {focus_source_guard}
+                      {representation_guard}
+                      AND (k.title IS NULL OR typeof(k.title)='text')
+                      AND (k.summary IS NULL OR typeof(k.summary)='text')
+                      AND (k.knowledge_kind IS NULL OR typeof(k.knowledge_kind)='text')
+               )
+               SELECT *,
+                      length(CAST(dense_chunk_body AS BLOB))
+                      + length(CAST(dense_title_prefix AS BLOB))
+                      + length(CAST(dense_summary_prefix AS BLOB))
+                      + length(CAST(dense_kind_prefix AS BLOB))
+                      + length(dense_focus_source_blob) AS dense_material_bytes
+                 FROM bounded_material
+                WHERE length(CAST(dense_chunk_body AS BLOB)) BETWEEN 1 AND ?
+                  AND length(dense_focus_source_blob) BETWEEN ? AND ?
+                  AND length(CAST(dense_chunk_body AS BLOB))
+                      + length(CAST(dense_title_prefix AS BLOB))
+                      + length(CAST(dense_summary_prefix AS BLOB))
+                      + length(CAST(dense_kind_prefix AS BLOB))
+                      + length(dense_focus_source_blob)
+                      BETWEEN 1 AND ?""",  # nosec B608 -- fixed code-owned expressions
+        (
+            start + 1,
+            span_chars,
+            title_prefix_chars,
+            header_prefix_chars,
+            header_prefix_chars,
+            *focus_source_parameters,
+            knowledge_rowid,
+            knowledge_id,
+            user_id,
+            knowledge_version,
+            raw_rowid,
+            raw_id,
+            user_id,
+            raw_version,
+            raw_digest,
+            *focus_source_guard_parameters,
+            *representation_parameters,
+            max_bytes,
+            focus_source_min_bytes,
+            focus_source_max_bytes,
+            max_bytes,
+        ),
+    )
+    if not rows:
+        return None
+    if len(rows) != 1:
+        raise _fail("archive dense chunk selection is invalid")
+    body = rows[0].get("dense_chunk_body")
+    material_bytes = rows[0].get("dense_material_bytes")
+    title_prefix = rows[0].get("dense_title_prefix")
+    summary_prefix = rows[0].get("dense_summary_prefix")
+    kind_prefix = rows[0].get("dense_kind_prefix")
+    focus_source_blob = rows[0].get("dense_focus_source_blob")
+    if (
+        type(body) is not str
+        or len(body) != span_chars
+        or type(material_bytes) is not int
+        or not 1 <= material_bytes <= max_bytes
+        or type(title_prefix) is not str
+        or len(title_prefix) > title_prefix_chars
+        or type(summary_prefix) is not str
+        or len(summary_prefix) > header_prefix_chars
+        or type(kind_prefix) is not str
+        or len(kind_prefix) > header_prefix_chars
+        or type(focus_source_blob) is not bytes
+        or not focus_source_min_bytes <= len(focus_source_blob) <= focus_source_max_bytes
+    ):
+        raise _fail("archive dense chunk selection is invalid")
+    try:
+        decoded_focus_source = focus_source_blob.decode("utf-8", errors="strict")
+    except UnicodeDecodeError:
+        return None
+    full_focus_source: str | None = decoded_focus_source if full_focus_required else None
+    full_focus_text_digest: str | None = None
+    if full_focus_required:
+        full_focus_text_digest = hashlib.sha256(focus_source_blob).hexdigest()
+    try:
+        exact_size = sum(
+            len(item.encode("utf-8", errors="strict"))
+            for item in (body, title_prefix, summary_prefix, kind_prefix)
+        ) + len(focus_source_blob)
+    except UnicodeEncodeError:
+        return None
+    if exact_size != material_bytes:
+        raise _fail("archive dense chunk size is invalid")
+    header = _dense_header_from_prefixes(
+        (
+            title_prefix[:header_prefix_chars],
+            summary_prefix,
+            kind_prefix,
+        ),
+        maximum=header_char_cap,
+    )
+    if header is None:
+        return None
+    title = title_prefix if len(title_prefix) <= 260 else None
+    return body, material_bytes, title, header, full_focus_source, full_focus_text_digest
 
 
 def _dense_rows(
@@ -1913,10 +2386,25 @@ def _dense_rows(
     request: ArchiveSearchRequest,
     corpus: ArchiveSearchCorpus,
     projection: ArchiveDenseQueryProjection,
-) -> tuple[int, int, bool, list[dict[str, Any]]]:
+) -> tuple[int, int, bool, bool, bool, list[dict[str, Any]]]:
     """Reauthorize and re-score the bounded dense selection in this snapshot."""
 
-    source_cte, scope_parameters = _source_cte(corpus, request, include_body=True)
+    scheme_match = re.fullmatch(
+        r"v2:([1-9][0-9]*):([0-9]+):([1-9][0-9]*)",
+        projection.chunk_scheme,
+    )
+    if scheme_match is None:
+        raise _fail("archive dense chunk scheme is unavailable")
+    max_chars, overlap_chars, max_chunks = (int(item) for item in scheme_match.groups())
+    if max_chars > 1_000_000 or overlap_chars >= max_chars or max_chunks > 1_000_000:
+        raise _fail("archive dense chunk scheme is unavailable")
+    header_char_cap = max_chars // 4
+    source_cte, scope_parameters = _source_cte(
+        corpus,
+        request,
+        include_body=False,
+        bounded_material=True,
+    )
     authority_parameters = (*_authority_parameters(tenant_id, owner_id), *scope_parameters)
     totals = _select_rows(
         conn,
@@ -1938,12 +2426,13 @@ def _dense_rows(
     total = int(totals[0]["total"])
     authority_backfill = totals[0].get("authority_backfill") == 1
     if not projection.candidates:
-        return total, 0, authority_backfill, []
+        return total, 0, authority_backfill, False, False, []
     candidate_json = json.dumps(
         [[item.knowledge_object_id, item.chunk_index] for item in projection.candidates],
         ensure_ascii=True,
         separators=(",", ":"),
     )
+    document_temporal_projection = ", s.raw_document_date" if corpus is ArchiveSearchCorpus.DOCUMENTS else ""
     rows = _select_rows(
         conn,
         f"""WITH {source_cte},
@@ -1956,7 +2445,16 @@ def _dense_rows(
                    AND json_type(value,'$[0]')='text'
                    AND json_type(value,'$[1]')='integer'
             )
-            SELECT s.*, {_filename_expression("s")} AS filename, d.admitted_rank,
+            SELECT s.raw_rowid, s.raw_id, s.user_id,
+                   substr(s.source,1,64) AS source,
+                   substr(s.content_type,1,64) AS content_type,
+                   s.content_hash, s.raw_version,
+                   s.raw_received_at{document_temporal_projection},
+                   s.inbox_id, s.inbox_status,
+                   s.knowledge_rowid, s.knowledge_id, s.knowledge_version,
+                   s.knowledge_lifecycle, s.knowledge_created_at,
+                   s.knowledge_updated_at, s.lifecycle_state, s.review_state,
+                   s.raw_filename AS filename, d.admitted_rank,
                    e.chunk_index AS dense_chunk_index,
                    e.start_char AS dense_start_char,
                    e.end_char AS dense_end_char,
@@ -1970,6 +2468,14 @@ def _dense_rows(
                AND e.user_id=? AND e.model=? AND e.dim=?
                AND e.source_version=s.knowledge_version
                AND e.chunk_scheme=?
+               AND typeof(e.vector)='blob' AND length(e.vector)=?
+               AND typeof(e.content_hash)='text'
+               AND length(e.content_hash)=64
+               AND e.content_hash NOT GLOB '*[^0-9a-f]*'
+               AND typeof(e.start_char)='integer' AND e.start_char>=0
+               AND typeof(e.end_char)='integer'
+               AND e.end_char>e.start_char
+               AND e.end_char-e.start_char<=1000000
              ORDER BY d.admitted_rank, s.raw_id""",
         (
             *authority_parameters,
@@ -1978,38 +2484,159 @@ def _dense_rows(
             projection.model_id,
             projection.dimensions,
             projection.chunk_scheme,
+            projection.dimensions * 4,
         ),
     )
-    valid: list[dict[str, Any]] = []
-    examined_sources: set[str] = set()
+    ranked_leads: list[dict[str, Any]] = []
     for row in rows:
-        if corpus is ArchiveSearchCorpus.DOCUMENTS and row.get("knowledge_content") != row.get(
-            "passage_body"
-        ):
-            continue
-        expected = _dense_chunk_text(row, projection)
-        digest = row.get("dense_content_hash")
         score = _dense_score(row.get("dense_vector"), projection)
+        digest = row.get("dense_content_hash")
+        start = row.get("dense_start_char")
+        end = row.get("dense_end_char")
+        raw_id = row.get("raw_id")
         if (
-            expected is None
+            score is None
             or type(digest) is not str
             or _SHA256.fullmatch(digest) is None
-            or not hmac.compare_digest(
-                hashlib.sha256(expected.encode("utf-8", errors="strict")).hexdigest(),
-                digest,
-            )
-            or score is None
+            or type(start) is not int
+            or type(end) is not int
+            or not 0 <= start < end
+            or end - start > 1_000_000
+            or type(raw_id) is not str
+            or _RAW_ID.fullmatch(raw_id) is None
+        ):
+            continue
+        row["dense_score"] = score
+        row["dense_header_char_cap"] = header_char_cap
+        row["dense_full_focus_required"] = bool(corpus is ArchiveSearchCorpus.DOCUMENTS and request.focus)
+        ranked_leads.append(row)
+    ranked_leads.sort(
+        key=lambda item: (
+            -float(item["dense_score"]),
+            int(item.get("admitted_rank") or 0),
+            str(item.get("knowledge_id") or ""),
+            str(item.get("raw_id") or ""),
+        )
+    )
+    # The private plan may contain more than one passage from the same source.
+    # Only the best authenticated vector may trigger a body read.
+    winning_leads: list[dict[str, Any]] = []
+    selected_sources: set[str] = set()
+    for row in ranked_leads:
+        raw_id = str(row["raw_id"])
+        if raw_id in selected_sources:
+            continue
+        selected_sources.add(raw_id)
+        winning_leads.append(row)
+
+    body_max_bytes = _DENSE_CHUNK_BODY_MAX_BYTES
+    body_budget_bytes = _DENSE_CHUNK_BODY_BUDGET_BYTES
+    if (
+        type(body_max_bytes) is not int
+        or type(body_budget_bytes) is not int
+        or not 1 <= body_max_bytes <= body_budget_bytes
+    ):
+        raise _fail("archive dense chunk budget is invalid")
+    valid: list[dict[str, Any]] = []
+    examined_sources: set[str] = set()
+    body_budget_remaining = body_budget_bytes
+    # Invalid/stale derivative rows are ordinary dense misses.  Only a source
+    # skipped by the explicit read ceilings makes this lane unavailable.
+    body_budget_incomplete = False
+    body_recall_capped = False
+    for row in winning_leads:
+        if body_budget_remaining <= 0:
+            body_budget_incomplete = True
+            body_recall_capped = True
+            break
+        attempt_cap = min(body_max_bytes, body_budget_remaining)
+        body_budget_remaining -= attempt_cap
+        selected_body = _read_dense_chunk_body(
+            conn,
+            row,
+            corpus=corpus,
+            max_bytes=attempt_cap,
+        )
+        if selected_body is None:
+            body_budget_incomplete = True
+            body_recall_capped = True
+            continue
+        body, consumed_bytes, title, header, full_focus_source, full_focus_text_digest = selected_body
+        body_budget_remaining += attempt_cap - consumed_bytes
+        row["dense_chunk_body"] = body
+        row["knowledge_title"] = title
+        row["dense_header"] = header
+        if type(full_focus_source) is str:
+            # The complete source is admitted only for focused documents and is
+            # already charged to the closed dense material budget.  Retain it
+            # privately so a stored-passage topology can be authenticated against
+            # the exact current code-owned projection before minting a v2 locator.
+            row["dense_full_focus_source"] = full_focus_source
+            row["dense_full_focus_char_count"] = len(full_focus_source)
+            row["dense_full_focus_text_sha256"] = full_focus_text_digest
+        expected = _dense_chunk_text(row, projection)
+        digest = row.get("dense_content_hash")
+        if expected is None or not hmac.compare_digest(
+            hashlib.sha256(expected.encode("utf-8", errors="strict")).hexdigest(),
+            str(digest),
         ):
             continue
         raw_id = row.get("raw_id")
         if type(raw_id) is str:
             examined_sources.add(raw_id)
-        if score < projection.minimum_score or _dense_excerpt(row) is None:
+        if float(row["dense_score"]) < projection.minimum_score:
             continue
-        row["dense_score"] = score
+        if _dense_excerpt(row) is None:
+            continue
+        source_focus_projection: SourceFocusProjection | None = None
+        if corpus is ArchiveSearchCorpus.DOCUMENTS and request.focus:
+            dense_start = row.get("dense_start_char")
+            dense_end = row.get("dense_end_char")
+            if (
+                type(dense_start) is not int
+                or type(dense_end) is not int
+                or type(full_focus_source) is not str
+            ):
+                continue
+            try:
+                source_focus_projection = _project_focused_dense_source(
+                    full_focus_source,
+                    body,
+                    request.query,
+                    request.focus,
+                    dense_start=dense_start,
+                    dense_end=dense_end,
+                    max_chars=_MAX_EXCERPT_CHARS,
+                )
+            except (TypeError, ValueError, UnicodeError):
+                source_focus_projection = None
+            if source_focus_projection is None:
+                continue
+            if (
+                not dense_start <= source_focus_projection.start < source_focus_projection.end <= dense_end
+                or source_focus_projection.end - source_focus_projection.start > _MAX_EXCERPT_CHARS
+                or source_focus_projection.excerpt
+                != body[
+                    source_focus_projection.start - dense_start : source_focus_projection.end - dense_start
+                ]
+            ):
+                continue
+        if source_focus_projection is not None:
+            row["source_focus_projection"] = source_focus_projection
         valid.append(row)
     valid.sort(
         key=lambda item: (
+            (
+                0
+                if type(item.get("source_focus_projection")) is SourceFocusProjection
+                and item["source_focus_projection"].focus_match_kind is SourceFocusMatchKind.FULL
+                else 1
+            ),
+            -(
+                item["source_focus_projection"].matched_focus_count
+                if type(item.get("source_focus_projection")) is SourceFocusProjection
+                else 0
+            ),
             -float(item["dense_score"]),
             str(item.get("knowledge_id") or ""),
             str(item.get("raw_id") or ""),
@@ -2021,7 +2648,83 @@ def _dense_rows(
     valid = list(best_by_source.values())
     for lane_rank, row in enumerate(valid, 1):
         row["lane_rank"] = lane_rank
-    return total, len(examined_sources), authority_backfill, valid
+    return (
+        total,
+        len(examined_sources),
+        authority_backfill,
+        body_budget_incomplete,
+        body_recall_capped,
+        valid,
+    )
+
+
+def _select_bounded_document_passage_rows(
+    conn: sqlite3.Connection,
+    *,
+    raw_object_id: str,
+    source_version: int,
+    source_digest: str,
+    extracted_digest: str,
+    source_char_count: int,
+    index_revision: str,
+) -> list[dict[str, Any]]:
+    """Enumerate one complete child topology without projecting corrupt TEXT."""
+
+    return _select_rows(
+        conn,
+        """SELECT projection.raw_object_id AS projection_raw_object_id,
+                      projection.source_version AS projection_source_version,
+                      projection.source_content_sha256 AS projection_source_content_sha256,
+                      projection.extracted_text_sha256 AS projection_extracted_text_sha256,
+                      projection.source_char_count AS projection_source_char_count,
+                      substr(CASE WHEN typeof(projection.passage_set_sha256)='text'
+                                  THEN projection.passage_set_sha256 ELSE '' END,1,65)
+                          AS projection_passage_set_sha256,
+                      projection.passage_index_revision AS projection_passage_index_revision,
+                      projection.projection_status AS projection_status,
+                      CASE WHEN projection.incomplete_reason IS NULL THEN NULL ELSE 'invalid' END
+                          AS projection_incomplete_reason,
+                      projection.passage_count AS projection_passage_count,
+                      CASE WHEN typeof(passage.chunk_index)='integer'
+                           THEN passage.chunk_index END AS passage_chunk_index,
+                      CASE WHEN typeof(passage.start_char)='integer'
+                           THEN passage.start_char END AS passage_start_char,
+                      CASE WHEN typeof(passage.end_char)='integer'
+                           THEN passage.end_char END AS passage_end_char,
+                      substr(CASE WHEN typeof(passage.content_sha256)='text'
+                                  THEN passage.content_sha256 ELSE '' END,1,65)
+                          AS passage_content_sha256
+                 FROM document_passage_projections projection
+                 JOIN document_passages passage
+                   ON passage.raw_object_id=projection.raw_object_id
+                WHERE projection.raw_object_id=?
+                  AND projection.source_version=?
+                  AND projection.source_content_sha256=?
+                  AND projection.extracted_text_sha256=?
+                  AND projection.source_char_count=?
+                  AND projection.passage_index_revision=?
+                  AND projection.projection_status='current'
+                  AND projection.incomplete_reason IS NULL
+                  AND typeof(projection.source_version)='integer'
+                  AND typeof(projection.source_content_sha256)='text'
+                  AND typeof(projection.extracted_text_sha256)='text'
+                  AND typeof(projection.source_char_count)='integer'
+                  AND typeof(projection.passage_index_revision)='text'
+                  AND typeof(projection.projection_status)='text'
+                  AND typeof(projection.passage_count)='integer'
+                  AND projection.passage_count BETWEEN 1 AND ?
+                LIMIT ?""",
+        (
+            raw_object_id,
+            source_version,
+            source_digest,
+            extracted_digest,
+            source_char_count,
+            index_revision,
+            _DOCUMENT_PASSAGE_MAX_COUNT,
+            _DOCUMENT_PASSAGE_MAX_COUNT + 1,
+        ),
+    )
 
 
 def _select_current_document_passages(
@@ -2050,31 +2753,22 @@ def _select_current_document_passages(
         body_digest = hashlib.sha256(body.encode("utf-8", errors="strict")).hexdigest()
     except UnicodeEncodeError:
         return None
-    rows = _select_rows(
+    rows = _select_bounded_document_passage_rows(
         conn,
-        """SELECT projection.raw_object_id AS projection_raw_object_id,
-                      projection.source_version AS projection_source_version,
-                      projection.source_content_sha256 AS projection_source_content_sha256,
-                      projection.extracted_text_sha256 AS projection_extracted_text_sha256,
-                      projection.source_char_count AS projection_source_char_count,
-                      projection.passage_set_sha256 AS projection_passage_set_sha256,
-                      projection.passage_index_revision AS projection_passage_index_revision,
-                      projection.projection_status AS projection_status,
-                      projection.incomplete_reason AS projection_incomplete_reason,
-                      projection.passage_count AS projection_passage_count,
-                      passage.chunk_index AS passage_chunk_index,
-                      passage.start_char AS passage_start_char,
-                      passage.end_char AS passage_end_char,
-                      passage.content_sha256 AS passage_content_sha256
-                 FROM document_passage_projections projection
-                 JOIN document_passages passage
-                   ON passage.raw_object_id=projection.raw_object_id
-                WHERE projection.raw_object_id=?
-                ORDER BY passage.chunk_index""",
-        (raw_object_id,),
+        raw_object_id=raw_object_id,
+        source_version=source_version,
+        source_digest=source_digest,
+        extracted_digest=body_digest,
+        source_char_count=len(body),
+        index_revision=contract.index_revision,
     )
     if not rows:
         return None
+    if len(rows) > _DOCUMENT_PASSAGE_MAX_COUNT or any(
+        type(row.get("passage_chunk_index")) is not int for row in rows
+    ):
+        return None
+    rows.sort(key=lambda row: int(row["passage_chunk_index"]))
     parent = rows[0]
     passage_count = parent.get("projection_passage_count")
     if (
@@ -2172,6 +2866,160 @@ def _select_current_document_passages(
     if exact_current_projection is not True:
         return None
     return tuple(passages)
+
+
+def _select_current_dense_document_passage(
+    conn: sqlite3.Connection,
+    source: dict[str, Any],
+    contract: _DocumentPassageContract,
+    *,
+    start: int,
+    end: int,
+) -> tuple[_StoredDocumentPassage, ...] | None:
+    """Authenticate only the stored passage containing one dense excerpt.
+
+    The focused dense admission already loaded and charged the complete Raw
+    document under its 1 MiB ceiling.  This path validates the body-free child
+    topology and then authenticates it against that exact bounded source.
+    """
+
+    raw_object_id = source.get("raw_id")
+    source_version = source.get("raw_version")
+    source_digest = source.get("content_hash")
+    source_char_count = source.get("dense_full_focus_char_count")
+    extracted_digest = source.get("dense_full_focus_text_sha256")
+    full_source = source.get("dense_full_focus_source")
+    if (
+        type(raw_object_id) is not str
+        or _RAW_ID.fullmatch(raw_object_id) is None
+        or type(source_version) is not int
+        or source_version < 1
+        or type(source_digest) is not str
+        or _SHA256.fullmatch(source_digest) is None
+        or type(source_char_count) is not int
+        or not 1 <= source_char_count <= _DENSE_CHUNK_BODY_MAX_BYTES
+        or type(extracted_digest) is not str
+        or _SHA256.fullmatch(extracted_digest) is None
+        or type(full_source) is not str
+        or len(full_source) != source_char_count
+        or type(start) is not int
+        or type(end) is not int
+        or not 0 <= start < end
+    ):
+        return None
+    rows = _select_bounded_document_passage_rows(
+        conn,
+        raw_object_id=raw_object_id,
+        source_version=source_version,
+        source_digest=source_digest,
+        extracted_digest=extracted_digest,
+        source_char_count=source_char_count,
+        index_revision=contract.index_revision,
+    )
+    if not rows:
+        return None
+    if len(rows) > _DOCUMENT_PASSAGE_MAX_COUNT or any(
+        type(row.get("passage_chunk_index")) is not int for row in rows
+    ):
+        return None
+    rows.sort(key=lambda row: int(row["passage_chunk_index"]))
+    parent = rows[0]
+    passage_count = parent.get("projection_passage_count")
+    if (
+        parent.get("projection_raw_object_id") != raw_object_id
+        or parent.get("projection_source_version") != source_version
+        or parent.get("projection_source_content_sha256") != source_digest
+        or parent.get("projection_extracted_text_sha256") != extracted_digest
+        or parent.get("projection_source_char_count") != source_char_count
+        or parent.get("projection_passage_index_revision") != contract.index_revision
+        or parent.get("projection_status") != "current"
+        or parent.get("projection_incomplete_reason") is not None
+        or type(passage_count) is not int
+        or passage_count != len(rows)
+        or not 1 <= passage_count <= _DOCUMENT_PASSAGE_MAX_COUNT
+        or type(parent.get("projection_source_char_count")) is not int
+        or type(parent.get("projection_passage_set_sha256")) is not str
+        or _SHA256.fullmatch(str(parent["projection_passage_set_sha256"])) is None
+    ):
+        return None
+    parent_keys = (
+        "projection_raw_object_id",
+        "projection_source_version",
+        "projection_source_content_sha256",
+        "projection_extracted_text_sha256",
+        "projection_source_char_count",
+        "projection_passage_set_sha256",
+        "projection_passage_index_revision",
+        "projection_status",
+        "projection_incomplete_reason",
+        "projection_passage_count",
+    )
+    source_char_count = int(parent["projection_source_char_count"])
+    digest_rows: list[tuple[int, int, int, str]] = []
+    passages: list[_StoredDocumentPassage] = []
+    previous: _StoredDocumentPassage | None = None
+    selected: _StoredDocumentPassage | None = None
+    for expected_index, row in enumerate(rows):
+        if any(row.get(key) != parent.get(key) for key in parent_keys):
+            return None
+        chunk_index = row.get("passage_chunk_index")
+        passage_start = row.get("passage_start_char")
+        passage_end = row.get("passage_end_char")
+        content_digest = row.get("passage_content_sha256")
+        if (
+            type(chunk_index) is not int
+            or chunk_index != expected_index
+            or type(passage_start) is not int
+            or type(passage_end) is not int
+            or not 0 <= passage_start < passage_end <= source_char_count
+            or type(content_digest) is not str
+            or _SHA256.fullmatch(content_digest) is None
+        ):
+            return None
+        passage = _StoredDocumentPassage(chunk_index, passage_start, passage_end, content_digest)
+        if previous is not None and (
+            passage.start_char <= previous.start_char
+            or passage.start_char > previous.end_char
+            or passage.end_char <= previous.end_char
+        ):
+            return None
+        if passage.start_char <= start < end <= passage.end_char:
+            if selected is not None:
+                return None
+            selected = passage
+        passages.append(passage)
+        digest_rows.append((chunk_index, passage_start, passage_end, content_digest))
+        previous = passage
+    if passages[0].start_char != 0 or passages[-1].end_char != source_char_count or selected is None:
+        return None
+    try:
+        set_digest = contract.set_sha256(tuple(digest_rows))
+    except (TypeError, ValueError, UnicodeError, OverflowError):
+        return None
+    if not hmac.compare_digest(set_digest, str(parent["projection_passage_set_sha256"])):
+        return None
+    try:
+        exact_current_projection = contract.rows_match_current_projection(
+            full_source,
+            extracted_digest,
+            tuple(digest_rows),
+        )
+    except Exception:
+        return None
+    if exact_current_projection is not True:
+        return None
+    try:
+        exact_digest = hashlib.sha256(
+            full_source[selected.start_char : selected.end_char].encode(
+                "utf-8",
+                errors="strict",
+            )
+        ).hexdigest()
+    except UnicodeEncodeError:
+        return None
+    if not hmac.compare_digest(exact_digest, selected.content_sha256):
+        return None
+    return (selected,)
 
 
 def _summary(
@@ -2419,6 +3267,376 @@ def _lexical_sql(
         *((match_query,) if derivative_available and corpus is ArchiveSearchCorpus.KNOWLEDGE else ()),
     )
     return sql, parameters
+
+
+def _focused_document_lexical_rows(
+    conn: sqlite3.Connection,
+    request: ArchiveSearchRequest,
+    *,
+    tenant_id: str,
+    owner_id: str,
+    derivative_available: bool,
+    document_passage_revision: str | None,
+) -> tuple[int, int, int, int, int, int, bool, list[dict[str, Any]]]:
+    """Use two authorized FTS leads before reading any exact source body."""
+
+    if not request.focus or request.corpora != (ArchiveSearchCorpus.DOCUMENTS,):
+        raise _fail("focused archive document request is invalid")
+    if not _table_exists(conn, "raw_fts"):
+        raise _fail("focused archive document lexical index is unavailable")
+    source_cte, scope_parameters = _source_cte(
+        ArchiveSearchCorpus.DOCUMENTS,
+        request,
+        include_body=False,
+        bounded_material=True,
+    )
+
+    def source_term_groups(value: str) -> tuple[tuple[str, ...], ...]:
+        groups: list[tuple[str, ...]] = []
+        for token in source_focus_fts_tokens(value):
+            normalized = unicodedata.normalize("NFKC", token).strip()
+            expanded = tuple(
+                dict.fromkeys(
+                    (
+                        *(term for group in _fts_term_groups(token) for term in group),
+                        token,
+                        normalized,
+                    )
+                )
+            )
+            expanded = tuple(
+                term for term in expanded if term and any(character.isalnum() for character in term)
+            )
+            if expanded:
+                groups.append(expanded)
+        return tuple(groups)
+
+    anchor_source_tokens = source_focus_fts_tokens(request.query)
+    raw_focus_groups = source_term_groups(request.focus)
+    raw_focus_terms = tuple(dict.fromkeys(term for group in raw_focus_groups for term in group))
+    raw_anchor_groups = source_term_groups(request.query)
+    compatibility_lead = any(
+        token.isascii() or unicodedata.normalize("NFKC", token) != token for token in anchor_source_tokens
+    )
+    if (
+        not raw_anchor_groups
+        or len(raw_anchor_groups) > MAX_SOURCE_FOCUS_ANCHOR_TERMS
+        or any(not group for group in raw_anchor_groups)
+    ):
+        raise _fail("focused archive document anchor budget is unavailable")
+    anchor_terms = tuple(dict.fromkeys(term for group in raw_anchor_groups for term in group))
+
+    def term_key(value: str) -> str:
+        return value.rstrip("*").strip('"').strip().casefold()
+
+    anchor_term_keys = frozenset(term_key(item) for item in anchor_terms)
+    focus_terms = (
+        tuple(item for item in raw_focus_terms if term_key(item) not in anchor_term_keys) or raw_focus_terms
+    )
+
+    def match_query(values: tuple[str, ...]) -> str:
+        return " OR ".join(
+            f'"{term_key(item).replace(chr(34), chr(34) * 2)}"*' for item in values if term_key(item)
+        )
+
+    focus_detail_query = match_query(focus_terms)
+    anchor_group_queries = tuple(match_query(group) for group in raw_anchor_groups)
+    anchor_match_query = " AND ".join(f"({item})" for item in anchor_group_queries if item)
+    if not focus_detail_query or not anchor_match_query:
+        raise _fail("focused archive document lexical query is unavailable")
+    focus_match_query = f"({anchor_match_query}) AND ({focus_detail_query})"
+
+    cap = _FOCUSED_DOCUMENT_LEAD_CAP
+    sentinel_limit = cap + 1
+    # Body-bound passage authentication runs only after the sequential body
+    # budget below.  Doing it in this lead query would materialize every Raw body
+    # before Python can enforce either the per-source or aggregate ceiling.
+    del derivative_available, document_passage_revision
+
+    sql = f"""WITH {source_cte},
+        focus_seed AS MATERIALIZED (
+            SELECT rowid AS raw_rowid FROM raw_fts
+             WHERE raw_fts MATCH ? LIMIT {sentinel_limit}
+        ),
+        focus_pool AS MATERIALIZED (
+            SELECT s.raw_id, s.sort_time
+              FROM focus_seed f
+              JOIN authorized_sources s ON s.raw_rowid=f.raw_rowid
+             ORDER BY s.sort_time DESC, s.raw_id ASC
+        ),
+        anchor_seed AS MATERIALIZED (
+            SELECT rowid AS raw_rowid FROM raw_fts
+             WHERE raw_fts MATCH ? LIMIT {sentinel_limit}
+        ),
+        anchor_pool AS MATERIALIZED (
+            SELECT s.raw_id, s.sort_time
+              FROM anchor_seed a
+              JOIN authorized_sources s ON s.raw_rowid=a.raw_rowid
+             ORDER BY s.sort_time DESC, s.raw_id ASC
+        ),
+        detail_seed AS MATERIALIZED (
+            SELECT rowid AS raw_rowid FROM raw_fts
+             WHERE ?=1 AND raw_fts MATCH ? LIMIT {sentinel_limit}
+        ),
+        detail_pool AS MATERIALIZED (
+            SELECT s.raw_id, s.sort_time
+              FROM detail_seed d
+              JOIN authorized_sources s ON s.raw_rowid=d.raw_rowid
+             ORDER BY s.sort_time DESC, s.raw_id ASC
+        ),
+        compatibility_fallback_seed AS MATERIALIZED (
+            SELECT s.raw_id, s.sort_time
+              FROM authorized_sources s
+             WHERE ?=1
+               AND NOT EXISTS (SELECT 1 FROM focus_pool)
+               AND NOT EXISTS (SELECT 1 FROM anchor_pool)
+               AND NOT EXISTS (SELECT 1 FROM detail_pool)
+             LIMIT {sentinel_limit}
+        ),
+        compatibility_fallback_pool AS MATERIALIZED (
+            SELECT * FROM compatibility_fallback_seed
+             ORDER BY sort_time DESC, raw_id ASC
+        ),
+        focus_ranked AS MATERIALIZED (
+            SELECT f.*, ROW_NUMBER() OVER (
+                       ORDER BY f.sort_time DESC, f.raw_id ASC
+                   ) AS lead_rank
+              FROM focus_pool f
+        ),
+        anchor_ranked AS MATERIALIZED (
+            SELECT a.*, ROW_NUMBER() OVER (
+                       ORDER BY a.sort_time DESC, a.raw_id ASC
+                   ) AS lead_rank
+              FROM anchor_pool a
+        ),
+        detail_ranked AS MATERIALIZED (
+            SELECT f.*, ROW_NUMBER() OVER (
+                       ORDER BY f.sort_time DESC, f.raw_id ASC
+                   ) AS lead_rank
+              FROM detail_pool f
+        ),
+        fallback_ranked AS MATERIALIZED (
+            SELECT f.*, ROW_NUMBER() OVER (
+                       ORDER BY f.sort_time DESC, f.raw_id ASC
+                   ) AS lead_rank
+              FROM compatibility_fallback_pool f
+        ),
+        combined_leads AS MATERIALIZED (
+            SELECT f.raw_id, 0 AS lead_kind, f.lead_rank
+              FROM focus_ranked f WHERE f.lead_rank<={cap}
+            UNION ALL
+            SELECT a.raw_id, 1 AS lead_kind, a.lead_rank
+              FROM anchor_ranked a WHERE a.lead_rank<={cap}
+            UNION ALL
+            SELECT f.raw_id, 2 AS lead_kind, f.lead_rank
+              FROM detail_ranked f WHERE f.lead_rank<={cap}
+            UNION ALL
+            SELECT f.raw_id, 3 AS lead_kind, f.lead_rank
+              FROM fallback_ranked f WHERE f.lead_rank<={cap}
+        ),
+        deduplicated_leads AS MATERIALIZED (
+            SELECT * FROM (
+                SELECT c.*, ROW_NUMBER() OVER (
+                           PARTITION BY c.raw_id
+                           ORDER BY c.lead_kind ASC, c.lead_rank ASC, c.raw_id ASC
+                       ) AS source_choice
+                  FROM combined_leads c
+            ) WHERE source_choice=1
+        ),
+        admitted_ids AS MATERIALIZED (
+            SELECT d.*, ROW_NUMBER() OVER (
+                       ORDER BY d.lead_kind ASC, d.lead_rank ASC, d.raw_id ASC
+                   ) AS admitted_order
+              FROM deduplicated_leads d
+        ),
+        admitted_sources AS MATERIALIZED (
+            SELECT s.*, admitted.raw_id AS source_id,
+                   admitted.lead_kind, admitted.lead_rank, admitted.admitted_order,
+                   0 AS passage_projection_current,
+                   0 AS passage_projection_backfill_pending,
+                   1 AS passage_projection_unavailable
+              FROM admitted_ids admitted
+              JOIN authorized_sources s ON s.raw_id=admitted.raw_id
+        ),
+        totals AS MATERIALIZED (
+            SELECT (SELECT COUNT(DISTINCT raw_id) FROM eligible_sources) AS total,
+                   (SELECT COUNT(DISTINCT raw_id) FROM authorized_sources) AS examined,
+                   (SELECT COUNT(*) FROM admitted_sources
+                     WHERE passage_projection_current<>1) AS derivative_mismatches,
+                   (SELECT COUNT(*) FROM admitted_sources
+                     WHERE passage_projection_backfill_pending=1) AS derivative_backfills,
+                   (SELECT COUNT(*) FROM admitted_sources
+                     WHERE passage_projection_unavailable=1) AS derivative_unavailable,
+                   CASE WHEN (SELECT value FROM authority_backfill)=1
+                                  OR (SELECT value FROM lane_backfill)=1
+                        THEN 1 ELSE 0 END AS authority_backfill,
+                   (SELECT COUNT(*) FROM focus_ranked) AS focus_lead_matches,
+                   (SELECT COUNT(*) FROM anchor_ranked) AS anchor_lead_matches,
+                   (SELECT COUNT(*) FROM detail_ranked) AS detail_lead_matches,
+                   (SELECT COUNT(*) FROM fallback_ranked) AS fallback_lead_matches
+        )
+        SELECT totals.*, admitted_sources.*
+          FROM totals LEFT JOIN admitted_sources ON 1=1
+         ORDER BY CASE WHEN admitted_sources.admitted_order IS NULL THEN 1 ELSE 0 END,
+                  admitted_sources.admitted_order ASC"""
+    rows = _select_rows(
+        conn,
+        sql,
+        (
+            *_authority_parameters(tenant_id, owner_id),
+            *scope_parameters,
+            focus_match_query,
+            anchor_match_query,
+            1 if compatibility_lead else 0,
+            focus_detail_query,
+            1 if compatibility_lead else 0,
+        ),
+    )
+    if not rows:
+        raise _fail("focused archive document summary is unavailable")
+    keys = (
+        "total",
+        "examined",
+        "derivative_mismatches",
+        "derivative_backfills",
+        "derivative_unavailable",
+        "authority_backfill",
+        "focus_lead_matches",
+        "anchor_lead_matches",
+        "detail_lead_matches",
+        "fallback_lead_matches",
+    )
+    try:
+        values = tuple(rows[0][key] for key in keys)
+    except KeyError:
+        raise _fail("focused archive document summary is invalid") from None
+    if any(type(item) is not int for item in values):
+        raise _fail("focused archive document summary is invalid")
+    (
+        total,
+        examined,
+        derivative_mismatches,
+        derivative_backfills,
+        derivative_unavailable,
+        authority_backfill,
+        focus_lead_matches,
+        anchor_lead_matches,
+        detail_lead_matches,
+        fallback_lead_matches,
+    ) = values
+    if (
+        min(values) < 0
+        or authority_backfill not in {0, 1}
+        or examined > total
+        or max(
+            derivative_mismatches,
+            derivative_backfills,
+            derivative_unavailable,
+            focus_lead_matches,
+            anchor_lead_matches,
+            detail_lead_matches,
+            fallback_lead_matches,
+        )
+        > examined
+        or focus_lead_matches > sentinel_limit
+        or anchor_lead_matches > sentinel_limit
+        or detail_lead_matches > sentinel_limit
+        or fallback_lead_matches > sentinel_limit
+        or derivative_backfills > derivative_mismatches
+        or derivative_unavailable > derivative_mismatches
+    ):
+        raise _fail("focused archive document summary is invalid")
+    hits: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for row in rows:
+        source_id = row.get("source_id")
+        if source_id is None:
+            continue
+        lead_kind = row.get("lead_kind")
+        lead_rank = row.get("lead_rank")
+        if (
+            type(source_id) is not str
+            or _RAW_ID.fullmatch(source_id) is None
+            or lead_kind not in {0, 1, 2, 3}
+            or type(lead_rank) is not int
+            or not 1 <= lead_rank <= cap
+        ):
+            raise _fail("focused archive document lead is invalid")
+        if source_id in seen:
+            continue
+        seen.add(source_id)
+        hits.append(row)
+    lead_capped = (
+        focus_lead_matches > cap
+        or anchor_lead_matches > cap
+        or detail_lead_matches > cap
+        or fallback_lead_matches > cap
+    )
+    return (
+        total,
+        examined,
+        derivative_mismatches,
+        derivative_backfills,
+        derivative_unavailable,
+        authority_backfill,
+        lead_capped,
+        hits,
+    )
+
+
+def _read_focused_document_body(
+    conn: sqlite3.Connection,
+    source: dict[str, Any],
+    *,
+    max_bytes: int,
+) -> tuple[str, int] | None:
+    """Read at most one exact authorized body under a byte ceiling."""
+
+    raw_rowid = source.get("raw_rowid")
+    raw_id = source.get("raw_id")
+    user_id = source.get("user_id")
+    raw_version = source.get("raw_version")
+    raw_digest = source.get("content_hash")
+    if (
+        type(max_bytes) is not int
+        or max_bytes <= 0
+        or type(raw_rowid) is not int
+        or raw_rowid <= 0
+        or type(raw_id) is not str
+        or _RAW_ID.fullmatch(raw_id) is None
+        or type(user_id) is not str
+        or not user_id
+        or type(raw_version) is not int
+        or raw_version < 1
+        or type(raw_digest) is not str
+        or _SHA256.fullmatch(raw_digest) is None
+    ):
+        return None
+    rows = _select_rows(
+        conn,
+        """SELECT substr(CAST(raw_content AS BLOB),1,?) AS passage_body_blob
+             FROM raw_objects
+            WHERE rowid=? AND id=? AND user_id=?
+              AND version=? AND content_hash=?
+              AND deleted_at IS NULL AND typeof(raw_content)='text'
+              AND length(CAST(raw_content AS BLOB)) BETWEEN 1 AND ?
+            LIMIT 2""",
+        (max_bytes + 1, raw_rowid, raw_id, user_id, raw_version, raw_digest, max_bytes),
+    )
+    if not rows:
+        return None
+    if len(rows) != 1:
+        raise _fail("focused archive document body selection is invalid")
+    body_blob = rows[0].get("passage_body_blob")
+    if type(body_blob) is not bytes or not 1 <= len(body_blob) <= max_bytes:
+        return None
+    try:
+        body = body_blob.decode("utf-8", errors="strict")
+    except UnicodeDecodeError:
+        return None
+    if not body:
+        raise _fail("focused archive document body selection is invalid")
+    return body, len(body_blob)
 
 
 def _catalog_sql(
@@ -2707,6 +3925,98 @@ def _stored_document_excerpt(
     return text, start, end, passage.chunk_index
 
 
+def _focused_document_excerpt(
+    body: object,
+    projection: SourceFocusProjection,
+    passages: tuple[_StoredDocumentPassage, ...] | None,
+) -> tuple[str, int, int, int | None] | None:
+    """Bind one focus projection to exact Raw offsets and, when possible, v2."""
+
+    if type(body) is not str or type(projection) is not SourceFocusProjection:
+        return None
+    start = projection.start
+    end = projection.end
+    if (
+        not 0 <= start < end <= len(body)
+        or end - start > _MAX_EXCERPT_CHARS
+        or projection.excerpt != body[start:end]
+    ):
+        return None
+    passage = next(
+        (item for item in passages or () if item.start_char <= start < end <= item.end_char),
+        None,
+    )
+    return projection.excerpt, start, end, None if passage is None else passage.chunk_index
+
+
+def _focused_dense_excerpt(
+    row: dict[str, Any],
+    projection: SourceFocusProjection,
+    passages: tuple[_StoredDocumentPassage, ...] | None,
+) -> tuple[str, int, int, int | None] | None:
+    """Bind a focus projection to one bounded dense span and absolute offsets."""
+
+    selected = _dense_chunk_slice(row)
+    if selected is None or type(projection) is not SourceFocusProjection:
+        return None
+    body, dense_start, dense_end = selected
+    start = projection.start
+    end = projection.end
+    relative_start = start - dense_start
+    relative_end = end - dense_start
+    if (
+        not dense_start <= start < end <= dense_end
+        or end - start > _MAX_EXCERPT_CHARS
+        or not 0 <= relative_start < relative_end <= len(body)
+        or projection.excerpt != body[relative_start:relative_end]
+    ):
+        return None
+    passage = next(
+        (item for item in passages or () if item.start_char <= start < end <= item.end_char),
+        None,
+    )
+    return projection.excerpt, start, end, None if passage is None else passage.chunk_index
+
+
+def _project_focused_dense_source(
+    full_source: str,
+    dense_body: str,
+    query: str,
+    focus: str,
+    *,
+    dense_start: int,
+    dense_end: int,
+    max_chars: int,
+) -> SourceFocusProjection | None:
+    """Project inside one dense span while retaining the real source boundaries."""
+
+    if (
+        not 0 <= dense_start < dense_end <= len(full_source)
+        or full_source[dense_start:dense_end] != dense_body
+    ):
+        return None
+
+    def boundary_shape(value: str) -> str:
+        # Keep every whitespace/record boundary and every absolute offset.  A
+        # non-whitespace exterior character becomes a neutral token character,
+        # so an edge in the middle of a token or beside a nonblank record cannot
+        # masquerade as a source boundary while remote anchor matches disappear.
+        return "".join(character if character.isspace() else "x" for character in value)
+
+    shaped_source = (
+        boundary_shape(full_source[:dense_start]) + dense_body + boundary_shape(full_source[dense_end:])
+    )
+    try:
+        return project_source_focus(
+            shaped_source,
+            query,
+            focus,
+            max_chars=max_chars,
+        )
+    except (TypeError, ValueError, UnicodeError):
+        return None
+
+
 def _closed_lifecycle(value: object, *, label: str) -> LifecycleState:
     if type(value) is not str:
         raise _fail(f"archive document {label} is invalid")
@@ -2894,6 +4204,7 @@ def _candidate(
     tenant_id: str,
     owner_id: str,
     document_passages: tuple[_StoredDocumentPassage, ...] | None = None,
+    source_focus_projection: SourceFocusProjection | None = None,
     dense_projection: ArchiveDenseQueryProjection | None = None,
 ) -> ArchiveSearchCandidate:
     resolved, passage_revision, raw_revision, knowledge_revision = _resolved_source(
@@ -2918,6 +4229,23 @@ def _candidate(
         raise _fail("archive document candidate state is invalid") from None
     if (lane is SearchLane.DENSE) != (dense_projection is not None):
         raise _fail("archive dense passage identity is invalid")
+    if source_focus_projection is not None and not (
+        lane in {SearchLane.LEXICAL, SearchLane.DENSE}
+        and corpus is ArchiveSearchCorpus.DOCUMENTS
+        and request.focus
+    ):
+        raise _fail("archive source-focus passage identity is invalid")
+    if (
+        request.focus
+        and corpus is ArchiveSearchCorpus.DOCUMENTS
+        and lane
+        in {
+            SearchLane.LEXICAL,
+            SearchLane.DENSE,
+        }
+        and source_focus_projection is None
+    ):
+        raise _fail("archive source-focus passage identity is unavailable")
     passages: tuple[ArchiveSearchPassage, ...] = ()
     evidence_authority = ArchiveEvidenceAuthority.NAVIGATION_ONLY
     if (
@@ -2928,17 +4256,36 @@ def _candidate(
             and row.get("inbox_status") == LifecycleState.PENDING.value
         )
     ):
+        focused_excerpt = (
+            _focused_dense_excerpt(row, source_focus_projection, document_passages)
+            if source_focus_projection is not None and lane is SearchLane.DENSE
+            else _focused_document_excerpt(
+                row.get("passage_body"),
+                source_focus_projection,
+                document_passages,
+            )
+            if source_focus_projection is not None
+            else None
+        )
+        if source_focus_projection is not None and focused_excerpt is None:
+            raise _fail("archive source-focus passage identity is unavailable")
         stored_excerpt = (
             _stored_document_excerpt(
                 row.get("passage_body"),
                 request.query,
                 document_passages,
             )
-            if lane is SearchLane.LEXICAL and corpus is ArchiveSearchCorpus.DOCUMENTS
+            if (
+                source_focus_projection is None
+                and lane is SearchLane.LEXICAL
+                and corpus is ArchiveSearchCorpus.DOCUMENTS
+            )
             else None
         )
         excerpt = (
-            _dense_excerpt(row)
+            (focused_excerpt[0], focused_excerpt[1], focused_excerpt[2])
+            if focused_excerpt is not None
+            else _dense_excerpt(row)
             if lane is SearchLane.DENSE
             else (stored_excerpt[0], stored_excerpt[1], stored_excerpt[2])
             if stored_excerpt is not None
@@ -2958,23 +4305,40 @@ def _candidate(
                     or _SHA256.fullmatch(chunk_digest) is None
                 ):
                     raise _fail("archive dense passage identity is unavailable")
-                passage_revision = knowledge_revision
-                passage_index_version = dense_projection.chunk_scheme
-                embedding = EmbeddingIdentity.indexed(
-                    EmbeddingCompatibility.CURRENT,
-                    model_id=dense_projection.model_id,
-                    dimensions=dense_projection.dimensions,
-                    source_version=int(knowledge_revision.value),
-                    chunk_scheme=dense_projection.chunk_scheme,
-                    chunk_content_sha256=chunk_digest,
-                )
+                if focused_excerpt is not None:
+                    passage_index_version = (
+                        DOCUMENT_STORED_PASSAGE_INDEX_VERSION
+                        if focused_excerpt[3] is not None
+                        else LEGACY_DOCUMENT_PASSAGE_INDEX_VERSION
+                    )
+                    chunk_index = focused_excerpt[3] if focused_excerpt[3] is not None else 0
+                    embedding = EmbeddingIdentity.unindexed(EmbeddingCompatibility.NOT_APPLICABLE)
+                else:
+                    passage_revision = knowledge_revision
+                    passage_index_version = dense_projection.chunk_scheme
+                    embedding = EmbeddingIdentity.indexed(
+                        EmbeddingCompatibility.CURRENT,
+                        model_id=dense_projection.model_id,
+                        dimensions=dense_projection.dimensions,
+                        source_version=int(knowledge_revision.value),
+                        chunk_scheme=dense_projection.chunk_scheme,
+                        chunk_content_sha256=chunk_digest,
+                    )
             else:
-                chunk_index = stored_excerpt[3] if stored_excerpt is not None else 0
-                passage_index_version = (
-                    DOCUMENT_STORED_PASSAGE_INDEX_VERSION
-                    if stored_excerpt is not None
-                    else LEGACY_DOCUMENT_PASSAGE_INDEX_VERSION
-                )
+                if focused_excerpt is not None:
+                    chunk_index = focused_excerpt[3] if focused_excerpt[3] is not None else 0
+                    passage_index_version = (
+                        DOCUMENT_STORED_PASSAGE_INDEX_VERSION
+                        if focused_excerpt[3] is not None
+                        else LEGACY_DOCUMENT_PASSAGE_INDEX_VERSION
+                    )
+                else:
+                    chunk_index = stored_excerpt[3] if stored_excerpt is not None else 0
+                    passage_index_version = (
+                        DOCUMENT_STORED_PASSAGE_INDEX_VERSION
+                        if stored_excerpt is not None
+                        else LEGACY_DOCUMENT_PASSAGE_INDEX_VERSION
+                    )
                 embedding = EmbeddingIdentity.unindexed(EmbeddingCompatibility.NOT_APPLICABLE)
             passage_ref = PassageRef.from_resolved_source(
                 resolved,
@@ -3013,6 +4377,85 @@ def _candidate(
     )
 
 
+def _read_exact_archive_replay_body(
+    conn: sqlite3.Connection,
+    source: dict[str, Any],
+    *,
+    corpus: ArchiveSearchCorpus,
+) -> str | None:
+    """Read exactly one already-authorized representation body."""
+
+    raw_rowid = source.get("raw_rowid")
+    raw_id = source.get("raw_id")
+    user_id = source.get("user_id")
+    raw_version = source.get("raw_version")
+    raw_digest = source.get("content_hash")
+    if (
+        type(raw_rowid) is not int
+        or raw_rowid <= 0
+        or type(raw_id) is not str
+        or _RAW_ID.fullmatch(raw_id) is None
+        or type(user_id) is not str
+        or not user_id
+        or type(raw_version) is not int
+        or raw_version < 1
+        or type(raw_digest) is not str
+        or _SHA256.fullmatch(raw_digest) is None
+    ):
+        return None
+    if corpus is ArchiveSearchCorpus.DOCUMENTS:
+        sql = """SELECT r.raw_content AS replay_body
+                   FROM raw_objects r
+                  WHERE r.rowid=? AND r.id=? AND r.user_id=?
+                    AND r.version=? AND r.content_hash=?
+                    AND r.deleted_at IS NULL AND typeof(r.raw_content)='text'
+                  LIMIT 2"""
+        parameters: tuple[object, ...] = (
+            raw_rowid,
+            raw_id,
+            user_id,
+            raw_version,
+            raw_digest,
+        )
+    else:
+        knowledge_rowid = source.get("knowledge_rowid")
+        knowledge_id = source.get("knowledge_id")
+        knowledge_version = source.get("knowledge_version")
+        if (
+            type(knowledge_rowid) is not int
+            or knowledge_rowid <= 0
+            or type(knowledge_id) is not str
+            or _KO_ID.fullmatch(knowledge_id) is None
+            or type(knowledge_version) is not int
+            or knowledge_version < 1
+        ):
+            return None
+        sql = """SELECT k.content AS replay_body
+                   FROM raw_objects r
+                   JOIN knowledge_objects k
+                     ON k.rowid=? AND k.id=? AND k.user_id=?
+                    AND k.raw_object_id=r.id AND k.version=?
+                    AND k.deleted_at IS NULL AND typeof(k.content)='text'
+                  WHERE r.rowid=? AND r.id=? AND r.user_id=?
+                    AND r.version=? AND r.content_hash=? AND r.deleted_at IS NULL
+                  LIMIT 2"""
+        parameters = (
+            knowledge_rowid,
+            knowledge_id,
+            user_id,
+            knowledge_version,
+            raw_rowid,
+            raw_id,
+            user_id,
+            raw_version,
+            raw_digest,
+        )
+    rows = _select_rows(conn, sql, parameters)
+    if len(rows) != 1 or type(rows[0].get("replay_body")) is not str:
+        return None
+    return str(rows[0]["replay_body"])
+
+
 def _select_authorized_archive_document_replay_source_in_transaction(
     conn: sqlite3.Connection,
     *,
@@ -3022,6 +4465,7 @@ def _select_authorized_archive_document_replay_source_in_transaction(
     corpus: ArchiveSearchCorpus,
     source_ref: SourceRef,
     knowledge_object_id: str | None = None,
+    source_revision: SourceRevision | None = None,
 ) -> ArchiveDocumentReplaySource | None:
     """Reselect one exact authorized document source without searching.
 
@@ -3067,7 +4511,12 @@ def _select_authorized_archive_document_replay_source_in_transaction(
         review_scope=ReviewScope.DISCOVERABLE,
         limit=1,
     )
-    source_cte, scope_parameters = _source_cte(corpus, request, include_body=True)
+    source_cte, scope_parameters = _source_cte(
+        corpus,
+        request,
+        include_body=False,
+        bounded_material=True,
+    )
     representation_clause = "" if knowledge_object_id is None else " AND s.knowledge_id=?"
     sql = f"""WITH {source_cte},
         replay_boundary AS MATERIALIZED (
@@ -3098,6 +4547,30 @@ def _select_authorized_archive_document_replay_source_in_transaction(
     if len(rows) != 1:
         raise _fail("archive document replay source is ambiguous")
     try:
+        if source_revision is not None:
+            if type(source_revision) is not SourceRevision:
+                raise _fail("archive document replay revision is invalid")
+            if corpus is ArchiveSearchCorpus.DOCUMENTS:
+                revision_matches = bool(
+                    source_revision.kind is RevisionKind.RAW_CONTENT_SHA256
+                    and source_revision.representation.kind is RepresentationKind.RAW_OBJECT
+                    and source_revision.representation.object_id == rows[0].get("raw_id")
+                    and source_revision.value == rows[0].get("content_hash")
+                )
+            else:
+                revision_matches = bool(
+                    source_revision.kind is RevisionKind.KNOWLEDGE_VERSION
+                    and source_revision.representation.kind is RepresentationKind.KNOWLEDGE_OBJECT
+                    and source_revision.representation.object_id == rows[0].get("knowledge_id")
+                    and source_revision.value == str(rows[0].get("knowledge_version"))
+                )
+            if not revision_matches:
+                return None
+        body = _read_exact_archive_replay_body(conn, rows[0], corpus=corpus)
+        if body is None:
+            return None
+        rows[0]["passage_body"] = body
+        rows[0]["filename"] = rows[0].get("raw_filename")
         resolved, _selected, _raw, _knowledge = _resolved_source(
             rows[0],
             corpus=corpus,
@@ -3144,6 +4617,7 @@ def select_authorized_archive_document_replay_source_in_transaction(
     corpus: ArchiveSearchCorpus,
     source_ref: SourceRef,
     knowledge_object_id: str | None = None,
+    source_revision: SourceRevision | None = None,
 ) -> ArchiveDocumentReplaySource | None:
     """Public body-free wrapper for one exact document replay SELECT."""
 
@@ -3156,11 +4630,183 @@ def select_authorized_archive_document_replay_source_in_transaction(
             corpus=corpus,
             source_ref=source_ref,
             knowledge_object_id=knowledge_object_id,
+            source_revision=source_revision,
         )
     except ArchiveDocumentStorageError:
         raise
     except Exception:
         raise _fail("archive document replay selection is unavailable") from None
+
+
+def _search_focused_document_lexical_lane(
+    conn: sqlite3.Connection,
+    *,
+    tenant_id: str,
+    owner_id: str,
+    request: ArchiveSearchRequest,
+    execution_binding: SearchExecutionBinding,
+    snapshot_discriminator: str,
+    snapshot_current: bool,
+    page_limit: int,
+    document_passage_contract: _DocumentPassageContract | None,
+) -> ArchiveDocumentLanePage:
+    derivative_available = document_passage_contract is not None
+    (
+        total,
+        examined,
+        derivative_mismatches,
+        derivative_backfills,
+        derivative_unavailable,
+        authority_backfill,
+        lead_capped,
+        lead_rows,
+    ) = _focused_document_lexical_rows(
+        conn,
+        request,
+        tenant_id=tenant_id,
+        owner_id=owner_id,
+        derivative_available=derivative_available,
+        document_passage_revision=(
+            document_passage_contract.index_revision if document_passage_contract is not None else None
+        ),
+    )
+
+    body_max_bytes = _FOCUSED_DOCUMENT_BODY_MAX_BYTES
+    body_budget_bytes = _FOCUSED_DOCUMENT_BODY_BUDGET_BYTES
+    if (
+        type(body_max_bytes) is not int
+        or type(body_budget_bytes) is not int
+        or not 1 <= body_max_bytes <= body_budget_bytes
+    ):
+        raise _fail("focused archive document body budget is invalid")
+
+    projected: list[tuple[int, dict[str, Any], SourceFocusProjection]] = []
+    body_budget_remaining = body_budget_bytes
+    body_budget_incomplete = False
+    for lead_order, row in enumerate(lead_rows):
+        if body_budget_remaining <= 0:
+            body_budget_incomplete = True
+            break
+        attempt_cap = min(body_max_bytes, body_budget_remaining)
+        body_budget_remaining -= attempt_cap
+        selected_body = _read_focused_document_body(
+            conn,
+            row,
+            max_bytes=attempt_cap,
+        )
+        if selected_body is None:
+            body_budget_incomplete = True
+            continue
+        body, consumed_bytes = selected_body
+        body_budget_remaining += attempt_cap - consumed_bytes
+        row["passage_body"] = body
+        row["filename"] = row.get("raw_filename")
+        try:
+            projection = project_source_focus(
+                body,
+                request.query,
+                request.focus,
+                max_chars=_MAX_EXCERPT_CHARS,
+            )
+        except (TypeError, ValueError, UnicodeError):
+            projection = None
+        if projection is not None and not any(
+            unicodedata.category(character).startswith("C") and character != "\n"
+            for character in projection.excerpt
+        ):
+            try:
+                projection.excerpt.encode("utf-8", errors="strict")
+            except UnicodeEncodeError:
+                row.pop("passage_body", None)
+                continue
+            projected.append((lead_order, row, projection))
+        else:
+            row.pop("passage_body", None)
+
+    # The two recall leads establish only a stable candidate order.  Exact
+    # source projection owns eligibility, and only its closed full/contextual
+    # class may reorder that sequence.
+    projected.sort(
+        key=lambda item: (
+            0 if item[2].focus_match_kind is SourceFocusMatchKind.FULL else 1,
+            -item[2].matched_focus_count,
+            item[0],
+        )
+    )
+    # raw_fts has no authenticated completeness generation.  One valid indexed
+    # target can survive after another target row disappeared, so a non-empty
+    # page is evidence for what it shows but never proof of complete recall.
+    # An authoritatively empty source scope remains the sole safe exhaustive case.
+    if examined > 0:
+        derivative_mismatches = max(1, derivative_mismatches)
+        derivative_unavailable = max(1, derivative_unavailable)
+    recall_capped = lead_capped or body_budget_incomplete
+    for lane_rank, (_lead_order, row, _projection) in enumerate(projected, 1):
+        row["lane_rank"] = lane_rank
+    visible = projected[:page_limit]
+
+    document_passages: dict[str, tuple[_StoredDocumentPassage, ...]] = {}
+    invalid_current_passages = 0
+    if document_passage_contract is not None:
+        try:
+            for _lead_order, row, _projection in visible:
+                raw_object_id = row.get("raw_id")
+                passages = _select_current_document_passages(
+                    conn,
+                    row,
+                    document_passage_contract,
+                )
+                if type(raw_object_id) is str and passages is not None:
+                    document_passages[raw_object_id] = passages
+                else:
+                    invalid_current_passages += 1
+        except ArchiveDocumentStorageError:
+            document_passages.clear()
+            invalid_current_passages = len(visible)
+    derivative_mismatches += invalid_current_passages
+    derivative_unavailable += invalid_current_passages
+    try:
+        candidates = tuple(
+            _candidate(
+                row,
+                corpus=ArchiveSearchCorpus.DOCUMENTS,
+                lane=SearchLane.LEXICAL,
+                request=request,
+                tenant_id=tenant_id,
+                owner_id=owner_id,
+                document_passages=document_passages.get(str(row.get("raw_id"))),
+                source_focus_projection=projection,
+            )
+            for _lead_order, row, projection in visible
+        )
+    except ArchiveDocumentStorageError:
+        raise
+    except Exception:
+        raise _fail("archive source-focus evidence projection is unavailable") from None
+    scope_complete = authority_backfill == 0
+    return _new_page(
+        corpus=ArchiveSearchCorpus.DOCUMENTS,
+        lane=SearchLane.LEXICAL,
+        candidates=candidates,
+        total=total if scope_complete else None,
+        examined=examined,
+        matched=len(projected),
+        has_more=recall_capped or len(projected) > page_limit,
+        available=True,
+        applied_limit=page_limit,
+        derivative_current=derivative_available and derivative_mismatches == 0,
+        derivative_backfill_pending=derivative_backfills > 0,
+        derivative_unavailable=(not derivative_available or derivative_unavailable > 0),
+        catalog_projection_current=None,
+        authority_scope_complete=scope_complete,
+        authority_rechecked=True,
+        snapshot_current=snapshot_current,
+        execution_binding=execution_binding,
+        request=request,
+        tenant_id=tenant_id,
+        owner_id=owner_id,
+        snapshot_discriminator=snapshot_discriminator,
+    )
 
 
 def _search_archive_document_lane(
@@ -3236,6 +4882,7 @@ def _search_archive_document_lane(
             snapshot_discriminator=snapshot,
             snapshot_current=snapshot_current,
             authority_rechecked=False,
+            applied_limit=page_limit,
         )
     if request.continuation is not None or not _temporal_supported(request, corpus):
         return _unavailable_page(
@@ -3248,13 +4895,27 @@ def _search_archive_document_lane(
             snapshot_discriminator=snapshot,
             snapshot_current=snapshot_current,
             authority_rechecked=True,
+            applied_limit=page_limit,
+        )
+    if request.focus and corpus is ArchiveSearchCorpus.DOCUMENTS and lane is SearchLane.CATALOG:
+        return _unavailable_page(
+            corpus,
+            lane,
+            execution_binding=execution_binding,
+            request=request,
+            tenant_id=tenant,
+            owner_id=owner,
+            snapshot_discriminator=snapshot,
+            snapshot_current=snapshot_current,
+            authority_rechecked=True,
+            applied_limit=page_limit,
         )
 
     dense_projection = (
         project_archive_dense_query_plan(
             dense_query_plan,
             principal_id=owner,
-            query=request.query,
+            query=request.dense_query,
         )
         if lane is SearchLane.DENSE
         else None
@@ -3271,8 +4932,16 @@ def _search_archive_document_lane(
                 snapshot_discriminator=snapshot,
                 snapshot_current=snapshot_current,
                 authority_rechecked=True,
+                applied_limit=page_limit,
             )
-        total, examined, dense_authority_backfill, hits = _dense_rows(
+        (
+            total,
+            examined,
+            dense_authority_backfill,
+            dense_derivative_unavailable,
+            dense_recall_capped,
+            hits,
+        ) = _dense_rows(
             conn,
             tenant_id=tenant,
             owner_id=owner,
@@ -3281,6 +4950,29 @@ def _search_archive_document_lane(
             projection=dense_projection,
         )
         visible_hits = hits[:page_limit]
+        focused_document_passages: dict[str, tuple[_StoredDocumentPassage, ...]] = {}
+        if request.focus and corpus is ArchiveSearchCorpus.DOCUMENTS:
+            passage_contract = _load_document_passage_contract(conn)
+            if passage_contract is not None:
+                try:
+                    for item in visible_hits:
+                        raw_object_id = item.get("raw_id")
+                        focus_projection = item.get("source_focus_projection")
+                        passages = (
+                            _select_current_dense_document_passage(
+                                conn,
+                                item,
+                                passage_contract,
+                                start=focus_projection.start,
+                                end=focus_projection.end,
+                            )
+                            if type(focus_projection) is SourceFocusProjection
+                            else None
+                        )
+                        if type(raw_object_id) is str and passages is not None:
+                            focused_document_passages[raw_object_id] = passages
+                except ArchiveDocumentStorageError:
+                    focused_document_passages.clear()
         try:
             candidates = tuple(
                 _candidate(
@@ -3290,6 +4982,8 @@ def _search_archive_document_lane(
                     request=request,
                     tenant_id=tenant,
                     owner_id=owner,
+                    source_focus_projection=(item.get("source_focus_projection") if request.focus else None),
+                    document_passages=focused_document_passages.get(str(item.get("raw_id"))),
                     dense_projection=dense_projection,
                 )
                 for item in visible_hits
@@ -3310,11 +5004,12 @@ def _search_archive_document_lane(
             total=total if scope_complete else None,
             examined=examined,
             matched=len(hits),
-            has_more=len(hits) > page_limit,
+            has_more=dense_recall_capped or len(hits) > page_limit,
             available=True,
+            applied_limit=page_limit,
             derivative_current=derivative_current,
             derivative_backfill_pending=True,
-            derivative_unavailable=False,
+            derivative_unavailable=dense_derivative_unavailable,
             catalog_projection_current=None,
             authority_scope_complete=scope_complete,
             authority_rechecked=True,
@@ -3338,7 +5033,12 @@ def _search_archive_document_lane(
             _ensure_archive_catalog_title_validator(conn)
     if lane is SearchLane.LEXICAL:
         terms = _fts_terms(request.query)
-        if not terms:
+        focused_document_terms = bool(
+            corpus is ArchiveSearchCorpus.DOCUMENTS
+            and request.focus
+            and source_focus_fts_tokens(request.query)
+        )
+        if not terms and not focused_document_terms:
             return _unavailable_page(
                 corpus,
                 lane,
@@ -3349,10 +5049,38 @@ def _search_archive_document_lane(
                 snapshot_discriminator=snapshot,
                 snapshot_current=snapshot_current,
                 authority_rechecked=True,
+                applied_limit=page_limit,
             )
         if corpus is ArchiveSearchCorpus.DOCUMENTS:
             document_passage_contract = _load_document_passage_contract(conn)
             derivative_available = document_passage_contract is not None
+            if request.focus:
+                try:
+                    return _search_focused_document_lexical_lane(
+                        conn,
+                        tenant_id=tenant,
+                        owner_id=owner,
+                        request=request,
+                        execution_binding=execution_binding,
+                        snapshot_discriminator=snapshot,
+                        snapshot_current=snapshot_current,
+                        page_limit=page_limit,
+                        document_passage_contract=document_passage_contract,
+                    )
+                except ArchiveDocumentStorageError:
+                    if not derivative_available:
+                        raise
+                    return _search_focused_document_lexical_lane(
+                        conn,
+                        tenant_id=tenant,
+                        owner_id=owner,
+                        request=request,
+                        execution_binding=execution_binding,
+                        snapshot_discriminator=snapshot,
+                        snapshot_current=snapshot_current,
+                        page_limit=page_limit,
+                        document_passage_contract=None,
+                    )
         else:
             derivative_available = _table_exists(conn, "knowledge_fts")
         sql, lane_parameters = _lexical_sql(
@@ -3465,6 +5193,7 @@ def _search_archive_document_lane(
         matched=matched,
         has_more=len(hits) > page_limit,
         available=True,
+        applied_limit=page_limit,
         derivative_current=(
             derivative_available and derivative_mismatches == 0 if lane is SearchLane.LEXICAL else None
         ),

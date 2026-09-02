@@ -43,11 +43,17 @@ from friday.retrieval.contracts import (
     aggregate_absence_decision,
 )
 
-ARCHIVE_SEARCH_REQUEST_SCHEMA: Final = "friday.archive-search-request.private.v1"
-ARCHIVE_SEARCH_REQUEST_IDENTITY_SCHEMA: Final = "friday.archive-search-request-identity.private.v1"
+ARCHIVE_SEARCH_REQUEST_SCHEMA: Final = "friday.archive-search-request.private.v2"
+ARCHIVE_SEARCH_REQUEST_IDENTITY_SCHEMA: Final = "friday.archive-search-request-identity.private.v2"
+_ARCHIVE_SEARCH_REQUEST_SCHEMA_V1: Final = "friday.archive-search-request.private.v1"
+_ARCHIVE_SEARCH_REQUEST_IDENTITY_SCHEMA_V1: Final = "friday.archive-search-request-identity.private.v1"
 ARCHIVE_SEARCH_CANDIDATE_SCHEMA: Final = "friday.archive-search-candidate.private.v1"
 ARCHIVE_SEARCH_PUBLIC_PAGE_SCHEMA: Final = "friday.archive-search-page.public.v1"
+_ARCHIVE_SEARCH_CANDIDATE_SCHEMA_V2: Final = "friday.archive-search-candidate.private.v2"
+_ARCHIVE_SEARCH_PUBLIC_PAGE_SCHEMA_V2: Final = "friday.archive-search-page.public.v2"
 MAX_QUERY_CHARS: Final = 1_000
+MAX_FOCUS_CHARS: Final = 480
+MAX_FOCUSED_SOURCE_QUERY_CHARS: Final = 240
 MAX_HINTS_PER_KIND: Final = 8
 MAX_HINT_CHARS: Final = 260
 MAX_DISPLAY_CHARS: Final = 260
@@ -156,6 +162,25 @@ def _text(value: object, label: str, maximum: int, *, optional: bool = False) ->
     return value
 
 
+def _passage_excerpt(value: object) -> str:
+    """Validate one exact source slice while retaining canonical line structure."""
+
+    if (
+        not isinstance(value, str)
+        or not value
+        or value != value.strip()
+        or len(value) > MAX_EXCERPT_CHARS
+        or "\r" in value
+        or any(unicodedata.category(character).startswith("C") and character != "\n" for character in value)
+    ):
+        raise RetrievalContractError("passage excerpt must be bounded canonical source text")
+    try:
+        value.encode("utf-8", errors="strict")
+    except UnicodeEncodeError as exc:
+        raise RetrievalContractError("passage excerpt must be valid UTF-8") from exc
+    return value
+
+
 def _query(value: object) -> str:
     if not isinstance(value, str):
         raise RetrievalContractError("archive query must be text")
@@ -167,6 +192,20 @@ def _query(value: object) -> str:
     except UnicodeEncodeError as exc:
         raise RetrievalContractError("archive query must be valid UTF-8") from exc
     return normalized
+
+
+def _focus(value: object) -> str:
+    if not isinstance(value, str):
+        raise RetrievalContractError("archive focus must be text")
+    if value == "":
+        return value
+    if value != " ".join(value.split()) or len(value) > MAX_FOCUS_CHARS or _control(value):
+        raise RetrievalContractError("archive focus must contain at most 480 canonical characters")
+    try:
+        value.encode("utf-8", errors="strict")
+    except UnicodeEncodeError as exc:
+        raise RetrievalContractError("archive focus must be valid UTF-8") from exc
+    return value
 
 
 def _integer(value: object, label: str, low: int, high: int) -> int:
@@ -610,7 +649,7 @@ class ArchiveContextWindow:
         )
 
 
-_PRIVATE_REQUEST_KEYS = frozenset(
+_PRIVATE_REQUEST_V2_KEYS = frozenset(
     {
         "context",
         "continuation",
@@ -618,6 +657,7 @@ _PRIVATE_REQUEST_KEYS = frozenset(
         "corpora",
         "entity_hints",
         "filename_hints",
+        "focus",
         "lifecycle_constraints",
         "limit",
         "query",
@@ -628,7 +668,8 @@ _PRIVATE_REQUEST_KEYS = frozenset(
         "title_hints",
     }
 )
-_MODEL_REQUEST_KEYS = _PRIVATE_REQUEST_KEYS - {"schema"}
+_PRIVATE_REQUEST_V1_KEYS = _PRIVATE_REQUEST_V2_KEYS - {"focus"}
+_MODEL_REQUEST_KEYS = _PRIVATE_REQUEST_V2_KEYS - {"schema"}
 
 
 @dataclass(frozen=True, slots=True, repr=False)
@@ -646,6 +687,7 @@ class ArchiveSearchRequest:
     limit: int
     context: ArchiveContextWindow
     continuation: str | None
+    focus: str = ""
 
     def __post_init__(self) -> None:
         if any(
@@ -663,6 +705,8 @@ class ArchiveSearchRequest:
             raise RetrievalContractError("archive request collections must use exact tuples")
         if self.query != _query(self.query):
             raise RetrievalContractError("archive query must already be canonical")
+        if self.focus != _focus(self.focus):
+            raise RetrievalContractError("archive focus must already be canonical")
         if self.corpora != _enum_tuple(self.corpora, ArchiveSearchCorpus, "archive corpora", empty=False):
             raise RetrievalContractError("archive corpora must be sorted and unique")
         if self.title_hints != _hints(self.title_hints, "title hints"):
@@ -695,6 +739,13 @@ class ArchiveSearchRequest:
             or self.context != ArchiveContextWindow()
         ):
             raise RetrievalContractError("conversation filters require the messages corpus")
+        if self.focus and (
+            self.corpora != (ArchiveSearchCorpus.DOCUMENTS,)
+            or len(self.query) > MAX_FOCUSED_SOURCE_QUERY_CHARS
+        ):
+            raise RetrievalContractError(
+                "archive focus requires a documents-only request and a query of at most 240 characters"
+            )
         if len(self.to_private_json().encode("ascii")) > _MAX_PRIVATE_REQUEST_BYTES:
             raise RetrievalContractError("archive request exceeds the closed byte limit")
 
@@ -704,6 +755,12 @@ class ArchiveSearchRequest:
     @property
     def permits_outbound(self) -> bool:
         return False
+
+    @property
+    def dense_query(self) -> str:
+        """Exact text bound into the optional dense source-recall sidecar."""
+
+        return f"{self.query} {self.focus}" if self.focus else self.query
 
     @classmethod
     def create(
@@ -722,6 +779,7 @@ class ArchiveSearchRequest:
         limit: int = 10,
         context: ArchiveContextWindow = ArchiveContextWindow(),
         continuation: str | None = None,
+        focus: str = "",
     ) -> ArchiveSearchRequest:
         return cls(
             _query(query),
@@ -737,10 +795,11 @@ class ArchiveSearchRequest:
             _integer(limit, "archive result limit", 1, 20),
             context,
             _token(continuation),
+            _focus(focus),
         )
 
     def to_private_payload(self) -> dict[str, object]:
-        return {
+        payload: dict[str, object] = {
             "context": self.context.to_private_payload(),
             "continuation": self.continuation,
             "conversation_scope": self.conversation_scope.value,
@@ -752,10 +811,13 @@ class ArchiveSearchRequest:
             "query": self.query,
             "review_scope": self.review_scope.value,
             "roles": [item.value for item in self.roles],
-            "schema": ARCHIVE_SEARCH_REQUEST_SCHEMA,
+            "schema": (ARCHIVE_SEARCH_REQUEST_SCHEMA if self.focus else _ARCHIVE_SEARCH_REQUEST_SCHEMA_V1),
             "temporal_constraints": [item.to_private_payload() for item in self.temporal_constraints],
             "title_hints": list(self.title_hints),
         }
+        if self.focus:
+            payload["focus"] = self.focus
+        return payload
 
     def to_private_json(self) -> str:
         return _json(self.to_private_payload())
@@ -765,14 +827,23 @@ class ArchiveSearchRequest:
 
         payload = self.to_private_payload()
         del payload["continuation"]
-        payload["schema"] = ARCHIVE_SEARCH_REQUEST_IDENTITY_SCHEMA
+        payload["schema"] = (
+            ARCHIVE_SEARCH_REQUEST_IDENTITY_SCHEMA
+            if self.focus
+            else _ARCHIVE_SEARCH_REQUEST_IDENTITY_SCHEMA_V1
+        )
         return payload
 
     def to_identity_json(self) -> str:
         return _json(self.to_identity_payload())
 
     def identity_digest_material(self) -> bytes:
-        return b"friday/archive-search-request-identity/v1\0" + self.to_identity_json().encode("ascii")
+        domain = (
+            b"friday/archive-search-request-identity/v2\0"
+            if self.focus
+            else b"friday/archive-search-request-identity/v1\0"
+        )
+        return domain + self.to_identity_json().encode("ascii")
 
     @classmethod
     def _from_fields(cls, payload: Mapping[str, object]) -> ArchiveSearchRequest:
@@ -821,6 +892,7 @@ class ArchiveSearchRequest:
                 payload.get("context", {"after": 0, "before": 0})
             ),
             continuation=_token(payload.get("continuation")),
+            focus=_focus(payload.get("focus", "")),
         )
 
     @classmethod
@@ -834,8 +906,14 @@ class ArchiveSearchRequest:
 
     @classmethod
     def from_private_payload(cls, value: object) -> ArchiveSearchRequest:
-        payload = _exact(value, _PRIVATE_REQUEST_KEYS, "archive request")
-        if payload["schema"] != ARCHIVE_SEARCH_REQUEST_SCHEMA:
+        schema = value.get("schema") if type(value) is dict else None
+        if schema == _ARCHIVE_SEARCH_REQUEST_SCHEMA_V1:
+            payload = _exact(value, _PRIVATE_REQUEST_V1_KEYS, "archive request")
+        elif schema == ARCHIVE_SEARCH_REQUEST_SCHEMA:
+            payload = _exact(value, _PRIVATE_REQUEST_V2_KEYS, "archive request")
+            if payload["focus"] == "":
+                raise RetrievalContractError("archive request v2 requires a non-empty focus")
+        else:
             raise RetrievalContractError("archive request schema is unsupported")
         return cls._from_fields(payload)
 
@@ -867,20 +945,60 @@ class ArchiveSearchPassage:
             or type(passage_ref.embedding) is not EmbeddingIdentity
         ):
             raise RetrievalContractError("factual excerpts require an exact PassageRef")
-        _text(self.excerpt, "passage excerpt", MAX_EXCERPT_CHARS)
+        _passage_excerpt(self.excerpt)
 
     def __repr__(self) -> str:
         return "ArchiveSearchPassage(private_passage=True)"
 
     def to_private_payload(self) -> dict[str, object]:
-        return {"excerpt": self.excerpt, "passage_ref": self.passage_ref.to_private_payload()}
+        """Serialize only the released standalone single-line carrier."""
+
+        return _passage_to_private_payload(self, allow_multiline=False)
 
     @classmethod
     def from_private_payload(cls, value: object) -> ArchiveSearchPassage:
-        payload = _exact(value, frozenset({"excerpt", "passage_ref"}), "archive passage")
-        excerpt = _text(payload["excerpt"], "passage excerpt", MAX_EXCERPT_CHARS)
-        assert isinstance(excerpt, str)
-        return cls(PassageRef.from_private_payload(payload["passage_ref"]), excerpt)
+        """Parse the released single-line passage domain.
+
+        Multiline passages are admitted only by the explicitly versioned
+        candidate-v2 parser below.  Keeping this standalone parser narrow makes
+        an old candidate-v1 carrier fail closed instead of silently widening its
+        durable evidence semantics.
+        """
+
+        return _passage_from_private_payload(value, allow_multiline=False)
+
+
+def _passage_to_private_payload(
+    passage: ArchiveSearchPassage,
+    *,
+    allow_multiline: bool,
+) -> dict[str, object]:
+    if type(passage) is not ArchiveSearchPassage or type(allow_multiline) is not bool:
+        raise RetrievalContractError("archive passage serializer mode is invalid")
+    if "\n" in passage.excerpt and not allow_multiline:
+        raise RetrievalContractError("passage excerpt requires an explicitly versioned carrier")
+    return {"excerpt": passage.excerpt, "passage_ref": passage.passage_ref.to_private_payload()}
+
+
+def _passage_from_private_payload(
+    value: object,
+    *,
+    allow_multiline: bool,
+) -> ArchiveSearchPassage:
+    if type(allow_multiline) is not bool:
+        raise RetrievalContractError("archive passage parser mode is invalid")
+    payload = _exact(value, frozenset({"excerpt", "passage_ref"}), "archive passage")
+    if allow_multiline:
+        excerpt = _passage_excerpt(payload["excerpt"])
+    else:
+        single_line_excerpt = _text(payload["excerpt"], "passage excerpt", MAX_EXCERPT_CHARS)
+        assert isinstance(single_line_excerpt, str)
+        excerpt = single_line_excerpt
+    return ArchiveSearchPassage(PassageRef.from_private_payload(payload["passage_ref"]), excerpt)
+
+
+def _candidate_uses_multiline_passage(candidate: ArchiveSearchCandidate) -> bool:
+    return any("\n" in passage.excerpt for passage in candidate.passages)
 
 
 def _passages(values: Iterable[ArchiveSearchPassage]) -> tuple[ArchiveSearchPassage, ...]:
@@ -1154,16 +1272,19 @@ class ArchiveSearchCandidate:
         )
 
     def to_private_payload(self) -> dict[str, object]:
+        multiline = _candidate_uses_multiline_passage(self)
         return {
             "corpus": self.corpus.value,
             "evidence_authority": self.evidence_authority.value,
             "filename": self.filename,
             "lifecycle_state": self.lifecycle_state.value,
             "matches": [item.to_private_payload() for item in self.matches],
-            "passages": [item.to_private_payload() for item in self.passages],
+            "passages": [
+                _passage_to_private_payload(item, allow_multiline=multiline) for item in self.passages
+            ],
             "resolved_source": self.resolved_source.to_private_payload(),
             "review_state": self.review_state.value,
-            "schema": ARCHIVE_SEARCH_CANDIDATE_SCHEMA,
+            "schema": (_ARCHIVE_SEARCH_CANDIDATE_SCHEMA_V2 if multiline else ARCHIVE_SEARCH_CANDIDATE_SCHEMA),
             "temporal_facts": [item.to_private_payload() for item in self.temporal_facts],
             "title": self.title,
         }
@@ -1174,8 +1295,10 @@ class ArchiveSearchCandidate:
     @classmethod
     def from_private_payload(cls, value: object) -> ArchiveSearchCandidate:
         payload = _exact(value, _CANDIDATE_KEYS, "archive candidate")
-        if payload["schema"] != ARCHIVE_SEARCH_CANDIDATE_SCHEMA:
+        schema = payload["schema"]
+        if schema not in {ARCHIVE_SEARCH_CANDIDATE_SCHEMA, _ARCHIVE_SEARCH_CANDIDATE_SCHEMA_V2}:
             raise RetrievalContractError("archive candidate schema is unsupported")
+        multiline = schema == _ARCHIVE_SEARCH_CANDIDATE_SCHEMA_V2
         title = _text(payload["title"], "candidate title", MAX_DISPLAY_CHARS, optional=True)
         filename = _text(payload["filename"], "candidate filename", MAX_DISPLAY_CHARS, optional=True)
         matches, facts, passages = (
@@ -1185,7 +1308,7 @@ class ArchiveSearchCandidate:
         )
         if any(type(item) is not list for item in (matches, facts, passages)):
             raise RetrievalContractError("archive candidate evidence collections must be arrays")
-        return cls.create(
+        candidate = cls.create(
             corpus=_enum(ArchiveSearchCorpus, payload["corpus"], "candidate corpus"),
             resolved_source=ResolvedSource.from_private_payload(payload["resolved_source"]),
             title=cast(str | None, title),
@@ -1199,8 +1322,11 @@ class ArchiveSearchCandidate:
             lifecycle_state=_enum(LifecycleState, payload["lifecycle_state"], "lifecycle state"),
             matches=(ArchiveMatchRank.from_private_payload(item) for item in matches),
             temporal_facts=(TemporalFact.from_private_payload(item) for item in facts),
-            passages=(ArchiveSearchPassage.from_private_payload(item) for item in passages),
+            passages=(_passage_from_private_payload(item, allow_multiline=multiline) for item in passages),
         )
+        if _candidate_uses_multiline_passage(candidate) is not multiline:
+            raise RetrievalContractError("archive candidate schema is not semantically canonical")
+        return candidate
 
     @classmethod
     def parse_private(cls, value: str) -> ArchiveSearchCandidate:
@@ -1441,7 +1567,11 @@ class ArchiveSearchPage:
             "coverage": coverage,
             "execution_binding": self.coverage[0].execution_binding.to_payload(),
             "exhaustive": self.exhaustive,
-            "schema": ARCHIVE_SEARCH_PUBLIC_PAGE_SCHEMA,
+            "schema": (
+                _ARCHIVE_SEARCH_PUBLIC_PAGE_SCHEMA_V2
+                if any(_candidate_uses_multiline_passage(item.candidate) for item in self.results)
+                else ARCHIVE_SEARCH_PUBLIC_PAGE_SCHEMA
+            ),
             "warnings": [item.value for item in self.warnings],
         }
         if (

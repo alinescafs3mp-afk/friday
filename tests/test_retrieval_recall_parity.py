@@ -7,6 +7,7 @@ from dataclasses import FrozenInstanceError
 
 import pytest
 
+from friday.retrieval_benchmark import parity as parity_module
 from friday.retrieval_benchmark._canonical import canonical_json
 from friday.retrieval_benchmark.cli import build_parser
 from friday.retrieval_benchmark.contracts import case_manifest_sha256
@@ -38,6 +39,8 @@ _PRIVATE_SENTINELS = (
     "raw_a100000000000004",
     "raw_a100000000000002",
     "raw_a100000000000003",
+    "raw_a100000000000005",
+    "raw_a100000000000006",
     "ko_a100000000000001",
     "conv_a100000000000001",
     "conv_a100000000000002",
@@ -53,6 +56,8 @@ _PRIVATE_SENTINELS = (
     "saffronneedle",
     "quartzpendingneedle",
     "cobaltpromotedneedle",
+    "orionfocusneedle",
+    "orionfocusneedle role",
     "lanternmessageneedle",
     "Uhfabr lt;ehcnd",
     "фдзрф иуеф",
@@ -87,7 +92,7 @@ def test_parity_report_is_canonical_deterministic_and_body_free(
     assert serialized.encode("ascii").decode("ascii") == serialized
     assert json.loads(serialized) == payload
     assert payload["schema"] == PARITY_REPORT_SCHEMA
-    assert payload["case_count"] == 6
+    assert payload["case_count"] == 7
     assert payload["identity_kind"] == "deterministic_synthetic_pseudonym_v1"
     assert not (_keys(payload) & _PRIVATE_KEYS)
     for sentinel in _PRIVATE_SENTINELS:
@@ -102,14 +107,14 @@ def test_parity_matrix_uses_only_synthetic_pseudonyms_and_aggregate_facts(
     cases = report.cases
 
     assert Counter(item.expected_corpus.value for item in cases) == {
-        "documents": 2,
+        "documents": 3,
         "knowledge": 1,
         "messages": 3,
     }
     assert Counter(item.adapter for item in cases) == {
         "memory_search": 1,
         "message_search": 3,
-        "source_search": 2,
+        "source_search": 3,
     }
     for item in cases:
         assert _DIGEST.fullmatch(item.case_id)
@@ -145,9 +150,9 @@ def test_parity_matrix_uses_only_synthetic_pseudonyms_and_aggregate_facts(
 
     dimensions = {item.name: item for item in report.dimensions}
     assert dimensions["candidate_membership"].status == "parity"
-    assert dimensions["candidate_membership"].matched == 6
+    assert dimensions["candidate_membership"].matched == 7
     assert dimensions["candidate_order"].status == "mismatch"
-    assert dimensions["candidate_order"].matched == 5
+    assert dimensions["candidate_order"].matched == 6
     assert dimensions["candidate_order"].mismatched == 1
     order_mismatches = tuple(item for item in cases if item.order_status == "mismatch")
     assert len(order_mismatches) == 1
@@ -169,6 +174,76 @@ def test_unsupported_dimensions_are_explicit_and_never_claim_parity(
         assert dimension.matched == 0
         assert dimension.mismatched == 0
         assert dimension.reason_codes == (reason,)
+
+
+def test_focused_source_is_measured_without_claiming_source_search_retirement(
+    parity_reports: tuple[ParityReportV1, ParityReportV1],
+) -> None:
+    report, _second = parity_reports
+    by_name = {item.name: item for item in report.dimensions}
+    focused = by_name["focused_source"]
+    focused_probes = tuple(
+        probe
+        for probe in parity_module._probes()  # noqa: PLC2701 - exact private benchmark matrix
+        if probe.request.focus
+    )
+
+    assert len(focused_probes) == 1
+    probe = focused_probes[0]
+    assert probe.adapter == "source_search"
+    assert tuple(item.value for item in probe.request.corpora) == ("documents",)
+    focused_case = next(item for item in report.cases if item.case_id == probe.opaque_case_id)
+    assert focused_case.archive_source_identities == (focused_case.expected_source_identity,)
+    assert focused_case.archive_publication_source_identities == (focused_case.expected_source_identity,)
+    assert focused_case.adapter_source_identities == (focused_case.expected_source_identity,)
+    assert focused_case.archive_expected_rank == focused_case.adapter_expected_rank == 1
+    assert focused_case.membership_status == focused_case.order_status == "parity"
+    assert "focused_source" not in UNSUPPORTED_REASON_CODES
+    assert (focused.status, focused.compared, focused.matched, focused.mismatched) == (
+        "parity",
+        1,
+        1,
+        0,
+    )
+    assert focused.reason_codes == ()
+    assert by_name["authorization_and_publication"].status == "partial"
+    assert by_name["coverage_and_absence"].status == "partial"
+    assert by_name["passage_locator"].status == "unsupported"
+
+
+def test_focused_source_dimension_rejects_equal_membership_in_the_wrong_order() -> None:
+    case_id = "1" * 64
+    expected = "a" * 64
+    other = "b" * 64
+    case = parity_module.ParityCaseResultV1(
+        case_id=case_id,
+        case_sha256="2" * 64,
+        expected_corpus=parity_module.ArchiveSearchCorpus.DOCUMENTS,
+        adapter="source_search",
+        expected_source_identity=expected,
+        archive_source_identities=(expected, other),
+        archive_publication_source_identities=(expected, other),
+        adapter_source_identities=(other, expected),
+        archive_expected_rank=1,
+        adapter_expected_rank=2,
+        membership_status="parity",
+        order_status="mismatch",
+        reason_code=None,
+    )
+
+    dimensions = parity_module._dimensions(  # noqa: PLC2701 - exact dimension contract
+        (case,),
+        focused_source_case_ids=frozenset({case_id}),
+    )
+
+    focused = next(item for item in dimensions if item.name == "focused_source")
+    assert (focused.status, focused.compared, focused.matched, focused.mismatched) == (
+        "mismatch",
+        1,
+        0,
+        1,
+    )
+    assert focused.reason_codes == ("candidate_order_mismatch",)
 
 
 def test_parity_contract_is_immutable_and_cli_is_separate(

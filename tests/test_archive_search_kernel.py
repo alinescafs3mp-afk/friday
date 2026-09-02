@@ -41,12 +41,20 @@ def _ledger(actor: Any, turn: str) -> Any:
     )
 
 
-def _arguments(invocation: object, *, corpora: list[str] | None = None) -> dict[str, Any]:
-    return {
+def _arguments(
+    invocation: object,
+    *,
+    corpora: list[str] | None = None,
+    focus: str = "",
+) -> dict[str, Any]:
+    payload = {
         "query": "PRIVATE-ARCHIVE-QUERY",
         "corpora": corpora or ["generated"],
         "_archive_invocation": invocation,
     }
+    if focus:
+        payload["focus"] = focus
+    return payload
 
 
 def _durable_read_signature(storage: Any) -> tuple[object, ...]:
@@ -80,6 +88,15 @@ def test_archive_search_is_an_observe_capability_without_private_schema_fields(s
     assert tool.risk == "observe"
     assert tool.parameters["additionalProperties"] is False
     assert "_archive_invocation" not in tool.parameters["properties"]
+    assert tool.parameters["properties"]["focus"] == {
+        "type": "string",
+        "maxLength": 480,
+        "description": (
+            "Необязательно и только для documents-only запроса: слова поля/вопроса "
+            "выбирают выдержку внутри найденного по query исходника, не расширяя "
+            "авторизацию источников"
+        ),
+    }
 
 
 @pytest.mark.asyncio
@@ -104,14 +121,14 @@ async def test_dense_authority_preflight_is_an_effect_free_read_snapshot(
     try:
         result = await kernel.execute(
             "archive_search",
-            _arguments(invocation, corpora=["documents"]),
+            _arguments(invocation, corpora=["documents"], focus="private focus"),
             actor=actor,
         )
     finally:
         await web.close()
 
     assert result.success is True
-    assert calls == [(actor.user_id, "PRIVATE-ARCHIVE-QUERY", actor.own_id)]
+    assert calls == [(actor.user_id, "PRIVATE-ARCHIVE-QUERY private focus", actor.own_id)]
 
 
 @pytest.mark.asyncio

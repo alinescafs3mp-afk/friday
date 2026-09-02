@@ -632,7 +632,10 @@ def _document_texts(
         if (
             not text
             or text != text.strip()
-            or any(unicodedata.category(character).startswith("C") for character in text)
+            or "\r" in text
+            or any(
+                unicodedata.category(character).startswith("C") and character != "\n" for character in text
+            )
         ):
             return None
         texts.append(text)
@@ -763,6 +766,7 @@ def replay_archive_evidence_in_transaction(
                 corpus=corpus,
                 source_ref=source_ref,
                 knowledge_object_id=knowledge_object_id,
+                source_revision=passage_refs[0].source_revision,
             )
             if replay is None:
                 return _closed_result(ArchiveEvidenceReplayStatus.DRIFTED, corpus)

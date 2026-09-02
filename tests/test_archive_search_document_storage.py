@@ -21,16 +21,23 @@ from friday.retrieval.archive_search_contract import (
     ArchiveTemporalConstraint,
     ReviewScope,
 )
+from friday.retrieval.archive_search_document_locator import (
+    DOCUMENT_STORED_PASSAGE_INDEX_VERSION,
+    LEGACY_DOCUMENT_PASSAGE_INDEX_VERSION,
+)
 from friday.retrieval.contracts import (
     AuthorityScope,
     CoverageState,
     LifecycleState,
     RepresentationKind,
+    RevisionKind,
     SearchCorpus,
     SearchCoverage,
     SearchExecutionBinding,
     SearchLane,
     SourceKind,
+    SourceRepresentation,
+    SourceRevision,
     TemporalPrecision,
     TemporalRole,
     TemporalValueKind,
@@ -150,6 +157,7 @@ def _request(
     lifecycle_constraints: tuple[ArchiveLifecycleConstraint, ...] = (),
     temporal_constraints: tuple[ArchiveTemporalConstraint, ...] = (),
     limit: int = 20,
+    focus: str = "",
 ) -> ArchiveSearchRequest:
     return ArchiveSearchRequest.create(
         query=query,
@@ -158,6 +166,7 @@ def _request(
         lifecycle_constraints=lifecycle_constraints,
         temporal_constraints=temporal_constraints,
         limit=limit,
+        focus=focus,
     )
 
 
@@ -432,6 +441,854 @@ def test_lexical_lanes_authorize_before_counts_and_return_exact_revision_passage
     publicish = json.dumps([documents, knowledge], default=str, ensure_ascii=False)
     for private in (SECRET, confirmed_raw, pending_raw, str(confirmed_ko)):
         assert private not in publicish
+
+
+def test_focused_lexical_lead_reaches_target_beyond_the_anchor_cap(storage) -> None:
+    target_body = "Иванов\nДолжность: ведущий инженер"
+    target, _ = _seed(
+        storage,
+        5000,
+        body=target_body,
+        received_at="2026-01-01T00:00:00+00:00",
+        inbox_status=InboxStatus.CLASSIFIED,
+    )
+    for index in range(100):
+        _seed(
+            storage,
+            5100 + index,
+            body=f"Иванов — специалист технического отдела {index:03d}",
+            received_at=f"2026-08-24T12:{index % 60:02d}:00+00:00",
+            inbox_status=InboxStatus.CLASSIFIED,
+        )
+    request = _request(
+        corpora=(ArchiveSearchCorpus.DOCUMENTS,),
+        query="Иванов",
+        focus="Иванов должность",
+        limit=10,
+    )
+
+    page = _search(
+        storage,
+        request=request,
+        corpus=ArchiveSearchCorpus.DOCUMENTS,
+        lane=SearchLane.LEXICAL,
+    )
+
+    assert page.candidates[0].resolved_source.source_ref.canonical_object_id == target
+    passage = page.candidates[0].passages[0]
+    locator = passage.passage_ref.locator
+    assert passage.excerpt == target_body
+    assert target_body[locator.start_char : locator.end_char] == passage.excerpt  # type: ignore[union-attr]
+    assert page.has_more is True
+    coverage = _coverage(page, request)
+    assert CoverageState.CAPPED in coverage.states
+    assert CoverageState.PARTIAL in coverage.states
+
+
+def test_focused_lexical_focus_pool_requires_anchor_and_detail(storage) -> None:
+    target_body = "Иванов\nДолжность: ведущий инженер"
+    target, _ = _seed(
+        storage,
+        6000,
+        body=target_body,
+        received_at="2026-01-01T00:00:00+00:00",
+        inbox_status=InboxStatus.CLASSIFIED,
+    )
+    for index in range(110):
+        _seed(
+            storage,
+            6100 + index,
+            body=f"Петров\nДолжность: директор {index:03d}",
+            received_at=f"2026-08-26T15:{index % 60:02d}:00+00:00",
+            inbox_status=InboxStatus.CLASSIFIED,
+        )
+    request = _request(
+        corpora=(ArchiveSearchCorpus.DOCUMENTS,),
+        query="Иванов",
+        focus="Иванов должность",
+    )
+
+    page = _search(
+        storage,
+        request=request,
+        corpus=ArchiveSearchCorpus.DOCUMENTS,
+        lane=SearchLane.LEXICAL,
+    )
+
+    assert (page.total, page.examined, page.matched, page.returned) == (111, 111, 1, 1)
+    assert page.candidates[0].resolved_source.source_ref.canonical_object_id == target
+    assert page.has_more is False
+    coverage = _coverage(page, request)
+    assert CoverageState.CAPPED not in coverage.states
+
+
+@pytest.mark.parametrize(
+    ("anchor", "detail", "value"),
+    (
+        ("张伟", "职位", "首席工程师"),
+        ("Νίκος", "θέση", "μηχανικός"),
+        ("أحمد", "المنصب", "مهندس"),
+    ),
+)
+def test_focused_lexical_live_fts_admits_all_script_source_tokens(
+    storage,
+    anchor: str,
+    detail: str,
+    value: str,
+) -> None:
+    body = f"{anchor}\n{detail}: {value}"
+    target, _ = _seed(
+        storage,
+        6050,
+        body=body,
+        inbox_status=InboxStatus.CLASSIFIED,
+    )
+    request = _request(
+        corpora=(ArchiveSearchCorpus.DOCUMENTS,),
+        query=anchor,
+        focus=f"{anchor} {detail}",
+    )
+
+    page = _search(
+        storage,
+        request=request,
+        corpus=ArchiveSearchCorpus.DOCUMENTS,
+        lane=SearchLane.LEXICAL,
+    )
+
+    assert page.matched == page.returned == 1
+    candidate = page.candidates[0]
+    assert candidate.resolved_source.source_ref.canonical_object_id == target
+    assert candidate.passages[0].excerpt == body
+
+
+@pytest.mark.parametrize("detail", ("X", "7"))
+def test_focused_lexical_live_fts_keeps_one_character_anchor_and_detail_exact(
+    storage,
+    detail: str,
+) -> None:
+    target_body = f"李\n{detail}: инженер"
+    target, _ = _seed(
+        storage,
+        6052,
+        body=target_body,
+        inbox_status=InboxStatus.CLASSIFIED,
+    )
+    _seed(
+        storage,
+        6053,
+        body="李\nY: отсутствующий detail",
+        inbox_status=InboxStatus.CLASSIFIED,
+    )
+    _seed(
+        storage,
+        6054,
+        body=f"王\n{detail}: отсутствующий anchor",
+        inbox_status=InboxStatus.CLASSIFIED,
+    )
+    request = _request(
+        corpora=(ArchiveSearchCorpus.DOCUMENTS,),
+        query="李",
+        focus=detail,
+    )
+
+    page = _search(
+        storage,
+        request=request,
+        corpus=ArchiveSearchCorpus.DOCUMENTS,
+        lane=SearchLane.LEXICAL,
+    )
+
+    assert page.matched == page.returned == 1
+    assert page.candidates[0].resolved_source.source_ref.canonical_object_id == target
+    assert page.candidates[0].passages[0].excerpt == target_body
+
+
+@pytest.mark.parametrize("stored_anchor", ("ＡＢ", "ⒶⒷ"))
+def test_focused_lexical_conservative_lead_recovers_unicode_compatibility_anchor(
+    storage,
+    stored_anchor: str,
+) -> None:
+    body = f"{stored_anchor}\nRole: engineer"
+    target, _ = _seed(
+        storage,
+        6051,
+        body=body,
+        inbox_status=InboxStatus.CLASSIFIED,
+    )
+    request = _request(
+        corpora=(ArchiveSearchCorpus.DOCUMENTS,),
+        query="AB",
+        focus="AB role",
+    )
+
+    page = _search(
+        storage,
+        request=request,
+        corpus=ArchiveSearchCorpus.DOCUMENTS,
+        lane=SearchLane.LEXICAL,
+    )
+
+    assert page.matched == page.returned == 1
+    assert page.candidates[0].resolved_source.source_ref.canonical_object_id == target
+    assert page.candidates[0].passages[0].excerpt == body
+
+
+def test_focused_lexical_requires_every_anchor_term_before_the_cap(storage) -> None:
+    target_body = "Иванов проект Альфа\nДолжность: ведущий инженер"
+    target, _ = _seed(
+        storage,
+        6300,
+        body=target_body,
+        received_at="2026-01-01T00:00:00+00:00",
+        inbox_status=InboxStatus.CLASSIFIED,
+    )
+    for index in range(110):
+        _seed(
+            storage,
+            6400 + index,
+            body=f"Иванов\nДолжность: директор {index:03d}",
+            received_at=f"2026-08-27T16:{index % 60:02d}:00+00:00",
+            inbox_status=InboxStatus.CLASSIFIED,
+        )
+    request = _request(
+        corpora=(ArchiveSearchCorpus.DOCUMENTS,),
+        query="Иванов проект Альфа",
+        focus="Иванов проект Альфа должность",
+    )
+
+    page = _search(
+        storage,
+        request=request,
+        corpus=ArchiveSearchCorpus.DOCUMENTS,
+        lane=SearchLane.LEXICAL,
+    )
+
+    assert (page.total, page.examined, page.matched, page.returned) == (111, 111, 1, 1)
+    assert page.candidates[0].resolved_source.source_ref.canonical_object_id == target
+    assert page.candidates[0].passages[0].excerpt == target_body
+    assert page.has_more is False
+    assert CoverageState.CAPPED not in _coverage(page, request).states
+
+
+def test_focused_lexical_keeps_yo_spellings_inside_one_anchor_group(storage) -> None:
+    body = "Иванов черных\nДолжность: ведущий инженер"
+    target, _ = _seed(
+        storage,
+        7000,
+        body=body,
+        inbox_status=InboxStatus.CLASSIFIED,
+    )
+    request = _request(
+        corpora=(ArchiveSearchCorpus.DOCUMENTS,),
+        query="Иванов чёрных",
+        focus="Иванов чёрных должность",
+    )
+
+    page = _search(
+        storage,
+        request=request,
+        corpus=ArchiveSearchCorpus.DOCUMENTS,
+        lane=SearchLane.LEXICAL,
+    )
+
+    assert page.matched == page.returned == 1
+    assert page.candidates[0].resolved_source.source_ref.canonical_object_id == target
+    assert page.candidates[0].passages[0].excerpt == body
+
+
+def test_focused_lexical_ninth_anchor_cannot_join_an_adjacent_record(storage) -> None:
+    anchors = tuple(f"anchor{index:02d}" for index in range(1, 10))
+    _seed(
+        storage,
+        7100,
+        body=(f"{' '.join(anchors[:8])}\nДолжность: ведущий инженер\n{anchors[8]}"),
+        inbox_status=InboxStatus.CLASSIFIED,
+    )
+    query = " ".join(anchors)
+    request = _request(
+        corpora=(ArchiveSearchCorpus.DOCUMENTS,),
+        query=query,
+        focus=f"{query} должность",
+    )
+
+    page = _search(
+        storage,
+        request=request,
+        corpus=ArchiveSearchCorpus.DOCUMENTS,
+        lane=SearchLane.LEXICAL,
+    )
+
+    assert (page.total, page.examined, page.matched, page.returned) == (1, 1, 0, 0)
+    assert page.candidates == ()
+
+
+def test_focused_lexical_foreign_fts_rows_cannot_change_authorized_leads(storage) -> None:
+    newer, _ = _seed(
+        storage,
+        6600,
+        body="Иванов\nДолжность: ведущий инженер",
+        received_at="2026-01-02T00:00:00+00:00",
+        inbox_status=InboxStatus.CLASSIFIED,
+    )
+    older, _ = _seed(
+        storage,
+        6601,
+        body="Иванов\nДолжность: системный архитектор",
+        received_at="2026-01-01T00:00:00+00:00",
+        inbox_status=InboxStatus.CLASSIFIED,
+    )
+    request = _request(
+        corpora=(ArchiveSearchCorpus.DOCUMENTS,),
+        query="Иванов",
+        focus="Иванов должность",
+    )
+
+    def search_ids() -> tuple[tuple[str, ...], bool]:
+        page = _search(
+            storage,
+            request=request,
+            corpus=ArchiveSearchCorpus.DOCUMENTS,
+            lane=SearchLane.LEXICAL,
+        )
+        return (
+            tuple(item.resolved_source.source_ref.canonical_object_id for item in page.candidates),
+            CoverageState.CAPPED in _coverage(page, request).states,
+        )
+
+    before = search_ids()
+    for index in range(100):
+        _seed(
+            storage,
+            6700 + index,
+            tenant=FOREIGN_TENANT,
+            owner=OTHER_OWNER,
+            body=("Иванов " * (1 + index % 7)) + "\nДолжность: чужой источник",
+            received_at=f"2026-08-28T17:{index % 60:02d}:00+00:00",
+            inbox_status=InboxStatus.CLASSIFIED,
+        )
+    statements: list[str] = []
+    storage.conn.set_trace_callback(statements.append)
+    try:
+        after = search_ids()
+    finally:
+        storage.conn.set_trace_callback(None)
+
+    assert before == after == ((newer, older), False)
+    query = next(item for item in statements if "focus_pool AS MATERIALIZED" in item)
+    assert "bm25(raw_fts)" not in query
+
+
+@pytest.mark.parametrize("drift", ("delete-all", "stale-row"))
+def test_focused_lexical_unattested_fts_miss_cannot_establish_absence(
+    drift: str,
+    storage,
+) -> None:
+    target, _ = _seed(
+        storage,
+        7200,
+        body="Иванов\nДолжность: ведущий инженер",
+        inbox_status=InboxStatus.CLASSIFIED,
+        text_extraction_success=True,
+    )
+    expected_total = 1
+    if drift == "stale-row":
+        _seed(
+            storage,
+            7201,
+            body="Иванов",
+            inbox_status=InboxStatus.CLASSIFIED,
+            text_extraction_success=True,
+        )
+        expected_total = 2
+    report = storage.backfill_document_catalog(
+        TENANT,
+        after_raw_object_id=None,
+        limit=expected_total,
+        include_document_passages=True,
+    )
+    assert report["passage_changed"] == expected_total
+    with storage.transaction() as conn:
+        if drift == "delete-all":
+            conn.execute("INSERT INTO raw_fts(raw_fts) VALUES('delete-all')")
+        else:
+            row = conn.execute(
+                "SELECT rowid, raw_content FROM raw_objects WHERE id=? AND user_id=?",
+                (target, TENANT),
+            ).fetchone()
+            assert row is not None
+            conn.execute(
+                "INSERT INTO raw_fts(raw_fts,rowid,raw_content) VALUES('delete',?,?)",
+                (row["rowid"], row["raw_content"]),
+            )
+    request = _request(
+        corpora=(ArchiveSearchCorpus.DOCUMENTS,),
+        query="Иванов",
+        focus="Иванов должность",
+    )
+
+    page = _search(
+        storage,
+        request=request,
+        corpus=ArchiveSearchCorpus.DOCUMENTS,
+        lane=SearchLane.LEXICAL,
+    )
+
+    assert (page.total, page.examined, page.matched, page.returned) == (
+        expected_total,
+        expected_total,
+        0,
+        0,
+    )
+    assert page.derivative_current is False
+    assert page.derivative_unavailable is True
+    coverage = _coverage(page, request)
+    assert CoverageState.UNAVAILABLE in coverage.states
+    assert coverage.absence_decision().value == "not_established"
+
+
+def test_focused_lexical_surviving_hit_cannot_claim_stale_fts_complete(storage) -> None:
+    removed, _ = _seed(
+        storage,
+        7202,
+        body="Иванов\nДолжность: ведущий инженер",
+        inbox_status=InboxStatus.CLASSIFIED,
+        text_extraction_success=True,
+    )
+    surviving, _ = _seed(
+        storage,
+        7203,
+        body="Иванов\nДолжность: системный архитектор",
+        inbox_status=InboxStatus.CLASSIFIED,
+        text_extraction_success=True,
+    )
+    report = storage.backfill_document_catalog(
+        TENANT,
+        after_raw_object_id=None,
+        limit=2,
+        include_document_passages=True,
+    )
+    assert report["passage_changed"] == 2
+    with storage.transaction() as conn:
+        row = conn.execute(
+            "SELECT rowid, raw_content FROM raw_objects WHERE id=? AND user_id=?",
+            (removed, TENANT),
+        ).fetchone()
+        assert row is not None
+        conn.execute(
+            "INSERT INTO raw_fts(raw_fts,rowid,raw_content) VALUES('delete',?,?)",
+            (row["rowid"], row["raw_content"]),
+        )
+    request = _request(
+        corpora=(ArchiveSearchCorpus.DOCUMENTS,),
+        query="Иванов",
+        focus="Иванов должность",
+    )
+
+    page = _search(
+        storage,
+        request=request,
+        corpus=ArchiveSearchCorpus.DOCUMENTS,
+        lane=SearchLane.LEXICAL,
+    )
+
+    assert (page.total, page.examined, page.matched, page.returned) == (2, 2, 1, 1)
+    assert page.candidates[0].resolved_source.source_ref.canonical_object_id == surviving
+    assert page.derivative_current is False
+    assert page.derivative_unavailable is True
+    coverage = _coverage(page, request)
+    assert CoverageState.UNAVAILABLE in coverage.states
+    assert coverage.absence_decision().value == "evidence_found"
+
+
+def test_focused_lexical_projection_rejects_predicate_only_and_far_join(storage) -> None:
+    _seed(
+        storage,
+        5300,
+        body="Должность: посторонний предикат без искомой фамилии",
+        inbox_status=InboxStatus.CLASSIFIED,
+    )
+    _seed(
+        storage,
+        5301,
+        body=(
+            "Иванов\n"
+            + ("нейтральный раздел без кадровых сведений\n" * 30)
+            + "Петров\nДолжность: генеральный директор"
+        ),
+        inbox_status=InboxStatus.CLASSIFIED,
+    )
+    _seed(
+        storage,
+        5302,
+        body="Иванов\nПетров Должность: генеральный директор",
+        inbox_status=InboxStatus.CLASSIFIED,
+    )
+    _seed(
+        storage,
+        5303,
+        body="Петров Должность: генеральный директор\nИванов",
+        inbox_status=InboxStatus.CLASSIFIED,
+    )
+    request = _request(
+        corpora=(ArchiveSearchCorpus.DOCUMENTS,),
+        query="Иванов",
+        focus="Иванов должность",
+    )
+
+    page = _search(
+        storage,
+        request=request,
+        corpus=ArchiveSearchCorpus.DOCUMENTS,
+        lane=SearchLane.LEXICAL,
+    )
+
+    assert page.examined == 4
+    assert page.matched == page.returned == 0
+    assert page.candidates == ()
+
+
+def test_focused_lexical_passage_uses_the_projector_exact_span(storage) -> None:
+    body = "Служебная преамбула\n\nИванов\nДолжность: ведущий инженер\n\nПетров\nДолжность: директор"
+    raw_id, _ = _seed(
+        storage,
+        5400,
+        body=body,
+        inbox_status=InboxStatus.CLASSIFIED,
+    )
+    request = _request(
+        corpora=(ArchiveSearchCorpus.DOCUMENTS,),
+        query="Иванов",
+        focus="Иванов должность",
+    )
+
+    page = _search(
+        storage,
+        request=request,
+        corpus=ArchiveSearchCorpus.DOCUMENTS,
+        lane=SearchLane.LEXICAL,
+    )
+
+    assert page.matched == page.returned == 1
+    candidate = page.candidates[0]
+    assert candidate.resolved_source.source_ref.canonical_object_id == raw_id
+    passage = candidate.passages[0]
+    locator = passage.passage_ref.locator
+    assert passage.excerpt == "Иванов\nДолжность: ведущий инженер"
+    assert body[locator.start_char : locator.end_char] == passage.excerpt  # type: ignore[union-attr]
+    assert passage.passage_ref.passage_index_version == LEGACY_DOCUMENT_PASSAGE_INDEX_VERSION
+    assert "Петров" not in passage.excerpt
+
+
+def test_focused_lexical_passage_uses_v2_only_for_a_containing_authenticated_child(
+    storage,
+) -> None:
+    body = "Иванов\nДолжность: ведущий инженер"
+    _seed(
+        storage,
+        5450,
+        body=body,
+        inbox_status=InboxStatus.CLASSIFIED,
+        text_extraction_success=True,
+    )
+    report = storage.backfill_document_catalog(
+        TENANT,
+        after_raw_object_id=None,
+        limit=1,
+        include_document_passages=True,
+    )
+    assert report["passage_changed"] == 1
+    request = _request(
+        corpora=(ArchiveSearchCorpus.DOCUMENTS,),
+        query="Иванов",
+        focus="Иванов должность",
+    )
+
+    page = _search(
+        storage,
+        request=request,
+        corpus=ArchiveSearchCorpus.DOCUMENTS,
+        lane=SearchLane.LEXICAL,
+    )
+
+    passage = page.candidates[0].passages[0]
+    locator = passage.passage_ref.locator
+    assert passage.passage_ref.passage_index_version == DOCUMENT_STORED_PASSAGE_INDEX_VERSION
+    assert body[locator.start_char : locator.end_char] == passage.excerpt  # type: ignore[union-attr]
+
+
+def test_no_focus_keeps_the_ordinary_lexical_sql_path(storage) -> None:
+    _seed(
+        storage,
+        5500,
+        body="Needle ordinary lexical source",
+        inbox_status=InboxStatus.CLASSIFIED,
+    )
+    request = _request(corpora=(ArchiveSearchCorpus.DOCUMENTS,), query="Needle")
+    statements: list[str] = []
+    storage.conn.set_trace_callback(statements.append)
+    try:
+        page = _search(
+            storage,
+            request=request,
+            corpus=ArchiveSearchCorpus.DOCUMENTS,
+            lane=SearchLane.LEXICAL,
+        )
+    finally:
+        storage.conn.set_trace_callback(None)
+
+    query = next(item for item in statements if "lexical_needles AS MATERIALIZED" in item)
+    assert "focus_ranked AS MATERIALIZED" not in query
+    assert page.matched == page.returned == 1
+
+
+def test_focused_lexical_fts_authorizes_before_the_sentinel_and_body_projection(
+    storage,
+) -> None:
+    target_body = "Иванов\nДолжность: ведущий инженер"
+    target, _ = _seed(
+        storage,
+        5600,
+        body=target_body,
+        received_at="2026-01-01T00:00:00+00:00",
+        inbox_status=InboxStatus.CLASSIFIED,
+    )
+    for index in range(110):
+        if index % 2:
+            _seed(
+                storage,
+                5700 + index,
+                tenant=FOREIGN_TENANT,
+                owner=OTHER_OWNER,
+                body="Иванов\nДолжность: чужой источник",
+                received_at=f"2026-08-25T14:{index % 60:02d}:00+00:00",
+                inbox_status=InboxStatus.CLASSIFIED,
+            )
+        else:
+            _seed(
+                storage,
+                5700 + index,
+                body="Иванов\nДолжность: отклонённый источник",
+                received_at=f"2026-08-25T14:{index % 60:02d}:00+00:00",
+                inbox_status=InboxStatus.IGNORED,
+            )
+    fold_calls: list[object] = []
+
+    def monitored_fold(value: object) -> str:
+        fold_calls.append(value)
+        return archive_document_storage._archive_search_fold(value)  # noqa: SLF001
+
+    storage.conn.create_function("friday_archive_fold", 1, monitored_fold, deterministic=True)
+    request = _request(
+        corpora=(ArchiveSearchCorpus.DOCUMENTS,),
+        query="Иванов",
+        focus="Иванов должность",
+    )
+    statements: list[str] = []
+    storage.conn.set_trace_callback(statements.append)
+    try:
+        page = _search(
+            storage,
+            request=request,
+            corpus=ArchiveSearchCorpus.DOCUMENTS,
+            lane=SearchLane.LEXICAL,
+        )
+    finally:
+        storage.conn.set_trace_callback(None)
+
+    assert (page.total, page.examined, page.matched, page.returned) == (1, 1, 1, 1)
+    assert page.candidates[0].resolved_source.source_ref.canonical_object_id == target
+    assert fold_calls == ["Ёж-Archive-Probe"]
+    query = next(item for item in statements if "focus_pool AS MATERIALIZED" in item)
+    sentinel = query.index("LIMIT 101")
+    authorized = query.index("JOIN authorized_sources s ON s.raw_rowid=f.raw_rowid")
+    assert sentinel < authorized
+    assert "raw_content AS passage_body" not in query
+    body_query = next(item for item in statements if "passage_body_blob" in item)
+    assert statements.index(query) < statements.index(body_query)
+    assert "substr(CAST(raw_content AS BLOB),1," in body_query
+    assert "version=" in body_query and "content_hash=" in body_query
+    assert "friday_archive_fold(s.passage_body)" not in query
+
+
+def test_focused_lexical_body_reads_obey_aggregate_and_per_source_budgets(
+    storage,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    body = "Иванов\nДолжность: ведущий инженер\n\n" + ("нейтральный раздел\n" * 10)
+    body_bytes = len(body.encode())
+    aggregate_budget = body_bytes * 2 + 10
+    oversized_body = "Иванов\nДолжность: ведущий инженер\n\n" + ("слишком большой раздел\n" * 20)
+    assert len(oversized_body.encode()) > 500
+    _seed(
+        storage,
+        7399,
+        body=oversized_body,
+        received_at="2026-08-29T17:00:00+00:00",
+        inbox_status=InboxStatus.CLASSIFIED,
+    )
+    for index in range(12):
+        _seed(
+            storage,
+            7400 + index,
+            body=body,
+            received_at=f"2026-08-29T18:{index:02d}:00+00:00",
+            inbox_status=InboxStatus.CLASSIFIED,
+        )
+    monkeypatch.setattr(archive_document_storage, "_FOCUSED_DOCUMENT_BODY_MAX_BYTES", 500)
+    monkeypatch.setattr(
+        archive_document_storage,
+        "_FOCUSED_DOCUMENT_BODY_BUDGET_BYTES",
+        aggregate_budget,
+    )
+    projected_body_bytes: list[int] = []
+    original_projector = archive_document_storage.project_source_focus
+
+    def monitored_projector(body: str, *args: object, **kwargs: object):
+        projected_body_bytes.append(len(body.encode()))
+        return original_projector(body, *args, **kwargs)
+
+    monkeypatch.setattr(archive_document_storage, "project_source_focus", monitored_projector)
+    request = _request(
+        corpora=(ArchiveSearchCorpus.DOCUMENTS,),
+        query="Иванов",
+        focus="Иванов должность",
+    )
+    statements: list[str] = []
+    storage.conn.set_trace_callback(statements.append)
+    try:
+        page = _search(
+            storage,
+            request=request,
+            corpus=ArchiveSearchCorpus.DOCUMENTS,
+            lane=SearchLane.LEXICAL,
+        )
+    finally:
+        storage.conn.set_trace_callback(None)
+
+    assert projected_body_bytes == [body_bytes, body_bytes]
+    assert sum(projected_body_bytes) <= aggregate_budget
+    assert all(item <= 500 for item in projected_body_bytes)
+    assert (page.matched, page.returned) == (2, 2)
+    assert page.has_more is True
+    coverage = _coverage(page, request)
+    assert CoverageState.CAPPED in coverage.states
+    assert CoverageState.UNAVAILABLE in coverage.states
+    assert coverage.limit == request.limit == 20
+    lead_query = next(item for item in statements if "focus_pool AS MATERIALIZED" in item)
+    assert "raw_content AS passage_body" not in lead_query
+    body_queries = [item for item in statements if "passage_body_blob" in item]
+    assert len(body_queries) == 3
+    assert all("length(CAST(raw_content AS BLOB)) BETWEEN 1 AND" in item for item in body_queries)
+
+
+def test_focused_lexical_failed_body_reads_consume_the_attempt_budget(
+    storage,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    for index in range(12):
+        _seed(
+            storage,
+            7450 + index,
+            body="Иванов\nДолжность: ведущий инженер\n\n" + ("oversized\n" * 80),
+            received_at=f"2026-08-29T20:{index:02d}:00+00:00",
+            inbox_status=InboxStatus.CLASSIFIED,
+        )
+    monkeypatch.setattr(archive_document_storage, "_FOCUSED_DOCUMENT_BODY_MAX_BYTES", 100)
+    monkeypatch.setattr(archive_document_storage, "_FOCUSED_DOCUMENT_BODY_BUDGET_BYTES", 400)
+    projector_calls = 0
+
+    def forbidden_projector(*_args: object, **_kwargs: object) -> None:
+        nonlocal projector_calls
+        projector_calls += 1
+        raise AssertionError("oversized body reached the exact projector")
+
+    monkeypatch.setattr(archive_document_storage, "project_source_focus", forbidden_projector)
+    request = _request(
+        corpora=(ArchiveSearchCorpus.DOCUMENTS,),
+        query="Иванов",
+        focus="Иванов должность",
+    )
+    statements: list[str] = []
+    storage.conn.set_trace_callback(statements.append)
+    try:
+        page = _search(
+            storage,
+            request=request,
+            corpus=ArchiveSearchCorpus.DOCUMENTS,
+            lane=SearchLane.LEXICAL,
+        )
+    finally:
+        storage.conn.set_trace_callback(None)
+
+    body_queries = [item for item in statements if "passage_body_blob" in item]
+    assert projector_calls == 0
+    assert len(body_queries) == 4
+    assert all("length(CAST(raw_content AS BLOB)) BETWEEN 1 AND 100" in item for item in body_queries)
+    assert page.candidates == ()
+    assert page.has_more is True
+    coverage = _coverage(page, request)
+    assert CoverageState.CAPPED in coverage.states
+    assert CoverageState.UNAVAILABLE in coverage.states
+
+
+def test_focused_lexical_oversize_zero_return_keeps_the_applied_request_limit(
+    storage,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _seed(
+        storage,
+        7500,
+        body="Иванов\nДолжность: ведущий инженер\n\n" + ("крупный раздел\n" * 20),
+        inbox_status=InboxStatus.CLASSIFIED,
+    )
+    monkeypatch.setattr(archive_document_storage, "_FOCUSED_DOCUMENT_BODY_MAX_BYTES", 100)
+    monkeypatch.setattr(archive_document_storage, "_FOCUSED_DOCUMENT_BODY_BUDGET_BYTES", 200)
+    request = _request(
+        corpora=(ArchiveSearchCorpus.DOCUMENTS,),
+        query="Иванов",
+        focus="Иванов должность",
+    )
+
+    page = _search(
+        storage,
+        request=request,
+        corpus=ArchiveSearchCorpus.DOCUMENTS,
+        lane=SearchLane.LEXICAL,
+    )
+
+    assert (page.matched, page.returned) == (0, 0)
+    assert page.has_more is True
+    assert page.applied_limit == request.limit == 20
+    coverage = _coverage(page, request)
+    assert CoverageState.CAPPED in coverage.states
+    assert CoverageState.UNAVAILABLE in coverage.states
+    assert coverage.limit == 20
+    assert coverage.absence_decision().value == "not_established"
+
+
+def test_focused_lexical_missing_raw_fts_fails_closed_without_a_body_scan(storage) -> None:
+    _seed(
+        storage,
+        5900,
+        body="Иванов\nДолжность: ведущий инженер",
+        inbox_status=InboxStatus.CLASSIFIED,
+    )
+    request = _request(
+        corpora=(ArchiveSearchCorpus.DOCUMENTS,),
+        query="Иванов",
+        focus="Иванов должность",
+    )
+    with storage.transaction() as conn:
+        conn.execute("DROP TABLE raw_fts")
+
+    with pytest.raises(ArchiveDocumentStorageError, match="lexical index is unavailable"):
+        _search(
+            storage,
+            request=request,
+            corpus=ArchiveSearchCorpus.DOCUMENTS,
+            lane=SearchLane.LEXICAL,
+        )
 
 
 def test_foreign_corpus_cannot_change_authorized_membership_or_lane_ranks(storage) -> None:
@@ -1195,6 +2052,7 @@ def test_internal_document_materialization_can_exceed_public_request_limit(stora
 
     assert request.limit == 1
     assert page.returned == len(page.candidates) == 3
+    assert page.applied_limit == 3
     with pytest.raises(ArchiveDocumentStorageError, match="page limit"):
         _search(
             storage,
@@ -2024,6 +2882,91 @@ def test_document_replay_source_is_immutable_and_not_dataclass_serializable(stor
         storage.conn.rollback()
 
 
+def test_document_replay_authorizes_body_free_then_reads_one_exact_large_source(storage) -> None:
+    large_body = "Needle exact large replay\n" + "x" * 1_100_000
+    raw_id, _knowledge_id = _seed(
+        storage,
+        44,
+        filename="needle-large-replay.pdf",
+        body=large_body,
+        inbox_status=InboxStatus.CLASSIFIED,
+    )
+    for ordinal in range(45, 48):
+        _seed(
+            storage,
+            ordinal,
+            filename=f"peer-{ordinal}.pdf",
+            body="large peer\n" + "y" * 1_100_000,
+            inbox_status=InboxStatus.CLASSIFIED,
+        )
+    conversation = storage.create_conversation(OWNER, "Large replay boundary")
+    boundary = storage.store_message(conversation["id"], OWNER, "user", "replay large source")
+    request = _request(corpora=(ArchiveSearchCorpus.DOCUMENTS,))
+    page = _search(
+        storage,
+        request=request,
+        corpus=ArchiveSearchCorpus.DOCUMENTS,
+        lane=SearchLane.CATALOG,
+    )
+    candidate = next(
+        item for item in page.candidates if item.resolved_source.source_ref.canonical_object_id == raw_id
+    )
+    raw_hash = str(
+        storage.conn.execute("SELECT content_hash FROM raw_objects WHERE id=?", (raw_id,)).fetchone()[0]
+    )
+    revision = SourceRevision(
+        SourceRepresentation(RepresentationKind.RAW_OBJECT, raw_id),
+        RevisionKind.RAW_CONTENT_SHA256,
+        raw_hash,
+    )
+
+    statements: list[str] = []
+    storage.conn.set_trace_callback(statements.append)
+    storage.conn.execute("BEGIN")
+    try:
+        source = select_authorized_archive_document_replay_source_in_transaction(
+            storage.conn,
+            tenant_id=TENANT,
+            owner_id=OWNER,
+            origin_boundary_user_message_id=boundary["id"],
+            corpus=ArchiveSearchCorpus.DOCUMENTS,
+            source_ref=candidate.resolved_source.source_ref,
+            source_revision=revision,
+        )
+        assert source is not None
+        assert source.body == large_body
+    finally:
+        storage.conn.rollback()
+        storage.conn.set_trace_callback(None)
+    body_reads = [item for item in statements if "AS replay_body" in item]
+    assert len(body_reads) == 1
+    lead = next(item for item in statements if "replay_boundary AS MATERIALIZED" in item)
+    assert "live_raw.raw_content" not in lead
+
+    with storage.transaction() as conn:
+        conn.execute("UPDATE raw_objects SET content_hash=? WHERE id=?", ("f" * 64, raw_id))
+    drift_statements: list[str] = []
+    storage.conn.set_trace_callback(drift_statements.append)
+    storage.conn.execute("BEGIN")
+    try:
+        assert (
+            select_authorized_archive_document_replay_source_in_transaction(
+                storage.conn,
+                tenant_id=TENANT,
+                owner_id=OWNER,
+                origin_boundary_user_message_id=boundary["id"],
+                corpus=ArchiveSearchCorpus.DOCUMENTS,
+                source_ref=candidate.resolved_source.source_ref,
+                source_revision=revision,
+            )
+            is None
+        )
+    finally:
+        storage.conn.rollback()
+        storage.conn.set_trace_callback(None)
+    assert not any("AS replay_body" in item for item in drift_statements)
+
+
 def test_inbound_continuation_is_explicitly_unavailable_without_a_local_cursor(storage) -> None:
     _seed(storage, 43, filename="needle-continuation.pdf", inbox_status=InboxStatus.CLASSIFIED)
     request = ArchiveSearchRequest.create(
@@ -2262,6 +3205,59 @@ def test_duplicate_filename_metadata_cannot_confirm_catalog_absence(
     assert page.total is None
     assert page.matched == page.returned == 0
     assert _coverage(page, request).absence_decision().value == "not_established"
+
+
+def test_oversized_audio_metadata_fails_closed_before_document_recall(storage) -> None:
+    raw_id, _ = _seed(
+        storage,
+        851,
+        filename="oversized-audio.ogg",
+        body="Oversized audio marker",
+        inbox_status=InboxStatus.CLASSIFIED,
+    )
+    oversized_audio_metadata = json.dumps(
+        {
+            "filename": "oversized-audio.ogg",
+            "mime_type": "audio/ogg",
+            "media_kind": "voice",
+            "uploaded_by": OWNER,
+            "padding": "x" * 200_000,
+        },
+        separators=(",", ":"),
+    )
+    with storage.transaction() as conn:
+        conn.execute(
+            "UPDATE raw_objects SET metadata_json=? WHERE id=?",
+            (oversized_audio_metadata, raw_id),
+        )
+    ordinary_id, _ = _seed(
+        storage,
+        852,
+        filename="ordinary-document.pdf",
+        body="Ordinary document marker",
+        inbox_status=InboxStatus.CLASSIFIED,
+    )
+    searchable = storage.get_searchable_file_sources(
+        TENANT,
+        [raw_id, ordinary_id],
+    )
+    assert [item["id"] for item in searchable] == [ordinary_id]
+
+    request = _request(
+        corpora=(ArchiveSearchCorpus.DOCUMENTS,),
+        query="Oversized audio marker",
+    )
+
+    page = _search(
+        storage,
+        request=request,
+        corpus=ArchiveSearchCorpus.DOCUMENTS,
+        lane=SearchLane.LEXICAL,
+    )
+
+    assert all(
+        candidate.resolved_source.source_ref.canonical_object_id != raw_id for candidate in page.candidates
+    )
 
 
 def test_foreign_principal_catalog_corruption_does_not_degrade_owner_coverage(storage) -> None:

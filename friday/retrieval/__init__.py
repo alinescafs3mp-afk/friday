@@ -3419,6 +3419,7 @@ class HybridSearcher:
         window_ids: set[str] | None = None,
         uploaded_by: str | None = None,
         query_vector: list[float] | None = None,
+        materialize_candidates: bool = True,
     ) -> dict[str, float]:
         """Corpus-wide dense recall over persisted vectors.
 
@@ -3586,6 +3587,7 @@ class HybridSearcher:
             ]
 
         promoted = list(dict.fromkeys(_ranked(doc_scores) + _ranked(combined)))
+        admitted_without_bodies: set[str] = set()
         for document_id in promoted:
             if document_id in candidate_map:
                 continue
@@ -3593,6 +3595,14 @@ class HybridSearcher:
             # заданных человеком границ, а вывод документа вне периода в кандидаты
             # означал бы, что «жёсткий предфильтр» держится только на одном канале.
             if window_ids is not None and document_id not in window_ids:
+                continue
+            if not materialize_candidates:
+                # Archive-plan preparation needs only the code-owned, principal-
+                # scoped embedding identity.  The storage facade reauthorizes the
+                # exact source and chunk in its own snapshot; loading a complete KO
+                # body here would grant no additional authority and retained up to
+                # two top-k sets of arbitrarily large documents in Python.
+                admitted_without_bodies.add(document_id)
                 continue
             item = await storage_read(
                 self.storage.get_knowledge_object,
@@ -3636,7 +3646,11 @@ class HybridSearcher:
                 if document_id in provenance
                 and chunk_scores.get(document_id, -1.0) >= doc_scores.get(document_id, -1.0)
             }
-        return {document_id: score for document_id, score in combined.items() if document_id in candidate_map}
+        return {
+            document_id: score
+            for document_id, score in combined.items()
+            if document_id in candidate_map or document_id in admitted_without_bodies
+        }
 
     async def prepare_archive_dense_query_plan(
         self,
@@ -3687,6 +3701,7 @@ class HybridSearcher:
             meta=meta,
             uploaded_by=principal if principal_id is not None else None,
             query_vector=query_vector,
+            materialize_candidates=False,
         )
         if meta.get("dense_indexed") is not True:
             return None
