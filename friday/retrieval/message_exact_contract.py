@@ -559,6 +559,19 @@ class _ProcessPrivate:
 class MessageExactRow(_ProcessPrivate):
     """One exact stored row.  Its body never has a serialization method."""
 
+    _seal: str
+    content: str
+    conversation_id: str
+    created_at: str
+    message_id: str
+    metadata_json: str
+    principal_id: str
+    reply_to_message_id: str | None
+    reply_revision_sha256: str | None
+    revision_sha256: str
+    role: MessageRole
+    storage_sequence: int
+
     __slots__ = (
         "_seal",
         "content",
@@ -775,6 +788,18 @@ def _page_selection_handle(
 
 class MessageExactPage(_ProcessPrivate):
     """One authorized, one-snapshot page retaining exact adjacent rows."""
+
+    _seal: str
+    authority_handle: str
+    boundary: MessageExactRow
+    next_continuation: MessageExactContinuation | None
+    offset: int
+    principal_id: str
+    request: MessageExactRequest
+    rows: tuple[MessageExactRow, ...]
+    selection_handle: str
+    snapshot_handle: str
+    total_rows: int
 
     __slots__ = (
         "_seal",
@@ -1178,6 +1203,11 @@ def project_message_exact_page(page: MessageExactPage) -> MessageExactProjection
 
 class MessageExactPublicationDecision(_ProcessPrivate):
     """Body-free late reauthorization receipt bound to one selected page."""
+
+    _authority_handle: str
+    _seal: str
+    _selection_handle: str
+    status: MessageExactPublicationStatus
 
     __slots__ = ("_authority_handle", "_seal", "_selection_handle", "status")
 

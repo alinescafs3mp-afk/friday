@@ -24,7 +24,7 @@ import sqlite3
 import unicodedata
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import Any, NoReturn, SupportsIndex
+from typing import Any, NoReturn, SupportsIndex, cast
 
 from friday.audit_privacy import decode_audit_privacy_key
 from friday.retrieval.contracts import MessageRole
@@ -238,6 +238,8 @@ def _selector_payload(request: MessageExactRequest) -> dict[str, object]:
     until = request.until
     if (since is None) != (until is None):
         raise MessageExactStorageError("request time bounds are incomplete")
+    start: str | None
+    end: str | None
     if since is not None and until is not None:
         start = _utc(since, label="request since")
         end = _utc(until, label="request until")
@@ -284,6 +286,22 @@ def _authorization_payload(
 
 class MessageExactStorageAuthority:
     """Process-private, database-keyed capability for one exact request."""
+
+    _adapter_binding_sha256: str
+    _authority_context_sha256: str
+    _authority_handle: str
+    _authorization_binding_sha256: str
+    _capability_binding_sha256: str
+    _context_authority_sha256: str
+    _person_binding_sha256: str
+    _principal_id: str
+    _request: MessageExactRequest
+    _request_identity_sha256: str
+    _seal: str
+    _selector_sha256: str
+    _tenant_binding_sha256: str
+    _turn_authority_sha256: str
+    _turn_id_sha256: str
 
     __slots__ = (
         "_adapter_binding_sha256",
@@ -442,7 +460,7 @@ def _issue_message_exact_storage_authority_in_transaction(
             "authorization_binding_sha256": authorization_binding_sha256,
         }
     )
-    stable = {
+    stable: dict[str, object] = {
         "schema": _AUTHORITY_SCHEMA,
         "request_identity_sha256": request_identity_sha256,
         "selector_sha256": selector_sha256,
@@ -459,12 +477,12 @@ def _issue_message_exact_storage_authority_in_transaction(
     authority_context_sha256 = _sha256(
         {key: value for key, value in stable.items() if key not in {"request_identity_sha256"}}
     )
-    material = {
+    material: dict[str, object] = {
         **stable,
         "authority_context_sha256": authority_context_sha256,
     }
     authority_handle = _sha256(material)
-    sealed_material = {**material, "authority_handle": authority_handle}
+    sealed_material: dict[str, object] = {**material, "authority_handle": authority_handle}
     key = _load_key(conn)
     seal = _hmac(key, domain=_AUTHORITY_SCHEMA, material=_canonical_bytes(sealed_material))
     return MessageExactStorageAuthority(
@@ -1085,7 +1103,7 @@ def _scan_rows(
     reply_budget: _ReplyRevisionBudget,
 ) -> _ScanResult:
     selector = _selector_payload(request)
-    roles = tuple(selector["roles"])
+    roles = tuple(cast(list[str], selector["roles"]))
     placeholders = ",".join("?" for _item in roles)
     time_clause = ""
     time_parameters: tuple[object, ...] = ()
