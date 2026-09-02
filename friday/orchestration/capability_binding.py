@@ -242,6 +242,107 @@ def _archive_adapter_resolution(authorization: AuthorizationService) -> _Adapter
     )
 
 
+def _message_exact_adapter_resolution(
+    definitions: dict[str, CapabilityDefinition],
+) -> _AdapterResolution:
+    """Resolve the code-owned queryless conversation lane and both permissions."""
+
+    expected_adapter = "friday.retrieval.message_exact_internal.MessageExactInternalAdapter"
+    try:
+        from friday.retrieval.message_exact_internal import (
+            MESSAGE_EXACT_ADAPTER_BINDING,
+            MESSAGE_EXACT_INTERNAL_ADAPTER_ID,
+            MESSAGE_EXACT_SECURITY_IDS,
+            MessageExactInternalAdapter,
+        )
+    except Exception:
+        return _missing_adapter(
+            security_id="conversations.read",
+            tool_id=CONVERSATION_WINDOW_READ_ID,
+            adapter_id=expected_adapter,
+        )
+
+    security_ids = tuple(MESSAGE_EXACT_SECURITY_IDS)
+    try:
+        adapter_binding_sha256 = MESSAGE_EXACT_ADAPTER_BINDING.canonical_sha256()
+    except Exception:
+        return _missing_adapter(
+            security_id="conversations.read",
+            tool_id=CONVERSATION_WINDOW_READ_ID,
+            adapter_id=expected_adapter,
+        )
+    permission_witnesses: list[dict[str, Any]] = []
+    permissions_registered = True
+    for security_id in security_ids:
+        definition = definitions.get(security_id)
+        registered = definition is not None
+        permissions_registered = permissions_registered and registered
+        permission_witnesses.append(
+            {
+                "security_id": security_id,
+                "registered": registered,
+                "identity_sha256": canonical_sha256(
+                    _permission_payload(definition)
+                    if definition is not None
+                    else {"security_id": security_id, "registered": False}
+                ),
+            }
+        )
+    adapter_id = str(MESSAGE_EXACT_INTERNAL_ADAPTER_ID)
+    tool_id = str(MESSAGE_EXACT_ADAPTER_BINDING.capability_id)
+    method_ids = {
+        name: _qualified_name(getattr(MessageExactInternalAdapter, name, None))
+        for name in (
+            "prepare_in_transaction",
+            "project_for_model",
+            "reauthorize_for_publication_in_transaction",
+        )
+    }
+    registered = bool(
+        adapter_id == expected_adapter
+        and _qualified_name(MessageExactInternalAdapter) == expected_adapter
+        and MESSAGE_EXACT_ADAPTER_BINDING.adapter_id == expected_adapter
+        and tool_id == CONVERSATION_WINDOW_READ_ID
+        and MESSAGE_EXACT_ADAPTER_BINDING.security_ids
+        == (
+            "conversations.read",
+            "search.use",
+        )
+        and security_ids == MESSAGE_EXACT_ADAPTER_BINDING.security_ids
+        and MESSAGE_EXACT_ADAPTER_BINDING.effect_class == "read"
+        and MESSAGE_EXACT_ADAPTER_BINDING.model_visible is False
+        and method_ids
+        == {
+            "prepare_in_transaction": f"{expected_adapter}.prepare_in_transaction",
+            "project_for_model": f"{expected_adapter}.project_for_model",
+            "reauthorize_for_publication_in_transaction": (
+                f"{expected_adapter}.reauthorize_for_publication_in_transaction"
+            ),
+        }
+        and permissions_registered
+    )
+    payload = {
+        "security_id": security_ids[0] if security_ids else "",
+        "security_ids": list(security_ids),
+        "permission_witnesses": permission_witnesses,
+        "tool_id": tool_id,
+        "adapter_id": adapter_id,
+        "adapter_binding_sha256": adapter_binding_sha256,
+        "implementation_id": _qualified_name(MessageExactInternalAdapter),
+        "method_ids": method_ids,
+        "effect_class": MESSAGE_EXACT_ADAPTER_BINDING.effect_class,
+        "model_visible": MESSAGE_EXACT_ADAPTER_BINDING.model_visible,
+        "registered": registered,
+    }
+    return _AdapterResolution(
+        security_id=security_ids[0] if security_ids else "",
+        tool_id=tool_id,
+        adapter_id=adapter_id,
+        identity_sha256=canonical_sha256(payload),
+        registered=registered,
+    )
+
+
 def _transient_web_adapter_resolution() -> _AdapterResolution:
     try:
         module = importlib.import_module("friday.orchestration.transient_web_comparison")
@@ -318,16 +419,13 @@ def operational_capability_snapshot() -> CapabilityBindingSnapshot:
     file_resolution = _file_adapter_resolution()
     archive_resolution = _archive_adapter_resolution(authorization)
     web_resolution = _transient_web_adapter_resolution()
+    message_resolution = _message_exact_adapter_resolution(definitions)
     return CapabilityBindingSnapshot(
         bindings=(
             _binding(FILE_CURRENT_READ_ID, file_resolution, definitions),
             _binding(ARCHIVE_SEARCH_ID, archive_resolution, definitions),
             _binding(WEB_SEARCH_CURRENT_ID, web_resolution, definitions),
-            _binding(
-                CONVERSATION_WINDOW_READ_ID,
-                _missing_adapter(security_id="conversations.read"),
-                definitions,
-            ),
+            _binding(CONVERSATION_WINDOW_READ_ID, message_resolution, definitions),
         )
     )
 

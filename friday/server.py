@@ -206,6 +206,7 @@ from friday.permissions import (
 )
 from friday.retrieval import EmbeddingBackend, HybridSearcher, is_relational_query
 from friday.retrieval._rerank_backend import RerankBackend, rerank_with_backend
+from friday.retrieval.message_exact_internal import MessageExactInternalAdapter
 from friday.secondary_brain import SecondaryBrainScheduler, build_secondary_brain
 from friday.security import verify_bridge_request
 from friday.storage import (
@@ -2795,6 +2796,10 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
                 kernel,
                 secondary_brain=secondary_brain,
                 selected_archive_model=attested_v12_runtime,
+                message_exact_adapter=MessageExactInternalAdapter(
+                    auth_service,
+                    turn_context_issuer,
+                ),
             )
             available_route_handlers = (
                 {

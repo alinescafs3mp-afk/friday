@@ -47,6 +47,7 @@ _MAX_STORED_PAGE_BYTES = 4_000_000
 # advertised 80k-character full-content budget.
 _MAX_MODEL_JSON_BYTES = 600_000
 _MAX_COUNT = 1_000_000_000
+_MAX_SQLITE_ROWID = 2**63 - 1
 _MESSAGE_ID = re.compile(r"msg_[0-9a-f]{16}\Z")
 _CONVERSATION_ID = re.compile(r"conv_[0-9a-f]{16}\Z")
 _SHA256 = re.compile(r"[0-9a-f]{64}\Z")
@@ -617,7 +618,12 @@ class MessageExactRow(_ProcessPrivate):
             else _sha256(reply_revision_sha256, label="stored reply parent revision")
         )
         created = _instant(created_at, label="stored message timestamp")
-        sequence = _count(storage_sequence, label="stored message sequence", low=1)
+        sequence = _count(
+            storage_sequence,
+            label="stored message sequence",
+            low=1,
+            high=_MAX_SQLITE_ROWID,
+        )
         revision = _message_exact_row_revision_sha256(
             message_id=message,
             conversation_id=conversation,
@@ -672,7 +678,12 @@ class MessageExactRow(_ProcessPrivate):
                 reply_revision_sha256=self.reply_revision_sha256,
                 created_at=self.created_at,
             )
-            _count(self.storage_sequence, label="stored message sequence", low=1)
+            _count(
+                self.storage_sequence,
+                label="stored message sequence",
+                low=1,
+                high=_MAX_SQLITE_ROWID,
+            )
             expected_seal = _keyed_handle(
                 b"friday/message-exact-row-seal/v1",
                 {

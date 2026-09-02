@@ -142,11 +142,7 @@ def test_each_missing_message_permission_makes_window_binding_unavailable(
     original = AuthorizationService.list_capabilities
 
     def without_definition(service: AuthorizationService) -> list[CapabilityDefinition]:
-        return [
-            definition
-            for definition in original(service)
-            if definition.security_id != security_id
-        ]
+        return [definition for definition in original(service) if definition.security_id != security_id]
 
     monkeypatch.setattr(AuthorizationService, "list_capabilities", without_definition)
     missing_snapshot = operational_capability_snapshot()

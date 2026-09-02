@@ -373,6 +373,10 @@ from friday.orchestration.turn_context_call_scope import (
     require_authenticated_chat_call_scope,
     require_current_authenticated_chat_call_scope,
 )
+from friday.orchestration.turn_context_publication import (
+    AUTHENTICATED_TURN_PUBLICATION_METADATA_KEY,
+    AUTHENTICATED_TURN_PUBLICATION_SCHEMA,
+)
 from friday.orchestration.turn_context_runtime import (
     current_authenticated_turn_context,
     current_primary_authenticated_turn_context,
@@ -431,7 +435,14 @@ from friday.retrieval.archive_search_service import (
     reauthorize_archive_search_coverage,
     refresh_archive_search_reauthorization_in_transaction,
 )
+from friday.retrieval.contracts import MessageRole
 from friday.retrieval.identity_contract import AuthorityScope, CanonicalObjectKind, SourceKind, SourceRef
+from friday.retrieval.message_exact_contract import (
+    MessageExactContentMode,
+    MessageExactPage,
+    MessageExactRequest,
+)
+from friday.retrieval.message_exact_internal import MessageExactInternalAdapter
 from friday.source_identity import (
     AuthorizedFileSnapshotToken,
     RawSourceSnapshot,
@@ -37165,6 +37176,52 @@ def _agent_attachment_model_authority(context: AgentContext | None) -> Authentic
     return admitted
 
 
+def _authenticated_message_exact_boundary(
+    stored: Mapping[str, Any],
+    context: AuthenticatedTurnContext | None,
+    *,
+    conversation_id: str,
+    person_id: str,
+    content: str,
+) -> str:
+    """Accept only the exact durable user row emitted by this primary turn."""
+
+    if context is None:
+        return ""
+    admitted = current_primary_authenticated_turn_context(context)
+    message_id = str(stored.get("id") or "").strip()
+    metadata_json = stored.get("metadata_json")
+    try:
+        metadata = json.loads(metadata_json) if type(metadata_json) is str else None
+    except (TypeError, ValueError, json.JSONDecodeError):
+        metadata = None
+    projection = (
+        metadata.get(AUTHENTICATED_TURN_PUBLICATION_METADATA_KEY) if isinstance(metadata, Mapping) else None
+    )
+    expected_projection = {
+        "schema": AUTHENTICATED_TURN_PUBLICATION_SCHEMA,
+        "turn_id": context.turn_id,
+        "context_authority_sha256": context.context_authority_sha256,
+        "request_effect_binding_sha256": context.effect_fence.request_effect_binding_sha256,
+        "publication_role": "user",
+    }
+    if (
+        admitted is not context
+        or context.authority.conversation_id != conversation_id
+        or context.authority.person_id != person_id
+        or str(stored.get("conversation_id") or "") != conversation_id
+        or str(stored.get("user_id") or "") != person_id
+        or stored.get("role") != "user"
+        or stored.get("content") != content
+        or re.fullmatch(r"msg_[0-9a-f]{16}", message_id) is None
+        or type(metadata) is not dict
+        or type(projection) is not dict
+        or projection != expected_projection
+    ):
+        raise TurnContextError("authenticated durable user boundary does not match this turn")
+    return message_id
+
+
 @dataclass
 class AgentContext:
     conversation_id: str
@@ -37302,6 +37359,39 @@ class AgentContext:
     #: attachment marker above are both true.
     message_locate_evidence_ready: bool = False
     message_locate_evidence_payload: str = ""
+    #: Exact durable ingress row accepted by the authenticated publication
+    #: lease. It is set only after the returned user's body-free publication
+    #: projection matches this ambient primary turn.
+    message_exact_boundary_user_message_id: str = field(
+        default="",
+        repr=False,
+        compare=False,
+    )
+    #: Process-private pages prepared by the code-owned queryless lane. Only
+    #: their bounded projections may enter model input; every page is consumed
+    #: by a fresh late publication decision in the assistant transaction.
+    message_exact_pages: tuple[MessageExactPage, ...] = field(
+        default_factory=tuple,
+        repr=False,
+        compare=False,
+    )
+    #: Independent process-private witness for the complete accepted page
+    #: chain.  It is updated with every page before projection, so losing only
+    #: a suffix of the carrier tuple cannot make the remaining pages look like
+    #: the complete model-used source set at publication time.
+    message_exact_page_chain_witness: tuple[str, ...] = field(
+        default_factory=tuple,
+        repr=False,
+        compare=False,
+    )
+    #: Sticky process-private evidence that the exact lane influenced this
+    #: turn. Losing its page carriers must deny publication, never downgrade
+    #: the final check to the legacy permission-only gate.
+    message_exact_read_used: bool = field(
+        default=False,
+        repr=False,
+        compare=False,
+    )
     #: A successful code-owned message adapter page influenced this turn.
     #: This process-private bit forces fresh search/conversation authority in
     #: the same transaction that commits the assistant publication.
@@ -37975,6 +38065,7 @@ class AgentRuntime:
         kernel: ExecutionKernel | None = None,
         secondary_brain: SecondaryBrainScheduler | None = None,
         selected_archive_model: Any | None = None,
+        message_exact_adapter: MessageExactInternalAdapter | None = None,
     ) -> None:
         self.settings = settings
         self.storage = storage
@@ -37984,6 +38075,7 @@ class AgentRuntime:
         # exact structural replay below, so the durable archive baseline never
         # depends on model availability.
         self._selected_archive_model = selected_archive_model
+        self._message_exact_adapter = message_exact_adapter
         # The fallback kernel is fully authorized: an ungated kernel would
         # otherwise run every tool without capability checks (and a kernel
         # without authorization now denies everything by design).
@@ -41895,6 +41987,55 @@ class AgentRuntime:
             LOGGER.warning("message-search: publication recheck failed (%s)", type(exc).__name__)
             return False
 
+    def _message_exact_publication_authorized(
+        self,
+        conn: Any,
+        *,
+        context: AgentContext,
+    ) -> bool:
+        """Consume late body-free decisions for every exact page exactly once."""
+
+        adapter = getattr(self, "_message_exact_adapter", None)
+        authenticated = context._authenticated_turn_context
+        pages = context.message_exact_pages
+        page_chain_witness = context.message_exact_page_chain_witness
+        try:
+            if (
+                not isinstance(adapter, MessageExactInternalAdapter)
+                or type(authenticated) is not AuthenticatedTurnContext
+                or context.message_exact_read_used is not True
+                or type(pages) is not tuple
+                or not pages
+                or len(pages) > (_OWN_MESSAGE_WINDOW_AUTO_CAP // _OWN_MESSAGE_WINDOW_PAGE_SIZE)
+                or any(type(page) is not MessageExactPage for page in pages)
+                or type(page_chain_witness) is not tuple
+                or len(page_chain_witness) != len(pages)
+                or any(
+                    type(witness) is not str
+                    or re.fullmatch(r"[0-9a-f]{64}", witness) is None
+                    or not hmac.compare_digest(witness, page.selection_handle)
+                    for page, witness in zip(pages, page_chain_witness, strict=True)
+                )
+            ):
+                return False
+            for page in pages:
+                decision = adapter.reauthorize_for_publication_in_transaction(
+                    conn,
+                    context=authenticated,
+                    page=page,
+                )
+                if not decision.authorizes(page):
+                    return False
+            return True
+        except Exception as exc:  # noqa: BLE001 - exact source publication fails closed
+            LOGGER.warning("message-exact: publication recheck failed (%s)", type(exc).__name__)
+            return False
+        finally:
+            # The private carriers never survive the publication boundary and
+            # cannot be cached for a later assistant row or advisory call.
+            context.message_exact_pages = ()
+            context.message_exact_page_chain_witness = ()
+
     def _obsidian_publication_authorized(
         self,
         conn: Any,
@@ -45144,6 +45285,11 @@ class AgentRuntime:
     ) -> bool:
         """Authorize every private source and final TTS in the same transaction."""
 
+        if context.message_exact_read_used:
+            # Exact transcript pages are consumed only by the definitive text
+            # publication transaction. They cannot authorize bytes sent to an
+            # irreversible TTS provider beforehand.
+            return False
         if not self._final_voice_tool_authorized(conn, actor=actor):
             return False
         if context.source_effect_reauth_required:
@@ -51638,6 +51784,13 @@ class AgentRuntime:
         source_search_lineage_user_message_id = str(stored_user_message.get("id") or "").strip()
         if not re.fullmatch(r"msg_[0-9a-f]{16}", source_search_lineage_user_message_id):
             raise RuntimeError("Stored user message has no valid durable identity")
+        message_exact_boundary_user_message_id = _authenticated_message_exact_boundary(
+            stored_user_message,
+            authenticated_turn_context,
+            conversation_id=str(conversation_id),
+            person_id=user_id,
+            content=clean_message,
+        )
         effect_root_user_message_id = (
             replay_root_id
             if re.fullmatch(r"msg_[0-9a-f]{16}", replay_root_id)
@@ -53660,6 +53813,7 @@ class AgentRuntime:
             workspace_exact_content = None
             workspace_exact_direct_authorized = False
         context.source_search_lineage_user_message_id = source_search_lineage_user_message_id
+        context.message_exact_boundary_user_message_id = message_exact_boundary_user_message_id
         context.effect_root_user_message_id = effect_root_user_message_id
         context.engineer_command_telegram_update_id = trusted_telegram_update_id
         context.effect_local_date = obsidian_effect_local_date
@@ -54733,14 +54887,29 @@ class AgentRuntime:
             settled = ""
             asked_of_model = clean_message
             workspace_authority_message = ""
-        message_search_preflight_authorized = bool(
+        message_search_policy_admitted = bool(
             not autonomous_engineer
             and ordinary_tool_surface_enabled
             and interaction_mode != "engineer"
             and not archive_search_requested_for_turn
             and not context.terse_request
             and topic != "быт"
+        )
+        legacy_message_search_preflight_authorized = bool(
+            message_search_policy_admitted
             and self._internal_search_adapter_available("message_search", actor)
+        )
+        exact_message_search_preflight_authorized = bool(
+            message_search_policy_admitted
+            and isinstance(
+                getattr(self, "_message_exact_adapter", None),
+                MessageExactInternalAdapter,
+            )
+            and type(context._authenticated_turn_context) is AuthenticatedTurnContext
+            and context._authenticated_turn_context.model_input.enable_tools is True
+        )
+        message_search_preflight_authorized = bool(
+            legacy_message_search_preflight_authorized or exact_message_search_preflight_authorized
         )
         response: dict[str, Any]
         if autonomous_engineer:
@@ -54961,6 +55130,7 @@ class AgentRuntime:
                 and (
                     visible_tools
                     or source_search_preflight_authorized
+                    or message_search_preflight_authorized
                     or _workspace_create_channel_request(asked_of_model)
                     or bool(workspace_authority_message)
                 )
@@ -58718,6 +58888,7 @@ class AgentRuntime:
             # Chat-history text cannot enter an irreversible TTS provider: its
             # read authority cannot be held atomically across synthesis.
             or context.message_search_used
+            or context.message_exact_read_used
             or adjacent_overview_unresolved_terminal
             or _turn_deadline_expired(context.turn_deadline)
         ):
@@ -58802,7 +58973,9 @@ class AgentRuntime:
         # Even a valid zero-hit page is a source-derived conclusion. A late
         # knowledge.read revocation must therefore close it before publication.
         source_search_publication_reauth_required = bool(context.source_search_used)
-        message_search_publication_reauth_required = bool(context.message_search_used)
+        message_search_publication_reauth_required = bool(
+            context.message_search_used or context.message_exact_read_used
+        )
         archive_search_publication_reauth_required = bool(
             context.archive_search_used or context.archive_prepared_searches
         )
@@ -58953,10 +59126,17 @@ class AgentRuntime:
             )
             message_search_publication_authorized = bool(
                 not message_search_publication_reauth_required
-                or self._message_search_publication_authorized(
-                    publication_conn,
-                    actor=actor,
-                    context=context,
+                or (
+                    self._message_exact_publication_authorized(
+                        publication_conn,
+                        context=context,
+                    )
+                    if context.message_exact_read_used
+                    else self._message_search_publication_authorized(
+                        publication_conn,
+                        actor=actor,
+                        context=context,
+                    )
                 )
             )
             archive_search_publication_authorized = not archive_search_publication_reauth_required
@@ -59324,6 +59504,8 @@ class AgentRuntime:
                     context.message_locate_dependency_resolved = False
                     context.message_locate_evidence_ready = False
                     context.message_locate_evidence_payload = ""
+                    context.message_exact_pages = ()
+                    context.message_exact_page_chain_witness = ()
                     assistant_metadata["tools_used"] = []
                     assistant_metadata["model_output_truncated"] = False
                     assistant_metadata.pop(_MESSAGE_LOCATE_PENDING_ACTION, None)
@@ -70031,6 +70213,136 @@ class AgentRuntime:
         )
         return True
 
+    def _prepare_message_exact_window(
+        self,
+        *,
+        context: AgentContext,
+        boundary_message_id: str,
+        since: str,
+        until: str,
+        role: str | None,
+        full_content_requested: bool,
+        turn_deadline: float | None,
+    ) -> tuple[dict[str, Any], tuple[MessageExactPage, ...]]:
+        """Prepare bounded queryless pages under the ambient primary authority."""
+
+        adapter = getattr(self, "_message_exact_adapter", None)
+        authenticated = context._authenticated_turn_context
+        if not isinstance(adapter, MessageExactInternalAdapter):
+            raise RuntimeError("message-exact adapter is unavailable")
+        if type(authenticated) is not AuthenticatedTurnContext:
+            raise TurnContextError("message-exact lane requires an authenticated primary turn")
+        if (
+            boundary_message_id != context.message_exact_boundary_user_message_id
+            or re.fullmatch(r"msg_[0-9a-f]{16}", boundary_message_id) is None
+        ):
+            raise TurnContextError("message-exact durable boundary is unavailable")
+        roles = (
+            (MessageRole.USER,)
+            if role == MessageRole.USER.value
+            else (MessageRole.ASSISTANT, MessageRole.USER)
+            if role is None
+            else ()
+        )
+        if not roles:
+            raise ValueError("message-exact role is outside the closed window")
+
+        pages: list[MessageExactPage] = []
+        projected_rows: list[dict[str, object]] = []
+        continuation = None
+        total_rows: int | None = None
+        snapshot_handle = ""
+        truncated_rows = 0
+        content_chars = 0
+        complete = False
+        while len(projected_rows) < _OWN_MESSAGE_WINDOW_AUTO_CAP:
+            if _turn_deadline_expired(turn_deadline):
+                raise TimeoutError("turn deadline expired during exact message-window read")
+            request = MessageExactRequest.create(
+                conversation_id=context.conversation_id,
+                accepted_boundary_user_message_id=boundary_message_id,
+                since=since,
+                until=until,
+                roles=roles,
+                page_size=min(
+                    _OWN_MESSAGE_WINDOW_PAGE_SIZE,
+                    _OWN_MESSAGE_WINDOW_AUTO_CAP - len(projected_rows),
+                ),
+                content_mode=(
+                    MessageExactContentMode.FULL_CONTENT
+                    if full_content_requested
+                    else MessageExactContentMode.EXCERPT
+                ),
+                continuation=continuation,
+            )
+            with self.storage.transaction() as exact_conn:
+                page = adapter.prepare_in_transaction(
+                    exact_conn,
+                    context=authenticated,
+                    request=request,
+                )
+            # A successfully selected page already influences the truth of any
+            # later failure/coverage statement. Bind it immediately so a
+            # timeout, projection failure or later-page error cannot downgrade
+            # final publication to the legacy permission-only check.
+            pages.append(page)
+            context.message_exact_read_used = True
+            context.message_exact_pages = tuple(pages)
+            context.message_exact_page_chain_witness = tuple(item.selection_handle for item in pages)
+            projection = adapter.project_for_model(page)
+            if (
+                page.offset != len(projected_rows)
+                or projection.offset != page.offset
+                or projection.shown_rows != len(page.rows)
+                or projection.total_rows != page.total_rows
+                or (total_rows is not None and page.total_rows != total_rows)
+                or (snapshot_handle and page.snapshot_handle != snapshot_handle)
+            ):
+                raise RuntimeError("message-exact pagination changed within one turn")
+            total_rows = page.total_rows
+            snapshot_handle = page.snapshot_handle
+            for row in projection.rows:
+                projected_rows.append(
+                    {
+                        "at": row.at,
+                        "role": row.role.value,
+                        "text": row.text,
+                    }
+                )
+                content_chars += len(row.text)
+                truncated_rows += int(row.truncated)
+            if page.next_continuation is None:
+                complete = True
+                break
+            if not page.rows:
+                raise RuntimeError("message-exact continuation did not advance")
+            continuation = page.next_continuation
+
+        if total_rows is None or len(projected_rows) > total_rows:
+            raise RuntimeError("message-exact coverage is invalid")
+        if complete != (len(projected_rows) == total_rows):
+            raise RuntimeError("message-exact completion is invalid")
+        return (
+            {
+                "total": total_rows,
+                "count": len(projected_rows),
+                "shown": len(projected_rows),
+                "offset": 0,
+                "complete": complete,
+                "next_offset": None if complete else len(projected_rows),
+                "truncated_rows": truncated_rows,
+                "content_chars": content_chars,
+                "content_complete": truncated_rows == 0,
+                "full_content": full_content_requested,
+                "results": projected_rows,
+                "since_local": since,
+                "until_local": until,
+                "timezone": "UTC",
+                "role": role or "any",
+            },
+            tuple(pages),
+        )
+
     async def _prefetch_own_messages(
         self,
         message: str,
@@ -70198,14 +70510,23 @@ class AgentRuntime:
                 "Повторите их двумя сообщениями."
             )
 
+        history_window = self._own_message_history_window(locate_message)
         available = {
             str((tool.get("function") or {}).get("name") or tool.get("name") or "") for tool in tools
         }
-        adapter_authorized = "message_search" in available if authorized is None else authorized
-        if authorized is not None:
-            adapter_authorized = bool(
-                adapter_authorized and self._internal_search_adapter_available("message_search", actor)
-            )
+        legacy_adapter_authorized = bool(
+            ("message_search" in available if authorized is None else authorized)
+            and self._internal_search_adapter_available("message_search", actor)
+        )
+        exact_window_preflight_available = bool(
+            history_window is not None
+            and authorized is not False
+            and isinstance(getattr(self, "_message_exact_adapter", None), MessageExactInternalAdapter)
+            and context is not None
+            and type(context._authenticated_turn_context) is AuthenticatedTurnContext
+            and context._authenticated_turn_context.model_input.enable_tools is True
+        )
+        adapter_authorized = bool(legacy_adapter_authorized or exact_window_preflight_available)
         if not adapter_authorized:
             LOGGER.info("own-messages-prefetch: инструмента нет среди доступных")
             return settle_unknown(
@@ -70226,7 +70547,6 @@ class AgentRuntime:
                 "Не удалось безопасно зафиксировать границу текущего сообщения. "
                 "История не показана, чтобы не включить сам запрос или более поздние строки."
             )
-        history_window = self._own_message_history_window(locate_message)
         analysis_requested = bool(
             history_window is not None
             and (
@@ -70313,18 +70633,50 @@ class AgentRuntime:
             }
         window_data: Mapping[str, Any] | None = None
         result: ToolResult | None = None
+        exact_window_data: dict[str, Any] | None = None
+        exact_pages: tuple[MessageExactPage, ...] = ()
+        exact_window_candidate = bool(
+            exact_window_preflight_available
+            and context is not None
+            and boundary_message_id == context.message_exact_boundary_user_message_id
+        )
+        if not exact_window_candidate and not legacy_adapter_authorized:
+            return settle_unknown(
+                "Поиск по вашей переписке недоступен для этой устойчивой границы; "
+                "модельная догадка вместо истории не использована."
+            )
         try:
             trace_message_search_attempted = True
-            result = await _await_with_turn_deadline(
-                self.kernel.execute(
+            if exact_window_candidate:
+                assert context is not None
+                assert history_window is not None
+                exact_since, exact_until, exact_role = history_window
+                exact_window_data, exact_pages = self._prepare_message_exact_window(
+                    context=context,
+                    boundary_message_id=boundary_message_id,
+                    since=exact_since,
+                    until=exact_until,
+                    role=exact_role,
+                    full_content_requested=full_content_requested,
+                    turn_deadline=turn_deadline,
+                )
+                result = ToolResult(
                     "message_search",
-                    params,
-                    actor=actor,
-                    execution_scope="internal",
-                ),
-                turn_deadline,
-                expired="turn deadline expired during own-message search",
-            )
+                    True,
+                    data=exact_window_data,
+                    handler_entered=True,
+                )
+            else:
+                result = await _await_with_turn_deadline(
+                    self.kernel.execute(
+                        "message_search",
+                        params,
+                        actor=actor,
+                        execution_scope="internal",
+                    ),
+                    turn_deadline,
+                    expired="turn deadline expired during own-message search",
+                )
             if not result.success:
                 tools_used.append("message_search")
                 record_message_search_outcome(_trace_tool_result_status("message_search", result))
@@ -70337,7 +70689,33 @@ class AgentRuntime:
                 # a later page fails. Bind final publication reauthorization at
                 # the first successful read.
                 context.message_search_used = True
-            if history_window is not None:
+            if exact_window_data is not None:
+                window_data = exact_window_data
+                assert context is not None
+                context.message_exact_read_used = True
+                bound_pages = context.message_exact_pages
+                bound_witness = context.message_exact_page_chain_witness
+                if (
+                    type(exact_pages) is not tuple
+                    or len(exact_pages) != len(bound_pages)
+                    or len(bound_witness) != len(bound_pages)
+                    or any(
+                        returned is not bound or not hmac.compare_digest(returned.selection_handle, witness)
+                        for returned, bound, witness in zip(
+                            exact_pages,
+                            bound_pages,
+                            bound_witness,
+                            strict=True,
+                        )
+                    )
+                ):
+                    # Keep the sticky read/witness evidence but remove all page
+                    # carriers.  Final publication then denies uniformly; it
+                    # must never accept a helper-returned prefix as the full
+                    # model-used source chain.
+                    context.message_exact_pages = ()
+                    raise RuntimeError("message-exact page carrier chain changed after preparation")
+            elif history_window is not None:
                 accumulated: list[Mapping[str, Any]] = []
                 expected_offset = 0
                 baseline_total: int | None = None

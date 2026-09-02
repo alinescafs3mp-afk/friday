@@ -550,8 +550,7 @@ def test_foreign_actor_conversation_and_boundary_fail_closed(storage: Any) -> No
     assert len(scope_reads) == 1
     assert "select boundary.rowid from users principal" in scope_reads[0]
     assert all(
-        forbidden not in scope_reads[0]
-        for forbidden in ("count(", ".content", "metadata_json", "length(")
+        forbidden not in scope_reads[0] for forbidden in ("count(", ".content", "metadata_json", "length(")
     )
 
 

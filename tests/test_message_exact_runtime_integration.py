@@ -11,9 +11,10 @@ from __future__ import annotations
 
 import hashlib
 import json
+import time
 from collections.abc import Callable
 from dataclasses import replace
-from datetime import datetime
+from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 from typing import Any
 
@@ -21,12 +22,23 @@ import pytest
 from fastapi.testclient import TestClient
 
 import friday.agent_runtime as agent_runtime
-from friday.agent_runtime import AgentRuntime
+import friday.storage._conversations as storage_conversations
+from friday.agent_runtime import AgentContext, AgentRuntime
 from friday.execution_kernel import ExecutionKernel
 from friday.ingestion import IngestionPipeline
 from friday.knowledge_graph import KnowledgeGraph
-from friday.orchestration.turn_context import AuthenticatedTurnContext, TurnContextIssuer
-from friday.permissions import AuthorizationService, LEGACY_OWNER_USER_ID
+from friday.orchestration.contracts import RouterMode, TurnInput
+from friday.orchestration.turn_context import (
+    AuthenticatedTurnContext,
+    IngressKind,
+    InheritedTurnBudget,
+    ModelAntiLoopBudget,
+    TurnContextIssuer,
+    TurnMode,
+    TurnResourceBudget,
+    TurnSafetyDeadline,
+)
+from friday.permissions import LEGACY_OWNER_USER_ID, AuthorizationService
 from friday.retrieval.message_exact_contract import (
     MESSAGE_EXACT_MAX_FULL_PAGE_CHARS,
     MESSAGE_EXACT_MAX_FULL_ROW_CHARS,
@@ -37,6 +49,7 @@ from friday.retrieval.message_exact_contract import (
     MessageExactRequest,
 )
 from friday.retrieval.message_exact_internal import MessageExactInternalAdapter
+from friday.turn_intent_policy import TurnIntent, TurnPolicyDecision
 from friday.web_surfer import WebSurfer
 
 _PROMPT = "проанализируй все сообщения за 1 сентября"
@@ -44,9 +57,56 @@ _TOPICAL_PROMPT = "найди ORIONMARKER в нашей переписке"
 _SOURCE_CANARY = "EXACT-RUNTIME-SOURCE-CANARY-8D4"
 _METADATA_CANARY = "EXACT-RUNTIME-METADATA-CANARY-8D4"
 _MODEL_DRAFT = f"Модельный черновик по {_SOURCE_CANARY}."
-_PUBLICATION_DENIAL = (
-    "Доступ к переписке изменился до публикации; найденные данные не публикую."
-)
+_PUBLICATION_DENIAL = "Доступ к переписке изменился до публикации; найденные данные не публикую."
+
+
+def _authenticated_context(
+    issuer: TurnContextIssuer,
+    actor: Any,
+    conversation_id: str,
+    *,
+    label: str,
+) -> AuthenticatedTurnContext:
+    now = time.monotonic_ns()
+    authority = issuer.issue_ingress_authority(
+        ingress_kind=IngressKind.SIGNED_HTTP,
+        ingress_issued_token=f"message-exact-runtime-{label}",
+        actor=actor,
+        conversation_id=conversation_id,
+        interaction_mode=TurnMode.DIALOGUE,
+        source_id=f"message-exact-runtime-source-{label}",
+        update_id=f"message-exact-runtime-update-{label}",
+        request_effect_binding_sha256=hashlib.sha256(label.encode("ascii")).hexdigest(),
+    )
+    model_input = TurnInput.from_chat(
+        message=_PROMPT,
+        actor=actor,
+        conversation_id=conversation_id,
+        attachments=(),
+        enable_tools=True,
+        synthetic_document_notice=False,
+        mode=TurnMode.DIALOGUE.value,
+        reply_to=None,
+        quoted_attachment_reference=False,
+        reply_assistant_reference=False,
+    )
+    policy = issuer.issue_turn_policy(
+        router_mode=RouterMode.LEGACY,
+        fallback_router_mode=None,
+        decision=TurnPolicyDecision(intent=TurnIntent.PASSTHROUGH),
+    )
+    return issuer.authenticate_turn(
+        authority=authority,
+        model_input=model_input,
+        authorized_sources=(issuer.accepted_ingress_source(authority),),
+        turn_policy=policy,
+        inherited_budget=InheritedTurnBudget(
+            TurnSafetyDeadline(now + 60_000_000_000),
+            ModelAntiLoopBudget(4, 1),
+            TurnResourceBudget(4, 2, 2, 16_384),
+        ),
+        pending_work_admission=None,
+    )
 
 
 class _ProjectionModel:
@@ -74,9 +134,7 @@ class _ProjectionModel:
         self.calls.append(snapshot)
         serialized = json.dumps(snapshot, ensure_ascii=False, sort_keys=True)
         system_text = "\n".join(
-            str(item.get("content") or "")
-            for item in snapshot
-            if str(item.get("role") or "") == "system"
+            str(item.get("content") or "") for item in snapshot if str(item.get("role") or "") == "system"
         )
         if "FRIDAY_UNTRUSTED_MESSAGE_HISTORY_DATA" in serialized:
             self.main_messages.append(snapshot)
@@ -155,9 +213,7 @@ def _observe_exact_lane(monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
     )
     original_prepare = MessageExactInternalAdapter.prepare_in_transaction
     original_project = MessageExactInternalAdapter.project_for_model
-    original_reauthorize = (
-        MessageExactInternalAdapter.reauthorize_for_publication_in_transaction
-    )
+    original_reauthorize = MessageExactInternalAdapter.reauthorize_for_publication_in_transaction
     original_store = agent_runtime.store_message_in_transaction
 
     def recording_prepare(
@@ -169,9 +225,7 @@ def _observe_exact_lane(monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
     ) -> MessageExactPage:
         assert conn.in_transaction
         page = original_prepare(adapter, conn, context=context, request=request)
-        observed.prepared.append(
-            SimpleNamespace(conn=conn, context=context, request=request, page=page)
-        )
+        observed.prepared.append(SimpleNamespace(conn=conn, context=context, request=request, page=page))
         return page
 
     def recording_project(
@@ -204,7 +258,7 @@ def _observe_exact_lane(monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
 
     def recording_store(conn: Any, *args: Any, **kwargs: Any) -> dict[str, Any]:
         role = str(args[2] if len(args) > 2 else kwargs.get("role") or "")
-        if role == "assistant":
+        if role == "assistant" and observed.reauthorized and conn is observed.reauthorized[-1].conn:
             assert conn.in_transaction
             content = str(args[3] if len(args) > 3 else kwargs.get("content") or "")
             observed.assistant_stores.append(
@@ -229,6 +283,15 @@ def _observe_exact_lane(monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
         recording_reauthorize,
     )
     monkeypatch.setattr(agent_runtime, "store_message_in_transaction", recording_store)
+    # The ordinary final-publication branch enters ``Storage.store_message``
+    # while the outer publication transaction is already active.  That method
+    # deliberately reuses the same connection, but resolves the helper through
+    # its defining module rather than AgentRuntime's imported alias.
+    monkeypatch.setattr(
+        storage_conversations,
+        "store_message_in_transaction",
+        recording_store,
+    )
     return observed
 
 
@@ -291,11 +354,7 @@ def _current_user_row(storage: Any, conversation_id: str, prompt: str) -> dict[s
         user_id=LEGACY_OWNER_USER_ID,
         limit=100,
     )
-    matches = [
-        row
-        for row in rows
-        if row.get("role") == "user" and row.get("content") == prompt
-    ]
+    matches = [row for row in rows if row.get("role") == "user" and row.get("content") == prompt]
     assert len(matches) == 1
     return matches[0]
 
@@ -305,9 +364,7 @@ def _projection_payload(model: _ProjectionModel) -> tuple[str, dict[str, Any]]:
     blocks = [
         str(item.get("content") or "")
         for item in model.main_messages[0]
-        if str(item.get("content") or "").startswith(
-            "FRIDAY_UNTRUSTED_MESSAGE_HISTORY_DATA\n"
-        )
+        if str(item.get("content") or "").startswith("FRIDAY_UNTRUSTED_MESSAGE_HISTORY_DATA\n")
     ]
     assert len(blocks) == 1
     encoded = blocks[0].split("\n", 1)[1]
@@ -344,6 +401,16 @@ def test_authenticated_queryless_window_uses_durable_boundary_projection_and_one
         runtime = app.state.agent
         model = _ProjectionModel()
         runtime.llm = model
+        monkeypatch.setattr(
+            runtime,
+            "_internal_search_adapter_available",
+            lambda _name, _actor: False,
+        )
+        monkeypatch.setattr(
+            runtime.kernel,
+            "get_tool_definitions",
+            lambda *_args, **_kwargs: [],
+        )
         monkeypatch.setattr(runtime, "_local_now", lambda: datetime(2026, 9, 3, 12, 0))
         legacy_calls = _record_legacy_message_search(runtime)
 
@@ -375,9 +442,7 @@ def test_authenticated_queryless_window_uses_durable_boundary_projection_and_one
         "schema": "friday.authenticated-turn-publication.v1",
         "turn_id": prepared.context.turn_id,
         "context_authority_sha256": prepared.context.context_authority_sha256,
-        "request_effect_binding_sha256": (
-            prepared.context.effect_fence.request_effect_binding_sha256
-        ),
+        "request_effect_binding_sha256": (prepared.context.effect_fence.request_effect_binding_sha256),
         "publication_role": "user",
     }
 
@@ -447,6 +512,270 @@ def test_authenticated_queryless_window_uses_durable_boundary_projection_and_one
     for private in private_values:
         if private:
             assert private not in durable
+
+
+def test_multi_page_exact_window_reauthorizes_every_page_in_one_final_transaction(
+    settings: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from friday.server import create_app
+
+    configured = replace(settings, verify_answers=False)
+    observed = _observe_exact_lane(monkeypatch)
+    app = create_app(configured)
+    with TestClient(app) as client:
+        conversation, _target = _seed_window(
+            app.state.storage,
+            title="authenticated exact multi-page window",
+        )
+        start = datetime(2026, 9, 1, 9, 0, tzinfo=UTC)
+        for index in range(125):
+            row = app.state.storage.store_message(
+                str(conversation["id"]),
+                LEGACY_OWNER_USER_ID,
+                "user" if index % 2 == 0 else "assistant",
+                f"multi-page exact row {index:03d}",
+            )
+            _set_created_at(
+                app.state.storage,
+                str(row["id"]),
+                (start + timedelta(seconds=index)).isoformat(),
+            )
+
+        runtime = app.state.agent
+        model = _ProjectionModel()
+        runtime.llm = model
+        monkeypatch.setattr(runtime, "_local_now", lambda: datetime(2026, 9, 3, 12, 0))
+        legacy_calls = _record_legacy_message_search(runtime)
+        response = _post_authenticated_window(
+            client,
+            configured,
+            str(conversation["id"]),
+            source_ref="message-exact-runtime-multi-page",
+        )
+
+    assert response["message"].endswith(_MODEL_DRAFT)
+    assert legacy_calls == []
+    assert len(observed.prepared) == len(observed.projected) == 2
+    assert [item.page.offset for item in observed.prepared] == [0, 100]
+    assert [item.page.total_rows for item in observed.prepared] == [126, 126]
+    assert len(observed.reauthorized) == 2
+    assert len(observed.assistant_stores) == 1
+    assistant_store = observed.assistant_stores[0]
+    assert assistant_store.reauthorization_count == 2
+    assert all(item.conn is assistant_store.conn for item in observed.reauthorized)
+
+
+def test_second_exact_page_failure_retains_first_page_for_late_reauthorization(
+    settings: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from friday.server import create_app
+
+    configured = replace(settings, verify_answers=False)
+    observed = _observe_exact_lane(monkeypatch)
+    app = create_app(configured)
+    with TestClient(app) as client:
+        conversation, target = _seed_window(
+            app.state.storage,
+            title="authenticated exact partial page failure",
+        )
+        start = datetime(2026, 9, 1, 9, 0, tzinfo=UTC)
+        for index in range(125):
+            row = app.state.storage.store_message(
+                str(conversation["id"]),
+                LEGACY_OWNER_USER_ID,
+                "user" if index % 2 == 0 else "assistant",
+                f"partial-page exact row {index:03d}",
+            )
+            _set_created_at(
+                app.state.storage,
+                str(row["id"]),
+                (start + timedelta(seconds=index)).isoformat(),
+            )
+
+        runtime = app.state.agent
+        model = _ProjectionModel()
+        runtime.llm = model
+        monkeypatch.setattr(runtime, "_local_now", lambda: datetime(2026, 9, 3, 12, 0))
+        first_page_prepare = MessageExactInternalAdapter.prepare_in_transaction
+        calls = 0
+
+        def fail_second_page(
+            adapter: MessageExactInternalAdapter,
+            conn: Any,
+            **kwargs: Any,
+        ) -> MessageExactPage:
+            nonlocal calls
+            calls += 1
+            if calls == 2:
+                raise TimeoutError("synthetic second-page deadline")
+            return first_page_prepare(adapter, conn, **kwargs)
+
+        monkeypatch.setattr(
+            MessageExactInternalAdapter,
+            "prepare_in_transaction",
+            fail_second_page,
+        )
+        legacy_calls = _record_legacy_message_search(runtime)
+        response = _post_authenticated_window(
+            client,
+            configured,
+            str(conversation["id"]),
+            source_ref="message-exact-runtime-partial-page",
+        )
+        assistant, metadata = _stored_assistant(app.state.storage, response)
+
+    assert calls == 2
+    assert legacy_calls == []
+    assert model.main_messages == []
+    assert len(observed.prepared) == len(observed.projected) == 1
+    assert len(observed.reauthorized) == len(observed.assistant_stores) == 1
+    assert observed.reauthorized[0].page is observed.prepared[0].page
+    assert observed.assistant_stores[0].reauthorization_count == 1
+    assert observed.assistant_stores[0].conn is observed.reauthorized[0].conn
+    assert response["message"] == assistant["content"]
+    assert "результат неизвестен" in response["message"].casefold()
+    public = json.dumps(response, ensure_ascii=False, sort_keys=True)
+    durable = json.dumps(
+        {"content": assistant["content"], "metadata": metadata},
+        ensure_ascii=False,
+        sort_keys=True,
+    )
+    for private in (_SOURCE_CANARY, _METADATA_CANARY, str(target["id"])):
+        assert private not in public
+        assert private not in durable
+
+
+def test_lost_exact_page_carriers_deny_instead_of_downgrading_to_legacy_reauth(
+    settings: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from friday.server import create_app
+
+    configured = replace(settings, verify_answers=False)
+    observed = _observe_exact_lane(monkeypatch)
+    app = create_app(configured)
+    with TestClient(app) as client:
+        conversation, target = _seed_window(
+            app.state.storage,
+            title="authenticated exact lost carrier",
+        )
+        runtime = app.state.agent
+        model = _ProjectionModel()
+        runtime.llm = model
+        monkeypatch.setattr(runtime, "_local_now", lambda: datetime(2026, 9, 3, 12, 0))
+        original_prepare = runtime._prepare_message_exact_window  # noqa: SLF001
+
+        def lose_private_pages(**kwargs: Any) -> tuple[dict[str, Any], tuple[MessageExactPage, ...]]:
+            data, pages = original_prepare(**kwargs)
+            assert pages
+            return data, ()
+
+        def forbidden_legacy_reauth(*_args: Any, **_kwargs: Any) -> bool:
+            raise AssertionError("exact carrier loss downgraded to legacy publication reauth")
+
+        monkeypatch.setattr(runtime, "_prepare_message_exact_window", lose_private_pages)
+        monkeypatch.setattr(runtime, "_message_search_publication_authorized", forbidden_legacy_reauth)
+        response = _post_authenticated_window(
+            client,
+            configured,
+            str(conversation["id"]),
+            source_ref="message-exact-runtime-lost-carrier",
+        )
+        assistant, metadata = _stored_assistant(app.state.storage, response)
+
+    assert model.main_messages == []
+    assert len(observed.prepared) == len(observed.projected) == 1
+    assert observed.reauthorized == []
+    assert response["message"] == assistant["content"] == _PUBLICATION_DENIAL
+    public = json.dumps(response, ensure_ascii=False, sort_keys=True)
+    durable = json.dumps(
+        {"content": assistant["content"], "metadata": metadata},
+        ensure_ascii=False,
+        sort_keys=True,
+    )
+    for private in (_SOURCE_CANARY, _METADATA_CANARY, str(target["id"])):
+        assert private not in public
+        assert private not in durable
+
+
+def test_partial_exact_page_carrier_loss_denies_the_complete_two_page_chain(
+    settings: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from friday.server import create_app
+
+    configured = replace(settings, verify_answers=False)
+    observed = _observe_exact_lane(monkeypatch)
+    app = create_app(configured)
+    with TestClient(app) as client:
+        conversation, target = _seed_window(
+            app.state.storage,
+            title="authenticated exact partial carrier loss",
+        )
+        start = datetime(2026, 9, 1, 9, 0, tzinfo=UTC)
+        for index in range(125):
+            row = app.state.storage.store_message(
+                str(conversation["id"]),
+                LEGACY_OWNER_USER_ID,
+                "user" if index % 2 == 0 else "assistant",
+                f"partial-carrier exact row {index:03d}",
+            )
+            _set_created_at(
+                app.state.storage,
+                str(row["id"]),
+                (start + timedelta(seconds=index)).isoformat(),
+            )
+
+        runtime = app.state.agent
+        model = _ProjectionModel()
+        runtime.llm = model
+        monkeypatch.setattr(runtime, "_local_now", lambda: datetime(2026, 9, 3, 12, 0))
+        original_prepare = runtime._prepare_message_exact_window  # noqa: SLF001
+        captured_context: AgentContext | None = None
+
+        def lose_last_private_page(
+            **kwargs: Any,
+        ) -> tuple[dict[str, Any], tuple[MessageExactPage, ...]]:
+            nonlocal captured_context
+            candidate_context = kwargs.get("context")
+            assert isinstance(candidate_context, AgentContext)
+            captured_context = candidate_context
+            data, pages = original_prepare(**kwargs)
+            assert len(pages) == 2
+            return data, pages[:-1]
+
+        def forbidden_legacy_reauth(*_args: Any, **_kwargs: Any) -> bool:
+            raise AssertionError("partial exact carrier loss used legacy publication reauth")
+
+        monkeypatch.setattr(runtime, "_prepare_message_exact_window", lose_last_private_page)
+        monkeypatch.setattr(runtime, "_message_search_publication_authorized", forbidden_legacy_reauth)
+        response = _post_authenticated_window(
+            client,
+            configured,
+            str(conversation["id"]),
+            source_ref="message-exact-runtime-partial-carrier-loss",
+        )
+        assistant, metadata = _stored_assistant(app.state.storage, response)
+
+    assert model.main_messages == []
+    assert len(observed.prepared) == len(observed.projected) == 2
+    assert [item.page.offset for item in observed.prepared] == [0, 100]
+    assert observed.reauthorized == []
+    assert captured_context is not None
+    assert captured_context.message_exact_pages == ()
+    assert captured_context.message_exact_page_chain_witness == ()
+    assert response["message"] == assistant["content"] == _PUBLICATION_DENIAL
+    public = json.dumps(response, ensure_ascii=False, sort_keys=True)
+    durable = json.dumps(
+        {"content": assistant["content"], "metadata": metadata},
+        ensure_ascii=False,
+        sort_keys=True,
+    )
+    for private in (_SOURCE_CANARY, _METADATA_CANARY, str(target["id"])):
+        assert private not in public
+        assert private not in durable
 
 
 @pytest.mark.parametrize(
@@ -570,9 +899,10 @@ def test_authenticated_window_without_adapter_preserves_legacy_kernel_route(
     assert legacy_calls[0].execution_scope == "internal"
     assert legacy_calls[0].arguments["query"] == ""
     assert legacy_calls[0].arguments["before_message_id"] == current["id"]
-    assert json.loads(str(current["metadata_json"]))["authenticated_turn_publication"][
-        "publication_role"
-    ] == "user"
+    assert (
+        json.loads(str(current["metadata_json"]))["authenticated_turn_publication"]["publication_role"]
+        == "user"
+    )
     assert observed.prepared == []
     assert observed.projected == []
     assert observed.reauthorized == []
@@ -631,6 +961,109 @@ async def test_window_without_authenticated_context_preserves_legacy_kernel_rout
     assert "authenticated_turn_publication" not in json.loads(str(current["metadata_json"]))
     assert observed.prepared == []
     assert observed.projected == []
+    assert observed.reauthorized == []
+
+
+@pytest.mark.asyncio
+async def test_pending_old_boundary_stays_legacy_and_exact_pages_never_authorize_tts(
+    settings: Any,
+    storage: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    configured = replace(settings, verify_answers=False)
+    conversation, _target = _seed_window(
+        storage,
+        title="pending message window keeps old boundary",
+    )
+    old_boundary = storage.store_message(
+        str(conversation["id"]),
+        LEGACY_OWNER_USER_ID,
+        "user",
+        "original pending comparison request",
+    )
+    current_boundary = storage.store_message(
+        str(conversation["id"]),
+        LEGACY_OWNER_USER_ID,
+        "user",
+        "resume pending comparison",
+    )
+    authorization = AuthorizationService(storage)
+    actor = authorization.actor_for_user(LEGACY_OWNER_USER_ID, source="test")
+    graph = KnowledgeGraph(storage)
+    kernel = ExecutionKernel(authorization, configured)
+    kernel.bind_services(
+        storage,
+        graph,
+        WebSurfer(configured),
+        IngestionPipeline(configured, storage, graph),
+    )
+    issuer = TurnContextIssuer(hashlib.sha256(b"message-exact-runtime-old-boundary").digest())
+    authenticated = _authenticated_context(
+        issuer,
+        actor,
+        str(conversation["id"]),
+        label="old-boundary",
+    )
+    runtime = AgentRuntime(
+        configured,
+        storage,
+        kernel=kernel,
+        message_exact_adapter=MessageExactInternalAdapter(authorization, issuer),
+    )
+    context = AgentContext(
+        conversation_id=str(conversation["id"]),
+        user_id=LEGACY_OWNER_USER_ID,
+        person_id=LEGACY_OWNER_USER_ID,
+        _authenticated_turn_context=authenticated,
+        message_exact_boundary_user_message_id=str(current_boundary["id"]),
+        message_locate_search_boundary_id=str(old_boundary["id"]),
+    )
+    monkeypatch.setattr(runtime, "_local_now", lambda: datetime(2026, 9, 3, 12, 0))
+    observed = _observe_exact_lane(monkeypatch)
+    legacy_calls = _record_legacy_message_search(runtime)
+    messages: list[dict[str, Any]] = []
+    tools_used: list[str] = []
+    tool_evidence: list[dict[str, str]] = []
+
+    located = await runtime._prefetch_own_messages(  # noqa: SLF001
+        _PROMPT,
+        actor,
+        kernel.get_tool_definitions(actor, topic=""),
+        messages,
+        tools_used,
+        tool_evidence,
+        context=context,
+        authorized=True,
+    )
+
+    assert located is True
+    assert len(legacy_calls) == 1
+    assert legacy_calls[0].arguments["before_message_id"] == old_boundary["id"]
+    assert observed.prepared == observed.projected == observed.reauthorized == []
+    assert context.message_exact_read_used is False
+    assert any("FRIDAY_UNTRUSTED_MESSAGE_HISTORY_DATA" in str(item.get("content")) for item in messages)
+
+    _data, exact_pages = runtime._prepare_message_exact_window(  # noqa: SLF001
+        context=context,
+        boundary_message_id=str(current_boundary["id"]),
+        since="2026-09-01T00:00:00+00:00",
+        until="2026-09-02T00:00:00+00:00",
+        role=None,
+        full_content_requested=True,
+        turn_deadline=None,
+    )
+    assert exact_pages
+    context.message_exact_pages = exact_pages
+    context.message_exact_read_used = True
+    context.message_search_used = False
+    monkeypatch.setattr(
+        runtime,
+        "_message_search_publication_authorized",
+        lambda *_args, **_kwargs: True,
+    )
+    assert await runtime._final_voice_can_start(actor=actor, context=context) is False  # noqa: SLF001
+    assert context.message_exact_pages is exact_pages
+    assert len(observed.prepared) == len(observed.projected) == 1
     assert observed.reauthorized == []
 
 
