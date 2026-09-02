@@ -21,6 +21,7 @@ import struct
 import threading
 from collections import OrderedDict
 from collections.abc import Mapping, Sequence
+from contextlib import suppress
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Final, NoReturn, SupportsIndex
@@ -56,6 +57,8 @@ MEMORY_EXACT_INTERNAL_ADAPTER_ID: Final = "friday.retrieval.memory_exact_interna
 MEMORY_EXACT_SECURITY_IDS: Final = ("search.use", "knowledge.read")
 _PROVIDER_DEPENDENCY_LEDGER_SCHEMA: Final = "friday.memory-exact-provider-dependency-ledger.v1"
 _PROVIDER_DEPENDENCY_LEDGER_KEY = secrets.token_bytes(32)
+_PROVIDER_DATABASE_LIST_MAX_ROWS: Final = 128
+_PROVIDER_DATABASE_PATH_MAX_BYTES: Final = 4_096
 _PROVIDER_READ_SET_SCHEMA: Final = "friday.memory-exact-provider-read-set.v1"
 _PROVIDER_READ_SET_MAX_OPERATIONS: Final = 1_024
 _PROVIDER_GRAPH_SUPPRESSED_PROOF_SHA256: Final = hashlib.sha256(
@@ -93,9 +96,7 @@ _PROVIDER_GRAPH_READ_KINDS: Final = frozenset(
     }
 )
 _PROVIDER_READ_KINDS: Final = (
-    _PROVIDER_STORAGE_READ_KINDS
-    | _PROVIDER_CONSTANT_READ_KINDS
-    | _PROVIDER_GRAPH_READ_KINDS
+    _PROVIDER_STORAGE_READ_KINDS | _PROVIDER_CONSTANT_READ_KINDS | _PROVIDER_GRAPH_READ_KINDS
 )
 _PROVIDER_MAIN_DEPENDENCY_NAMES: Final = frozenset(
     {
@@ -169,13 +170,7 @@ def _main_data_version(conn: sqlite3.Connection) -> int:
         row = conn.execute("PRAGMA main.data_version").fetchone()
     except sqlite3.Error:
         raise _ProviderSnapshotInvalid from None
-    if (
-        row is None
-        or len(row) != 1
-        or isinstance(row[0], bool)
-        or not isinstance(row[0], int)
-        or row[0] < 0
-    ):
+    if row is None or len(row) != 1 or isinstance(row[0], bool) or not isinstance(row[0], int) or row[0] < 0:
         raise _ProviderSnapshotInvalid
     return row[0]
 
@@ -185,13 +180,7 @@ def _main_schema_version(conn: sqlite3.Connection) -> int:
         row = conn.execute("PRAGMA main.schema_version").fetchone()
     except sqlite3.Error:
         raise _ProviderSnapshotInvalid from None
-    if (
-        row is None
-        or len(row) != 1
-        or isinstance(row[0], bool)
-        or not isinstance(row[0], int)
-        or row[0] < 0
-    ):
+    if row is None or len(row) != 1 or isinstance(row[0], bool) or not isinstance(row[0], int) or row[0] < 0:
         raise _ProviderSnapshotInvalid
     return row[0]
 
@@ -201,15 +190,61 @@ def _temp_schema_version(conn: sqlite3.Connection) -> int:
         row = conn.execute("PRAGMA temp.schema_version").fetchone()
     except sqlite3.Error:
         raise _ProviderSnapshotInvalid from None
-    if (
-        row is None
-        or len(row) != 1
-        or isinstance(row[0], bool)
-        or not isinstance(row[0], int)
-        or row[0] < 0
-    ):
+    if row is None or len(row) != 1 or isinstance(row[0], bool) or not isinstance(row[0], int) or row[0] < 0:
         raise _ProviderSnapshotInvalid
     return row[0]
+
+
+def _main_database_identity(conn: sqlite3.Connection) -> tuple[Path, int, int]:
+    """Return one bounded canonical path plus its code-owned filesystem identity."""
+
+    cursor: sqlite3.Cursor | None = None
+    try:
+        if type(conn) is not sqlite3.Connection:
+            raise _ProviderSnapshotInvalid
+        cursor = conn.execute("PRAGMA database_list")
+        rows = cursor.fetchmany(_PROVIDER_DATABASE_LIST_MAX_ROWS + 1)
+        if len(rows) > _PROVIDER_DATABASE_LIST_MAX_ROWS:
+            raise _ProviderSnapshotInvalid
+        main_paths: list[str] = []
+        for row in rows:
+            values = tuple(row)
+            if (
+                len(values) != 3
+                or isinstance(values[0], bool)
+                or not isinstance(values[0], int)
+                or values[0] < 0
+                or type(values[1]) is not str
+                or type(values[2]) is not str
+            ):
+                raise _ProviderSnapshotInvalid
+            if values[1] == "main":
+                main_paths.append(values[2])
+        if len(main_paths) != 1 or not main_paths[0]:
+            raise _ProviderSnapshotInvalid
+        raw_path = main_paths[0]
+        if len(raw_path.encode("utf-8")) > _PROVIDER_DATABASE_PATH_MAX_BYTES:
+            raise _ProviderSnapshotInvalid
+        database = Path(raw_path).resolve(strict=True)
+        if len(str(database).encode("utf-8")) > _PROVIDER_DATABASE_PATH_MAX_BYTES:
+            raise _ProviderSnapshotInvalid
+        before = database.stat()
+        after = database.stat()
+        identity = (before.st_dev, before.st_ino)
+        if any(
+            isinstance(value, bool) or not isinstance(value, int) or value < 0
+            for value in (*identity, after.st_dev, after.st_ino)
+        ) or identity != (after.st_dev, after.st_ino):
+            raise _ProviderSnapshotInvalid
+        return database, identity[0], identity[1]
+    except _ProviderSnapshotInvalid:
+        raise
+    except (OSError, RuntimeError, sqlite3.Error, TypeError, UnicodeError, ValueError):
+        raise _ProviderSnapshotInvalid from None
+    finally:
+        if cursor is not None:
+            with suppress(sqlite3.Error):
+                cursor.close()
 
 
 def _require_no_provider_temp_shadow(conn: sqlite3.Connection) -> None:
@@ -400,9 +435,7 @@ def _current_storage_connection(storage: FridayStorage) -> sqlite3.Connection:
             raise _ProviderSnapshotInvalid
         return conn
     except Exception:  # noqa: BLE001 - storage failures may retain private paths
-        raise MemoryExactInternalError(
-            "memory-exact provider connection is unavailable"
-        ) from None
+        raise MemoryExactInternalError("memory-exact provider connection is unavailable") from None
 
 
 def _provider_configuration_sha256(
@@ -433,9 +466,7 @@ def _provider_configuration_sha256(
     scalars: dict[str, object] = {}
     for name in scalar_names:
         value = getattr(searcher, name, None)
-        if type(value) not in (bool, float, int) or (
-            isinstance(value, float) and not math.isfinite(value)
-        ):
+        if type(value) not in (bool, float, int) or (isinstance(value, float) and not math.isfinite(value)):
             raise _ProviderSnapshotInvalid
         scalars[name] = value
     weights: list[tuple[str, float]] = []
@@ -495,11 +526,8 @@ def _provider_configuration_sha256(
 def _open_main_database_observer(conn: sqlite3.Connection) -> sqlite3.Connection:
     observer: sqlite3.Connection | None = None
     try:
-        rows = conn.execute("PRAGMA database_list").fetchall()
-        paths = [row[2] for row in rows if len(row) == 3 and row[1] == "main"]
-        if len(paths) != 1 or type(paths[0]) is not str or not paths[0]:
-            raise _ProviderSnapshotInvalid
-        database = Path(paths[0]).resolve(strict=True)
+        source_identity = _main_database_identity(conn)
+        database = source_identity[0]
         observer = sqlite3.connect(
             f"{database.as_uri()}?mode=ro",
             uri=True,
@@ -511,22 +539,21 @@ def _open_main_database_observer(conn: sqlite3.Connection) -> sqlite3.Connection
         query_only = observer.execute("PRAGMA query_only").fetchone()
         if query_only is None or len(query_only) != 1 or query_only[0] != 1:
             raise _ProviderSnapshotInvalid
+        observer_identity = _main_database_identity(observer)
+        if observer_identity != source_identity or _main_database_identity(conn) != source_identity:
+            raise _ProviderSnapshotInvalid
         _main_data_version(observer)
         _main_schema_version(observer)
         return observer
     except (OSError, RuntimeError, sqlite3.Error, UnicodeError, ValueError):
         if observer is not None:
-            try:
+            with suppress(sqlite3.Error):
                 observer.close()
-            except sqlite3.Error:
-                pass
         raise _ProviderSnapshotInvalid from None
     except BaseException:
         if observer is not None:
-            try:
+            with suppress(sqlite3.Error):
                 observer.close()
-            except sqlite3.Error:
-                pass
         raise
 
 
@@ -735,9 +762,7 @@ def _freeze_provider_read_arguments(value: object, *, depth: int = 0) -> object:
             raise _ProviderSnapshotInvalid
         return value
     if value_type is tuple:
-        return tuple(
-            _freeze_provider_read_arguments(item, depth=depth + 1) for item in value
-        )
+        return tuple(_freeze_provider_read_arguments(item, depth=depth + 1) for item in value)
     raise _ProviderSnapshotInvalid
 
 
@@ -799,8 +824,7 @@ class _ProviderReadWitness:
                 type(self._kind) is str
                 and self._kind in _PROVIDER_READ_KINDS
                 and type(self._arguments) is tuple
-                and _provider_read_value_sha256(self._arguments)
-                == self._arguments_sha256
+                and _provider_read_value_sha256(self._arguments) == self._arguments_sha256
                 and type(self._result_sha256) is str
                 and len(self._result_sha256) == 64
                 and type(self._seal) is str
@@ -883,16 +907,11 @@ class _ProviderReadSet:
         try:
             witness = _ProviderReadWitness(kind, arguments, result)
             if kind == "graph_candidate_cards":
-                if (
-                    len(witness._arguments) != 1
-                    or type(witness._arguments[0]) is not str
-                ):
+                if len(witness._arguments) != 1 or type(witness._arguments[0]) is not str:
                     raise _ProviderSnapshotInvalid
                 _provider_graph_candidate_ids(witness._arguments[0], result)
                 graph_saturated: bool | None = result[0]
-                graph_candidate_cards_sha256: str | None = _provider_read_value_sha256(
-                    result[1]
-                )
+                graph_candidate_cards_sha256: str | None = _provider_read_value_sha256(result[1])
             else:
                 graph_saturated = None
                 graph_candidate_cards_sha256 = None
@@ -913,8 +932,7 @@ class _ProviderReadSet:
                     raise _ProviderSnapshotInvalid
                 if kind == "graph_candidate_cards" and (
                     self._graph_saturated is not graph_saturated
-                    or self._graph_candidate_cards_sha256
-                    != graph_candidate_cards_sha256
+                    or self._graph_candidate_cards_sha256 != graph_candidate_cards_sha256
                 ):
                     self._poisoned = "invalid"
                     raise _ProviderSnapshotInvalid
@@ -960,16 +978,9 @@ class _ProviderReadSet:
                 )
                 or (
                     self._graph_saturated is True
-                    and any(
-                        witness._kind in _PROVIDER_GRAPH_READ_KINDS
-                        for witness in witnesses
-                    )
+                    and any(witness._kind in _PROVIDER_GRAPH_READ_KINDS for witness in witnesses)
                 )
-                or sum(
-                    witness._kind == "graph_candidate_cards"
-                    for witness in witnesses
-                )
-                != 1
+                or sum(witness._kind == "graph_candidate_cards" for witness in witnesses) != 1
                 or any(not witness._is_process_owned() for witness in witnesses)
             ):
                 raise _ProviderSnapshotInvalid
@@ -1011,8 +1022,7 @@ class _ProviderReadSet:
                     and len(seal) == 64
                 )
             if not valid_shape or any(
-                type(witness) is not _ProviderReadWitness
-                or not witness._is_process_owned()
+                type(witness) is not _ProviderReadWitness or not witness._is_process_owned()
                 for witness in witnesses
             ):
                 return False
@@ -1114,9 +1124,7 @@ class _ProviderReadSet:
                 value = set()
             elif witness._kind == "vocabulary_terms":
                 value = []
-            elif witness._kind == "get_knowledge_usage":
-                value = {}
-            elif witness._kind == "get_chunk_spans":
+            elif witness._kind == "get_knowledge_usage" or witness._kind == "get_chunk_spans":
                 value = {}
             elif witness._kind in _PROVIDER_GRAPH_READ_KINDS:
                 arguments = witness._arguments
@@ -1143,10 +1151,7 @@ class _ProviderReadSet:
                     or not isinstance(arguments[3], int)
                     or isinstance(arguments[4], bool)
                     or not isinstance(arguments[4], int)
-                    or (
-                        arguments[5] is not None
-                        and type(arguments[5]) is not tuple
-                    )
+                    or (arguments[5] is not None and type(arguments[5]) is not tuple)
                     or type(arguments[6]) is not str
                     or type(arguments[7]) is not str
                 ):
@@ -1176,11 +1181,7 @@ class _ProviderReadSet:
                         )
                         _provider_proved_result(
                             value,
-                            expected=(
-                                list
-                                if witness._kind == "graph_search_entities"
-                                else dict
-                            ),
+                            expected=(list if witness._kind == "graph_search_entities" else dict),
                         )
                         commit_bytes(budget.finish())
                     except Exception:  # noqa: BLE001 - compare the sealed sentinel
@@ -1214,6 +1215,7 @@ class _ProviderDependencyLedger:
 
     __slots__ = (
         "_connection",
+        "_database_identity_sha256",
         "_graph",
         "_observer",
         "_observer_data_version",
@@ -1282,17 +1284,25 @@ class _ProviderDependencyLedger:
         total_changes = conn.total_changes
         schema_version = _main_schema_version(conn)
         temp_schema_version = _temp_schema_version(conn)
-        if (
-            isinstance(total_changes, bool)
-            or not isinstance(total_changes, int)
-            or total_changes < 0
-        ):
+        database_identity = _main_database_identity(conn)
+        database_identity_sha256 = _provider_dependency_ledger_seal(
+            {
+                "canonical_path": str(database_identity[0]),
+                "device": database_identity[1],
+                "inode": database_identity[2],
+                "schema": "friday.memory-exact-database-provenance.v1",
+            }
+        )
+        if isinstance(total_changes, bool) or not isinstance(total_changes, int) or total_changes < 0:
             raise _ProviderSnapshotInvalid
         with observer_lock:
+            observer_database_identity = _main_database_identity(observer)
             observer_data_version = _main_data_version(observer)
             observer_schema_version = _main_schema_version(observer)
         if (
             _main_data_version(conn) != source_data_version
+            or _main_database_identity(conn) != database_identity
+            or observer_database_identity != database_identity
             or observer_schema_version != schema_version
         ):
             raise _ProviderSnapshotInvalid
@@ -1306,6 +1316,7 @@ class _ProviderDependencyLedger:
         material = {
             "completeness": "sqlite-mutation-epoch",
             "connection_object": id(conn),
+            "database_identity_sha256": database_identity_sha256,
             "graph_object": id(graph),
             "observer_data_version": observer_data_version,
             "observer_lock_object": id(observer_lock),
@@ -1326,6 +1337,7 @@ class _ProviderDependencyLedger:
             "trusted_temp_schema_sha256": trusted_temp_schema_sha256,
         }
         object.__setattr__(self, "_connection", conn)
+        object.__setattr__(self, "_database_identity_sha256", database_identity_sha256)
         object.__setattr__(self, "_graph", graph)
         object.__setattr__(self, "_observer", observer)
         object.__setattr__(self, "_observer_data_version", observer_data_version)
@@ -1376,6 +1388,7 @@ class _ProviderDependencyLedger:
         return {
             "completeness": "sqlite-mutation-epoch",
             "connection_object": id(self._connection),
+            "database_identity_sha256": self._database_identity_sha256,
             "graph_object": id(self._graph),
             "observer_data_version": self._observer_data_version,
             "observer_lock_object": id(self._observer_lock),
@@ -1407,6 +1420,8 @@ class _ProviderDependencyLedger:
                 and self._storage._generation == self._storage_generation  # noqa: SLF001
                 and type(self._connection) is sqlite3.Connection
                 and self._connection is _current_storage_connection(self._storage)
+                and type(self._database_identity_sha256) is str
+                and len(self._database_identity_sha256) == 64
                 and type(self._observer) is sqlite3.Connection
                 and type(self._observer_lock) is _LOCK_TYPE
                 and type(self._searcher) is HybridSearcher
@@ -1417,8 +1432,7 @@ class _ProviderDependencyLedger:
                 and type(self._trusted_temp_schema_sha256) is str
                 and len(self._trusted_temp_schema_sha256) == 64
                 and request.identity_sha256() == self._request_identity_sha256
-                and hashlib.sha256(request.tenant_id.encode("utf-8")).hexdigest()
-                == self._tenant_sha256
+                and hashlib.sha256(request.tenant_id.encode("utf-8")).hexdigest() == self._tenant_sha256
                 and _provider_configuration_sha256(
                     self._storage,
                     self._searcher,
@@ -1426,9 +1440,7 @@ class _ProviderDependencyLedger:
                 )
                 == self._provider_configuration_sha256
                 and all(
-                    isinstance(value, int)
-                    and not isinstance(value, bool)
-                    and value >= 0
+                    isinstance(value, int) and not isinstance(value, bool) and value >= 0
                     for value in (
                         self._observer_data_version,
                         self._schema_version,
@@ -1495,15 +1507,31 @@ class _ProviderDependencyLedger:
         total_changes = conn.total_changes
         source_schema_version = _main_schema_version(conn)
         temp_schema_version = _temp_schema_version(conn)
+        database_identity = _main_database_identity(conn)
+        database_identity_sha256 = _provider_dependency_ledger_seal(
+            {
+                "canonical_path": str(database_identity[0]),
+                "device": database_identity[1],
+                "inode": database_identity[2],
+                "schema": "friday.memory-exact-database-provenance.v1",
+            }
+        )
         if isinstance(total_changes, bool) or not isinstance(total_changes, int):
             raise _ProviderSnapshotInvalid
         with self._observer_lock:
+            observer_database_identity = _main_database_identity(self._observer)
             observer_data_version = _main_data_version(self._observer)
             observer_schema_version = _main_schema_version(self._observer)
         if (
             _main_data_version(conn) != source_data_version
+            or _main_database_identity(conn) != database_identity
             or total_changes != self._total_changes + local_change_delta
             or source_data_version != self._source_data_version
+            or not hmac.compare_digest(
+                database_identity_sha256,
+                self._database_identity_sha256,
+            )
+            or observer_database_identity != database_identity
             or observer_data_version != self._observer_data_version
             or source_schema_version != self._schema_version
             or observer_schema_version != self._schema_version
@@ -1514,7 +1542,6 @@ class _ProviderDependencyLedger:
             from friday.storage._memory_exact_internal import MemoryExactStorageDrift
 
             raise MemoryExactStorageDrift("memory exact source changed after ranking")
-
 
 
 class _ProviderReadEnvelope:
@@ -1615,12 +1642,7 @@ class _ProviderStagedReadBudget:
     def reserve(self, size: int) -> None:
         from friday.storage._memory_exact_internal import MEMORY_EXACT_MAX_SNAPSHOT_UTF8_BYTES
 
-        if (
-            self._closed
-            or isinstance(size, bool)
-            or not isinstance(size, int)
-            or size < 0
-        ):
+        if self._closed or isinstance(size, bool) or not isinstance(size, int) or size < 0:
             raise _ProviderSnapshotInvalid
         total = self._used_bytes + size
         if total > MEMORY_EXACT_MAX_SNAPSHOT_UTF8_BYTES:
@@ -1718,9 +1740,7 @@ class _BoundedProviderStorage:
             )
             return self._envelope.observe(kind, arguments, value)
         except BaseException as error:
-            self._envelope.poison(
-                resource=isinstance(error, _ProviderResourceExceeded)
-            )
+            self._envelope.poison(resource=isinstance(error, _ProviderResourceExceeded))
             raise
 
     def _load(
@@ -1788,9 +1808,7 @@ class _BoundedProviderStorage:
             self._envelope.commit_staged(budget.finish())
         except Exception as error:  # noqa: BLE001 - graph failures stay body-free
             if self._request.as_of or self._request.known_at:
-                self._envelope.poison(
-                    resource=isinstance(error, _ProviderResourceExceeded)
-                )
+                self._envelope.poison(resource=isinstance(error, _ProviderResourceExceeded))
                 raise
             self._envelope.suppress_graph()
             value = (True, ())
@@ -1926,12 +1944,7 @@ class _BoundedProviderStorage:
             invalid = (
                 type(terms) not in (list, tuple)
                 or len(terms) > 400
-                or any(
-                    type(term) is not str
-                    or not term
-                    or len(term.encode("utf-8")) > 512
-                    for term in terms
-                )
+                or any(type(term) is not str or not term or len(term.encode("utf-8")) > 512 for term in terms)
             )
         except UnicodeError:
             invalid = True
@@ -1949,9 +1962,7 @@ class _BoundedProviderStorage:
                 type(prefixes) not in (list, tuple)
                 or len(prefixes) > 400
                 or any(
-                    type(prefix) is not str
-                    or not prefix
-                    or len(prefix.encode("utf-8")) > 512
+                    type(prefix) is not str or not prefix or len(prefix.encode("utf-8")) > 512
                     for prefix in prefixes
                 )
                 or isinstance(limit, bool)
@@ -2019,9 +2030,7 @@ class _BoundedProviderStorage:
             self._envelope.observe("relation_history_status", arguments, value)
             return released
         except BaseException as error:
-            self._envelope.poison(
-                resource=isinstance(error, _ProviderResourceExceeded)
-            )
+            self._envelope.poison(resource=isinstance(error, _ProviderResourceExceeded))
             raise
 
     def get_knowledge_usage(
@@ -2097,10 +2106,7 @@ class _BoundedProviderStorage:
                 type(values) not in (list, tuple)
                 or len(values) > maximum
                 or any(
-                    type(item) is not str
-                    or not item
-                    or len(item.encode("utf-8")) > 240
-                    for item in values
+                    type(item) is not str or not item or len(item.encode("utf-8")) > 240 for item in values
                 )
             )
         except UnicodeError:
@@ -2367,7 +2373,7 @@ class _BoundedProviderGraph:
             )
         except _ProviderSnapshotInvalid:
             self._envelope.poison()
-            raise _ProviderSnapshotInvalid
+            raise _ProviderSnapshotInvalid from None
         self._envelope.observe(kind, arguments, value)
         return released
 
@@ -2402,18 +2408,14 @@ class _BoundedProviderGraph:
                         type(seed_knowledge_ids) is not list
                         or len(seed_knowledge_ids) > 400
                         or any(
-                            type(identity) is not str
-                            or not identity
-                            or len(identity.encode("utf-8")) > 240
+                            type(identity) is not str or not identity or len(identity.encode("utf-8")) > 240
                             for identity in seed_knowledge_ids
                         )
                     )
                 )
             ):
                 raise _ProviderSnapshotInvalid
-            frozen_seeds = (
-                None if seed_knowledge_ids is None else tuple(seed_knowledge_ids)
-            )
+            frozen_seeds = None if seed_knowledge_ids is None else tuple(seed_knowledge_ids)
             arguments = (
                 tenant,
                 query,
@@ -2455,9 +2457,7 @@ class _BoundedProviderGraph:
             self._envelope.commit_staged(budget.finish())
         except Exception as error:  # noqa: BLE001 - graph failures stay body-free
             if self._request.as_of or self._request.known_at:
-                self._envelope.poison(
-                    resource=isinstance(error, _ProviderResourceExceeded)
-                )
+                self._envelope.poison(resource=isinstance(error, _ProviderResourceExceeded))
                 raise
             self._unavailable = True
             self._envelope.suppress_graph()
@@ -2521,9 +2521,7 @@ class _BoundedProviderGraph:
             self._envelope.commit_staged(budget.finish())
         except Exception as error:  # noqa: BLE001 - graph failures stay body-free
             if self._request.as_of or self._request.known_at:
-                self._envelope.poison(
-                    resource=isinstance(error, _ProviderResourceExceeded)
-                )
+                self._envelope.poison(resource=isinstance(error, _ProviderResourceExceeded))
                 raise
             self._unavailable = True
             self._envelope.suppress_graph()
@@ -2673,13 +2671,9 @@ class MemoryExactPublicationRefresh:
             "authorization_bindings_sha256": _sha256(authorization_bindings),
             "context_authority_sha256": context_authority_sha256,
             "decision_object": id(decision),
-            "dependency_ledger_object": (
-                None if dependency_ledger is None else id(dependency_ledger)
-            ),
+            "dependency_ledger_object": (None if dependency_ledger is None else id(dependency_ledger)),
             "dependency_ledger_seal": (
-                None
-                if dependency_ledger is None
-                else dependency_ledger.seal_sha256(page.request)
+                None if dependency_ledger is None else dependency_ledger.seal_sha256(page.request)
             ),
             "page_authority_handle": page.authority_handle,
             "page_graph_source_set_sha256": page.graph_source_set_sha256,
@@ -2810,11 +2804,7 @@ class MemoryExactInternalAdapter:
         try:
             source = _current_storage_connection(storage)
             generation = storage._generation  # noqa: SLF001
-            if (
-                isinstance(generation, bool)
-                or not isinstance(generation, int)
-                or generation < 0
-            ):
+            if isinstance(generation, bool) or not isinstance(generation, int) or generation < 0:
                 raise _ProviderSnapshotInvalid
             _normalize_provider_connection(source)
             trusted_function_schema_sha256 = _function_schema_sha256(source)
@@ -2829,13 +2819,9 @@ class MemoryExactInternalAdapter:
                 raise _ProviderSnapshotInvalid
         except Exception:  # noqa: BLE001 - initialization failures stay body-free
             if observer is not None:
-                try:
+                with suppress(sqlite3.Error):
                     observer.close()
-                except sqlite3.Error:
-                    pass
-            raise MemoryExactInternalError(
-                "memory-exact provider connection is unavailable"
-            ) from None
+            raise MemoryExactInternalError("memory-exact provider connection is unavailable") from None
         self._trusted_function_schema_sha256 = trusted_function_schema_sha256
         self._trusted_temp_schema_sha256 = trusted_temp_schema_sha256
         self._dependency_observer = observer
@@ -2843,10 +2829,8 @@ class MemoryExactInternalAdapter:
         self._dependency_observer_lock = threading.Lock()
 
     def __del__(self) -> None:
-        try:
+        with suppress(Exception):  # noqa: BLE001 - destructor never escapes
             object.__getattribute__(self, "_dependency_observer").close()
-        except Exception:  # noqa: BLE001 - destructor must never escape at shutdown
-            pass
 
     @property
     def binding(self) -> MemoryExactAdapterBinding:
@@ -2911,9 +2895,7 @@ class MemoryExactInternalAdapter:
         except MemoryExactInternalError:
             raise
         except Exception:  # noqa: BLE001 - storage failures may retain private paths
-            raise MemoryExactInternalError(
-                "memory-exact authorization storage is unavailable"
-            ) from None
+            raise MemoryExactInternalError("memory-exact authorization storage is unavailable") from None
 
     def _require_no_publication_transaction(self) -> None:
         try:
@@ -2921,9 +2903,7 @@ class MemoryExactInternalAdapter:
         except MemoryExactInternalError:
             raise
         except Exception:  # noqa: BLE001 - connection diagnostics may retain paths
-            raise MemoryExactInternalError(
-                "memory-exact provider connection is unavailable"
-            ) from None
+            raise MemoryExactInternalError("memory-exact provider connection is unavailable") from None
         if in_transaction:
             raise MemoryExactInternalError(
                 "memory-exact provider refresh requires no active publication transaction"
@@ -2971,8 +2951,8 @@ class MemoryExactInternalAdapter:
 
         self._require_no_publication_transaction()
         from friday.storage._memory_exact_internal import (
-            MemoryExactStorageDrift,
             _MEMORY_EXACT_MAX_PROVIDER_MATERIAL_ROWS,
+            MemoryExactStorageDrift,
         )
 
         read_set = _ProviderReadSet()
@@ -2987,9 +2967,7 @@ class MemoryExactInternalAdapter:
                 request=request,
                 searcher=self._searcher,
                 graph=self._graph,
-                trusted_function_schema_sha256=(
-                    self._trusted_function_schema_sha256
-                ),
+                trusted_function_schema_sha256=(self._trusted_function_schema_sha256),
                 trusted_temp_schema_sha256=self._trusted_temp_schema_sha256,
             )
             with read_only_storage_snapshot(self._storage) as conn:
@@ -3012,9 +2990,7 @@ class MemoryExactInternalAdapter:
             _ProviderSnapshotInvalid,
             sqlite3.Error,
         ):
-            raise MemoryExactInternalError(
-                "memory-exact provider dependency ledger is unavailable"
-            ) from None
+            raise MemoryExactInternalError("memory-exact provider dependency ledger is unavailable") from None
         graph_expansion = bool(request.as_of or request.known_at or is_relational_query(request.query))
         envelope = _ProviderReadEnvelope(read_set)
         bounded_storage = _BoundedProviderStorage(
@@ -3108,11 +3084,7 @@ class MemoryExactInternalAdapter:
                 result_ids: list[str] = []
                 for item in raw_results:
                     identity = item.get("id")
-                    if (
-                        type(identity) is not str
-                        or not identity
-                        or len(identity.encode("utf-8")) > 240
-                    ):
+                    if type(identity) is not str or not identity or len(identity.encode("utf-8")) > 240:
                         raise _ProviderSnapshotInvalid
                     result_ids.append(identity)
                 bounded_storage.ensure_result_sources_in_transaction(
@@ -3130,16 +3102,8 @@ class MemoryExactInternalAdapter:
                 )
 
                 try:
-                    graph_omitted = (
-                        graph_saturated
-                        or provider_graph.unavailable
-                        or read_set.graph_suppressed
-                    )
-                    provider_payload = (
-                        _provider_graph_omitted_payload(request, raw)
-                        if graph_omitted
-                        else raw
-                    )
+                    graph_omitted = graph_saturated or provider_graph.unavailable or read_set.graph_suppressed
+                    provider_payload = _provider_graph_omitted_payload(request, raw) if graph_omitted else raw
                     provider_snapshot = _create_memory_exact_provider_snapshot(
                         request,
                         provider_payload,
@@ -3183,6 +3147,11 @@ class MemoryExactInternalAdapter:
         request: MemoryExactRequest,
     ) -> MemoryExactPage:
         """Authorize before ranking, then reauthorize in the exact source snapshot."""
+
+        from friday.storage._memory_exact_internal import (
+            MemoryExactStorageDrift,
+            MemoryExactStorageError,
+        )
 
         admitted, actor = self._admitted_scope(context, request)
         try:
@@ -3238,6 +3207,10 @@ class MemoryExactInternalAdapter:
         except _AuthorizationDenied:
             raise MemoryExactReadDenied("memory-exact read authorization changed") from None
         except TurnContextError:
+            raise
+        except MemoryExactStorageDrift:
+            raise
+        except MemoryExactStorageError:
             raise
         except MemoryExactInternalError:
             raise
@@ -3533,9 +3506,7 @@ class MemoryExactInternalAdapter:
                 or type(transaction_context[2]) is not str
                 or transaction_context[2] != transaction_context[1]
             ):
-                raise MemoryExactInternalError(
-                    "memory-exact publication transaction context is unavailable"
-                )
+                raise MemoryExactInternalError("memory-exact publication transaction context is unavailable")
             refresh._dependency_ledger.require_stable(
                 conn,
                 request=page.request,
