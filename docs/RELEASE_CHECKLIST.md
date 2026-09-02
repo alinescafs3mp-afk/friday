@@ -19,6 +19,11 @@ base_sha="$(git rev-parse --verify "${QUALITY_GATE_BASE_SHA:?set accepted base}^
 GOLDEN_JOURNEY_RELEASE_ROOT="$(readlink -f -- "$HOME/.jericho/wheel-only-releases/d751bfc6397c6f750724df1d40e3fb90f7594943")" || exit 1
 test -d "$GOLDEN_JOURNEY_RELEASE_ROOT" || exit 1
 export GOLDEN_JOURNEY_RELEASE_ROOT
+GOLDEN_JOURNEY_PRODUCTION_OBSERVATION_ARTIFACT="$(readlink -f -- "$HOME/.jericho/runtime/release-tools-020799/production-observation-private-020799-d751bfc6.json")" || exit 1
+GOLDEN_JOURNEY_PRODUCTION_OBSERVATION_ARTIFACT_SHA256="b92805725feab559766ef68933752fa0d1b55471d0fafa1f90bae0980eaf4ad6"
+test -f "$GOLDEN_JOURNEY_PRODUCTION_OBSERVATION_ARTIFACT" || exit 1
+export GOLDEN_JOURNEY_PRODUCTION_OBSERVATION_ARTIFACT
+export GOLDEN_JOURNEY_PRODUCTION_OBSERVATION_ARTIFACT_SHA256
 evidence_dir="$(mktemp -d -p /var/tmp friday-exact-evidence.XXXXXXXX)"
 .venv/bin/python -I -B tools/quality_gate.py \
   --tier exact-release --candidate-sha "$candidate_sha" --base-sha "$base_sha" \

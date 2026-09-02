@@ -70514,9 +70514,15 @@ class AgentRuntime:
         available = {
             str((tool.get("function") or {}).get("name") or tool.get("name") or "") for tool in tools
         }
-        legacy_adapter_authorized = bool(
-            ("message_search" in available if authorized is None else authorized)
-            and self._internal_search_adapter_available("message_search", actor)
+        # A caller which supplies the already-filtered tool surface retains the
+        # legacy topical-search contract.  Only an explicit preflight decision
+        # needs the separate code-owned adapter proof; requiring both here
+        # would silently disable the established topical lane for internal
+        # callers whose kernel intentionally has no preflight hook.
+        legacy_adapter_authorized = (
+            "message_search" in available
+            if authorized is None
+            else bool(authorized and self._internal_search_adapter_available("message_search", actor))
         )
         exact_window_preflight_available = bool(
             history_window is not None
