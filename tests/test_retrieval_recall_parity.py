@@ -151,14 +151,11 @@ def test_parity_matrix_uses_only_synthetic_pseudonyms_and_aggregate_facts(
     dimensions = {item.name: item for item in report.dimensions}
     assert dimensions["candidate_membership"].status == "parity"
     assert dimensions["candidate_membership"].matched == 7
-    assert dimensions["candidate_order"].status == "mismatch"
-    assert dimensions["candidate_order"].matched == 6
-    assert dimensions["candidate_order"].mismatched == 1
-    order_mismatches = tuple(item for item in cases if item.order_status == "mismatch")
-    assert len(order_mismatches) == 1
-    assert order_mismatches[0].adapter == "message_search"
-    assert order_mismatches[0].archive_expected_rank == 2
-    assert order_mismatches[0].adapter_expected_rank == 1
+    assert dimensions["candidate_order"].status == "parity"
+    assert dimensions["candidate_order"].matched == 7
+    assert dimensions["candidate_order"].mismatched == 0
+    assert all(item.order_status == "parity" for item in cases)
+    assert all(item.archive_expected_rank == item.adapter_expected_rank for item in cases)
 
 
 def test_unsupported_dimensions_are_explicit_and_never_claim_parity(

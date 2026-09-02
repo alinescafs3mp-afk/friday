@@ -13,6 +13,7 @@ _OWNER = "archive-message-parity-owner"
 _FOREIGN = "archive-message-parity-foreign"
 _MISTYPED_QUERY = "Uhfabr lt;ehcnd"
 _REPAIRED_TEXT = "График дежурств"
+_MISTYPED_TOPIC_QUERY = "фдзрф иуеф"
 
 
 def _archive_page(
@@ -225,3 +226,67 @@ def test_candidate_limit_is_applied_after_conversation_deduplication(storage: An
     }
     assert any(hit.message.message_id == target["id"] for hit in page.hits)
     assert {hit.source_rank for hit in page.hits} == {1, 2}
+
+
+def test_repaired_topic_order_matches_principal_local_legacy_relevance(storage: Any) -> None:
+    storage.ensure_user(_OWNER)
+    relevant_conversation = storage.create_conversation(_OWNER, "older compact topic")
+    relevant = storage.store_message(
+        relevant_conversation["id"],
+        _OWNER,
+        "assistant",
+        "alpha alpha alpha beta beta",
+    )
+    recent_conversation = storage.create_conversation(_OWNER, "newer padded topic")
+    recent = storage.store_message(
+        recent_conversation["id"],
+        _OWNER,
+        "assistant",
+        "alpha beta " + "context " * 40,
+    )
+    boundary_conversation = storage.create_conversation(_OWNER, "accepted topic boundary")
+    boundary = storage.store_message(
+        boundary_conversation["id"],
+        _OWNER,
+        "user",
+        "current archive request",
+    )
+    storage.execute(
+        "UPDATE messages SET created_at=? WHERE id=?",
+        ("2026-05-05T08:00:00+00:00", relevant["id"]),
+    )
+    storage.execute(
+        "UPDATE messages SET created_at=? WHERE id=?",
+        ("2026-05-05T09:00:00+00:00", recent["id"]),
+    )
+    storage.execute(
+        "UPDATE messages SET created_at=? WHERE id=?",
+        ("2026-05-06T10:00:00+00:00", boundary["id"]),
+    )
+    storage.commit()
+
+    legacy_ids = [
+        str(row["id"])
+        for row in storage.search_messages(
+            _OWNER,
+            _MISTYPED_TOPIC_QUERY,
+            limit=2,
+            before_message_id=boundary["id"],
+        )
+    ]
+    with storage.transaction() as conn:
+        page = select_authorized_archive_message_page_in_transaction(
+            conn,
+            principal_id=_OWNER,
+            query=_MISTYPED_TOPIC_QUERY,
+            scope=ArchiveMessageScope.ALL,
+            conversation_id=boundary_conversation["id"],
+            boundary_user_message_id=boundary["id"],
+            roles=(MessageRole.ASSISTANT,),
+            limit=2,
+        )
+
+    assert page is not None
+    assert legacy_ids == [relevant["id"], recent["id"]]
+    assert [hit.message.message_id for hit in page.hits] == legacy_ids
+    assert tuple(hit.source_rank for hit in page.hits) == (1, 2)

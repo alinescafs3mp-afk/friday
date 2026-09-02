@@ -1995,6 +1995,7 @@ def _select_authorized_archive_message_page_once_in_transaction(
                           ROW_NUMBER() OVER (
                               PARTITION BY conversation_id
                               ORDER BY lexical_score ASC,
+                                       length(content) ASC,
                                        julianday(created_at) DESC, message_rowid DESC
                           ) AS source_hit_rank
                      FROM lexical
@@ -2006,6 +2007,7 @@ def _select_authorized_archive_message_page_once_in_transaction(
                    SELECT source_heads.conversation_id,
                           ROW_NUMBER() OVER (
                               ORDER BY lexical_score ASC,
+                                       length(content) ASC,
                                        julianday(created_at) DESC, message_rowid DESC,
                                        conversation_id ASC
                           ) AS source_rank
