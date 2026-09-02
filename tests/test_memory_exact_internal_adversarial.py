@@ -52,7 +52,7 @@ from friday.retrieval.memory_exact_internal import (
     MemoryExactReadDenied,
 )
 from friday.storage import FridayStorage
-from friday.storage._memory_exact_internal import MemoryExactStorageError
+from friday.storage._memory_exact_internal import MemoryExactStorageDrift, MemoryExactStorageError
 from friday.storage.models import (
     Entity,
     EntityType,
@@ -178,6 +178,29 @@ def _request(
     return MemoryExactRequest.create(**values)
 
 
+async def _refresh_and_consume(
+    storage: FridayStorage,
+    adapter: MemoryExactInternalAdapter,
+    *,
+    context: AuthenticatedTurnContext,
+    page: Any,
+    decision: Any,
+) -> bool:
+    refresh = await adapter.refresh_publication_authority(
+        context=context,
+        page=page,
+        decision=decision,
+    )
+    with storage.transaction() as conn:
+        return adapter.consume_publication_authority_in_transaction(
+            conn,
+            context=context,
+            page=page,
+            decision=decision,
+            refresh=refresh,
+        )
+
+
 def _seed(
     storage: FridayStorage,
     *,
@@ -185,6 +208,7 @@ def _seed(
     query: str,
     tenant: str = TENANT,
     body: str | None = None,
+    knowledge_id: str | None = None,
 ) -> tuple[RawObject, KnowledgeObject]:
     storage.ensure_user(tenant, preset_key="owner")
     content = body if body is not None else f"{query} exact hostile evidence {suffix}"
@@ -202,7 +226,7 @@ def _seed(
     )
     storage.store_raw_object(raw)
     knowledge = KnowledgeObject(
-        id=new_id("ko"),
+        id=knowledge_id or new_id("ko"),
         user_id=tenant,
         raw_object_id=raw.id,
         content=content,
@@ -561,6 +585,83 @@ async def test_read_authority_is_fresh_and_precedes_provider(
     assert called is False
 
 
+@pytest.mark.parametrize("security_id", ("search.use", "knowledge.read"))
+async def test_projection_reauthorizes_after_prepare(
+    storage: Any,
+    security_id: str,
+) -> None:
+    _seed(storage, suffix=f"projection-revoke-{security_id}", query="R8EPROJECTIONREVOKE")
+    authorization, actor, context, _searcher, adapter = _stack(
+        storage,
+        label=f"projection-revoke-{security_id}",
+    )
+    page = await adapter.prepare(
+        context=context,
+        request=_request(actor, context, "R8EPROJECTIONREVOKE"),
+    )
+    authorization.deny_permission(actor.own_id, security_id)
+    with pytest.raises(MemoryExactReadDenied, match="projection authorization denied"):
+        adapter.project_for_model(context=context, page=page)
+
+
+@pytest.mark.parametrize("security_id", ("search.use", "knowledge.read"))
+async def test_provider_time_revocation_precedes_every_exact_source_read(
+    storage: Any,
+    monkeypatch: pytest.MonkeyPatch,
+    security_id: str,
+) -> None:
+    _seed(storage, suffix=f"provider-revoke-{security_id}", query="R8EPROVIDERREVOKE")
+    authorization, actor, context, _searcher, adapter = _stack(
+        storage,
+        label=f"provider-revoke-{security_id}",
+    )
+    events: list[str] = []
+    released_search = HybridSearcher.search
+    released_authorize = AuthorizationService.authorize_in_transaction
+
+    def traced_authorize(
+        service: AuthorizationService,
+        conn: Any,
+        admitted_actor: ActorContext,
+        capability: str,
+    ) -> Any:
+        if events and events[-1] == "provider-return":
+            events.append(f"authorization:{capability}")
+        return released_authorize(service, conn, admitted_actor, capability)
+
+    async def revoke_before_return(
+        provider: HybridSearcher,
+        *args: object,
+        **kwargs: Any,
+    ) -> dict[str, Any]:
+        result = await released_search(provider, *args, **kwargs)
+        authorization.deny_permission(actor.own_id, security_id)
+        events.append("provider-return")
+        return result
+
+    def forbidden_exact_source_read(*_args: object, **_kwargs: object) -> object:
+        events.append("exact-source-read")
+        raise AssertionError("exact sources were read after provider-time revocation")
+
+    import friday.storage._memory_exact_internal as memory_storage
+
+    monkeypatch.setattr(AuthorizationService, "authorize_in_transaction", traced_authorize)
+    monkeypatch.setattr(HybridSearcher, "search", revoke_before_return)
+    monkeypatch.setattr(
+        memory_storage,
+        "select_memory_exact_page_in_transaction",
+        forbidden_exact_source_read,
+    )
+    with pytest.raises(MemoryExactReadDenied, match="authorization changed"):
+        await adapter.prepare(
+            context=context,
+            request=_request(actor, context, "R8EPROVIDERREVOKE"),
+        )
+    assert events[0] == "provider-return"
+    assert "exact-source-read" not in events
+    assert any(event.startswith("authorization:") for event in events[1:])
+
+
 @pytest.mark.parametrize("edge", ("prepare", "projection", "publication"))
 async def test_inherited_turn_deadline_closes_every_model_and_publication_edge(
     storage: Any,
@@ -644,15 +745,23 @@ async def test_publication_receipt_cannot_outlive_deadline_or_later_revocation(
     )
     expired = await adapter.reauthorize_for_publication(context=context, page=page)
     assert expired.status is MemoryExactPublicationStatus.AUTHORIZED
-    clock_ns[0] += 61_000_000_000
-    assert (
-        await adapter.consume_publication_authority(
-            context=context,
-            page=page,
-            decision=expired,
-        )
-        is False
+    expired_refresh = await adapter.refresh_publication_authority(
+        context=context,
+        page=page,
+        decision=expired,
     )
+    clock_ns[0] += 61_000_000_000
+    with storage.transaction() as conn:
+        assert (
+            adapter.consume_publication_authority_in_transaction(
+                conn,
+                context=context,
+                page=page,
+                decision=expired,
+                refresh=expired_refresh,
+            )
+            is False
+        )
     assert expired.authorizes(page) is False
     assert expired.to_public_payload()["authorized"] is False
 
@@ -672,7 +781,9 @@ async def test_publication_receipt_cannot_outlive_deadline_or_later_revocation(
     )
     authorization.deny_permission(actor.own_id, "knowledge.read")
     assert (
-        await live_adapter.consume_publication_authority(
+        await _refresh_and_consume(
+            storage,
+            live_adapter,
             context=live_context,
             page=live_page,
             decision=revoked,
@@ -681,7 +792,9 @@ async def test_publication_receipt_cannot_outlive_deadline_or_later_revocation(
     )
     authorization.grant_permission(actor.own_id, "knowledge.read")
     assert (
-        await live_adapter.consume_publication_authority(
+        await _refresh_and_consume(
+            storage,
+            live_adapter,
             context=live_context,
             page=live_page,
             decision=revoked,
@@ -705,12 +818,16 @@ async def test_publication_claim_is_single_consumer_and_provider_failure_burns_i
     )
     decision = await adapter.reauthorize_for_publication(context=context, page=page)
     outcomes = await asyncio.gather(
-        adapter.consume_publication_authority(
+        _refresh_and_consume(
+            storage,
+            adapter,
             context=context,
             page=page,
             decision=decision,
         ),
-        adapter.consume_publication_authority(
+        _refresh_and_consume(
+            storage,
+            adapter,
             context=context,
             page=page,
             decision=decision,
@@ -726,7 +843,9 @@ async def test_publication_claim_is_single_consumer_and_provider_failure_burns_i
 
     monkeypatch.setattr(HybridSearcher, "search", unavailable)
     assert (
-        await adapter.consume_publication_authority(
+        await _refresh_and_consume(
+            storage,
+            adapter,
             context=context,
             page=page,
             decision=failed,
@@ -747,7 +866,7 @@ async def test_publication_claim_is_single_consumer_and_provider_failure_burns_i
 
     monkeypatch.setattr(HybridSearcher, "search", blocked)
     task = asyncio.create_task(
-        adapter.consume_publication_authority(
+        adapter.refresh_publication_authority(
             context=context,
             page=page,
             decision=cancelled,
@@ -757,15 +876,55 @@ async def test_publication_claim_is_single_consumer_and_provider_failure_burns_i
     task.cancel()
     with pytest.raises(asyncio.CancelledError):
         await task
-    assert cancelled.to_public_payload()["authorized"] is False
+    assert cancelled.to_public_payload()["authorized"] is True
+    monkeypatch.setattr(HybridSearcher, "search", released_search)
     assert (
-        await adapter.consume_publication_authority(
+        await _refresh_and_consume(
+            storage,
+            adapter,
             context=context,
             page=page,
             decision=cancelled,
         )
-        is False
+        is True
     )
+
+
+async def test_publication_refresh_refuses_an_active_transaction_before_provider(
+    storage: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _seed(storage, suffix="refresh-transaction", query="R8EREFRESHTRANSACTION")
+    _authorization, actor, context, _searcher, adapter = _stack(
+        storage,
+        label="refresh-transaction",
+    )
+    page = await adapter.prepare(
+        context=context,
+        request=_request(actor, context, "R8EREFRESHTRANSACTION"),
+    )
+    decision = await adapter.reauthorize_for_publication(context=context, page=page)
+    called = False
+
+    async def forbidden_provider(*_args: object, **_kwargs: object) -> dict[str, object]:
+        nonlocal called
+        called = True
+        raise AssertionError("provider ran inside the publication transaction")
+
+    monkeypatch.setattr(HybridSearcher, "search", forbidden_provider)
+    with (
+        storage.transaction(),
+        pytest.raises(
+            MemoryExactInternalError,
+            match="no active publication transaction",
+        ),
+    ):
+        await adapter.refresh_publication_authority(
+            context=context,
+            page=page,
+            decision=decision,
+        )
+    assert called is False
 
 
 async def test_wrong_page_does_not_burn_receipt_and_denied_receipt_never_upgrades(
@@ -787,7 +946,9 @@ async def test_wrong_page_does_not_burn_receipt_and_denied_receipt_never_upgrade
     )
     decision = await adapter.reauthorize_for_publication(context=context, page=page_a)
     assert (
-        await adapter.consume_publication_authority(
+        await _refresh_and_consume(
+            storage,
+            adapter,
             context=context,
             page=page_b,
             decision=decision,
@@ -796,7 +957,9 @@ async def test_wrong_page_does_not_burn_receipt_and_denied_receipt_never_upgrade
     )
     assert decision.to_public_payload()["authorized"] is True
     assert (
-        await adapter.consume_publication_authority(
+        await _refresh_and_consume(
+            storage,
+            adapter,
             context=context,
             page=page_a,
             decision=decision,
@@ -809,7 +972,9 @@ async def test_wrong_page_does_not_burn_receipt_and_denied_receipt_never_upgrade
     assert denied.status is MemoryExactPublicationStatus.DENIED
     authorization.grant_permission(actor.own_id, "knowledge.read")
     assert (
-        await adapter.consume_publication_authority(
+        await _refresh_and_consume(
+            storage,
+            adapter,
             context=context,
             page=page_a,
             decision=denied,
@@ -817,6 +982,232 @@ async def test_wrong_page_does_not_burn_receipt_and_denied_receipt_never_upgrade
         is False
     )
     assert denied.to_public_payload()["authorized"] is False
+
+
+@pytest.mark.parametrize("foreign_scope", ("turn", "person"))
+async def test_wrong_context_burns_an_exact_page_receipt(
+    storage: Any,
+    foreign_scope: str,
+) -> None:
+    _seed(storage, suffix=f"receipt-wrong-{foreign_scope}", query="R8EWRONGCONTEXT")
+    _authorization, actor, context, _searcher, adapter = _stack(
+        storage,
+        label=f"receipt-wrong-{foreign_scope}",
+    )
+    page = await adapter.prepare(
+        context=context,
+        request=_request(actor, context, "R8EWRONGCONTEXT"),
+    )
+    decision = await adapter.reauthorize_for_publication(context=context, page=page)
+    refresh = await adapter.refresh_publication_authority(
+        context=context,
+        page=page,
+        decision=decision,
+    )
+    if foreign_scope == "turn":
+        _foreign_issuer, foreign_context = _turn(actor, label="receipt-foreign-turn")
+    else:
+        storage.ensure_user(OTHER_PRINCIPAL, preset_key="owner")
+        other_actor = AuthorizationService(storage, shared_tenant=TENANT).actor_for_user(
+            OTHER_PRINCIPAL,
+            source="memory-exact-wrong-person",
+        )
+        _foreign_issuer, foreign_context = _turn(other_actor, label="receipt-foreign-person")
+    with storage.transaction() as conn:
+        assert (
+            adapter.consume_publication_authority_in_transaction(
+                conn,
+                context=foreign_context,
+                page=page,
+                decision=decision,
+                refresh=refresh,
+            )
+            is False
+        )
+    assert decision.to_public_payload()["authorized"] is False
+    assert (
+        await _refresh_and_consume(
+            storage,
+            adapter,
+            context=context,
+            page=page,
+            decision=decision,
+        )
+        is False
+    )
+
+
+async def test_publication_transaction_rollback_keeps_receipt_burned(storage: Any) -> None:
+    _seed(storage, suffix="receipt-rollback", query="R8ERECEIPTROLLBACK")
+    _authorization, actor, context, _searcher, adapter = _stack(
+        storage,
+        label="receipt-rollback",
+    )
+    page = await adapter.prepare(
+        context=context,
+        request=_request(actor, context, "R8ERECEIPTROLLBACK"),
+    )
+    decision = await adapter.reauthorize_for_publication(context=context, page=page)
+    refresh = await adapter.refresh_publication_authority(
+        context=context,
+        page=page,
+        decision=decision,
+    )
+    before = storage.execute("SELECT display_name FROM users WHERE id=?", (TENANT,)).fetchone()[0]
+    with pytest.raises(RuntimeError, match="publication CAS failed"), storage.transaction() as conn:
+        assert (
+            adapter.consume_publication_authority_in_transaction(
+                conn,
+                context=context,
+                page=page,
+                decision=decision,
+                refresh=refresh,
+            )
+            is True
+        )
+        conn.execute("UPDATE users SET display_name=? WHERE id=?", ("should-roll-back", TENANT))
+        raise RuntimeError("publication CAS failed")
+    after = storage.execute("SELECT display_name FROM users WHERE id=?", (TENANT,)).fetchone()[0]
+    assert after == before
+    assert decision.to_public_payload()["authorized"] is False
+
+
+async def test_provider_order_change_after_authorized_decision_is_burned(
+    storage: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    for index in range(2):
+        _seed(storage, suffix=f"provider-order-{index}", query="R8EPROVIDERORDER")
+    _authorization, actor, context, _searcher, adapter = _stack(
+        storage,
+        label="provider-order",
+    )
+    page = await adapter.prepare(
+        context=context,
+        request=_request(
+            actor,
+            context,
+            "R8EPROVIDERORDER",
+            page_size=2,
+            snapshot_limit=2,
+        ),
+    )
+    assert len(page.candidates) == 2
+    decision = await adapter.reauthorize_for_publication(context=context, page=page)
+    assert decision.status is MemoryExactPublicationStatus.AUTHORIZED
+    released_search = HybridSearcher.search
+
+    async def reordered(
+        provider: HybridSearcher,
+        *args: object,
+        **kwargs: Any,
+    ) -> dict[str, Any]:
+        result = await released_search(provider, *args, **kwargs)
+        result["results"] = list(reversed(result["results"]))
+        return result
+
+    monkeypatch.setattr(HybridSearcher, "search", reordered)
+    refresh = await adapter.refresh_publication_authority(
+        context=context,
+        page=page,
+        decision=decision,
+    )
+    assert refresh.status is MemoryExactPublicationStatus.DRIFTED
+    with storage.transaction() as conn:
+        assert (
+            adapter.consume_publication_authority_in_transaction(
+                conn,
+                context=context,
+                page=page,
+                decision=decision,
+                refresh=refresh,
+            )
+            is False
+        )
+    assert decision.to_public_payload()["authorized"] is False
+
+
+@pytest.mark.parametrize("mutation", ("link-status", "link-review", "merge"))
+async def test_link_review_or_merge_change_after_authorized_decision_is_burned(
+    storage: Any,
+    mutation: str,
+) -> None:
+    _raw, knowledge = _seed(
+        storage,
+        suffix=f"late-topology-{mutation}",
+        query="R8ELATETOPOLOGY",
+        body="R8ELATETOPOLOGY links LateAlphaR8E with LateBetaR8E.",
+    )
+    alpha = Entity(new_id("ent"), TENANT, "LateAlphaR8E", EntityType.PERSON)
+    beta = Entity(new_id("ent"), TENANT, "LateBetaR8E", EntityType.ORGANIZATION)
+    gamma = Entity(new_id("ent"), TENANT, "LateGammaR8E", EntityType.ORGANIZATION)
+    for entity in (alpha, beta, gamma):
+        storage.create_entity(entity)
+    alpha_link = storage.link_knowledge_entity(
+        TENANT,
+        knowledge.id,
+        alpha.id,
+        status="accepted",
+        evidence={"basis": "late-topology"},
+        reviewed_by=PRINCIPAL,
+    )
+    storage.link_knowledge_entity(
+        TENANT,
+        knowledge.id,
+        beta.id,
+        status="accepted",
+        evidence={"basis": "late-topology"},
+        reviewed_by=PRINCIPAL,
+    )
+    _authorization, actor, context, _searcher, adapter = _stack(
+        storage,
+        label=f"late-topology-{mutation}",
+    )
+    page = await adapter.prepare(
+        context=context,
+        request=_request(actor, context, "как связан LateAlphaR8E с LateBetaR8E"),
+    )
+    assert page.graph_projection.relations
+    decision = await adapter.reauthorize_for_publication(context=context, page=page)
+    assert decision.status is MemoryExactPublicationStatus.AUTHORIZED
+    if mutation == "link-status":
+        storage.execute(
+            "UPDATE knowledge_entity_links SET status='rejected' WHERE id=?",
+            (alpha_link["id"],),
+        )
+        storage.commit()
+    elif mutation == "link-review":
+        storage.execute(
+            """UPDATE knowledge_entity_links
+                  SET reviewed_by=?,reviewed_at=?,evidence_json=? WHERE id=?""",
+            (
+                OTHER_PRINCIPAL,
+                "2026-09-01T11:00:00+00:00",
+                json.dumps({"basis": "changed-review"}),
+                alpha_link["id"],
+            ),
+        )
+        storage.commit()
+    else:
+        storage.merge_entities(TENANT, alpha.id, gamma.id, merged_by=PRINCIPAL)
+    refresh = await adapter.refresh_publication_authority(
+        context=context,
+        page=page,
+        decision=decision,
+    )
+    assert refresh.status is not MemoryExactPublicationStatus.AUTHORIZED
+    with storage.transaction() as conn:
+        assert (
+            adapter.consume_publication_authority_in_transaction(
+                conn,
+                context=context,
+                page=page,
+                decision=decision,
+                refresh=refresh,
+            )
+            is False
+        )
+    assert decision.to_public_payload()["authorized"] is False
 
 
 @pytest.mark.parametrize("source", ("knowledge", "raw", "deleted"))
@@ -837,6 +1228,8 @@ async def test_exact_selected_revision_or_source_drift_refuses_publication(
         context=context,
         request=_request(actor, context, "R8EDRIFTNEEDLE"),
     )
+    decision = await adapter.reauthorize_for_publication(context=context, page=page)
+    assert decision.status is MemoryExactPublicationStatus.AUTHORIZED
     if source == "knowledge":
         storage.execute(
             "UPDATE knowledge_objects SET title=?,version=version+1,updated_at=? WHERE id=?",
@@ -854,9 +1247,24 @@ async def test_exact_selected_revision_or_source_drift_refuses_publication(
         )
     storage.commit()
 
-    decision = await adapter.reauthorize_for_publication(context=context, page=page)
-    assert decision.status is MemoryExactPublicationStatus.DRIFTED
-    assert decision.authorizes(page) is False
+    refresh = await adapter.refresh_publication_authority(
+        context=context,
+        page=page,
+        decision=decision,
+    )
+    assert refresh.status is MemoryExactPublicationStatus.DRIFTED
+    with storage.transaction() as conn:
+        assert (
+            adapter.consume_publication_authority_in_transaction(
+                conn,
+                context=context,
+                page=page,
+                decision=decision,
+                refresh=refresh,
+            )
+            is False
+        )
+    assert decision.to_public_payload()["authorized"] is False
 
 
 @pytest.mark.parametrize("graph_source", ("entity", "relation"))
@@ -906,6 +1314,8 @@ async def test_exact_graph_source_drift_refuses_publication(
         ),
     )
     assert page.graph_projection.relations
+    decision = await adapter.reauthorize_for_publication(context=context, page=page)
+    assert decision.status is MemoryExactPublicationStatus.AUTHORIZED
     if graph_source == "entity":
         storage.execute(
             "UPDATE entities SET name=?,version=version+1,updated_at=? WHERE id=?",
@@ -918,9 +1328,24 @@ async def test_exact_graph_source_drift_refuses_publication(
         )
     storage.commit()
 
-    decision = await adapter.reauthorize_for_publication(context=context, page=page)
-    assert decision.status is MemoryExactPublicationStatus.DRIFTED
-    assert decision.authorizes(page) is False
+    refresh = await adapter.refresh_publication_authority(
+        context=context,
+        page=page,
+        decision=decision,
+    )
+    assert refresh.status is MemoryExactPublicationStatus.DRIFTED
+    with storage.transaction() as conn:
+        assert (
+            adapter.consume_publication_authority_in_transaction(
+                conn,
+                context=context,
+                page=page,
+                decision=decision,
+                refresh=refresh,
+            )
+            is False
+        )
+    assert decision.to_public_payload()["authorized"] is False
 
 
 async def test_foreign_provider_candidate_is_never_projected(
@@ -957,18 +1382,8 @@ async def test_foreign_provider_candidate_is_never_projected(
 
     monkeypatch.setattr(HybridSearcher, "search", forged)
     request = _request(actor, context, "R8EPROVIDERTENANT")
-    try:
-        page = await adapter.prepare(context=context, request=request)
-    except MemoryExactStorageError:
-        return
-    assert page.candidates == ()
-    assert (
-        foreign.id
-        not in adapter.project_for_model(
-            context=context,
-            page=page,
-        ).to_model_json()
-    )
+    with pytest.raises((MemoryExactStorageError, MemoryExactInternalError)):
+        await adapter.prepare(context=context, request=request)
 
 
 async def test_provider_cannot_claim_an_exactly_nonempty_date_window_is_empty(
@@ -1044,6 +1459,362 @@ async def test_provider_oom_fails_closed_without_private_exception_text(
             request=_request(actor, context, private),
         )
     assert private not in str(captured.value)
+
+
+async def test_provider_internal_error_is_replaced_with_a_fixed_body_free_error(
+    storage: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _authorization, actor, context, _searcher, adapter = _stack(
+        storage,
+        label="provider-private-internal-error",
+    )
+    private = "PRIVATE-PROVIDER-INTERNAL-QUERY-AND-BODY-CANARY"
+
+    async def failed(*_args: object, **_kwargs: object) -> dict[str, object]:
+        raise MemoryExactInternalError(private)
+
+    monkeypatch.setattr(HybridSearcher, "search", failed)
+    with pytest.raises(MemoryExactInternalError) as captured:
+        await adapter.prepare(
+            context=context,
+            request=_request(actor, context, "R8EPRIVATEPROVIDERERROR"),
+        )
+    assert str(captured.value) == "memory-exact provider is unavailable"
+    assert private not in repr(captured.value)
+
+
+async def test_provider_pool_has_a_real_aggregate_envelope_before_full_row_reads(
+    storage: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    body = "R8EREALAGGREGATE " + ("x" * 950_000)
+    for index in range(9):
+        _seed(
+            storage,
+            suffix=f"real-aggregate-{index}",
+            query="R8EREALAGGREGATE",
+            body=f"{body}{index}",
+        )
+    _authorization, actor, context, _searcher, adapter = _stack(
+        storage,
+        label="real-aggregate",
+    )
+
+    def forbidden_legacy_materialization(*_args: object, **_kwargs: object) -> object:
+        raise AssertionError("legacy full-row materialization escaped the bounded facade")
+
+    monkeypatch.setattr(FridayStorage, "search_knowledge", forbidden_legacy_materialization)
+    monkeypatch.setattr(FridayStorage, "list_knowledge_objects", forbidden_legacy_materialization)
+    with pytest.raises(MemoryExactInternalError, match="aggregate byte bound"):
+        await adapter.prepare(
+            context=context,
+            request=_request(actor, context, "R8EREALAGGREGATE"),
+        )
+
+
+@pytest.mark.parametrize(
+    ("field", "forged_value"),
+    (
+        ("content", "PRIVATE-FORGED-PROVIDER-BODY"),
+        ("title", "PRIVATE-FORGED-PROVIDER-TITLE"),
+        ("lifecycle_stage", "deprecated"),
+    ),
+)
+async def test_valid_local_provider_row_cannot_forge_ranked_material(
+    storage: Any,
+    monkeypatch: pytest.MonkeyPatch,
+    field: str,
+    forged_value: str,
+) -> None:
+    _seed(storage, suffix=f"provider-forge-{field}", query="R8ELOCALFORGE")
+    _authorization, actor, context, searcher, adapter = _stack(
+        storage,
+        label=f"provider-forge-{field}",
+    )
+    genuine = await searcher.search(
+        actor.user_id,
+        "R8ELOCALFORGE",
+        limit=10,
+        include_entities=True,
+        kg=KnowledgeGraph(storage),
+        graph_expansion=False,
+        record_usage=False,
+    )
+    assert genuine["results"]
+    hostile = copy.deepcopy(genuine)
+    hostile["results"][0][field] = forged_value
+
+    async def forged(*_args: object, **_kwargs: object) -> dict[str, Any]:
+        return hostile
+
+    monkeypatch.setattr(HybridSearcher, "search", forged)
+    with pytest.raises(MemoryExactInternalError) as captured:
+        await adapter.prepare(
+            context=context,
+            request=_request(actor, context, "R8ELOCALFORGE"),
+        )
+    assert forged_value not in str(captured.value)
+
+
+@pytest.mark.parametrize(
+    ("assignment", "value"),
+    (
+        ("content=?", "R8EPROVIDERTOCTOU changed body"),
+        ("title=?", "Changed provider-time title"),
+        ("lifecycle_stage=?", "archived"),
+    ),
+)
+async def test_provider_to_storage_revision_race_fails_closed(
+    storage: Any,
+    monkeypatch: pytest.MonkeyPatch,
+    assignment: str,
+    value: str,
+) -> None:
+    _raw, knowledge = _seed(
+        storage,
+        suffix=f"provider-toctou-{assignment}",
+        query="R8EPROVIDERTOCTOU",
+    )
+    _authorization, actor, context, _searcher, adapter = _stack(
+        storage,
+        label=f"provider-toctou-{assignment}",
+    )
+    released_search = HybridSearcher.search
+
+    async def mutate_after_ranking(
+        provider: HybridSearcher,
+        *args: object,
+        **kwargs: Any,
+    ) -> dict[str, Any]:
+        result = await released_search(provider, *args, **kwargs)
+        storage.execute(
+            f"""UPDATE knowledge_objects
+                   SET {assignment},version=version+1,updated_at=? WHERE id=?""",  # nosec B608
+            (value, "2026-09-01T10:00:00+00:00", knowledge.id),
+        )
+        storage.commit()
+        return result
+
+    monkeypatch.setattr(HybridSearcher, "search", mutate_after_ranking)
+    with pytest.raises(MemoryExactStorageDrift, match="changed after ranking"):
+        await adapter.prepare(
+            context=context,
+            request=_request(actor, context, "R8EPROVIDERTOCTOU"),
+        )
+
+
+async def test_oversized_date_metadata_makes_exact_window_unavailable(
+    storage: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _raw, knowledge = _seed(
+        storage,
+        suffix="date-metadata-bound",
+        query="R8EDATEMETABOUND",
+    )
+    storage.execute(
+        "UPDATE knowledge_objects SET metadata_json=? WHERE id=?",
+        (json.dumps({"document_date": "2020-01-01"}), knowledge.id),
+    )
+    storage.commit()
+    _authorization, actor, context, searcher, adapter = _stack(
+        storage,
+        label="date-metadata-bound",
+    )
+    empty = await searcher.search(
+        actor.user_id,
+        "R8EDATEMETABOUND",
+        limit=10,
+        include_entities=True,
+        kg=KnowledgeGraph(storage),
+        graph_expansion=False,
+        since="2025-01-01",
+        record_usage=False,
+    )
+    assert empty["results"] == []
+    assert empty["strategy"]["date_window_empty"] is True
+    oversized_metadata = json.dumps({"document_date": "2025-05-01", "padding": "x" * 512})
+    storage.execute(
+        "UPDATE knowledge_objects SET metadata_json=? WHERE id=?",
+        (oversized_metadata, knowledge.id),
+    )
+    storage.commit()
+
+    async def stale_empty(*_args: object, **_kwargs: object) -> dict[str, Any]:
+        return empty
+
+    def forbidden_source_scan(*_args: object, **_kwargs: object) -> object:
+        raise AssertionError("source bodies were read before date metadata refusal")
+
+    import friday.storage._memory_exact_internal as memory_storage
+
+    # Keep the row inside the independent privacy envelope while proving that
+    # this lane refuses metadata above its own classification envelope.
+    monkeypatch.setattr(memory_storage, "MEMORY_EXACT_MAX_METADATA_UTF8_BYTES", 256)
+    monkeypatch.setattr(HybridSearcher, "search", stale_empty)
+    monkeypatch.setattr(memory_storage, "_scan_material", forbidden_source_scan)
+    with pytest.raises(MemoryExactStorageError, match="classification bound"):
+        await adapter.prepare(
+            context=context,
+            request=_request(
+                actor,
+                context,
+                "R8EDATEMETABOUND",
+                since="2025-01-01",
+            ),
+        )
+
+
+@pytest.mark.parametrize(
+    "metadata_json",
+    (
+        json.dumps({"document_date": "2025-05-01", "padding": "x" * 512}),
+        '{"document_date":"2025-05-01","document_date":"2025-05-02"}',
+    ),
+    ids=("oversized", "duplicate-date-key"),
+)
+async def test_live_date_provider_refuses_metadata_before_legacy_sql_or_material_fetch(
+    storage: Any,
+    monkeypatch: pytest.MonkeyPatch,
+    metadata_json: str,
+) -> None:
+    _raw, knowledge = _seed(
+        storage,
+        suffix="live-date-preflight",
+        query="R8ELIVEDATEPREFLIGHT",
+    )
+    storage.execute(
+        "UPDATE knowledge_objects SET metadata_json=? WHERE id=?",
+        (metadata_json, knowledge.id),
+    )
+    storage.commit()
+    _authorization, actor, context, _searcher, adapter = _stack(
+        storage,
+        label=f"live-date-preflight-{hashlib.sha256(metadata_json.encode()).hexdigest()[:8]}",
+    )
+    calls: list[str] = []
+
+    def forbidden_legacy_date_sql(*_args: object, **_kwargs: object) -> object:
+        calls.append("legacy-date-sql")
+        raise AssertionError("legacy date SQL ran before provider metadata refusal")
+
+    def forbidden_material_fetch(*_args: object, **_kwargs: object) -> object:
+        calls.append("material-fetch")
+        raise AssertionError("provider material was fetched before date metadata refusal")
+
+    import friday.storage._memory_exact_internal as memory_storage
+
+    # Keep the row privacy-eligible: this test exercises the exact-provider
+    # classification envelope, not the wider generic privacy envelope.
+    monkeypatch.setattr(memory_storage, "MEMORY_EXACT_MAX_METADATA_UTF8_BYTES", 256)
+    monkeypatch.setattr(FridayStorage, "knowledge_ids_in_window", forbidden_legacy_date_sql)
+    monkeypatch.setattr(
+        memory_storage,
+        "_load_memory_exact_provider_rows_in_transaction",
+        forbidden_material_fetch,
+    )
+    with pytest.raises(MemoryExactInternalError, match="provider is unavailable"):
+        await adapter.prepare(
+            context=context,
+            request=_request(
+                actor,
+                context,
+                "R8ELIVEDATEPREFLIGHT",
+                since="2025-01-01",
+            ),
+        )
+    assert calls == []
+
+
+@pytest.mark.parametrize(
+    ("assignment", "field", "dynamic_type"),
+    (
+        ("version=CAST(zeroblob(?) AS TEXT)", "version", "text"),
+        ("quality_score=zeroblob(?)", "quality_score", "blob"),
+    ),
+    ids=("text-version", "blob-score"),
+)
+async def test_huge_dynamic_provider_fields_fail_preflight_before_materialization(
+    storage: Any,
+    monkeypatch: pytest.MonkeyPatch,
+    assignment: str,
+    field: str,
+    dynamic_type: str,
+) -> None:
+    _raw, knowledge = _seed(
+        storage,
+        suffix=f"dynamic-{dynamic_type}",
+        query="R8EDYNAMICPREFLIGHT",
+    )
+    storage.execute("PRAGMA ignore_check_constraints=ON")
+    storage.execute(
+        f"UPDATE knowledge_objects SET {assignment} WHERE id=?",  # nosec B608
+        (5 * 1024 * 1024, knowledge.id),
+    )
+    storage.commit()
+    storage.execute("PRAGMA ignore_check_constraints=OFF")
+    stored_type = storage.execute(
+        f"SELECT typeof({field}) FROM knowledge_objects WHERE id=?",  # nosec B608
+        (knowledge.id,),
+    ).fetchone()[0]
+    assert stored_type == dynamic_type
+    _authorization, actor, context, _searcher, adapter = _stack(
+        storage,
+        label=f"dynamic-preflight-{dynamic_type}",
+    )
+    materialized = False
+
+    def forbidden_materialization(*_args: object, **_kwargs: object) -> object:
+        nonlocal materialized
+        materialized = True
+        raise AssertionError("a dynamically oversized provider row was materialized")
+
+    import friday.storage._memory_exact_internal as memory_storage
+
+    monkeypatch.setattr(memory_storage, "_stored_material", forbidden_materialization)
+    with pytest.raises(MemoryExactInternalError, match="provider is unavailable"):
+        await adapter.prepare(
+            context=context,
+            request=_request(actor, context, "R8EDYNAMICPREFLIGHT"),
+        )
+    assert materialized is False
+
+
+async def test_oversized_provider_identity_is_refused_before_material_fetch(
+    storage: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _raw, _knowledge = _seed(
+        storage,
+        suffix="oversized-provider-identity",
+        query="R8EOVERSIZEDPROVIDERIDENTITY",
+        knowledge_id="k" * 241,
+    )
+    _authorization, actor, context, _searcher, adapter = _stack(
+        storage,
+        label="oversized-provider-identity",
+    )
+    materialized = False
+
+    def forbidden_materialization(*_args: object, **_kwargs: object) -> object:
+        nonlocal materialized
+        materialized = True
+        raise AssertionError("an oversized provider identity reached material fetch")
+
+    import friday.storage._memory_exact_internal as memory_storage
+
+    monkeypatch.setattr(
+        memory_storage,
+        "_load_memory_exact_provider_rows_in_transaction",
+        forbidden_materialization,
+    )
+    with pytest.raises(MemoryExactInternalError, match="provider is unavailable"):
+        await adapter.prepare(
+            context=context,
+            request=_request(actor, context, "R8EOVERSIZEDPROVIDERIDENTITY"),
+        )
+    assert materialized is False
 
 
 async def test_provider_snapshot_oversize_fails_before_any_source_read(
@@ -1199,6 +1970,88 @@ async def test_signed_cursor_rejects_tamper_and_cross_request_replay(storage: An
             context=changed_context,
             request=changed_authority_request,
         )
+
+    foreign_turn_issuer, foreign_turn_context = _turn(actor, label="hostile-cursor-foreign-turn")
+    foreign_turn_adapter = MemoryExactInternalAdapter(
+        authorization,
+        foreign_turn_issuer,
+        storage,
+        HybridSearcher(storage, record_usage=False),
+        KnowledgeGraph(storage),
+    )
+    with pytest.raises(MemoryExactStorageError):
+        await foreign_turn_adapter.prepare(
+            context=foreign_turn_context,
+            request=_request(
+                actor,
+                foreign_turn_context,
+                "R8EHOSTILECURSOR",
+                page_size=1,
+                snapshot_limit=3,
+                continuation=first.next_continuation,
+            ),
+        )
+
+    (
+        other_authorization,
+        other_actor,
+        other_context,
+        _other_searcher,
+        other_adapter,
+    ) = _stack(storage, label="hostile-cursor-other-person", principal=OTHER_PRINCIPAL)
+    del other_authorization
+    with pytest.raises(MemoryExactStorageError):
+        await other_adapter.prepare(
+            context=other_context,
+            request=_request(
+                other_actor,
+                other_context,
+                "R8EHOSTILECURSOR",
+                page_size=1,
+                snapshot_limit=3,
+                continuation=first.next_continuation,
+            ),
+        )
+
+    (
+        foreign_authorization,
+        foreign_actor,
+        foreign_context,
+        _foreign_searcher,
+        foreign_adapter,
+    ) = _stack(storage, label="hostile-cursor-other-tenant", tenant=FOREIGN_TENANT)
+    del foreign_authorization
+    with pytest.raises(MemoryExactStorageError):
+        await foreign_adapter.prepare(
+            context=foreign_context,
+            request=_request(
+                foreign_actor,
+                foreign_context,
+                "R8EHOSTILECURSOR",
+                page_size=1,
+                snapshot_limit=3,
+                continuation=first.next_continuation,
+            ),
+        )
+
+    storage.execute("UPDATE users SET preset_key='user' WHERE id=?", (actor.own_id,))
+    storage.commit()
+    try:
+        with pytest.raises(MemoryExactStorageError):
+            await adapter.prepare(
+                context=context,
+                request=_request(
+                    actor,
+                    context,
+                    "R8EHOSTILECURSOR",
+                    page_size=1,
+                    snapshot_limit=3,
+                    continuation=first.next_continuation,
+                ),
+            )
+    finally:
+        storage.execute("UPDATE users SET preset_key='owner' WHERE id=?", (actor.own_id,))
+        storage.commit()
 
 
 async def test_cursor_envelope_contains_no_query_body_or_raw_identity(storage: Any) -> None:

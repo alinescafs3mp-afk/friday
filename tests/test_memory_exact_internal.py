@@ -7,8 +7,10 @@ adapter replaces provider rows with transaction-local exact storage revisions.
 
 from __future__ import annotations
 
+import copy
 import hashlib
 import json
+import pickle
 import time
 from dataclasses import replace
 from typing import Any
@@ -30,11 +32,13 @@ from friday.orchestration.turn_context import (
 from friday.permissions import ActorContext, AuthorizationService
 from friday.retrieval import HybridSearcher, best_snippet, is_relational_query
 from friday.retrieval.memory_exact_contract import (
+    MEMORY_EXACT_MAX_EXCERPT_CHARS,
     MEMORY_EXACT_MAX_GRAPH_NODES,
     MEMORY_EXACT_MAX_GRAPH_PATH_EDGES,
     MEMORY_EXACT_MAX_GRAPH_PATHS,
     MEMORY_EXACT_MAX_GRAPH_RELATIONS,
     MemoryExactContentCoverage,
+    MemoryExactGraphCoverage,
     MemoryExactLifecycleStage,
     MemoryExactPublicationStatus,
     MemoryExactRequest,
@@ -232,6 +236,101 @@ def _legacy_ids(payload: dict[str, Any]) -> list[str]:
     return [str(item["id"]) for item in payload["results"]]
 
 
+def _legacy_graph_semantics(payload: dict[str, Any]) -> dict[str, object]:
+    """Reduce one released graph payload to its ordered model-visible meaning."""
+
+    nodes_by_id: dict[str, tuple[str, str]] = {}
+    node_sources = [*payload["nodes"], *payload["roots"]]
+    for path in payload["paths"]:
+        node_sources.extend(path.get("entities", ()))
+    for node in node_sources:
+        nodes_by_id[str(node["id"])] = (
+            str(node["name"]),
+            str(node["entity_type"])[:80],
+        )
+
+    def node(identity: object) -> tuple[str, str]:
+        return nodes_by_id[str(identity)]
+
+    return {
+        "nodes": tuple(node(item["id"]) for item in payload["nodes"]),
+        "roots": tuple(node(item["id"]) for item in payload["roots"]),
+        "relations": tuple(
+            (
+                node(item["source_entity_id"]),
+                node(item["target_entity_id"]),
+                str(item["relation_type"])[:80],
+                str(item.get("valid_from") or "") or None,
+                item.get("valid_to"),
+                bool(item["implicit"]),
+            )
+            for item in payload["relations"]
+        ),
+        "paths": tuple(
+            tuple(
+                (
+                    node(edge["from"]),
+                    node(edge["to"]),
+                    node(edge["source"]),
+                    node(edge["target"]),
+                    str(edge["type"])[:80],
+                    str(edge["direction"]),
+                    str(edge.get("valid_from") or "") or None,
+                    edge.get("valid_to"),
+                    bool(edge["implicit"]),
+                )
+                for edge in path["edges"]
+            )
+            for path in payload["paths"]
+        ),
+    }
+
+
+def _projected_graph_semantics(payload: dict[str, Any]) -> dict[str, object]:
+    """Reduce the ID-free projection to the same ordered semantic shape."""
+
+    nodes_by_alias = {str(item["alias"]): (str(item["name"]), str(item["type"])) for item in payload["nodes"]}
+
+    def node(alias: object) -> tuple[str, str]:
+        return nodes_by_alias[str(alias)]
+
+    def assertion_endpoints(edge: dict[str, Any]) -> tuple[tuple[str, str], tuple[str, str]]:
+        traversal = (node(edge["from"]), node(edge["to"]))
+        return traversal if edge["direction"] == "forward" else (traversal[1], traversal[0])
+
+    return {
+        "nodes": tuple(node(item["alias"]) for item in payload["nodes"]),
+        "roots": tuple(node(alias) for alias in payload["roots"]),
+        "relations": tuple(
+            (
+                node(item["source"]),
+                node(item["target"]),
+                str(item["relation"]),
+                item["valid_from"],
+                item["valid_to"],
+                bool(item["implicit"]),
+            )
+            for item in payload["relations"]
+        ),
+        "paths": tuple(
+            tuple(
+                (
+                    node(edge["from"]),
+                    node(edge["to"]),
+                    *assertion_endpoints(edge),
+                    str(edge["relation"]),
+                    str(edge["direction"]),
+                    edge["valid_from"],
+                    edge["valid_to"],
+                    bool(edge["implicit"]),
+                )
+                for edge in path["edges"]
+            )
+            for path in payload["paths"]
+        ),
+    }
+
+
 def test_adapter_binding_is_closed_read_only_and_not_model_visible() -> None:
     payload = MEMORY_EXACT_ADAPTER_BINDING.payload()
     assert payload["capability_id"] == "archive.search"
@@ -364,6 +463,49 @@ async def test_seeded_rank_order_and_projection_match_released_legacy_search(sto
         assert private not in model_json
 
 
+async def test_long_body_keeps_exact_bounded_legacy_excerpt_and_reports_truncation(
+    storage: Any,
+) -> None:
+    body = "R8ELONGBODYNEEDLE " + "x " * 800 + "PRIVATE-END-CANARY"
+    _raw, knowledge = _seed_knowledge(
+        storage,
+        suffix="long-body",
+        title="Long bounded memory",
+        body=body,
+    )
+    _authorization, actor, _issuer, context, searcher, adapter = _stack(
+        storage,
+        label="long-body",
+    )
+    request = _request(actor, context, "R8ELONGBODYNEEDLE", page_size=1, snapshot_limit=1)
+    legacy = await _legacy(searcher, KnowledgeGraph(storage), request)
+    page = await adapter.prepare(context=context, request=request)
+
+    assert _legacy_ids(legacy) == [knowledge.id]
+    assert [candidate.knowledge_id for candidate in page.candidates] == [knowledge.id]
+    candidate = page.candidates[0]
+    assert (
+        candidate.excerpt
+        == best_snippet(
+            request.query,
+            body,
+            max_chars=MEMORY_EXACT_MAX_EXCERPT_CHARS,
+        )[:MEMORY_EXACT_MAX_EXCERPT_CHARS]
+    )
+    assert len(candidate.excerpt) == MEMORY_EXACT_MAX_EXCERPT_CHARS
+    assert candidate.excerpt_truncated is True
+    assert candidate.content_chars == len(body)
+    assert candidate.body_sha256 == hashlib.sha256(body.encode("utf-8")).hexdigest()
+
+    projection = adapter.project_for_model(context=context, page=page)
+    assert projection.content_coverage is MemoryExactContentCoverage.TRUNCATED
+    assert projection.truncated_rows == 1
+    assert projection.rows[0].excerpt == candidate.excerpt
+    assert projection.rows[0].excerpt_truncated is True
+    assert "PRIVATE-END-CANARY" not in projection.to_model_json()
+    assert body not in projection.to_model_json()
+
+
 @pytest.mark.parametrize(
     ("boundary", "value", "expected_title"),
     (
@@ -467,36 +609,44 @@ async def test_as_of_graph_context_is_bounded_id_free_and_source_bound(storage: 
     _raw, knowledge = _seed_knowledge(
         storage,
         suffix="valid-time-graph",
-        title="Alpha Beta relation",
-        body="R8EGRAPHNEEDLE says AlphaR8E is connected with BetaR8E.",
+        title="Opaque valid-time witness",
+        body="R8EGRAPHNEEDLE carries source-bound valid-time evidence.",
     )
     alpha = Entity(new_id("ent"), TENANT, "AlphaR8E", EntityType.PERSON)
     beta = Entity(new_id("ent"), TENANT, "BetaR8E", EntityType.ORGANIZATION)
-    storage.create_entity(alpha)
-    storage.create_entity(beta)
-    storage.link_knowledge_entity(
-        user_id=TENANT,
-        knowledge_object_id=knowledge.id,
-        entity_id=alpha.id,
-        status="accepted",
-    )
-    storage.link_knowledge_entity(
-        user_id=TENANT,
-        knowledge_object_id=knowledge.id,
-        entity_id=beta.id,
-        status="accepted",
-    )
+    gamma = Entity(new_id("ent"), TENANT, "GammaR8E", EntityType.PROJECT)
+    for entity in (alpha, beta, gamma):
+        storage.create_entity(entity)
+        storage.link_knowledge_entity(
+            user_id=TENANT,
+            knowledge_object_id=knowledge.id,
+            entity_id=entity.id,
+            status="accepted",
+        )
     relation = Relation(
         new_id("rel"),
         TENANT,
         alpha.id,
         beta.id,
         RelationType.MEMBER_OF,
-        weight=0.9,
+        weight=1.0,
         valid_from="2020-01-01",
+        valid_to="2025-01-01",
         metadata_json={"evidence": {"knowledge_object_id": knowledge.id}},
     )
     storage.create_relation(relation)
+    parent_relation = Relation(
+        new_id("rel"),
+        TENANT,
+        beta.id,
+        gamma.id,
+        RelationType.PART_OF,
+        weight=1.0,
+        valid_from="2019-01-01",
+        valid_to="2026-01-01",
+        metadata_json={"evidence": {"knowledge_object_id": knowledge.id}},
+    )
+    storage.create_relation(parent_relation)
 
     _authorization, actor, _issuer, context, searcher, adapter = _stack(
         storage,
@@ -505,7 +655,7 @@ async def test_as_of_graph_context_is_bounded_id_free_and_source_bound(storage: 
     request = _request(
         actor,
         context,
-        "как связан AlphaR8E с BetaR8E",
+        "как связан GammaR8E",
         as_of="2022-01-01",
         page_size=2,
         snapshot_limit=2,
@@ -525,13 +675,41 @@ async def test_as_of_graph_context_is_bounded_id_free_and_source_bound(storage: 
     assert len(page.graph_source_set_sha256) == 64
     graph_payload = graph.to_model_payload()
     assert graph_payload["query"] == legacy["graph_context"]["query"]
-    assert set(graph_payload["roots"]) <= {item["alias"] for item in graph_payload["nodes"]}
-    assert len(graph_payload["roots"]) == len(legacy["graph_context"]["roots"])
+    assert _projected_graph_semantics(graph_payload) == _legacy_graph_semantics(legacy["graph_context"])
+    assert {
+        (
+            item["relation"],
+            item["valid_from"],
+            item["valid_to"],
+        )
+        for item in graph_payload["relations"]
+    } == {
+        ("member_of", "2020-01-01", "2025-01-01"),
+        ("part_of", "2019-01-01", "2026-01-01"),
+    }
+    assert [item["relation"] for item in graph_payload["relations"]] == [
+        "member_of",
+        "part_of",
+    ]
+    assert graph_payload["paths"]
+    assert [[edge["relation"] for edge in path["edges"]] for path in graph_payload["paths"]] == [
+        ["part_of"],
+        ["part_of", "member_of"],
+    ]
+    assert {edge["direction"] for path in graph_payload["paths"] for edge in path["edges"]} == {"reverse"}
     assert all(item["implicit"] is False for item in graph_payload["relations"])
     assert all(item["evidence_basis"] == "relation_row_only" for item in graph_payload["relations"])
     assert all(path["grounded"] is False for path in graph_payload["paths"])
     model_json = projection.to_model_json()
-    for private in (alpha.id, beta.id, relation.id, knowledge.id, knowledge.raw_object_id):
+    for private in (
+        alpha.id,
+        beta.id,
+        gamma.id,
+        relation.id,
+        parent_relation.id,
+        knowledge.id,
+        knowledge.raw_object_id,
+    ):
         assert private not in model_json
     assert {item["alias"] for item in graph_payload["nodes"]} == {
         f"n{index}" for index in range(1, len(graph.nodes) + 1)
@@ -594,6 +772,73 @@ async def test_current_implicit_graph_keeps_cooccurrence_and_local_grounding(
     encoded = projection.to_model_json()
     for private in (knowledge.id, knowledge.raw_object_id, alpha.id, beta.id):
         assert private not in encoded
+
+
+async def test_adapter_propagates_real_partial_and_unknown_graph_coverage(
+    storage: Any,
+) -> None:
+    _raw, knowledge = _seed_knowledge(
+        storage,
+        suffix="graph-coverage",
+        title="Graph coverage witness",
+        body="Archival witness shared by a deliberately saturated entity cluster.",
+    )
+    entities = [
+        Entity(
+            new_id("ent"),
+            TENANT,
+            "CoverageHubR8E" if index == 0 else f"CoverageSatellite{index:02d}R8E",
+            EntityType.CONCEPT,
+        )
+        for index in range(MEMORY_EXACT_MAX_GRAPH_NODES)
+    ]
+    for entity in entities:
+        storage.create_entity(entity)
+        storage.link_knowledge_entity(
+            TENANT,
+            knowledge.id,
+            entity.id,
+            status="accepted",
+        )
+
+    _authorization, actor, _issuer, context, searcher, adapter = _stack(
+        storage,
+        label="graph-coverage",
+    )
+    request = _request(
+        actor,
+        context,
+        "как связан CoverageHubR8E",
+        page_size=5,
+        snapshot_limit=5,
+    )
+    legacy = await _legacy(searcher, KnowledgeGraph(storage), request)
+    legacy_graph = legacy["graph_context"]
+
+    assert len(legacy_graph["nodes"]) == MEMORY_EXACT_MAX_GRAPH_NODES
+    assert len(legacy_graph["relations"]) == MEMORY_EXACT_MAX_GRAPH_RELATIONS
+    assert len(legacy_graph["paths"]) > MEMORY_EXACT_MAX_GRAPH_PATHS
+    assert legacy_graph["paths_matched_at_least"] > len(legacy_graph["paths"])
+    assert legacy_graph["paths_truncated"] is True
+
+    page = await adapter.prepare(context=context, request=request)
+    assert knowledge.id in {candidate.knowledge_id for candidate in page.candidates}
+    graph = page.graph_projection
+    assert graph.nodes_coverage is MemoryExactGraphCoverage.UNKNOWN
+    assert graph.relations_coverage is MemoryExactGraphCoverage.UNKNOWN
+    assert graph.paths_coverage is MemoryExactGraphCoverage.PARTIAL
+
+    payload = adapter.project_for_model(
+        context=context,
+        page=page,
+    ).graph_projection.to_model_payload()
+    assert payload["nodes_shown"] == payload["nodes_matched_at_least"]
+    assert payload["nodes_truncated"] is None
+    assert payload["relations_shown"] == payload["relations_matched_at_least"]
+    assert payload["relations_truncated"] is None
+    assert payload["paths_shown"] == MEMORY_EXACT_MAX_GRAPH_PATHS
+    assert payload["paths_matched_at_least"] == legacy_graph["paths_matched_at_least"]
+    assert payload["paths_truncated"] is True
 
 
 async def test_reviewed_relation_without_knowledge_anchor_stays_ungrounded(
@@ -905,6 +1150,16 @@ async def test_known_at_relation_history_matches_legacy_snapshot(storage: Any) -
     assert page.temporal_status.temporal_basis.value == "bitemporal"
     assert len(page.graph_projection.relations) == len(legacy["graph_context"]["relations"])
     assert len(page.graph_projection.paths) == len(legacy["graph_context"]["paths"])
+    graph_payload = page.graph_projection.to_model_payload()
+    assert _projected_graph_semantics(graph_payload) == _legacy_graph_semantics(legacy["graph_context"])
+    assert {
+        (
+            item["relation"],
+            item["valid_from"],
+            item["valid_to"],
+        )
+        for item in graph_payload["relations"]
+    } == {("related_to", "2020-01-01", None)}
 
 
 async def test_signed_continuation_is_deterministic_and_pages_one_snapshot(storage: Any) -> None:
@@ -1122,6 +1377,31 @@ async def test_exact_empty_date_window_is_distinct_from_zero_query_matches(
         "until": None,
     }
 
+    zero_request = _request(
+        actor,
+        context,
+        "R8EREALZEROMATCHCANARY",
+        page_size=5,
+        snapshot_limit=5,
+    )
+    zero_page = await adapter.prepare(context=context, request=zero_request)
+    zero_projection = adapter.project_for_model(
+        context=context,
+        page=zero_page,
+    ).to_model_payload()
+    assert zero_page.candidates == ()
+    assert zero_page.total_rows == 1
+    assert zero_page.snapshot_rows == zero_page.matched_rows == 0
+    assert zero_projection["row_coverage"] == "partial"
+    assert zero_projection["matched_at_least"] == 0
+    assert zero_projection["date_window"] == {
+        "applied": False,
+        "empty": False,
+        "requested": False,
+        "since": None,
+        "until": None,
+    }
+
 
 async def test_signed_continuation_survives_storage_restart(settings: Any, tmp_path: Any) -> None:
     database = tmp_path / "memory-exact-restart.sqlite3"
@@ -1179,13 +1459,28 @@ async def test_signed_continuation_survives_storage_restart(settings: Any, tmp_p
         reopened.close(final=True)
 
 
-async def test_fresh_read_and_one_shot_publication_authority(storage: Any) -> None:
+async def test_fresh_read_and_one_shot_publication_authority(
+    storage: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     _seed_knowledge(
         storage,
         suffix="publication",
         title="Publication",
         body="R8EPUBLICATIONNEEDLE exact evidence",
     )
+    provider_transaction_states: list[bool] = []
+    original_search = HybridSearcher.search
+
+    async def observed_provider_search(
+        provider: HybridSearcher,
+        *args: Any,
+        **kwargs: Any,
+    ) -> dict[str, Any]:
+        provider_transaction_states.append(storage.conn.in_transaction)
+        return await original_search(provider, *args, **kwargs)
+
+    monkeypatch.setattr(HybridSearcher, "search", observed_provider_search)
     _authorization, actor, _issuer, context, _searcher, adapter = _stack(
         storage,
         label="publication",
@@ -1198,6 +1493,12 @@ async def test_fresh_read_and_one_shot_publication_authority(storage: Any) -> No
     )
     page = await adapter.prepare(context=context, request=request)
     decision = await adapter.reauthorize_for_publication(context=context, page=page)
+    refresh_call = len(provider_transaction_states)
+    refresh = await adapter.refresh_publication_authority(
+        context=context,
+        page=page,
+        decision=decision,
+    )
     authority_after = str(
         storage.execute("SELECT observed_at FROM relation_revision_context WHERE singleton=1").fetchone()[
             "observed_at"
@@ -1205,7 +1506,17 @@ async def test_fresh_read_and_one_shot_publication_authority(storage: Any) -> No
     )
 
     assert authority_after == authority_before
+    assert provider_transaction_states
+    assert all(state is False for state in provider_transaction_states)
+    assert provider_transaction_states[refresh_call:] == [False]
     assert decision.status is MemoryExactPublicationStatus.AUTHORIZED
+    assert refresh.status is MemoryExactPublicationStatus.AUTHORIZED
+    with pytest.raises(TypeError, match="process-private"):
+        copy.copy(refresh)
+    with pytest.raises(TypeError, match="process-private"):
+        copy.deepcopy(refresh)
+    with pytest.raises(TypeError, match="process-private"):
+        pickle.dumps(refresh)
     assert decision.to_public_payload() == {
         "authorized": True,
         "one_shot": True,
@@ -1213,21 +1524,60 @@ async def test_fresh_read_and_one_shot_publication_authority(storage: Any) -> No
         "status": "authorized",
     }
     assert decision.authorizes(page) is False
-    assert (
-        await adapter.consume_publication_authority(
-            context=context,
-            page=page,
-            decision=decision,
+    provider_calls_before_transaction = len(provider_transaction_states)
+    publication_key = f"test.memory-exact-publication.{context.turn_id[-16:]}"
+    with storage.transaction() as conn:
+        assert conn is storage.conn
+        assert conn.in_transaction is True
+        assert (
+            adapter.consume_publication_authority_in_transaction(
+                conn,
+                context=context,
+                page=page,
+                decision=decision,
+                refresh=refresh,
+            )
+            is True
         )
-        is True
-    )
-    assert (
-        await adapter.consume_publication_authority(
-            context=context,
-            page=page,
-            decision=decision,
+        assert conn.in_transaction is True
+        inserted = conn.execute(
+            """INSERT INTO schema_meta(key,value,updated_at)
+               SELECT ?,?,?
+                WHERE NOT EXISTS (SELECT 1 FROM schema_meta WHERE key=?)""",
+            (publication_key, "published", BASE_TIME, publication_key),
         )
-        is False
+        assert inserted.rowcount == 1
+        assert conn.in_transaction is True
+        assert (
+            str(
+                conn.execute(
+                    "SELECT value FROM schema_meta WHERE key=?",
+                    (publication_key,),
+                ).fetchone()["value"]
+            )
+            == "published"
+        )
+        assert (
+            adapter.consume_publication_authority_in_transaction(
+                conn,
+                context=context,
+                page=page,
+                decision=decision,
+                refresh=refresh,
+            )
+            is False
+        )
+    assert len(provider_transaction_states) == provider_calls_before_transaction
+    assert (
+        str(
+            storage.execute(
+                "SELECT value FROM schema_meta WHERE key=?",
+                (publication_key,),
+            ).fetchone()["value"]
+        )
+        == "published"
     )
+    assert decision.to_public_payload()["authorized"] is False
     assert "R8EPUBLICATIONNEEDLE" not in repr(decision)
+    assert "R8EPUBLICATIONNEEDLE" not in repr(refresh)
     assert json.dumps(decision.to_public_payload(), sort_keys=True).count("authority") == 0
