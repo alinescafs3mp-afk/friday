@@ -15,7 +15,7 @@ import time
 from collections import Counter, OrderedDict, deque
 from collections.abc import Callable, Mapping
 from contextlib import suppress
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any, Protocol, TypeVar, cast
 
 from friday import semantic_supervisor_policy
@@ -119,6 +119,9 @@ class _PreparedShadow:
     current_attachment_count: int
     dispatch_scope: str
     dispatch_epoch: int
+    # Inherited turn cap. None means only the supervisor timeout, which starts
+    # at dispatch after the primary await, not at prepare.
+    parent_deadline_monotonic: float | None
 
 
 @dataclass(slots=True)
@@ -565,17 +568,20 @@ class SemanticSupervisorShadowRuntime:
         if not eligibility.eligible:
             return None, self._skipped(eligibility.skip_reason, turn=turn)
 
-        started = time.monotonic()
-        deadline = started + supervisor_timeout_sec(self._settings)
+        parent_deadline: float | None = None
         if authenticated_scope is not None:
-            deadline = min(deadline, authenticated_scope.conservative_deadline_monotonic)
+            parent_deadline = authenticated_scope.conservative_deadline_monotonic
         elif turn_deadline is not None:
             if not isinstance(turn_deadline, (int, float)) or isinstance(turn_deadline, bool):
                 return None, self._skipped(SupervisorSkipReason.TIMEOUT, turn=turn)
             external_deadline = float(turn_deadline)
             if not math.isfinite(external_deadline):
                 return None, self._skipped(SupervisorSkipReason.TIMEOUT, turn=turn)
-            deadline = min(deadline, external_deadline)
+            parent_deadline = external_deadline
+        started = time.monotonic()
+        deadline = started + supervisor_timeout_sec(self._settings)
+        if parent_deadline is not None:
+            deadline = min(deadline, parent_deadline)
 
         try:
             supervisor_input = build_supervisor_input(turn, self._settings)
@@ -632,6 +638,7 @@ class SemanticSupervisorShadowRuntime:
                 current_attachment_count=(current_attachment_count if authenticated_scope is None else 0),
                 dispatch_scope=dispatch_scope,
                 dispatch_epoch=dispatch_epoch,
+                parent_deadline_monotonic=parent_deadline,
             ),
             None,
         )
@@ -708,6 +715,41 @@ class SemanticSupervisorShadowRuntime:
             captured,
         )
 
+    def _parent_deadline_elapsed(self, prepared: _PreparedShadow) -> bool:
+        parent = prepared.parent_deadline_monotonic
+        return parent is not None and parent <= time.monotonic()
+
+    def _rebake_prepared_for_dispatch(
+        self, prepared: _PreparedShadow
+    ) -> _PreparedShadow | SupervisorSkipReason:
+        """Start the supervisor timeout at dispatch, capped by the inherited turn."""
+
+        now = time.monotonic()
+        if self._parent_deadline_elapsed(prepared):
+            return SupervisorSkipReason.TIMEOUT
+        deadline = now + supervisor_timeout_sec(self._settings)
+        parent = prepared.parent_deadline_monotonic
+        if parent is not None:
+            deadline = min(deadline, parent)
+        if deadline <= now:
+            return SupervisorSkipReason.TIMEOUT
+        try:
+            request = build_supervisor_request(
+                prepared.supervisor_input,
+                absolute_deadline_monotonic=deadline,
+            )
+            context = shadow_policy_admission_context(
+                prepared.supervisor_input,
+                actor_binding_sha256=prepared.context.actor_binding_sha256,
+                conversation_binding_sha256=prepared.context.conversation_binding_sha256,
+                turn_deadline_monotonic_ns=int(deadline * 1_000_000_000),
+            )
+        except SupervisorContractError:
+            return SupervisorSkipReason.SECRET_MATERIAL
+        except Exception:
+            return SupervisorSkipReason.SECONDARY_UNAVAILABLE
+        return replace(prepared, request=request, context=context)
+
     async def _complete_shadow(self, job: _ShadowJob) -> None:
         prepared = job.prepared
         if (
@@ -727,6 +769,15 @@ class SemanticSupervisorShadowRuntime:
                 self._skipped(SupervisorSkipReason.EXACT_LANE, turn=prepared.turn),
             )
             return
+        rebaked = self._rebake_prepared_for_dispatch(prepared)
+        if isinstance(rebaked, SupervisorSkipReason):
+            self._record_terminal(
+                job,
+                self._skipped(rebaked, turn=prepared.turn),
+            )
+            return
+        prepared = rebaked
+        job.prepared = prepared
         if prepared.request.absolute_deadline_monotonic <= time.monotonic():
             self._record_terminal(
                 job,
@@ -862,7 +913,7 @@ class SemanticSupervisorShadowRuntime:
                 primary_trace,
             )
             return
-        if prepared.request.absolute_deadline_monotonic <= time.monotonic():
+        if self._parent_deadline_elapsed(prepared):
             self._record(
                 self._skipped(SupervisorSkipReason.TIMEOUT, turn=prepared.turn),
                 primary_trace,

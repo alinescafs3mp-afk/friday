@@ -643,7 +643,7 @@ async def test_truncated_turn_projection_never_rechecks_pending_with_different_m
 
 
 @pytest.mark.asyncio
-async def test_spent_deadline_and_malformed_adapter_are_closed_observations() -> None:
+async def test_supervisor_timeout_starts_after_primary_not_before() -> None:
     class _SlowPrimary(_Primary):
         async def chat(self, _user_id: str, _message: str, **kwargs: Any) -> dict[str, Any]:
             self.calls += 1
@@ -660,9 +660,52 @@ async def test_spent_deadline_and_malformed_adapter_are_closed_observations() ->
         "Сравни этот договор с текущими публичными правилами в интернете.",
         **_chat_kwargs(),
     )
+    await slow_wrapper.drain_shadow()
     assert result is slow_primary.marker
-    assert slow_scheduler.calls == 0
-    assert slow_wrapper.semantic_supervisor_observations[-1].skip_reason is SupervisorSkipReason.TIMEOUT
+    assert slow_primary.calls == 1
+    assert slow_scheduler.calls == 1
+    assert slow_wrapper.semantic_supervisor_observations[-1].invoked is True
+
+
+@pytest.mark.asyncio
+async def test_spent_parent_deadline_closes_shadow_before_dispatch() -> None:
+    wrapper, primary, scheduler = _wrapper()
+    result = await wrapper.chat(
+        "person_private_7f",
+        "Сравни этот договор с текущими публичными правилами в интернете.",
+        **_chat_kwargs(turn_deadline=time.monotonic() - 1.0),
+    )
+    await wrapper.drain_shadow()
+    assert result is primary.marker
+    assert primary.calls == 1
+    assert scheduler.calls == 0
+    assert wrapper.semantic_supervisor_observations[-1].skip_reason is SupervisorSkipReason.TIMEOUT
+    assert wrapper.semantic_supervisor_observations[-1].invoked is False
+
+
+@pytest.mark.asyncio
+async def test_spent_deadline_and_malformed_adapter_are_closed_observations() -> None:
+
+    class _SlowPrimary(_Primary):
+        async def chat(self, _user_id: str, _message: str, **kwargs: Any) -> dict[str, Any]:
+            self.calls += 1
+            self.last_kwargs = kwargs
+            await asyncio.sleep(0.11)
+            return self.marker
+
+    spent_wrapper, spent_primary, spent_scheduler = _wrapper(
+        primary=_SlowPrimary(),
+        settings=_settings(semantic_supervisor_timeout_sec=0.1),
+    )
+    spent_result = await spent_wrapper.chat(
+        "person_private_7f",
+        "Сравни этот договор с текущими публичными правилами в интернете.",
+        **_chat_kwargs(turn_deadline=time.monotonic() + 0.05),
+    )
+    await spent_wrapper.drain_shadow()
+    assert spent_result is spent_primary.marker
+    assert spent_scheduler.calls == 0
+    assert spent_wrapper.semantic_supervisor_observations[-1].skip_reason is (SupervisorSkipReason.TIMEOUT)
 
     for outcome in ("malformed", "success_without_validation"):
         malformed_wrapper, _, malformed_scheduler = _wrapper(scheduler=_Scheduler(outcome=outcome))
