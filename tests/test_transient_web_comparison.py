@@ -15,6 +15,7 @@ import pytest
 
 from friday.orchestration.current_file_web_query import (
     extract_compare_current_file_public_web_query,
+    extract_independent_public_web_query,
 )
 from friday.orchestration.transient_web_comparison import (
     TRANSIENT_WEB_ADAPTER_ID,
@@ -412,27 +413,56 @@ async def test_malformed_or_unbound_provider_report_fails_closed(storage) -> Non
             "Compare this contract with current public HTTP Date header rules on the web.",
             "current public HTTP Date header rules",
         ),
+        (
+            "Обобщи документ и сравни с текущими публичными правилами в интернете.",
+            "текущими публичными правилами",
+        ),
     ],
 )
 def test_compare_file_web_extracts_independent_public_topic(message: str, expected: str) -> None:
     assert extract_compare_current_file_public_web_query(message) == expected
+    assert extract_independent_public_web_query(message) == expected
+
+
+@pytest.mark.parametrize(
+    ("message", "expected"),
+    [
+        (
+            "Найди в интернете официальный сайт проекта Nextcloud",
+            "официальный сайт проекта Nextcloud",
+        ),
+        ("Найди в интернете курс доллара", "курс доллара"),
+        (
+            "Обобщи документ и найди в интернете курс доллара",
+            "курс доллара",
+        ),
+    ],
+)
+def test_independent_public_web_extracts_topic_without_compare_cues(
+    message: str,
+    expected: str,
+) -> None:
+    assert extract_compare_current_file_public_web_query(message) == ""
+    assert extract_independent_public_web_query(message) == expected
 
 
 @pytest.mark.parametrize(
     "message",
     [
         "Обобщи весь документ и поищи актуальные данные в интернете.",
-        "Обобщи документ и сравни с текущими публичными правилами в интернете.",
         "Найди в интернете то, что написано в этом файле.",
+        "Найди в интернете официальные характеристики по этому файлу.",
+        "Найди в интернете свежие новости по нему за прошедшие сутки.",
+        "Прочитай этот файл и найди в интернете свежие сведения по теме.",
         "Сравни этот файл с интернетом.",
         "Перескажи файл.",
-        "Найди в интернете курс доллара.",
         "Сравни этот договор с тем что в файле.",
         "Сравни договор с текущими публичными правилами в интернете.",
     ],
 )
 def test_compare_file_web_extraction_fails_closed_when_topic_is_the_file(message: str) -> None:
     assert extract_compare_current_file_public_web_query(message) == ""
+    assert extract_independent_public_web_query(message) == ""
 
 
 @pytest.mark.anyio

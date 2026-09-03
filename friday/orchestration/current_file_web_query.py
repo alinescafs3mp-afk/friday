@@ -1,10 +1,10 @@
-"""Closed public-web topic extraction for current-file comparison turns.
+"""Closed public-web topic extraction beside local files.
 
-The admitted product journey is: read one current-turn file locally, search the
-public web for an independent topic named in the same utterance, then compare
-locally.  File bytes, filenames and file deictics are never part of the outbound
-query.  Ambiguous or file-as-query speech fails closed so the ordinary
-private-source web refusal remains in force.
+A current file, several current files, or a restored conversation file may be
+read locally in the same turn as an independent public-web topic.  File bytes,
+filenames and file deictics are never part of the outbound query.  Ambiguous or
+file-as-query speech yields no topic so the web clause is skipped without
+turning the whole turn into a refusal.
 """
 
 from __future__ import annotations
@@ -63,7 +63,15 @@ _COMPARE_PRONOUN_JOIN = re.compile(
     r"\b(?:их|его|её|ее|them|it)\s+(?:с|со|with|against)\b",
     re.IGNORECASE,
 )
-_DANGLING_PRONOUN = re.compile(r"\b(?:их|его|её|ее|them|it)\b", re.IGNORECASE)
+_DANGLING_PRONOUN = re.compile(
+    r"\b(?:их|его|её|ее|нему|ним|ней|нём|нем|them|it)\b",
+    re.IGNORECASE,
+)
+_FILE_PRONOUN_DEICTIC = re.compile(
+    r"\b(?:по|из|про|о|об|в|во|с|со|with|against)\s+"
+    r"(?:н(?:ём|ем|ему|ей|их|им)|нем|этом|том|him|her|them|it)\b",
+    re.IGNORECASE,
+)
 _LEADING_JOIN = re.compile(
     r"^(?:с|со|with|against|to|и|а|and|then|on)\s+",
     re.IGNORECASE,
@@ -79,12 +87,14 @@ _CLAUSE_SPLIT = re.compile(
 _VAGUE_TOPIC = re.compile(
     r"^(?:"
     r"(?:это|этот|эта|эти|там|тут|его|её|ее|их)|"
+    r"(?:актуальн\w*|свеж\w*|current)\s+(?:данн\w*|информац\w*|сведени\w*|data|information)|"
     r"(?:данн\w*|информац\w*|сведени\w*|подробност\w*)|"
     r"(?:что[- ]?нибудь|вс[её]|подробнее|дальше)|"
     r"(?:this|that|it|them|there)|(?:more\s+)?(?:data|information|details?)"
     r")\W*$",
     re.IGNORECASE,
 )
+_FILLER = re.compile(r"\b(?:пожалуйста|please|мне)\b", re.IGNORECASE)
 _CODE_FENCE = re.compile(r"```|~~~")
 
 
@@ -95,6 +105,19 @@ def _folded(message: str) -> str:
 def _has_any(message: str, needles: tuple[str, ...]) -> bool:
     folded = _folded(message)
     return any(needle in folded for needle in needles)
+
+
+def utterance_names_local_file(message: object) -> bool:
+    """True when the current text itself names a file, document or deictic file."""
+
+    if type(message) is not str or not message.strip():
+        return False
+    raw = unicodedata.normalize("NFKC", message)
+    return bool(
+        _FILE_DEICTIC_NP.search(raw) is not None
+        or _FILE_CARRIER_LEFTOVER.search(raw) is not None
+        or _FILE_AS_QUERY.search(raw) is not None
+    )
 
 
 def compare_current_file_web_cues_present(message: str) -> bool:
@@ -111,14 +134,58 @@ def _strip_clause(clause: str) -> str:
     text = _COMPARE_PRONOUN_JOIN.sub(" ", text)
     text = _DANGLING_PRONOUN.sub(" ", text)
     text = _WEB_TRANSPORT.sub(" ", text)
+    text = _FILLER.sub(" ", text)
     text = _TRAILING_PREP.sub("", text)
     text = _LEADING_JOIN.sub("", " ".join(text.split()).strip(" ,.:;—–-"))
     text = _TRAILING_PREP.sub("", text)
     return " ".join(text.split()).strip(" ,.:;—–-")
 
 
-def extract_compare_current_file_public_web_query(message: object) -> str:
-    """Return the independent public-web topic, or ``""`` when extraction is unsafe."""
+_FILE_LOOKUP_REMNANT = re.compile(
+    r"^(?:строк\w*|фраз\w*|слов\w*|текст\w*|подстрок\w*|результат\w*)\b|"
+    r"^[«\"'].*[»\"']\W*$",
+    re.IGNORECASE,
+)
+_FILE_TOPIC_STUB = re.compile(
+    r"(?:по\s+теме|на\s+эту\s+тему|по\s+этому|указанн\w*\s+во\s+вложен|"
+    r"about\s+the\s+topic|on\s+this\s+topic)",
+    re.IGNORECASE,
+)
+
+
+def _clause_is_local_file_work(remnant: str) -> bool:
+    return bool(
+        _LOCAL_READ_LEFTOVER.search(remnant)
+        or _FILE_CARRIER_LEFTOVER.search(remnant)
+        or _FILE_LOOKUP_REMNANT.search(remnant)
+        or _FILE_TOPIC_STUB.search(remnant)
+    )
+
+
+def web_clause_names_local_file(message: object) -> bool:
+    """True when a web-bearing clause itself names the local file."""
+
+    if type(message) is not str or not message.strip():
+        return False
+    raw = unicodedata.normalize("NFKC", message)
+    visible = " ".join(raw.split())
+    clauses = [visible] if _CLAUSE_SPLIT.search(visible) is None else _CLAUSE_SPLIT.split(visible)
+    if not clauses:
+        clauses = [visible]
+    return any(
+        _has_any(clause, _WEB_CUES)
+        and (
+            utterance_names_local_file(clause)
+            or _FILE_PRONOUN_DEICTIC.search(clause) is not None
+            or _FILE_TOPIC_STUB.search(clause) is not None
+        )
+        for clause in clauses
+        if clause.strip()
+    )
+
+
+def extract_independent_public_web_query(message: object) -> str:
+    """Return a public-web topic with no file carriers, or ``""`` when unsafe."""
 
     if type(message) is not str:
         return ""
@@ -128,7 +195,7 @@ def extract_compare_current_file_public_web_query(message: object) -> str:
         or len(raw) > _MAX_MESSAGE_CHARS
         or "\x00" in raw
         or _CODE_FENCE.search(raw) is not None
-        or not compare_current_file_web_cues_present(raw)
+        or not _has_any(raw, _WEB_CUES)
         or _FILE_AS_QUERY.search(raw) is not None
     ):
         return ""
@@ -137,10 +204,20 @@ def extract_compare_current_file_public_web_query(message: object) -> str:
     clauses = [visible] if _CLAUSE_SPLIT.search(visible) is None else _CLAUSE_SPLIT.split(visible)
     if not clauses:
         clauses = [visible]
+    compare_turn = compare_current_file_web_cues_present(raw)
     for clause in clauses:
+        if not compare_turn and (
+            _FILE_DEICTIC_NP.search(clause) is not None
+            or _FILE_CARRIER_LEFTOVER.search(clause) is not None
+            or _FILE_PRONOUN_DEICTIC.search(clause) is not None
+        ):
+            # Without a compare cue the file phrase is the topic, not a local
+            # sibling.  Do not strip it and keep a leftover public-looking stub.
+            continue
         remnant = _strip_clause(clause)
-        if remnant:
-            remnants.append(remnant)
+        if not remnant or _clause_is_local_file_work(remnant):
+            continue
+        remnants.append(remnant)
     topic = " ".join(remnants).strip()
     topic = " ".join(topic.split())
     if (
@@ -157,6 +234,14 @@ def extract_compare_current_file_public_web_query(message: object) -> str:
     ):
         return ""
     try:
-        return parse_query_intent(topic, label="compare-current-file public web query")
+        return parse_query_intent(topic, label="independent public web query")
     except SupervisorContractError:
         return ""
+
+
+def extract_compare_current_file_public_web_query(message: object) -> str:
+    """Return the independent public-web topic of a file compare, or ``""``."""
+
+    if type(message) is not str or not compare_current_file_web_cues_present(message):
+        return ""
+    return extract_independent_public_web_query(message)
