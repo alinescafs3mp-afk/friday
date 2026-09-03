@@ -302,8 +302,9 @@ Shadow использует policy `gptoss20b-semantic-supervisor-v1`, SHA-256
 `MAX_STEPS=6`, `MAX_REVIEW_ROUNDS=0` и одну либо обе task classes
 `compare_current_file_with_current_web`,
 `compare_archive_with_current_web`. Proposal вызывается после успешного primary
-и выбрасывается; laptop-off, timeout, saturation и malformed output не меняют
-primary path. Для synthetic regression используйте:
+и выбрасывается; `TIMEOUT_SEC=12` ограничивает вызов ноутбука после primary,
+а не длительность самого primary. laptop-off, timeout, saturation и malformed
+output не меняют primary path. Для synthetic regression используйте:
 
 ```bash
 .venv/bin/python -I -B tools/evaluate_semantic_supervisor_offline.py \
@@ -797,6 +798,8 @@ previous и сохраняет `0.207.90/schema50` immutable fallback.
 previous и сохраняет `0.207.90/schema50` immutable fallback.
 `0.208.2/schema50` DDL не меняет, принимает exact `0.208.1/schema50` как
 previous и сохраняет `0.207.90/schema50` immutable fallback.
+`0.208.3/schema50` DDL не меняет, принимает exact `0.208.2/schema50` как
+previous и сохраняет `0.207.90/schema50` immutable fallback.
 
 0.206.4 использует SQLite schema 34; Obsidian-релиз 0.207.2 поднимает её до
 schema 35. Новое поле имени загрузки принадлежит
@@ -1066,7 +1069,7 @@ process-owned result. Acquire одноразовый: отказ, timeout, drift
 attestation не разрешают повторный acquire на меньшем или новом tier.
 
 Во время probe `/api/health` ещё недоступен. Ждите до 420 секунд и дополнительно
-требуйте `status=ok` и `version=0.208.2`.
+требуйте `status=ok` и `version=0.208.3`.
 
 HTTP `status=ok` при `installed_mode=legacy` означает безопасную деградацию, но
 не успешный canary. В `canary`/`v12` Sentinel не реже раза в минуту

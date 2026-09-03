@@ -1,3 +1,15 @@
+## 0.208.3 — 2026-09-03
+
+### Supervisor shadow timeout after primary
+
+- Starts the 12s semantic-supervisor budget at dispatch after the primary
+  await, capped by the inherited turn deadline.
+- A compare-file-plus-public-web primary that outlasts 12s no longer skips
+  the laptop call as `timeout` before HTTP.
+- An already spent parent turn deadline still fail-closes without dispatch.
+  SQLite remains at schema 50; exact `0.208.2` is the predecessor and
+  `0.207.90` the fallback.
+
 ## 0.208.2 — 2026-09-03
 
 ### Local files beside independent public web
