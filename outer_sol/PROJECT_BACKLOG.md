@@ -67,10 +67,11 @@ current release. P0H reader, pair-bearing writer and safe no-delete continuation
 remain live through `0.207.98`; the permanent `io_uring_disabled=2` R3 proposal
 is rejected, so P0H remains open only for a one-shot maintenance authority and
 reviewed bounded deletion that preserves the ordinary Engineer environment. S4-R8 remains open for sole-facade
-parity. `origin/main` now has unactivated R8E, a composite seam, exact archive
-dispatch, and a dialogue-catalogue hide: `memory_search` / `source_search` /
-`message_search` are internal (and mission) only. Formal `cutover_ready` stays
-false while R8E review status is `integrated`. Production `0.208.0` still
+parity. `origin/main` (`50ce6884`) has unactivated R8E, a composite seam, exact
+archive dispatch, and a dialogue-catalogue hide: `memory_search` /
+`source_search` / `message_search` are internal (and mission) only. Formal
+`cutover_ready` stays false: R8E review status is `integrated`, and no
+`accepted` review record exists. Production `0.208.0` / `75b165a2` still
 serves the previous catalogue until a clean release boundary.
 Keep the released S3 path in shadow
 until its genuine production witness exists; then promote only the
@@ -819,22 +820,25 @@ checklist elsewhere.
 - [x] S4-R8E unactivated exact bitemporal/graph internal lane + open-handle provenance
 - [x] S4-R8H composite seam
 - [x] S4-R8H exact archive dispatch (`exact_window` / `as_of` / `known_at` / `include_graph`)
-- [x] S4-R8F body-free measurement snapshot (honestly `not ready` at that commit)
-
-Head: `2ca633ba`. Production remains `0.208.0` / `75b165a2`.
-
-### Open and implementable
-
 - [x] S4-R8F step 3: hide `memory_search` / `source_search` / `message_search`
       from dialogue; keep them internal/mission; offer `archive_search` as the
       sole ordinary retrieval facade; close stale dialogue calls. Historical
       ten-file union 1,197/1,197; thirteen contours `parity` or `preserved`.
-- [ ] S4-R8F step 4: formal `cutover_ready` requires R8E review status
-      `accepted` (currently `integrated`). Release and activation remain
-      Mainline-owned. Do not deploy until a clean release boundary.
+
+Head: `50ce6884`. Production remains `0.208.0` / `75b165a2`.
+Measured `cutover_ready` is false: R8E review status is `integrated`, not
+`accepted`. Last independent R8E review record is `changes_required`
+(`handoffs/Sol/S4-R8E-REVIEW-BLOCKER-002.md`); no later `accepted` review
+exists. Do not promote that status.
+
+### Open and implementable
+
+- none until an independent R8E review records `accepted`.
 
 ### Open and blocked
 
+- [ ] S4-R8F step 4: formal `cutover_ready` — blocked on a real R8E review
+      status `accepted` (code-owned status remains `integrated`).
 - [ ] P0H reviewed bounded deletion — owner one-shot maintenance authority;
       Linux still cannot prove global open-reference absence. No apply/delete.
 - [ ] S3 Supervisor promotion — observation-bound. Need a genuine eligible
