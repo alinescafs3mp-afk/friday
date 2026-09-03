@@ -48,9 +48,7 @@ from friday.retrieval.message_exact_contract import MessageExactRequest
 ARCHIVE_SEARCH_REQUEST_SCHEMA: Final = "friday.archive-search-request.private.v2"
 ARCHIVE_SEARCH_REQUEST_IDENTITY_SCHEMA: Final = "friday.archive-search-request-identity.private.v2"
 ARCHIVE_SEARCH_REQUEST_SCHEMA_V3: Final = "friday.archive-search-request.private.v3"
-ARCHIVE_SEARCH_REQUEST_IDENTITY_SCHEMA_V3: Final = (
-    "friday.archive-search-request-identity.private.v3"
-)
+ARCHIVE_SEARCH_REQUEST_IDENTITY_SCHEMA_V3: Final = "friday.archive-search-request-identity.private.v3"
 _ARCHIVE_SEARCH_REQUEST_SCHEMA_V1: Final = "friday.archive-search-request.private.v1"
 _ARCHIVE_SEARCH_REQUEST_IDENTITY_SCHEMA_V1: Final = "friday.archive-search-request-identity.private.v1"
 ARCHIVE_SEARCH_CANDIDATE_SCHEMA: Final = "friday.archive-search-candidate.private.v1"
@@ -761,9 +759,7 @@ class ArchiveSearchRequest:
         _token(self.continuation)
         if self.message_exact_request is not None:
             if type(self.message_exact_request) is not MessageExactRequest:
-                raise RetrievalContractError(
-                    "exact message selection must use the code-owned typed contract"
-                )
+                raise RetrievalContractError("exact message selection must use the code-owned typed contract")
             try:
                 message_exact = MessageExactRequest.parse_private(
                     self.message_exact_request.to_private_json()
@@ -776,13 +772,9 @@ class ArchiveSearchRequest:
                 raise RetrievalContractError("exact message selection requires the messages corpus")
         if self.memory_exact_request is not None:
             if type(self.memory_exact_request) is not MemoryExactRequest:
-                raise RetrievalContractError(
-                    "exact memory selection must use the code-owned typed contract"
-                )
+                raise RetrievalContractError("exact memory selection must use the code-owned typed contract")
             try:
-                memory_exact = MemoryExactRequest.parse_private(
-                    self.memory_exact_request.to_private_json()
-                )
+                memory_exact = MemoryExactRequest.parse_private(self.memory_exact_request.to_private_json())
             except Exception:
                 raise RetrievalContractError("exact memory selection is not canonical") from None
             if memory_exact != self.memory_exact_request:
@@ -892,9 +884,7 @@ class ArchiveSearchRequest:
                 else self.message_exact_request.to_private_payload()
             )
             payload["memory_exact_request"] = (
-                None
-                if self.memory_exact_request is None
-                else self.memory_exact_request.to_private_payload()
+                None if self.memory_exact_request is None else self.memory_exact_request.to_private_payload()
             )
         return payload
 
@@ -914,9 +904,7 @@ class ArchiveSearchRequest:
                 else self.message_exact_request.to_identity_payload()
             )
             payload["memory_exact_request"] = (
-                None
-                if self.memory_exact_request is None
-                else self.memory_exact_request.to_identity_payload()
+                None if self.memory_exact_request is None else self.memory_exact_request.to_identity_payload()
             )
         else:
             payload["schema"] = (

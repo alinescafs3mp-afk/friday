@@ -75,6 +75,7 @@ class _CompositeFixture:
     boundary_id: str
     context: AuthenticatedTurnContext
     conversation_id: str
+    issuer: TurnContextIssuer
     memory_adapter: MemoryExactInternalAdapter
     memory_pages: tuple[MemoryExactPage, ...]
     memory_request: MemoryExactRequest | None
@@ -336,6 +337,7 @@ async def _fixture(
         boundary_id=boundary_id,
         context=context,
         conversation_id=conversation_id,
+        issuer=issuer,
         memory_adapter=memory_adapter,
         memory_pages=memory_pages,
         memory_request=memory_request,
@@ -625,7 +627,17 @@ async def test_memory_chain_rejects_cursor_and_offset_gap_replay_terminal_append
         include_memory=True,
     )
     first, second, terminal = fixture.memory_pages
-    replayed_second = await fixture.memory_adapter.prepare(
+    # R8E binds function-schema and observer identity at adapter construction.
+    # The fixture's later archive-search writer changes that schema, so replay
+    # uses a fresh adapter on the same issuer rather than a stale observer.
+    replay_adapter = MemoryExactInternalAdapter(
+        fixture.authorization,
+        fixture.issuer,
+        storage,
+        HybridSearcher(storage, record_usage=False),
+        KnowledgeGraph(storage),
+    )
+    replayed_second = await replay_adapter.prepare(
         context=fixture.context,
         request=second.request,
     )
