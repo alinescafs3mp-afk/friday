@@ -1,3 +1,16 @@
+## 0.208.1 — 2026-09-03
+
+### Sole archive_search cutover
+
+- Records an independent accepted review of the R8E exact bitemporal/graph
+  internal lane at `f44c4e7c` and opens formal `cutover_ready`.
+- Keeps `archive_search` as the sole ordinary dialogue retrieval facade; the
+  legacy memory/source/message adapters remain internal or mission-only.
+- Dispatches exact conversation windows, `as_of`/`known_at` and bounded graph
+  through the shared archive owner with one final publisher.
+- SQLite remains at schema 50; exact `0.208.0` is the predecessor and
+  `0.207.90` the fallback.
+
 ## 0.208.0 — 2026-09-02
 
 ### Authenticated exact message windows
