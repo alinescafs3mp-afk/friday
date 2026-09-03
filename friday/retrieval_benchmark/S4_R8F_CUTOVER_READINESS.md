@@ -5,8 +5,10 @@
 The measured branch has hidden the legacy dialogue adapters and replayed the
 thirteen contours plus the historical ten-file union (1,197 passed). Scalar,
 archived-source and message-topic remain parity; the other ten contours are
-now `preserved` under the sole facade. Formal `cutover_ready` stays false
-while the R8E review status is `integrated` rather than `accepted`.
+now `preserved` under the sole facade. Independent R8E review of
+`f44c4e7c2f4a693bcaac91c4a9861fa6e8eef13b` is `accepted`, so formal
+`cutover_ready` is true. Production remains `0.208.0` until a clean release
+boundary.
 
 This package changes the dialogue catalogue: `memory_search`, `source_search`
 and `message_search` are no longer model-visible and are not executable in
@@ -24,9 +26,9 @@ adapters. Production `0.208.0` is unchanged until a clean release boundary.
 
 The builder pins the live Friday source release, exact R8C seven-case manifest,
 full R8C case/dimension measurement, fixed thirteen-contour case manifest, R8D
-measurement head `2fa079eb4de1d33535798e24552f85db3b9ccfd2` and R8E integrated
+measurement head `2fa079eb4de1d33535798e24552f85db3b9ccfd2` and R8E accepted
 head `f44c4e7c2f4a693bcaac91c4a9861fa6e8eef13b` with status
-`integrated`. The report carries only a closed code-owned vocabulary,
+`accepted`. The report carries only a closed code-owned vocabulary,
 canonical repository-local paths, counts and digests. It contains no query,
 message, excerpt, prompt, tool output, actor/tenant/person/conversation ID,
 private path or source body. Parsing rejects extra or duplicate keys,
@@ -75,9 +77,9 @@ nodes. That proves compatibility restoration, not sole-facade readiness.
 | Stale legacy call | preserved | Dialogue calls to the three legacy adapters fail closed; internal adapters remain executable. |
 | Final reauthorization | preserved | One final publisher consumes exact receipts through the archive composite. |
 
-R8E review status remains `integrated`, so `cutover_ready` is still false. The
-shared archive handler now expresses exact window, temporal and graph intents;
-legacy dialogue adapters are hidden.
+R8E review status is `accepted`, so `cutover_ready` is true. The shared
+archive handler expresses exact window, temporal and graph intents; legacy
+dialogue adapters are hidden. Release and activation remain Mainline-owned.
 
 ## Minimal later shared-file set
 
@@ -112,5 +114,6 @@ measurements recorded in its handoff.
 3. Replay all thirteen contour guards and the exact historical ten-file union
    with legacy adapters hidden from dialogue and stale calls closed. Done:
    1,197 historical nodes passed; contour guards held.
-4. Catalogue hide is in this package. Formal `cutover_ready` still requires
-   R8E review status `accepted`. Release and activation remain Mainline-owned.
+4. Catalogue hide is in this package. Formal `cutover_ready` is true after
+   independent R8E acceptance of `f44c4e7c2f4a693bcaac91c4a9861fa6e8eef13b`.
+   Release and activation remain Mainline-owned.

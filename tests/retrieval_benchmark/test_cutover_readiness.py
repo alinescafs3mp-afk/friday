@@ -118,7 +118,7 @@ def test_current_parity_mismatch_is_exposed_instead_of_hidden_by_routing(
         "message_search_order_3_of_3",
     )
     assert cases[CutoverContour.MESSAGE_TOPIC].blocker_codes == ()
-    assert cutover_report.cutover_ready is False
+    assert cutover_report.cutover_ready is True
 
 
 def test_exact_message_and_memory_foundations_are_preserved_through_the_shared_facade(
@@ -274,8 +274,12 @@ def test_report_binds_exact_foundation_review_and_case_manifests(
     assert payload["message_foundation_measurement_sha"] == MESSAGE_FOUNDATION_MEASUREMENT_SHA
     assert payload["memory_foundation_reviewed_sha"] == MEMORY_FOUNDATION_REVIEWED_SHA
     assert payload["memory_foundation_review_status"] == MEMORY_FOUNDATION_REVIEW_STATUS
-    assert MEMORY_FOUNDATION_REVIEW_STATUS == "integrated"
-    assert cutover_report.cutover_ready is False
+    assert MEMORY_FOUNDATION_REVIEW_STATUS == "accepted"
+    assert payload["memory_foundation_reviewed_sha"] == "f44c4e7c2f4a693bcaac91c4a9861fa6e8eef13b"
+    assert cutover_report.cutover_ready is True
+    assert all(item.ready for item in cutover_report.cases)
+    assert cutover_report.blockers == ()
+    assert cutover_report.minimal_shared_file_set == ()
 
 
 def test_restart_fallback_followup_v12_and_publication_are_preserved_after_catalog_hide(

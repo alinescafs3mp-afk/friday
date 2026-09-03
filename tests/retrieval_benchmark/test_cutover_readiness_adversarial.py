@@ -226,7 +226,12 @@ def test_parser_rejects_unknown_keys_enums_and_forged_ready_flag(
         CutoverReadinessReportV1.from_payload(payload)
 
     payload = report.to_payload()
-    payload["cutover_ready"] = True
+    payload["cutover_ready"] = False
+    with pytest.raises(CutoverReadinessError):
+        CutoverReadinessReportV1.from_payload(payload)
+
+    payload = report.to_payload()
+    payload["memory_foundation_review_status"] = "integrated"
     with pytest.raises(CutoverReadinessError):
         CutoverReadinessReportV1.from_payload(payload)
 

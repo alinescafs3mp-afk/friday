@@ -66,13 +66,12 @@ P0G Gate Diet is included in the
 current release. P0H reader, pair-bearing writer and safe no-delete continuation
 remain live through `0.207.98`; the permanent `io_uring_disabled=2` R3 proposal
 is rejected, so P0H remains open only for a one-shot maintenance authority and
-reviewed bounded deletion that preserves the ordinary Engineer environment. S4-R8 remains open for sole-facade
-parity. `origin/main` (`50ce6884`) has unactivated R8E, a composite seam, exact
-archive dispatch, and a dialogue-catalogue hide: `memory_search` /
-`source_search` / `message_search` are internal (and mission) only. Formal
-`cutover_ready` stays false: R8E review status is `integrated`, and no
-`accepted` review record exists. Production `0.208.0` / `75b165a2` still
-serves the previous catalogue until a clean release boundary.
+reviewed bounded deletion that preserves the ordinary Engineer environment. S4-R8
+formal cutover is code-owned `accepted` on `origin/main`: independent R8E
+review of `f44c4e7c` is `accepted`, thirteen contours are `parity` or
+`preserved`, and `cutover_ready` is true. Production `0.208.0` / `75b165a2`
+still serves the previous catalogue until a clean post-`0.208.0` release
+boundary.
 Keep the released S3 path in shadow
 until its genuine production witness exists; then promote only the
 current-file-plus-current-public-web journey through the already released
@@ -418,11 +417,11 @@ compatibility/model-control slice is deployed in `0.207.95`; fail-soft dense
 document passage recall is deployed in `0.207.96`; the R8B internal retrieval
 foundation is deployed in `0.207.98`; R8C exact focused-source parity is
 deployed in `0.207.99`; and R8D authenticated exact-message windows are
-deployed in `0.208.0`. Local `main` additionally carries the unactivated R8E
+deployed in `0.208.0`. Local `main` additionally carries the accepted R8E
 bitemporal/graph internal lane, the archive composite seam, a dispatch owner
-that can express exact window / `as_of` / `known_at` / graph without hiding
-legacy dialogue tools, and a refreshed sole-facade measurement that is still
-`not ready`. R8 sole dialogue-facade retirement is not deployed.
+that expresses exact window / `as_of` / `known_at` / graph, and a sole-facade
+measurement with `cutover_ready` true. R8 sole dialogue-facade retirement is
+not yet a production release.
 
 1. Add reader-first `document_passages` with a schema-capable fallback, bounded
    writer, restart-safe resumable backfill and honest `index_incomplete`.
@@ -824,22 +823,20 @@ checklist elsewhere.
       from dialogue; keep them internal/mission; offer `archive_search` as the
       sole ordinary retrieval facade; close stale dialogue calls. Historical
       ten-file union 1,197/1,197; thirteen contours `parity` or `preserved`.
+- [x] S4-R8F step 4: formal `cutover_ready` — independent R8E review of
+      `f44c4e7c` is `accepted`; code-owned status is `accepted`; every contour
+      is `parity` or `preserved`; blocker and minimal shared-file sets are empty.
 
-Head: `origin/main` (last product hide `50ce6884`). Production remains
-`0.208.0` / `75b165a2`.
-Measured `cutover_ready` is false: R8E review status is `integrated`, not
-`accepted`. Last independent R8E review record is `changes_required`
-(`handoffs/Sol/S4-R8E-REVIEW-BLOCKER-002.md`); no later `accepted` review
-exists. Do not promote that status.
+Head: `origin/main` (last product hide `50ce6884`; R8E accepted SHA `f44c4e7c`).
+Production remains `0.208.0` / `75b165a2` until exact-release and activation.
 
 ### Open and implementable
 
-- none until an independent R8E review records `accepted`.
+- [ ] Full exact-release gate + production deploy of the accepted post-`0.208.0`
+      main candidate.
 
 ### Open and blocked
 
-- [ ] S4-R8F step 4: formal `cutover_ready` — blocked on a real R8E review
-      status `accepted` (code-owned status remains `integrated`).
 - [ ] P0H reviewed bounded deletion — owner one-shot maintenance authority;
       Linux still cannot prove global open-reference absence. No apply/delete.
 - [ ] S3 Supervisor promotion — observation-bound. Need a genuine eligible
@@ -850,8 +847,6 @@ exists. Do not promote that status.
       the single protected runtime secret.
 - [ ] Golden-journey evidence refresh — clean-artifact/restart rows are `STALE`
       at a previous release binding. Refresh only at a clean release boundary.
-- [ ] Full exact-release gate + production deploy of post-`0.208.0` main —
-      no clean release boundary yet.
 
 ### Operating invariants (never "done", always in force)
 
