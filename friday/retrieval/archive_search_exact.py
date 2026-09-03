@@ -164,6 +164,11 @@ def derive_archive_exact_requests(
         raise ArchiveExactDispatchError("exact archive derivation requires typed inputs")
     if not intent.active:
         return None, None
+    # The outer opaque cursor is the sole authority for a resumed generic page.
+    # Model-authored exact flags must not start a fresh selector before that
+    # cursor is redeemed or rejected by the released facade.
+    if request.continuation is not None:
+        return None, None
     message_request: MessageExactRequest | None = None
     memory_request: MemoryExactRequest | None = None
     if intent.requests_message_window:
@@ -344,6 +349,8 @@ async def prepare_archive_exact_lanes(
     """Run exact lanes for one archive request.  Inactive intents are a no-op."""
 
     if not intent.active:
+        return ArchiveExactLaneResult(request, (), (), None)
+    if request.continuation is not None:
         return ArchiveExactLaneResult(request, (), (), None)
     if type(turn_context) is not AuthenticatedTurnContext:
         raise ArchiveExactDispatchError("exact archive selection requires an authenticated turn")

@@ -253,6 +253,76 @@ def test_derived_memory_request_binds_as_of_and_known_at() -> None:
     assert memory.query == QUERY
 
 
+def test_generic_continuation_does_not_derive_exact_requests() -> None:
+    request = ArchiveSearchRequest.create(
+        query=QUERY,
+        corpora=(ArchiveSearchCorpus.KNOWLEDGE, ArchiveSearchCorpus.MESSAGES),
+        continuation="opaque_outer_page_cursor",
+    )
+    intent = parse_archive_exact_intent(
+        as_of="2026-08-31",
+        exact_window=True,
+        include_graph=True,
+    )
+    message, memory = derive_archive_exact_requests(
+        request,
+        intent,
+        tenant_id=TENANT,
+        principal_id=PRINCIPAL,
+        active_turn_id="turn_" + "a" * 64,
+        conversation_id="conv_" + "b" * 16,
+        boundary_user_message_id="msg_" + "c" * 16,
+    )
+    assert message is None
+    assert memory is None
+
+
+@pytest.mark.asyncio
+async def test_generic_continuation_does_not_enter_exact_selectors(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Cursor redemption precedes every possible fresh exact/provider read."""
+
+    request = ArchiveSearchRequest.create(
+        query=QUERY,
+        corpora=(ArchiveSearchCorpus.KNOWLEDGE, ArchiveSearchCorpus.MESSAGES),
+        continuation="opaque_outer_page_cursor",
+    )
+    intent = parse_archive_exact_intent(
+        as_of="2026-08-31",
+        exact_window=True,
+        include_graph=True,
+    )
+
+    def exact_selector_entered(*_args: object, **_kwargs: object) -> None:
+        raise AssertionError("continued generic request entered a fresh exact selector")
+
+    monkeypatch.setattr(
+        "friday.retrieval.archive_search_exact.collect_message_exact_pages",
+        exact_selector_entered,
+    )
+    monkeypatch.setattr(
+        "friday.retrieval.archive_search_exact.collect_memory_exact_pages",
+        exact_selector_entered,
+    )
+    lanes = await prepare_archive_exact_lanes(
+        request=request,
+        intent=intent,
+        storage=object(),
+        turn_context=None,
+        tenant_id=TENANT,
+        principal_id=PRINCIPAL,
+        conversation_id=None,
+        boundary_user_message_id=None,
+        message_adapter=None,
+        memory_adapter=None,
+    )
+    assert lanes.execution_request is request
+    assert lanes.message_pages == ()
+    assert lanes.memory_pages == ()
+    assert lanes.model_payload is None
+
+
 def test_model_payload_still_cannot_inject_exact_authority() -> None:
     with pytest.raises(Exception, match="keys"):
         ArchiveSearchRequest.from_model_payload(
@@ -360,6 +430,38 @@ async def test_exact_window_without_authenticated_turn_fails_closed(
     assert result.prepared_archive_search is None
     assert result.prepared_archive_search_composite is None
     assert result.error.startswith("Invalid tool arguments")
+
+
+@pytest.mark.asyncio
+async def test_outer_continuation_does_not_enter_exact_dispatch(
+    settings: Any,
+    storage: Any,
+) -> None:
+    """A resumed generic page must not start exact selection from sibling flags."""
+
+    stack = _stack(storage, settings, label="continuation")
+    try:
+        result = await stack["kernel"].execute(
+            "archive_search",
+            {
+                "query": QUERY,
+                "corpora": [ArchiveSearchCorpus.DOCUMENTS.value],
+                "continuation": "opaque_outer_page_cursor",
+                "exact_window": True,
+                "include_graph": True,
+                "as_of": "2026-08-31",
+                "_archive_invocation": stack["invocation"],
+            },
+            actor=stack["actor"],
+        )
+    finally:
+        await stack["web"].close()
+    error = result.error or ""
+    assert result.prepared_archive_search_composite is None
+    assert result.archive_exact_model_payload is None
+    assert "authenticated turn" not in error
+    assert "messages corpus" not in error
+    assert "knowledge corpus" not in error
 
 
 @pytest.mark.asyncio

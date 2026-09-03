@@ -6457,34 +6457,35 @@ class ExecutionKernel:
                 elif candidate_reader is not None:
                     LOGGER.warning("Archive Obsidian exact reader failed owner/composition attestation")
 
-        try:
-            exact_intent = parse_archive_exact_intent(
-                as_of=as_of,
-                known_at=known_at,
-                exact_window=exact_window,
-                include_graph=include_graph,
-                content_mode=content_mode,
-            )
-        except ArchiveExactDispatchError as exc:
-            raise ValueError(str(exc)) from exc
         exact_lanes = None
-        if exact_intent.active:
+        if request.continuation is None:
             try:
-                exact_lanes = await prepare_archive_exact_lanes(
-                    request=request,
-                    intent=exact_intent,
-                    storage=storage,
-                    turn_context=current_primary_authenticated_turn_context(),
-                    tenant_id=invocation.tenant_id,
-                    principal_id=invocation.principal_id,
-                    conversation_id=invocation.current_conversation_id,
-                    boundary_user_message_id=invocation.boundary_user_message_id,
-                    message_adapter=self._message_exact_adapter,
-                    memory_adapter=self._memory_exact_adapter,
+                exact_intent = parse_archive_exact_intent(
+                    as_of=as_of,
+                    known_at=known_at,
+                    exact_window=exact_window,
+                    include_graph=include_graph,
+                    content_mode=content_mode,
                 )
-            except (ArchiveExactDispatchError, PermissionError) as exc:
-                raise ValueError(str(exc) or "exact archive selection is unavailable") from exc
-            request = exact_lanes.execution_request
+            except ArchiveExactDispatchError as exc:
+                raise ValueError(str(exc)) from exc
+            if exact_intent.active:
+                try:
+                    exact_lanes = await prepare_archive_exact_lanes(
+                        request=request,
+                        intent=exact_intent,
+                        storage=storage,
+                        turn_context=current_primary_authenticated_turn_context(),
+                        tenant_id=invocation.tenant_id,
+                        principal_id=invocation.principal_id,
+                        conversation_id=invocation.current_conversation_id,
+                        boundary_user_message_id=invocation.boundary_user_message_id,
+                        message_adapter=self._message_exact_adapter,
+                        memory_adapter=self._memory_exact_adapter,
+                    )
+                except (ArchiveExactDispatchError, PermissionError) as exc:
+                    raise ValueError(str(exc) or "exact archive selection is unavailable") from exc
+                request = exact_lanes.execution_request
 
         with storage.transaction() as conn:
             # The generic execute gate ran before the optional awaited vault
