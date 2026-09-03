@@ -14,22 +14,22 @@ either merged here or discarded before that source is removed.
 ## Current production identity
 
 - Branch: `main`
-- Deployed implementation head: `75b165a23809dfcc7445311e2dc896c98ce3df00`.
-- Live: Friday `0.208.0` / `75b165a23809dfcc7445311e2dc896c98ce3df00`;
-  tree `9d1c49da576e58e73ec1570d3e4c7e1ea7ebca2d44cc1e7482ef418c9ec89315`;
-  wheel `1354792971eb50b792c6a65ea7f86db47f0b9a643b7fb113dbbaddd733078490`.
-- Immediate runtime predecessor: Friday `0.207.99` /
-  `d751bfc6397c6f750724df1d40e3fb90f7594943`; tree
-  `fcee3f670cdeb0b02dd67b10b03f751758a656772c1f27db1d294fdeda183720`.
+- Deployed implementation head: `8b6a8c13ce54b8b07192cb6f5b820953da4efcb5`.
+- Live: Friday `0.208.1` / `8b6a8c13ce54b8b07192cb6f5b820953da4efcb5`;
+  tree `5587e4c3dd45e2b85191b8d39dd0268dc7fbf046526761af6d485297d2be8f82`;
+  wheel `1cadf5769b87f9cdc152729183ddf3a1d6ef4a8ff3192d48d1a5b538e856872f`.
+- Immediate runtime predecessor: Friday `0.208.0` /
+  `75b165a23809dfcc7445311e2dc896c98ce3df00`; tree
+  `9d1c49da576e58e73ec1570d3e4c7e1ea7ebca2d44cc1e7482ef418c9ec89315`.
   Schema-capable fallback: Friday `0.207.90` /
   `7abb3c5e3fb29bdc7c53bf923f8b218fa26f07e9`; tree
   `c1c29331db489ad1c56080d70a8c37d4051b4752f1309dba9c0a012099ebcae5`.
 - Database schema: 50 in deployed production and the fallback.
 - Production: immutable activation `clear`; backend and Telegram bridge active;
-  trusted-CA health `200`. The post-activation DR lifecycle is published at
-  index revision 48 with `0.208.0` current, `0.207.99` older and the
-  pre-activation anchor retained; retention admission is honestly
-  `review_required` and grants no apply/delete authority.
+  trusted-CA health `200` / `version=0.208.1`. Writer target `candidate`.
+  Retention admission remains honestly `review_required` and grants no
+  apply/delete authority. A terminal-activation DR candidate is pending
+  independent rehearsal; do not treat enrollment as a published generation.
   V12
   `canary_ready` with verified, installation and effective context all exactly
   `40960`; complete S2 authenticated turn
@@ -69,9 +69,9 @@ is rejected, so P0H remains open only for a one-shot maintenance authority and
 reviewed bounded deletion that preserves the ordinary Engineer environment. S4-R8
 formal cutover is code-owned `accepted` on `origin/main`: independent R8E
 review of `f44c4e7c` is `accepted`, thirteen contours are `parity` or
-`preserved`, and `cutover_ready` is true. Production `0.208.0` / `75b165a2`
-still serves the previous catalogue until a clean post-`0.208.0` release
-boundary.
+`preserved`, and `cutover_ready` is true. Production `0.208.1` /
+`8b6a8c13` now serves that catalogue: dialogue offers `archive_search`;
+`memory_search` / `source_search` / `message_search` remain internal.
 Keep the released S3 path in shadow
 until its genuine production witness exists; then promote only the
 current-file-plus-current-public-web journey through the already released
@@ -801,7 +801,7 @@ This is the live remaining-work register. Owner/external and observation-bound
 rows stay open until their named evidence exists. Do not invent a second
 checklist elsewhere.
 
-### Closed on production `0.208.0`
+### Closed on production `0.208.1`
 
 - [x] P0G Gate Diet
 - [x] P0 production message stability
@@ -810,30 +810,24 @@ checklist elsewhere.
 - [x] S1 Engineer continuation
 - [x] S2 one-turn nervous system
 - [x] S4-R0..R8D recall, passages, facade parity, exact message windows
+- [x] S4-R8E exact bitemporal/graph internal lane + open-handle provenance
+      (reviewed SHA `f44c4e7c`, status `accepted`)
+- [x] S4-R8H composite seam and exact archive dispatch
+- [x] S4-R8F dialogue cutover: `archive_search` sole ordinary facade;
+      `memory_search` / `source_search` / `message_search` internal
 - [x] S5 measured cognition and exact 40k lease
 - [x] S6-R0..R4 mission/reminder/Telegram recovery, browse-to-document, journey evidence
 - [x] Inbox-advice fairness selection
-
-### Closed on `origin/main`, not yet a production release
-
-- [x] S4-R8E unactivated exact bitemporal/graph internal lane + open-handle provenance
-- [x] S4-R8H composite seam
-- [x] S4-R8H exact archive dispatch (`exact_window` / `as_of` / `known_at` / `include_graph`)
-- [x] S4-R8F step 3: hide `memory_search` / `source_search` / `message_search`
-      from dialogue; keep them internal/mission; offer `archive_search` as the
-      sole ordinary retrieval facade; close stale dialogue calls. Historical
-      ten-file union 1,197/1,197; thirteen contours `parity` or `preserved`.
-- [x] S4-R8F step 4: formal `cutover_ready` — independent R8E review of
-      `f44c4e7c` is `accepted`; code-owned status is `accepted`; every contour
-      is `parity` or `preserved`; blocker and minimal shared-file sets are empty.
-
-Head: `origin/main` (last product hide `50ce6884`; R8E accepted SHA `f44c4e7c`).
-Production remains `0.208.0` / `75b165a2` until exact-release and activation.
+- [x] Full exact-release gate + immutable activation of `8b6a8c13` /
+      `0.208.1` (25569 non-UI + 32 UI, zero failed/error/skipped;
+      activation `phase=clear`; trusted-CA health `200` / `0.208.1`)
 
 ### Open and implementable
 
-- [ ] Full exact-release gate + production deploy of the accepted post-`0.208.0`
-      main candidate.
+- [ ] Golden-journey evidence refresh at this `0.208.1` / `8b6a8c13`
+      identity. Clean-artifact and restart rows are still `STALE` on the
+      previous binding; do not mark them `VERIFIED` until new closed receipts
+      bind commit, tree, wheel and schema.
 
 ### Open and blocked
 
@@ -845,8 +839,6 @@ Production remains `0.208.0` / `75b165a2` until exact-release and activation.
 - [ ] Off-machine backup/file mirror — implementation present, target empty.
 - [ ] Rotate the external web-search credential at the provider, then update
       the single protected runtime secret.
-- [ ] Golden-journey evidence refresh — clean-artifact/restart rows are `STALE`
-      at a previous release binding. Refresh only at a clean release boundary.
 
 ### Operating invariants (never "done", always in force)
 
