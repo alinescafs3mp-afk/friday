@@ -1825,18 +1825,18 @@ def test_canonical_golden_journey_registry_is_closed_current_and_privacy_safe(
         for evidence_class in _CURRENT_SNAPSHOT_MISSING_CLASSES
     )
     assert {row.journey_id: row.evidence["clean artifact path"].state for row in rows} == {
-        "conversation_recall": "STALE",
-        "document_recall_answer": "STALE",
+        "conversation_recall": "VERIFIED",
+        "document_recall_answer": "VERIFIED",
         "obsidian_write_sync": "MISSING",
-        "durable_scheduled_work": "STALE",
-        "honest_degradation": "STALE",
+        "durable_scheduled_work": "VERIFIED",
+        "honest_degradation": "VERIFIED",
         "current_file_web_comparison": "MISSING",
     }
     durable = next(row for row in rows if row.journey_id == "durable_scheduled_work")
     honest = next(row for row in rows if row.journey_id == "honest_degradation")
-    assert durable.evidence["production read-only observation"].state == "VERIFIED"
-    assert durable.evidence["restart and recovery evidence"].state == "STALE"
-    assert honest.evidence["restart and recovery evidence"].state == "STALE"
+    assert durable.evidence["production read-only observation"].state == "STALE"
+    assert durable.evidence["restart and recovery evidence"].state == "VERIFIED"
+    assert honest.evidence["restart and recovery evidence"].state == "VERIFIED"
     document = next(row for row in rows if row.journey_id == "document_recall_answer")
     assert document.evidence["restart and recovery evidence"].state == "AVAILABLE"
     restart_proof = (
