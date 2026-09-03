@@ -182,7 +182,7 @@ def _ingestion_result_allows_shadow(value: dict[str, Any] | None) -> bool:
     if category == "system_notice":
         if set(value) != base_keys | {"synthetic"} or value.get("synthetic") is not True:
             return False
-    elif category in {"web_request", "archive_search_request"}:
+    elif category in {"web_request", "archive_search_request", "compare_current_file_web"}:
         if set(value) != base_keys:
             return False
     else:

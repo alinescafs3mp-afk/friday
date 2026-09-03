@@ -139,6 +139,9 @@ from friday.orchestration.capability_binding import (
     operational_capability_snapshot,
     operational_effect_capability_snapshot,
 )
+from friday.orchestration.current_file_web_query import (
+    extract_compare_current_file_public_web_query,
+)
 from friday.orchestration.file_read import V12FileReadHandler
 from friday.orchestration.semantic_supervisor_runtime import build_semantic_supervisor_runtime
 from friday.orchestration.supervisor_assist_activation import (
@@ -6084,6 +6087,20 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
                         "action": "transient",
                         "category": "obsidian_request",
                         "reason": "явная команда Obsidian — действие, а не материал",
+                    }
+                elif (
+                    pending_comparison_attachment_count == 1
+                    and extract_compare_current_file_public_web_query(message)
+                ):
+                    ingestion_result = {
+                        "promoted": False,
+                        "queued_for_review": False,
+                        "action": "transient",
+                        "category": "compare_current_file_web",
+                        "reason": (
+                            "сравнение текущего файла с публичным вебом — команда, "
+                            "а не материал архива"
+                        ),
                     }
                 elif asks_for_the_web(message):
                     # «Найди в интернете курс доллара» — это команда, а не факт,

@@ -976,8 +976,12 @@ def _store_docx(
     )
 
 
-def _store_generic_text(settings, storage) -> _StoredDocument:
-    marker = "PRIVATE-SYNTHETIC-LOCAL-NEWS-CANARY"
+def _store_generic_text(
+    settings,
+    storage,
+    *,
+    marker: str = "PRIVATE-SYNTHETIC-LOCAL-NEWS-CANARY",
+) -> _StoredDocument:
     text = (
         f"{marker}\nПо данным из интернета, в документе за прошедшие сутки есть "
         "синтетическая локальная запись."
@@ -1808,3 +1812,171 @@ async def test_attachment_derived_news_carriers_cannot_use_web(
     metadata = _stored_metadata(storage, response)
     assert metadata["structural"]["private_web_search_blocked"] is True
     assert metadata["structural"]["model_spoke"] is False
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "request_text",
+    [
+        "Найди в интернете текущие публичные правила и сравни их с этим договором.",
+        "Сравни этот договор с текущими публичными правилами в интернете.",
+        "Compare this contract with current public HTTP Date header rules on the web.",
+    ],
+)
+async def test_current_file_public_web_compare_searches_only_the_public_topic(
+    settings,
+    storage,
+    request_text: str,
+) -> None:
+    storage.ensure_user(OWNER, preset_key="owner")
+    document = _store_generic_text(settings, storage)
+    kernel = _SyntheticWebKernel()
+    runtime = AgentRuntime(
+        replace(settings, verify_answers=False),
+        storage,
+        llm=_ScriptedModel({document.marker: "Локальная сверка."}, web_fact=PUBLIC_FACT, web_url=PUBLIC_URL),
+        kernel=kernel,
+    )
+    response = await runtime.chat(
+        OWNER,
+        request_text,
+        actor=_actor(),
+        attachments=[document.attachment],
+    )
+
+    assert kernel.calls, "public-web compare must prefetch web"
+    assert len(kernel.calls) == 1
+    query = str(kernel.calls[0][1].get("query") or "")
+    folded_query = query.casefold()
+    assert "публичн" in folded_query or "public" in folded_query
+    assert document.marker not in query
+    assert "договор" not in folded_query
+    assert "файл" not in folded_query
+    assert "contract" not in folded_query
+    assert "file" not in folded_query
+    assert "интернет" not in folded_query
+    assert "web" not in folded_query
+    rendered = json.dumps(runtime.llm.calls, ensure_ascii=False) if runtime.llm.calls else ""
+    assert document.marker in rendered
+    assert document.marker not in query
+    metadata = _stored_metadata(storage, response)
+    assert metadata["structural"].get("private_web_search_blocked") is not True
+    assert "приватные вложения" not in response["message"].casefold()
+    assert PUBLIC_FACT in response["message"]
+    assert response["web_evidence_status"] == "sourced"
+    assert response["web_sources"] == [{"url": PUBLIC_URL, "title": "Synthetic public news source"}]
+
+
+@pytest.mark.asyncio
+async def test_summarize_document_and_search_web_still_blocks_public_research(
+    settings,
+    storage,
+) -> None:
+    storage.ensure_user(OWNER, preset_key="owner")
+    request = "Обобщи весь документ и поищи актуальные данные в интернете."
+    document = _store_generic_text(settings, storage)
+    kernel = _SyntheticWebKernel()
+    runtime = AgentRuntime(
+        replace(settings, verify_answers=False),
+        storage,
+        llm=_ScriptedModel({document.marker: "Синтетическая локальная сводка."}),
+        kernel=kernel,
+    )
+    response = await runtime.chat(
+        OWNER,
+        request,
+        actor=_actor(),
+        attachments=[document.attachment],
+    )
+    assert kernel.calls == []
+    assert "приватные вложения" in response["message"].casefold()
+    metadata = _stored_metadata(storage, response)
+    assert metadata["structural"]["private_web_search_blocked"] is True
+
+
+@pytest.mark.asyncio
+async def test_summarize_then_compare_public_rules_still_blocks_public_research(
+    settings,
+    storage,
+) -> None:
+    storage.ensure_user(OWNER, preset_key="owner")
+    request = "Обобщи документ и сравни с текущими публичными правилами в интернете."
+    document = _store_generic_text(settings, storage)
+    kernel = _SyntheticWebKernel()
+    runtime = AgentRuntime(
+        replace(settings, verify_answers=False),
+        storage,
+        llm=_ScriptedModel({document.marker: "Синтетическая локальная сводка."}),
+        kernel=kernel,
+    )
+    response = await runtime.chat(
+        OWNER,
+        request,
+        actor=_actor(),
+        attachments=[document.attachment],
+    )
+    assert kernel.calls == []
+    assert response["web_evidence_status"] == "none"
+    assert PUBLIC_FACT not in response["message"]
+    metadata = _stored_metadata(storage, response)
+    assert metadata["structural"].get("private_web_search_blocked") is not True
+
+
+@pytest.mark.asyncio
+async def test_two_current_files_cannot_open_public_web_compare(
+    settings,
+    storage,
+) -> None:
+    storage.ensure_user(OWNER, preset_key="owner")
+    first = _store_generic_text(settings, storage, marker="PRIVATE-SYNTHETIC-COMPARE-FILE-A")
+    second = _store_generic_text(settings, storage, marker="PRIVATE-SYNTHETIC-COMPARE-FILE-B")
+    kernel = _SyntheticWebKernel()
+    runtime = AgentRuntime(
+        replace(settings, verify_answers=False),
+        storage,
+        llm=_ScriptedModel({first.marker: "Синтетическая локальная сводка."}),
+        kernel=kernel,
+    )
+    response = await runtime.chat(
+        OWNER,
+        "Найди в интернете текущие публичные правила и сравни их с этим договором.",
+        actor=_actor(),
+        attachments=[first.attachment, second.attachment],
+    )
+    assert kernel.calls == []
+    assert "приватные вложения" in response["message"].casefold()
+    metadata = _stored_metadata(storage, response)
+    assert metadata["structural"]["private_web_search_blocked"] is True
+
+
+@pytest.mark.asyncio
+async def test_prior_file_history_cannot_open_public_web_compare(
+    settings,
+    storage,
+) -> None:
+    storage.ensure_user(OWNER, preset_key="owner")
+    document = _store_generic_text(settings, storage)
+    kernel = _SyntheticWebKernel()
+    runtime = AgentRuntime(
+        replace(settings, verify_answers=False),
+        storage,
+        llm=_ScriptedModel({document.marker: "Синтетическая локальная сводка."}),
+        kernel=kernel,
+    )
+    first = await runtime.chat(
+        OWNER,
+        "Кратко изложи этот файл.",
+        actor=_actor(),
+        attachments=[document.attachment],
+    )
+    kernel.calls.clear()
+    response = await runtime.chat(
+        OWNER,
+        "Найди в интернете текущие публичные правила и сравни их с этим договором.",
+        actor=_actor(),
+        conversation_id=str(first["conversation_id"]),
+    )
+    assert kernel.calls == []
+    assert "приватные вложения" in response["message"].casefold()
+    metadata = _stored_metadata(storage, response)
+    assert metadata["structural"]["private_web_search_blocked"] is True

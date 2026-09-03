@@ -32,6 +32,7 @@ from friday.orchestration.supervisor_plan_authority import (
 from friday.orchestration.transient_web_comparison import (
     SealedPublicWebQuery,
     TransientWebComparisonError,
+    seal_compare_current_file_public_web_query,
     seal_explicit_public_web_query,
 )
 from friday.orchestration.turn_context import (
@@ -142,7 +143,7 @@ def _transient_web_ingestion(value: object) -> bool:
         value.get("promoted") is False
         and value.get("queued_for_review") is False
         and value.get("action") == "transient"
-        and value.get("category") == "web_request"
+        and value.get("category") in {"web_request", "compare_current_file_web"}
         and type(value.get("reason")) is str
         and bool(str(value.get("reason") or "").strip())
     )
@@ -245,7 +246,14 @@ def prepare_authenticated_current_file_web_assist_surface(
             conversation_id=conversation_id,
         )
     except (TransientWebComparisonError, TypeError, ValueError, UnicodeError):
-        return None
+        try:
+            web_plan = seal_compare_current_file_public_web_query(
+                current_user_message=turn.message,
+                actor=actor,
+                conversation_id=conversation_id,
+            )
+        except (TransientWebComparisonError, TypeError, ValueError, UnicodeError):
+            return None
     return CurrentFileWebAssistSurface(
         turn=turn,
         actor=actor,
@@ -365,7 +373,14 @@ def prepare_current_file_web_assist_surface(
             conversation_id=conversation_id,
         )
     except (TransientWebComparisonError, TypeError, ValueError, UnicodeError):
-        return None
+        try:
+            web_plan = seal_compare_current_file_public_web_query(
+                current_user_message=message,
+                actor=actor,
+                conversation_id=conversation_id,
+            )
+        except (TransientWebComparisonError, TypeError, ValueError, UnicodeError):
+            return None
     return CurrentFileWebAssistSurface(
         turn=turn,
         actor=actor,

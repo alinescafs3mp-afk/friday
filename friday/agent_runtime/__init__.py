@@ -291,6 +291,9 @@ from friday.orchestration.conversation_document_comparison import (
     conversation_document_comparison_process_lease_is_current,
     conversation_document_model_evidence_identity,
 )
+from friday.orchestration.current_file_web_query import (
+    extract_compare_current_file_public_web_query,
+)
 from friday.orchestration.effect_outcome import (
     EffectAction,
     EffectCapability,
@@ -37332,11 +37335,17 @@ class AgentContext:
     #: History, retrieval and attachment-derived context are removed for this
     #: one turn; the sticky lineage itself remains persisted for future safety.
     isolated_outbound_turn: bool = False
+    #: One current-turn file stays local while an independent public-web topic
+    #: from the same utterance is prefetched. File bytes never become the query.
+    isolated_current_file_web_compare_turn: bool = False
+    compare_current_file_public_web_query: str = ""
     #: A private source or its sticky lineage participates in this turn. This
     #: transient code-owned bit closes external/MCP schemas and is repeated at
     #: execution so an unoffered or future hallucinated tool cannot cross the
     #: boundary. Reviewed isolated current-message-only lanes are exceptions
-    #: only because they admit no source/history/reply carrier.
+    #: only because they admit no source/history/reply carrier. The current-file
+    #: public-web compare contour keeps one sealed ``web_research`` prefetch
+    #: open until that query runs; the boundary then closes the rest of the turn.
     private_source_boundary_active: bool = False
     #: This isolated current-text turn asks for public research followed by one
     #: late code-owned Obsidian write. The marker grants no capability; it keeps
@@ -43224,6 +43233,8 @@ class AgentRuntime:
         context.current_attachment_present = False
         context.current_attachment_auto_summary = False
         context.isolated_outbound_turn = False
+        context.isolated_current_file_web_compare_turn = False
+        context.compare_current_file_public_web_query = ""
         context.obsidian_result_note_turn = False
         context.focused_attachment_turn = False
         context.isolated_local_file_turn = False
@@ -51516,6 +51527,31 @@ class AgentRuntime:
             and obsidian_intent is None
             and obsidian_result_request_candidate is None
         )
+        compare_current_file_public_web_query = extract_compare_current_file_public_web_query(routing_message)
+        isolated_current_file_web_compare_turn = bool(
+            compare_current_file_public_web_query
+            and supplied_attachment_count == 1
+            and attachments
+            and restored_attachment_expected_count == 0
+            and not restored_attachments
+            and not synthetic_document_notice
+            and not quoted_attachment_reference
+            and not reply_assistant_reference
+            and not reply_quote
+            and not replay_source_message_id
+            and not replay_had_attachments
+            and not attachment_reference_kind
+            and workspace_inbox_request is None
+            and not message_locate_flow
+            and not person_inventory_turn
+            and filename_inventory_request is None
+            and not direct_archived_source_query
+            and not contextual_source_query
+            and obsidian_intent is None
+            and obsidian_result_request_candidate is None
+        )
+        if not isolated_current_file_web_compare_turn:
+            compare_current_file_public_web_query = ""
         isolated_obsidian_result_turn = bool(
             obsidian_result_request_candidate is not None
             and not synthetic_document_notice
@@ -53660,6 +53696,25 @@ class AgentRuntime:
                 search_query=clean_message,
                 isolated_shape_turn=True,
             )
+        elif isolated_current_file_web_compare_turn:
+            # Current-turn file stays local. History, archive and learned
+            # context stay out so they cannot become the outbound query.
+            # The public topic is sealed from the utterance, never the file.
+            context = AgentContext(
+                conversation_id=conversation_id,
+                user_id=tenant_id,
+                person_id=person_id,
+                conversation_history=[],
+                ingestion=dict(ingestion_result or {}),
+                interaction_mode=interaction_mode,
+                search_query=compare_current_file_public_web_query,
+                current_attachment_present=True,
+                focused_attachment_turn=True,
+                isolated_current_file_web_compare_turn=True,
+                compare_current_file_public_web_query=compare_current_file_public_web_query,
+                outward_verdict=("интернет", compare_current_file_public_web_query),
+                policy_web_authorized=True,
+            )
         elif isolated_outbound_turn:
             # Do not call `_prepare_context` at all: even if its result is
             # cleared afterwards, archive search, graph expansion and learned
@@ -54028,7 +54083,11 @@ class AgentRuntime:
         )
         if message_locate_flow:
             context.message_locate_dependency_resolved = message_locate_dependency_selected
-        private_source_boundary_active = bool(turn_private_context_lineage and not isolated_outbound_turn)
+        private_source_boundary_active = bool(
+            turn_private_context_lineage
+            and not isolated_outbound_turn
+            and not isolated_current_file_web_compare_turn
+        )
         context.private_source_boundary_active = private_source_boundary_active
         if private_source_boundary_active:
             # Do not carry a source-derived outbox body into the agent loop even
@@ -54406,10 +54465,11 @@ class AgentRuntime:
         )
         if not archive_search_requested_for_turn:
             visible_tools = _file_turn_capability_tools(visible_tools, file_turn)
-        if current_document_secondary_task:
+        if current_document_secondary_task and not isolated_current_file_web_compare_turn:
             # This whole-speech proof rejects every effect sibling. Clear a
             # false ``make_file`` projection before the first model token; the
-            # optional model never receives tools.
+            # optional model never receives tools. A sealed current-file/public-web
+            # compare still needs the one prefetch schema.
             visible_tools = []
         if not context.host_json_attachment_raw_id:
             visible_tools = [
@@ -54497,10 +54557,10 @@ class AgentRuntime:
                 for tool in visible_tools
                 if str((tool.get("function") or {}).get("name") or "") != "make_file"
             ]
-        if isolated_outbound_turn:
+        if isolated_outbound_turn or isolated_current_file_web_compare_turn:
             # The deterministic prefetch gets exactly one outward capability.
             # No local/archive tool and no model-selected network tool is
-            # offered on the isolated turn.
+            # offered on the isolated turn. The current file is not a tool.
             visible_tools = [
                 tool
                 for tool in visible_tools
@@ -54530,6 +54590,7 @@ class AgentRuntime:
             private_source_boundary_active
             or (attachment_private_turn or private_context_lineage)
             and not isolated_outbound_turn
+            and not isolated_current_file_web_compare_turn
         )
         context.private_source_boundary_active = private_outbound_restricted
         restricted_outbound_turn = bool(topic.startswith("человек") or private_outbound_restricted)
@@ -54571,6 +54632,14 @@ class AgentRuntime:
         outbound_blocked = bool(
             private_outbound_restricted or (topic.startswith("человек") and not web_intent_authorized)
         )
+        if isolated_current_file_web_compare_turn:
+            # Earlier file-source projections may have cleared every schema.
+            # Restore exactly the sealed public-web prefetch tool.
+            visible_tools = [
+                tool
+                for tool in self.kernel.get_tool_definitions(actor, topic="")
+                if str((tool.get("function") or {}).get("name") or tool.get("name") or "") == "web_research"
+            ]
         if private_outbound_restricted:
             # Closed projection, not a denylist: only reviewed process-local
             # tools remain.  Thus web/data/code, all MCP calls after source
@@ -54924,6 +54993,12 @@ class AgentRuntime:
             # empty ledger afterwards: no formatter retry may hide an effect
             # which already happened in the draft generation.
             visible_tools = []
+        if isolated_current_file_web_compare_turn:
+            visible_tools = [
+                tool
+                for tool in self.kernel.get_tool_definitions(actor, topic="")
+                if str((tool.get("function") or {}).get("name") or tool.get("name") or "") == "web_research"
+            ]
         if (
             not autonomous_engineer
             and full_source_prepass_required
@@ -64286,6 +64361,26 @@ class AgentRuntime:
             and getattr(self.settings, "engineer_command_enabled", False) is True
         )
         turn_auth = file_turn_authority(message)
+
+        def keep_sealed_compare_web_schema() -> None:
+            """Hold the one sealed public-web schema until that prefetch runs."""
+
+            if autonomous_engineer or not context.isolated_current_file_web_compare_turn:
+                return
+            if any(
+                str((tool.get("function") or {}).get("name") or tool.get("name") or "") == "web_research"
+                for tool in tools
+                if isinstance(tool, Mapping)
+            ):
+                return
+            restored = [
+                tool
+                for tool in self.kernel.get_tool_definitions(actor, topic="")
+                if str((tool.get("function") or {}).get("name") or tool.get("name") or "") == "web_research"
+            ]
+            if restored:
+                tools[:] = restored
+
         if context.terse_request and not autonomous_engineer:
             # Defense in depth for direct callers and future outer-route drift.
             # Clear in place so no prefetch or model-native call can retain a
@@ -64297,6 +64392,7 @@ class AgentRuntime:
             # through chat, and a schema removed only by the outer route is not
             # a security boundary against a hallucinated native call.
             tools[:] = _project_private_source_tool_schemas(tools)
+            keep_sealed_compare_web_schema()
         if context.interaction_mode == "engineer":
             if autonomous_engineer:
                 # Retire the bounded scan/compiler/decompiler wrappers from the
@@ -64488,9 +64584,16 @@ class AgentRuntime:
                 return True
             if archive_search_requested and tool_name != _ARCHIVE_SEARCH_TOOL_NAME:
                 return False
+            sealed_compare_web = bool(
+                context.isolated_current_file_web_compare_turn
+                and tool_name == "web_research"
+                and str(context.compare_current_file_public_web_query or "").strip()
+            )
             if (
-                context.private_source_boundary_active or archive_search_requested
-            ) and _private_source_tool_policy(tool_name) != "local":
+                not sealed_compare_web
+                and (context.private_source_boundary_active or archive_search_requested)
+                and _private_source_tool_policy(tool_name) != "local"
+            ):
                 return False
             if tool_name not in _OUTBOUND_TOOL_NAMES:
                 return True
@@ -64644,6 +64747,7 @@ class AgentRuntime:
             # and before either a prefetch or model call. Ordinary dialogue
             # history alone is not a private-document/source label.
             tools[:] = _project_private_source_tool_schemas(tools)
+            keep_sealed_compare_web_schema()
         if autonomous_engineer:
             engineer_cancel_requested = _engineer_cancel_requested(turn_auth.speech)
             resumed = await self._resume_engineer_work_item(
@@ -65010,6 +65114,7 @@ class AgentRuntime:
             and not context.focused_attachment_turn
             and not context.isolated_local_file_turn
             and not context.isolated_outbound_turn
+            and not context.isolated_current_file_web_compare_turn
             and not context.isolated_shape_turn
             and not context.reply_quote
             and not context.source_search_used
@@ -65116,11 +65221,14 @@ class AgentRuntime:
             )
         if (
             not autonomous_engineer
-            and context.isolated_outbound_turn
+            and (context.isolated_outbound_turn or context.isolated_current_file_web_compare_turn)
             and not closed_past_timeline_prefetched
             and outward_tool_is_allowed("web_research")
             and not source_lookup_owned
-            and not (turn_auth.proved("local_read") and not turn_auth.proved("web"))
+            and (
+                context.isolated_current_file_web_compare_turn
+                or not (turn_auth.proved("local_read") and not turn_auth.proved("web"))
+            )
         ):
             await self._prefetch_the_web_if_asked(
                 message, actor, tools, messages, tools_used, tool_evidence, web_notice, context
@@ -65139,7 +65247,9 @@ class AgentRuntime:
                 if str((tool.get("function") or {}).get("name") or tool.get("name") or "")
                 not in _WEB_TOOL_NAMES
             ]
-        if context.isolated_outbound_turn and not autonomous_engineer:
+        if (
+            context.isolated_outbound_turn or context.isolated_current_file_web_compare_turn
+        ) and not autonomous_engineer:
             # The prefetch above is the sole authorised outbound effect.  A
             # model-native call could otherwise derive a second query from its
             # own generated prose, defeating current-text-only isolation.
@@ -65149,6 +65259,12 @@ class AgentRuntime:
                 if str((tool.get("function") or {}).get("name") or tool.get("name") or "")
                 not in _OUTBOUND_TOOL_NAMES
             ]
+            if context.isolated_current_file_web_compare_turn:
+                # The current file is now in the model transcript. Close every
+                # remaining external/MCP schema so a later native call cannot
+                # serialize file bytes into a second provider query.
+                context.private_source_boundary_active = True
+                tools[:] = _project_private_source_tool_schemas(tools)
         if simple_public_news_lane:
             # The explicit public-news lane owns the whole turn.  Search has
             # already happened exactly once above.  It never enters tool rounds
@@ -65320,7 +65436,11 @@ class AgentRuntime:
             and not archive_search_requested
             and not closed_past_timeline_prefetched
             and not source_lookup_owned
-            and not (context.isolated_outbound_turn or context.focused_attachment_turn)
+            and not (
+                context.isolated_outbound_turn
+                or context.focused_attachment_turn
+                or context.isolated_current_file_web_compare_turn
+            )
             and not (
                 turn_auth.proved("local_read")
                 and not turn_auth.proved("person")
@@ -65388,9 +65508,11 @@ class AgentRuntime:
             and not source_lookup_owned
             and not about_a_person
         ):
-            if not (context.isolated_outbound_turn or context.focused_attachment_turn) and not (
-                turn_auth.proved("local_read") and not turn_auth.proved("temporal")
-            ):
+            if not (
+                context.isolated_outbound_turn
+                or context.focused_attachment_turn
+                or context.isolated_current_file_web_compare_turn
+            ) and not (turn_auth.proved("local_read") and not turn_auth.proved("temporal")):
                 await self._prefetch_the_timeline_if_asked(
                     temporal_message,
                     actor,
@@ -65420,7 +65542,11 @@ class AgentRuntime:
             and not closed_past_timeline_prefetched
             and not source_lookup_owned
             and not about_a_person
-            and not (context.isolated_outbound_turn or context.focused_attachment_turn)
+            and not (
+                context.isolated_outbound_turn
+                or context.focused_attachment_turn
+                or context.isolated_current_file_web_compare_turn
+            )
             and not (turn_auth.proved("local_read") and not turn_auth.proved("archive"))
         ):
             await self._prefetch_archive_numbers(
@@ -65458,6 +65584,7 @@ class AgentRuntime:
             and not source_lookup_owned
             and not about_a_person
             and not context.isolated_outbound_turn
+            and not context.isolated_current_file_web_compare_turn
             and not (turn_auth.proved("local_read") and not turn_auth.proved("archive"))
         ):
             await self._prefetch_the_archive_if_asked(
@@ -65475,6 +65602,7 @@ class AgentRuntime:
             not autonomous_engineer
             and not archive_search_requested
             and not context.isolated_outbound_turn
+            and not context.isolated_current_file_web_compare_turn
             and not closed_past_timeline_prefetched
             and outward_tool_is_allowed("web_research")
             and not source_lookup_owned
@@ -65497,6 +65625,7 @@ class AgentRuntime:
         if (
             not autonomous_engineer
             and not context.isolated_outbound_turn
+            and not context.isolated_current_file_web_compare_turn
             and _web_source_class_on_speech(turn_auth.speech)
         ):
             tools[:] = [
@@ -65544,6 +65673,7 @@ class AgentRuntime:
             and not closed_past_timeline_prefetched
             and not source_lookup_owned
             and not context.isolated_outbound_turn
+            and not context.isolated_current_file_web_compare_turn
             and not (turn_auth.proved("local_read") and not turn_auth.proved("reminder"))
         ):
             reminder_message = context.open_remainder if context.remainder_known else message
@@ -73211,7 +73341,12 @@ class AgentRuntime:
         """
         notice = notice if notice is not None else []
         turn_auth = file_turn_authority(message)
-        if context is not None and context.private_source_boundary_active:
+        sealed_compare_query = (
+            str(getattr(context, "compare_current_file_public_web_query", "") or "")
+            if context is not None and context.isolated_current_file_web_compare_turn
+            else ""
+        )
+        if context is not None and context.private_source_boundary_active and not sealed_compare_query:
             # Defense in depth for direct callers of this prefetch seam.  Do
             # not build a provider query or serialize source-derived arguments;
             # chat-level schema projection is deliberately not the only gate.
@@ -73315,6 +73450,16 @@ class AgentRuntime:
             for tool in tools
         ):
             return  # инструмент недоступен этому человеку — не обходим права
+        kind: str
+        second: str | None
+        if sealed_compare_query:
+            # The public topic is already sealed. Do not let the arbiter, the
+            # raw utterance, or file deictics choose a different outbound query.
+            query = sealed_compare_query
+            kind, second = "интернет", sealed_compare_query
+            verdict = ("интернет", sealed_compare_query)
+            asked_outright = True
+            looks_like_a_request = True
         # Запрос формулирует арбитр: он же решает, нужен ли интернет вообще, когда
         # прямой просьбы не было. При явной просьбе его вердикт «не интернет» не
         # отменяет поиск — человек попросил, — но строку у него всё равно берём:
@@ -73324,9 +73469,7 @@ class AgentRuntime:
         # (прямая просьба «найди в интернете» обходит поиск целиком).
         # The bounded wrapper below is the sole live call to the legacy
         # ``_web_query_by_arbiter(message)`` seam; adapters keep that signature.
-        kind: str
-        second: str | None
-        if (
+        elif (
             context is not None
             and context.isolated_outbound_turn
             and context.policy_web_authorized
@@ -73402,6 +73545,11 @@ class AgentRuntime:
         if not query:
             if not asked_outright:
                 return  # вопрос не про внешний мир — интернет тут ни при чём
+            if sealed_compare_query:
+                # The sealed public topic is the only legal provider query on
+                # this contour.  Do not rebuild one from the raw utterance: that
+                # string still names the current file.
+                return
             query = self.web_query_from(web_message)
         source_class = _web_source_class_on_speech(turn_auth.speech)
         topic_class = ""
@@ -73441,7 +73589,7 @@ class AgentRuntime:
         if _turn_deadline_expired(turn_deadline):
             return
         source_effect_authorized = True
-        if context is not None:
+        if context is not None and not sealed_compare_query:
             source_effect_gate = getattr(self, "_source_derived_effect_can_start", None)
             if callable(source_effect_gate):
                 source_effect_authorized = await source_effect_gate(
@@ -74693,11 +74841,15 @@ class AgentRuntime:
             "suggested_next_step",
             "user_model",
         )
-        if not context.isolated_outbound_turn and (
-            bool(attachments)
-            or context.attachment_hierarchy_bundle is not None
-            or bool(context_payload.get("feedback_summary"))
-            or any(bool(context_payload.get(key)) for key in private_payload_keys)
+        if (
+            not context.isolated_outbound_turn
+            and not context.isolated_current_file_web_compare_turn
+            and (
+                bool(attachments)
+                or context.attachment_hierarchy_bundle is not None
+                or bool(context_payload.get("feedback_summary"))
+                or any(bool(context_payload.get(key)) for key in private_payload_keys)
+            )
         ):
             # This is the last exact point at which dynamically loaded private
             # source carriers are known.  Ordinary dialogue history is not by
@@ -74705,8 +74857,24 @@ class AgentRuntime:
             # may use it only to derive its bounded city+horizon projection.
             # Attachments, retrieval bodies and durable personal projections do
             # close outbound before a deterministic prefetch can serialize a
-            # query.
+            # query.  The current-file/public-web compare contour is different:
+            # the file stays local for synthesis, and the only outbound is a
+            # later sealed public-topic prefetch.  Closing here would delete
+            # that schema before the query could run.
             context.private_source_boundary_active = True
+        if context.isolated_current_file_web_compare_turn:
+            messages.append(
+                {
+                    "role": "system",
+                    "content": (
+                        "Текущий файл — только локальный источник для сверки. Отдельный "
+                        "публичный веб-запрос выполняет код по теме из реплики человека, "
+                        "без байтов файла и без имени файла. Сравни локальный текст с "
+                        "полученными публичными сведениями. Не составляй новый интернет-запрос "
+                        "и не отправляй содержимое файла наружу."
+                    ),
+                }
+            )
         messages.append({"role": "user", "content": message})
         return messages
 
