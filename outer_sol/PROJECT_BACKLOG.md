@@ -825,7 +825,8 @@ checklist elsewhere.
       sole ordinary retrieval facade; close stale dialogue calls. Historical
       ten-file union 1,197/1,197; thirteen contours `parity` or `preserved`.
 
-Head: `50ce6884`. Production remains `0.208.0` / `75b165a2`.
+Head: `origin/main` (last product hide `50ce6884`). Production remains
+`0.208.0` / `75b165a2`.
 Measured `cutover_ready` is false: R8E review status is `integrated`, not
 `accepted`. Last independent R8E review record is `changes_required`
 (`handoffs/Sol/S4-R8E-REVIEW-BLOCKER-002.md`); no later `accepted` review
