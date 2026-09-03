@@ -112,12 +112,12 @@ def test_current_parity_mismatch_is_exposed_instead_of_hidden_by_routing(
 
     assert cases[CutoverContour.SCALAR].status is CutoverEvidenceStatus.PARITY
     assert cases[CutoverContour.ARCHIVED_SOURCE].status is CutoverEvidenceStatus.PARITY
-    assert cases[CutoverContour.MESSAGE_TOPIC].status is CutoverEvidenceStatus.MISMATCH
+    assert cases[CutoverContour.MESSAGE_TOPIC].status is CutoverEvidenceStatus.PARITY
     assert cases[CutoverContour.MESSAGE_TOPIC].evidence_codes == (
         "message_search_membership_3_of_3",
-        "message_search_order_2_of_3",
+        "message_search_order_3_of_3",
     )
-    assert cases[CutoverContour.MESSAGE_TOPIC].blocker_codes == ("message_search_candidate_order_mismatch",)
+    assert cases[CutoverContour.MESSAGE_TOPIC].blocker_codes == ()
     assert cutover_report.cutover_ready is False
 
 
@@ -146,7 +146,7 @@ def test_exact_message_and_memory_foundations_are_not_promoted_to_runtime_parity
             }
         )
     )
-    assert "memory_exact_provider_time_reauthorization_review_open" in publication.blocker_codes
+    assert "single_final_publisher_does_not_consume_all_exact_receipts" in publication.blocker_codes
     assert message.ready is temporal.ready is graph.ready is publication.ready is False
 
 
@@ -233,7 +233,6 @@ def test_minimal_later_shared_file_set_is_exact_and_does_not_include_foundation_
         "friday/retrieval/archive_search_contract.py",
         "friday/retrieval/archive_search_service.py",
         "friday/server.py",
-        "friday/storage/_archive_search_messages.py",
         "friday/turn_intent_policy.py",
     )
     serialized = cutover_report.to_json()
@@ -282,7 +281,7 @@ def test_report_binds_exact_foundation_review_and_case_manifests(
     assert payload["message_foundation_measurement_sha"] == MESSAGE_FOUNDATION_MEASUREMENT_SHA
     assert payload["memory_foundation_reviewed_sha"] == MEMORY_FOUNDATION_REVIEWED_SHA
     assert payload["memory_foundation_review_status"] == MEMORY_FOUNDATION_REVIEW_STATUS
-    assert MEMORY_FOUNDATION_REVIEW_STATUS == "changes_required"
+    assert MEMORY_FOUNDATION_REVIEW_STATUS == "integrated"
     assert cutover_report.cutover_ready is False
 
 

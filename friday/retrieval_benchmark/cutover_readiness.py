@@ -37,17 +37,17 @@ from friday.retrieval_benchmark.release import (
 CUTOVER_REPORT_SCHEMA: Final = "friday.archive-search-cutover-readiness.body-free.v1"
 CUTOVER_CASE_SCHEMA: Final = "friday.archive-search-cutover-case.body-free.v1"
 HISTORICAL_FAILURE_GROUP_SCHEMA: Final = "friday.archive-search-cutover-failure-group.v1"
-CUTOVER_CASE_MANIFEST_SHA256: Final = "5e296960f9f4648b517c7aa6c207e3a4123f7804cf457c98ab0187d33284480b"
+CUTOVER_CASE_MANIFEST_SHA256: Final = "d47727a9bd367e16d3b4740fc9466162cf580a5ba56358ab8c08d47f88fdd6b7"
 
 HISTORICAL_CANDIDATE_SHA: Final = "7848cc45ad8ddda3702b1aa560d1d42d5dea2acc"
 HISTORICAL_BASE_SHA: Final = "9928e83d26061cc3df1198815ca9ac9f4481080f"
 HISTORICAL_FAILURE_COUNT: Final = 60
 HISTORICAL_NODE_MANIFEST_SHA256: Final = "e1d8d50860ad84ee3a117d48171af560f47a52750dd2d01ded1460ef792ef8d2"
 MESSAGE_FOUNDATION_MEASUREMENT_SHA: Final = "2fa079eb4de1d33535798e24552f85db3b9ccfd2"
-MEMORY_FOUNDATION_REVIEWED_SHA: Final = "5da12b508bcdeaf7ab2eeff79a7cc14af75037e1"
-MEMORY_FOUNDATION_REVIEW_STATUS: Final = "changes_required"
+MEMORY_FOUNDATION_REVIEWED_SHA: Final = "f44c4e7c2f4a693bcaac91c4a9861fa6e8eef13b"
+MEMORY_FOUNDATION_REVIEW_STATUS: Final = "integrated"
 R8C_CASE_MANIFEST_SHA256: Final = "20cc50b2676da16da0246ea2899211c8388a02347c81d86e50b8de21fc25f3c5"
-R8C_MEASUREMENT_SHA256: Final = "1fee981224e26de6a819e892e2eb8b79a1b2ca99f6657c9a41214a8f5528e15f"
+R8C_MEASUREMENT_SHA256: Final = "160795299c001efc5f1f0cc322c9275646d978ce5f13fe653339fe6dde40bcf4"
 
 _TOKEN = re.compile(r"[a-z][a-z0-9_.-]{0,95}\Z")
 _TEST_FILE = re.compile(r"tests/[a-zA-Z0-9_./-]+\.py\Z")
@@ -959,13 +959,10 @@ def build_cutover_readiness_report(parity: ParityReportV1) -> CutoverReadinessRe
             CutoverContour.FINAL_REAUTHORIZATION,
             CutoverEvidenceStatus.CONTRACT_ONLY,
             (
-                "memory_exact_late_reauthorization_under_review",
+                "memory_exact_late_reauthorization_contract",
                 "message_exact_late_reauthorization_contract",
             ),
-            (
-                "memory_exact_provider_time_reauthorization_review_open",
-                "single_final_publisher_does_not_consume_all_exact_receipts",
-            ),
+            ("single_final_publisher_does_not_consume_all_exact_receipts",),
             (_AGENT_RUNTIME, _CAPABILITY_BINDING, _SERVER),
             (
                 "tests/test_memory_exact_internal.py::test_fresh_read_and_one_shot_publication_authority",

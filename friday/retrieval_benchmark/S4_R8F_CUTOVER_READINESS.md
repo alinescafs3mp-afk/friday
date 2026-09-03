@@ -3,10 +3,10 @@
 ## Verdict
 
 The measured branch is **not ready** to make `archive_search` the sole
-dialogue-facing retrieval facade. Scalar memory and archived-source parity are
-green, but message-topic candidate order is only 2/3 and every exact
-message-window, bitemporal-memory, graph, restart, fallback and final-publication
-path is either contract-only or unmeasured at the shared runtime boundary.
+dialogue-facing retrieval facade. Scalar memory, archived-source and
+message-topic membership/order are now parity, but every exact message-window,
+bitemporal-memory, graph, restart, fallback and final-publication path is
+either contract-only or unmeasured at the shared runtime boundary.
 
 This package is evidence only. It changes no runtime, tool catalogue, schema,
 store, release metadata or production state. A `PACKAGE_READY` handoff means the
@@ -18,14 +18,14 @@ negative readiness result is reproducible; it does not authorize cutover.
 
 - the released R8C archive parity report;
 - the closed R8D message-exact adapter binding;
-- the review-blocked R8E memory-exact adapter binding; and
+- the mainline-integrated R8E memory-exact adapter binding; and
 - a body-free manifest of the exact historical R8 failures.
 
 The builder pins the live Friday source release, exact R8C seven-case manifest,
 full R8C case/dimension measurement, fixed thirteen-contour case manifest, R8D
-measurement head `2fa079eb4de1d33535798e24552f85db3b9ccfd2` and R8E reviewed
-head `5da12b508bcdeaf7ab2eeff79a7cc14af75037e1` with status
-`changes_required`. The report carries only a closed code-owned vocabulary,
+measurement head `2fa079eb4de1d33535798e24552f85db3b9ccfd2` and R8E integrated
+head `f44c4e7c2f4a693bcaac91c4a9861fa6e8eef13b` with status
+`integrated`. The report carries only a closed code-owned vocabulary,
 canonical repository-local paths, counts and digests. It contains no query,
 message, excerpt, prompt, tool output, actor/tenant/person/conversation ID,
 private path or source body. Parsing rejects extra or duplicate keys,
@@ -62,7 +62,7 @@ nodes. That proves compatibility restoration, not sole-facade readiness.
 |---|---|---|
 | Scalar | parity | Current archive facade matches the measured legacy memory adapter. |
 | Archived source | parity | Current archive facade matches the measured legacy source adapter. |
-| Message topic | mismatch | Membership is 3/3; candidate order is 2/3. No routing heuristic hides the mismatch. |
+| Message topic | parity | Membership is 3/3 and candidate order is 3/3 after the measured topic-order repair. |
 | Current file | unmeasured | The authenticated V12 current-file contract remains separately owned. |
 | Message window | contract only | R8D has a queryless exact contract, but this branch does not wire it through `archive_search`. |
 | Temporal `as_of`/`known_at` | contract only | R8E can express the exact snapshot; the model-facing archive request cannot. |
@@ -72,14 +72,11 @@ nodes. That proves compatibility restoration, not sole-facade readiness.
 | Restart | contract only | Exact cursors survive storage reopen, but runtime rehydration is not wired here. |
 | Fallback | unmeasured | Primary-only fallback is preserved, but the future sole-facade catalogue union is not replayed. |
 | Stale legacy call | unmeasured | Legacy adapters are intentionally still dialogue-visible, so post-cutover staleness cannot yet be asserted. |
-| Final reauthorization | contract only | The message lane has a late check; memory provider-time reauthorization remains under review, and one final publisher does not consume all exact receipts through the shared facade. |
+| Final reauthorization | contract only | Exact lanes have late reauthorization contracts; one final publisher still does not consume all exact receipts through the shared facade. |
 
-R8D/R8E contract presence is never promoted to runtime parity. In particular,
-the R8E correction round must close provider-time reauthorization, transactional
-one-shot publication, hard aggregate memory bounds, metadata fail-closure and
-provider/storage TOCTOU tests before its binding can be treated as a released
-foundation. Those prerequisite corrections are separate from the later shared
-cutover set below.
+R8D/R8E contract presence is never promoted to runtime parity. R8E is
+integrated on mainline with open-handle provenance, but the shared archive
+request still cannot express exact window, temporal or graph intents.
 
 ## Minimal later shared-file set
 
@@ -93,7 +90,6 @@ shared-runtime obligations is:
 - `friday/retrieval/archive_search_contract.py`
 - `friday/retrieval/archive_search_service.py`
 - `friday/server.py`
-- `friday/storage/_archive_search_messages.py`
 - `friday/turn_intent_policy.py`
 
 This is a measurement, not a write lease. Exact foundation files are excluded
@@ -107,11 +103,11 @@ measurements recorded in its handoff.
 
 ## Cutover sequence
 
-1. Correct, review and release the R8E foundation; consume the released R8D/R8E
-   manifests rather than this measurement branch's copied commits.
-2. Extend the single archive request/dispatch owner to express exact window,
-   temporal and graph intents while preserving one fresh authorization and one
-   final publisher.
+1. Keep the integrated R8E/R8D foundations unactivated in the dialogue catalogue
+   until the shared archive request can express exact window, temporal and graph
+   intents.
+2. Extend the single archive request/dispatch owner to express those intents
+   while preserving one fresh authorization and one final publisher.
 3. Replay all thirteen contour guards and the exact historical ten-file union
    with legacy adapters hidden from dialogue and stale calls closed.
 4. Require zero mismatches and no contract-only or unmeasured contour before
