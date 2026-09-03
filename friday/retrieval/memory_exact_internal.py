@@ -247,6 +247,41 @@ def _main_database_identity(conn: sqlite3.Connection) -> tuple[Path, int, int]:
                 cursor.close()
 
 
+def _source_open_handle_identity(
+    storage: FridayStorage,
+    conn: sqlite3.Connection,
+) -> tuple[int, int]:
+    """Return the connection owner's open-handle identity, never a pathname stat."""
+
+    try:
+        if type(storage) is not FridayStorage or type(conn) is not sqlite3.Connection:
+            raise _ProviderSnapshotInvalid
+        token = storage._main_file_provenance_token(conn)
+        storage._validate_main_file_provenance_token(conn, token)
+        identity = token.identity()
+        if (
+            type(identity) is not tuple
+            or len(identity) != 2
+            or any(type(value) is not int or value < 0 for value in identity)
+        ):
+            raise _ProviderSnapshotInvalid
+        return identity
+    except _ProviderSnapshotInvalid:
+        raise
+    except Exception:  # noqa: BLE001 - provenance failures stay body-free
+        raise _ProviderSnapshotInvalid from None
+
+
+def _database_open_handle_sha256(identity: tuple[int, int]) -> str:
+    return _provider_dependency_ledger_seal(
+        {
+            "device": identity[0],
+            "inode": identity[1],
+            "schema": "friday.memory-exact-database-provenance.v1",
+        }
+    )
+
+
 def _require_no_provider_temp_shadow(conn: sqlite3.Connection) -> None:
     names = tuple(sorted(_PROVIDER_MAIN_DEPENDENCY_NAMES))
     holders = ",".join("?" for _name in names)
@@ -523,11 +558,17 @@ def _provider_configuration_sha256(
     )
 
 
-def _open_main_database_observer(conn: sqlite3.Connection) -> sqlite3.Connection:
+def _open_main_database_observer(
+    storage: FridayStorage,
+    conn: sqlite3.Connection,
+) -> sqlite3.Connection:
     observer: sqlite3.Connection | None = None
     try:
-        source_identity = _main_database_identity(conn)
-        database = source_identity[0]
+        source_identity = _source_open_handle_identity(storage, conn)
+        path_identity = _main_database_identity(conn)
+        if (path_identity[1], path_identity[2]) != source_identity:
+            raise _ProviderSnapshotInvalid
+        database = path_identity[0]
         observer = sqlite3.connect(
             f"{database.as_uri()}?mode=ro",
             uri=True,
@@ -540,7 +581,12 @@ def _open_main_database_observer(conn: sqlite3.Connection) -> sqlite3.Connection
         if query_only is None or len(query_only) != 1 or query_only[0] != 1:
             raise _ProviderSnapshotInvalid
         observer_identity = _main_database_identity(observer)
-        if observer_identity != source_identity or _main_database_identity(conn) != source_identity:
+        if (
+            observer_identity != path_identity
+            or _main_database_identity(conn) != path_identity
+            or (observer_identity[1], observer_identity[2]) != source_identity
+            or _source_open_handle_identity(storage, conn) != source_identity
+        ):
             raise _ProviderSnapshotInvalid
         _main_data_version(observer)
         _main_schema_version(observer)
@@ -1227,6 +1273,7 @@ class _ProviderDependencyLedger:
         "_seal",
         "_searcher",
         "_source_data_version",
+        "_source_identity",
         "_storage",
         "_storage_generation",
         "_temp_schema_version",
@@ -1284,15 +1331,11 @@ class _ProviderDependencyLedger:
         total_changes = conn.total_changes
         schema_version = _main_schema_version(conn)
         temp_schema_version = _temp_schema_version(conn)
-        database_identity = _main_database_identity(conn)
-        database_identity_sha256 = _provider_dependency_ledger_seal(
-            {
-                "canonical_path": str(database_identity[0]),
-                "device": database_identity[1],
-                "inode": database_identity[2],
-                "schema": "friday.memory-exact-database-provenance.v1",
-            }
-        )
+        source_identity = _source_open_handle_identity(storage, conn)
+        path_identity = _main_database_identity(conn)
+        if (path_identity[1], path_identity[2]) != source_identity:
+            raise _ProviderSnapshotInvalid
+        database_identity_sha256 = _database_open_handle_sha256(source_identity)
         if isinstance(total_changes, bool) or not isinstance(total_changes, int) or total_changes < 0:
             raise _ProviderSnapshotInvalid
         with observer_lock:
@@ -1301,8 +1344,10 @@ class _ProviderDependencyLedger:
             observer_schema_version = _main_schema_version(observer)
         if (
             _main_data_version(conn) != source_data_version
-            or _main_database_identity(conn) != database_identity
-            or observer_database_identity != database_identity
+            or _source_open_handle_identity(storage, conn) != source_identity
+            or _main_database_identity(conn) != path_identity
+            or observer_database_identity != path_identity
+            or (observer_database_identity[1], observer_database_identity[2]) != source_identity
             or observer_schema_version != schema_version
         ):
             raise _ProviderSnapshotInvalid
@@ -1352,6 +1397,7 @@ class _ProviderDependencyLedger:
         object.__setattr__(self, "_schema_version", schema_version)
         object.__setattr__(self, "_searcher", searcher)
         object.__setattr__(self, "_source_data_version", source_data_version)
+        object.__setattr__(self, "_source_identity", source_identity)
         object.__setattr__(self, "_storage", storage)
         object.__setattr__(self, "_storage_generation", observer_generation)
         object.__setattr__(self, "_temp_schema_version", temp_schema_version)
@@ -1420,6 +1466,9 @@ class _ProviderDependencyLedger:
                 and self._storage._generation == self._storage_generation  # noqa: SLF001
                 and type(self._connection) is sqlite3.Connection
                 and self._connection is _current_storage_connection(self._storage)
+                and type(self._source_identity) is tuple
+                and len(self._source_identity) == 2
+                and _source_open_handle_identity(self._storage, self._connection) == self._source_identity
                 and type(self._database_identity_sha256) is str
                 and len(self._database_identity_sha256) == 64
                 and type(self._observer) is sqlite3.Connection
@@ -1507,15 +1556,9 @@ class _ProviderDependencyLedger:
         total_changes = conn.total_changes
         source_schema_version = _main_schema_version(conn)
         temp_schema_version = _temp_schema_version(conn)
-        database_identity = _main_database_identity(conn)
-        database_identity_sha256 = _provider_dependency_ledger_seal(
-            {
-                "canonical_path": str(database_identity[0]),
-                "device": database_identity[1],
-                "inode": database_identity[2],
-                "schema": "friday.memory-exact-database-provenance.v1",
-            }
-        )
+        source_identity = _source_open_handle_identity(self._storage, conn)
+        path_identity = _main_database_identity(conn)
+        database_identity_sha256 = _database_open_handle_sha256(source_identity)
         if isinstance(total_changes, bool) or not isinstance(total_changes, int):
             raise _ProviderSnapshotInvalid
         with self._observer_lock:
@@ -1524,14 +1567,17 @@ class _ProviderDependencyLedger:
             observer_schema_version = _main_schema_version(self._observer)
         if (
             _main_data_version(conn) != source_data_version
-            or _main_database_identity(conn) != database_identity
+            or source_identity != self._source_identity
+            or (path_identity[1], path_identity[2]) != source_identity
+            or _main_database_identity(conn) != path_identity
             or total_changes != self._total_changes + local_change_delta
             or source_data_version != self._source_data_version
             or not hmac.compare_digest(
                 database_identity_sha256,
                 self._database_identity_sha256,
             )
-            or observer_database_identity != database_identity
+            or observer_database_identity != path_identity
+            or (observer_database_identity[1], observer_database_identity[2]) != source_identity
             or observer_data_version != self._observer_data_version
             or source_schema_version != self._schema_version
             or observer_schema_version != self._schema_version
@@ -2809,7 +2855,7 @@ class MemoryExactInternalAdapter:
             _normalize_provider_connection(source)
             trusted_function_schema_sha256 = _function_schema_sha256(source)
             trusted_temp_schema_sha256 = _temp_schema_sha256(source)
-            observer = _open_main_database_observer(source)
+            observer = _open_main_database_observer(storage, source)
             if (
                 type(observer) is not sqlite3.Connection
                 or observer.in_transaction

@@ -7,6 +7,7 @@ signatures and bodies. Mixed back into that class, so ``self.execute`` and
 
 from __future__ import annotations
 
+import os
 import re
 import secrets
 import stat
@@ -191,6 +192,118 @@ def _required_database_fingerprint(path: Path) -> tuple[int, int]:
     if not stat.S_ISREG(metadata.st_mode) or metadata.st_size <= 0:
         raise sqlite3.OperationalError("required Friday database is unavailable or empty")
     return int(metadata.st_dev), int(metadata.st_ino)
+
+
+def _acquire_main_file_provenance(path: Path) -> tuple[int, int, int]:
+    """Open a private read fd on the main file before sqlite3.connect()."""
+
+    flags = os.O_RDONLY
+    flags |= int(getattr(os, "O_CLOEXEC", 0))
+    flags |= int(getattr(os, "O_NOFOLLOW", 0))
+    try:
+        descriptor = os.open(path, flags)
+    except OSError as exc:
+        raise sqlite3.OperationalError("Friday database is unavailable") from exc
+    try:
+        metadata = os.fstat(descriptor)
+        if not stat.S_ISREG(metadata.st_mode):
+            raise sqlite3.OperationalError("Friday database is unavailable")
+        device = int(metadata.st_dev)
+        inode = int(metadata.st_ino)
+        if device < 0 or inode < 0:
+            raise sqlite3.OperationalError("Friday database is unavailable")
+        return descriptor, device, inode
+    except BaseException:
+        with suppress(OSError):
+            os.close(descriptor)
+        raise
+
+
+def _require_held_main_file_provenance(
+    path: Path,
+    descriptor: int,
+    device: int,
+    inode: int,
+) -> None:
+    """Fail closed unless the held fd and the current path still name one file."""
+
+    try:
+        held = os.fstat(descriptor)
+        current = path.lstat()
+    except OSError as exc:
+        raise sqlite3.OperationalError("Friday database changed during open") from exc
+    if (
+        not stat.S_ISREG(held.st_mode)
+        or not stat.S_ISREG(current.st_mode)
+        or int(held.st_dev) != device
+        or int(held.st_ino) != inode
+        or int(current.st_dev) != device
+        or int(current.st_ino) != inode
+    ):
+        raise sqlite3.OperationalError("Friday database changed during open")
+
+
+class _MainFileProvenanceToken:
+    """Process-private open-handle identity for one thread-local connection."""
+
+    __slots__ = ("_closed", "_connection", "_device", "_fd", "_inode")
+
+    def __init__(
+        self,
+        *,
+        connection: sqlite3.Connection,
+        fd: int,
+        device: int,
+        inode: int,
+    ) -> None:
+        if (
+            type(connection) is not sqlite3.Connection
+            or type(fd) is not int
+            or fd < 0
+            or type(device) is not int
+            or device < 0
+            or type(inode) is not int
+            or inode < 0
+        ):
+            raise sqlite3.OperationalError("Friday database provenance is invalid")
+        self._closed = False
+        self._connection = connection
+        self._fd = fd
+        self._device = device
+        self._inode = inode
+
+    def __repr__(self) -> str:
+        return "_MainFileProvenanceToken(private=True)"
+
+    def identity(self) -> tuple[int, int]:
+        return (self._device, self._inode)
+
+    def bound_to(self, conn: sqlite3.Connection) -> bool:
+        return type(conn) is sqlite3.Connection and conn is self._connection
+
+    def close(self) -> None:
+        if self._closed:
+            return
+        self._closed = True
+        descriptor = self._fd
+        self._fd = -1
+        if descriptor >= 0:
+            with suppress(OSError):
+                os.close(descriptor)
+
+    def validate(self, conn: sqlite3.Connection) -> None:
+        if self._closed or not self.bound_to(conn) or self._fd < 0:
+            raise sqlite3.OperationalError("Friday database provenance is invalid")
+        try:
+            metadata = os.fstat(self._fd)
+        except OSError as exc:
+            raise sqlite3.OperationalError("Friday database provenance is invalid") from exc
+        if (
+            not stat.S_ISREG(metadata.st_mode)
+            or int(metadata.st_dev) != self._device
+            or int(metadata.st_ino) != self._inode
+        ):
+            raise sqlite3.OperationalError("Friday database provenance is invalid")
 
 
 def _required_database_has_friday_schema(conn: sqlite3.Connection) -> bool:
@@ -2240,6 +2353,7 @@ class CoreMixin(StorageShared):
         self._local = threading.local()
         self._registry_lock = threading.Lock()
         self._connections: list[sqlite3.Connection] = []
+        self._provenance_tokens: list[_MainFileProvenanceToken] = []
         self._generation = 0
         # Writers serialise through this process-wide lock, held for the whole
         # transaction() block. Reads never take it, so the WAL many-reader win is
@@ -2304,11 +2418,47 @@ class CoreMixin(StorageShared):
             # released process lease.
             raise StorageClosedError("Storage is shut down; this connection will not be reopened")
         connection = self._open()
+        token = getattr(local, "pending_main_file_provenance", None)
+        local.pending_main_file_provenance = None
+        if type(token) is not _MainFileProvenanceToken or not token.bound_to(connection):
+            with suppress(sqlite3.Error):
+                connection.close()
+            if type(token) is _MainFileProvenanceToken:
+                token.close()
+            raise sqlite3.OperationalError("Friday database provenance is invalid")
         with self._registry_lock:
             self._connections.append(connection)
+            self._provenance_tokens.append(token)
             local.conn = connection
             local.generation = self._generation
+            local.main_file_provenance = token
         return connection
+
+    def _main_file_provenance_token(self, conn: sqlite3.Connection) -> _MainFileProvenanceToken:
+        """Return the private token issued when this thread opened *conn*."""
+
+        local = self._local
+        token = getattr(local, "main_file_provenance", None)
+        if (
+            type(token) is not _MainFileProvenanceToken
+            or getattr(local, "conn", None) is not conn
+            or getattr(local, "generation", None) != self._generation
+        ):
+            raise sqlite3.OperationalError("Friday database provenance is invalid")
+        token.validate(conn)
+        return token
+
+    def _validate_main_file_provenance_token(
+        self,
+        conn: sqlite3.Connection,
+        token: _MainFileProvenanceToken,
+    ) -> None:
+        """Revalidate an owner-issued token against the live open handle."""
+
+        current = self._main_file_provenance_token(conn)
+        if token is not current:
+            raise sqlite3.OperationalError("Friday database provenance is invalid")
+        token.validate(conn)
 
     @staticmethod
     def _is_sqlite_busy(exc: sqlite3.OperationalError) -> bool:
@@ -2359,18 +2509,36 @@ class CoreMixin(StorageShared):
         else:
             prepare_private_sqlite(self._db_path)
             database_target = str(self._db_path)
-        # check_same_thread=False so close() can shut every thread's connection
-        # down from the shutdown/restore thread; cross-thread *use* is prevented
-        # structurally (the conn property only ever hands back the caller thread's
-        # own connection via threading.local), not by the sqlite thread check.
-        conn = sqlite3.connect(
-            database_target,
-            check_same_thread=False,
-            timeout=10.0,
-            uri=must_exist,
-        )
+        # Hold the main inode before sqlite3.connect() so a same-path replacement
+        # cannot bind the live connection to a later directory-entry target.
+        provenance_fd = -1
+        try:
+            provenance_fd, provenance_device, provenance_inode = _acquire_main_file_provenance(self._db_path)
+            if must_exist and (provenance_device, provenance_inode) != required_fingerprint:
+                raise sqlite3.OperationalError("required Friday database changed during open")
+            # check_same_thread=False so close() can shut every thread's connection
+            # down from the shutdown/restore thread; cross-thread *use* is prevented
+            # structurally (the conn property only ever hands back the caller thread's
+            # own connection via threading.local), not by the sqlite thread check.
+            conn = sqlite3.connect(
+                database_target,
+                check_same_thread=False,
+                timeout=10.0,
+                uri=must_exist,
+            )
+        except BaseException:
+            if provenance_fd >= 0:
+                with suppress(OSError):
+                    os.close(provenance_fd)
+            raise
         conn.row_factory = sqlite3.Row
         try:
+            _require_held_main_file_provenance(
+                self._db_path,
+                provenance_fd,
+                provenance_device,
+                provenance_inode,
+            )
             if must_exist:
                 if _required_database_fingerprint(self._db_path) != required_fingerprint:
                     raise sqlite3.OperationalError("required Friday database changed during open")
@@ -2480,10 +2648,22 @@ class CoreMixin(StorageShared):
             # The core migration transiently lowers busy_timeout (a PRAGMA embedded
             # in CORE_SCHEMA); restore the uniform value on the migrating connection.
             conn.execute("PRAGMA busy_timeout=10000")
+            token = _MainFileProvenanceToken(
+                connection=conn,
+                fd=provenance_fd,
+                device=provenance_device,
+                inode=provenance_inode,
+            )
+            provenance_fd = -1
+            self._local.pending_main_file_provenance = token
             return conn
         except BaseException:
             conn.close()
             raise
+        finally:
+            if provenance_fd >= 0:
+                with suppress(OSError):
+                    os.close(provenance_fd)
 
     def _ensure_schema(self, conn: sqlite3.Connection) -> None:
         """Create/upgrade the schema exactly once, behind a barrier.
@@ -3968,7 +4148,9 @@ class CoreMixin(StorageShared):
         with self._write_lock:
             with self._registry_lock:
                 connections = list(self._connections)
+                tokens = list(self._provenance_tokens)
                 self._connections.clear()
+                self._provenance_tokens.clear()
                 self._generation += 1
                 self._schema_ready = False
             for connection in connections:
@@ -3983,6 +4165,8 @@ class CoreMixin(StorageShared):
                         connection.rollback()
                 with suppress(sqlite3.Error):
                     connection.close()
+            for token in tokens:
+                token.close()
 
     def execute(self, sql: str, params: tuple | dict | None = None) -> sqlite3.Cursor:
         # No lock: this thread's own connection, and the caller fetches the cursor

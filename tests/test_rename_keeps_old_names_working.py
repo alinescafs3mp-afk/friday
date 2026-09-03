@@ -344,3 +344,65 @@ def test_no_module_reads_a_setting_behind_the_compatibility_point():
     assert not offenders, (
         "настройка читается в обход `config.env`, прежнее имя там работать не будет: " + ", ".join(offenders)
     )
+
+
+def test_open_connection_keeps_main_file_provenance_after_path_replacement(tmp_path, monkeypatch):
+    """The live connection stays bound to the inode it opened, not the pathname."""
+
+    from dataclasses import replace
+
+    from friday.config import load_settings
+    from friday.storage import FridayStorage
+
+    home = tmp_path / "home"
+    monkeypatch.setenv("FRIDAY_HOME", str(home))
+    monkeypatch.delenv("FRIDAY_DATABASE_MUST_EXIST", raising=False)
+    live_path = tmp_path / "main-file-provenance-live.sqlite3"
+    configured = replace(
+        load_settings(),
+        database_path=live_path,
+        database_must_exist=False,
+    )
+    storage = FridayStorage(configured)
+    replacement_path = tmp_path / "main-file-provenance-replacement.sqlite3"
+    displaced_path = tmp_path / "main-file-provenance-displaced.sqlite3"
+    swapped_path = tmp_path / "main-file-provenance-swapped.sqlite3"
+    original_displaced = False
+    replacement_installed = False
+    try:
+        storage.ensure_user("owner", preset_key="owner")
+        conn = storage.conn
+        token = storage._main_file_provenance_token(conn)
+        storage._validate_main_file_provenance_token(conn, token)
+        original = token.identity()
+        live_stat = live_path.stat()
+        assert original == (int(live_stat.st_dev), int(live_stat.st_ino))
+
+        replacement = sqlite3.connect(str(replacement_path), isolation_level=None)
+        try:
+            conn.backup(replacement)
+        finally:
+            replacement.close()
+        live_path.replace(displaced_path)
+        original_displaced = True
+        replacement_path.replace(live_path)
+        replacement_installed = True
+        replaced = live_path.stat()
+        assert (int(replaced.st_dev), int(replaced.st_ino)) != original
+
+        storage._validate_main_file_provenance_token(conn, token)
+        assert token.identity() == original
+        assert storage.conn is conn
+        exposed = repr(token)
+        assert str(live_path) not in exposed
+        assert "inode" not in exposed
+    finally:
+        try:
+            if replacement_installed and live_path.exists():
+                live_path.replace(swapped_path)
+                replacement_installed = False
+        finally:
+            if original_displaced and displaced_path.exists():
+                displaced_path.replace(live_path)
+                original_displaced = False
+        storage.close(final=True)
