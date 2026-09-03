@@ -429,14 +429,24 @@ from friday.retrieval.archive_search_authority import (
     preview_archive_search_candidate_projection_labels,
 )
 from friday.retrieval.archive_search_contract import ArchiveSearchCorpus
+from friday.retrieval.archive_search_exact import compose_archive_search_exact_envelope
 from friday.retrieval.archive_search_service import (
     PreparedArchiveSearch,
+    PreparedArchiveSearchComposite,
     reauthorize_archive_search_candidate,
     reauthorize_archive_search_coverage,
     refresh_archive_search_reauthorization_in_transaction,
 )
 from friday.retrieval.contracts import MessageRole
 from friday.retrieval.identity_contract import AuthorityScope, CanonicalObjectKind, SourceKind, SourceRef
+from friday.retrieval.memory_exact_contract import (
+    MemoryExactPage,
+    MemoryExactPublicationDecision,
+)
+from friday.retrieval.memory_exact_internal import (
+    MemoryExactInternalAdapter,
+    MemoryExactPublicationRefresh,
+)
 from friday.retrieval.message_exact_contract import (
     MessageExactContentMode,
     MessageExactPage,
@@ -37498,6 +37508,17 @@ class AgentContext:
     archive_search_isolated_verdict_kind: str = field(default="", repr=False, compare=False)
     archive_search_used: bool = field(default=False, repr=False, compare=False)
     archive_search_ledger_frozen: bool = field(default=False, repr=False, compare=False)
+    #: Sealed exact-lane composite admitted through archive_search.  Private
+    #: pages never enter prompts; late publication consumes them once.
+    archive_search_composite: PreparedArchiveSearchComposite | None = field(
+        default=None,
+        repr=False,
+        compare=False,
+    )
+    archive_memory_exact_publication: tuple[
+        tuple[MemoryExactPage, MemoryExactPublicationDecision, MemoryExactPublicationRefresh],
+        ...,
+    ] = field(default=(), repr=False, compare=False)
     #: Process-private, immutable authority for any non-observe tool whose
     #: arguments may be derived from the authenticated attachment set. The
     #: kernel capability and every source identity are rechecked immediately
@@ -38066,6 +38087,7 @@ class AgentRuntime:
         secondary_brain: SecondaryBrainScheduler | None = None,
         selected_archive_model: Any | None = None,
         message_exact_adapter: MessageExactInternalAdapter | None = None,
+        memory_exact_adapter: MemoryExactInternalAdapter | None = None,
     ) -> None:
         self.settings = settings
         self.storage = storage
@@ -38076,6 +38098,7 @@ class AgentRuntime:
         # depends on model availability.
         self._selected_archive_model = selected_archive_model
         self._message_exact_adapter = message_exact_adapter
+        self._memory_exact_adapter = memory_exact_adapter
         # The fallback kernel is fully authorized: an ungated kernel would
         # otherwise run every tool without capability checks (and a kernel
         # without authorization now denies everything by design).
@@ -42036,6 +42059,127 @@ class AgentRuntime:
             context.message_exact_pages = ()
             context.message_exact_page_chain_witness = ()
 
+    def _archive_composite_message_publication_authorized(
+        self,
+        conn: Any,
+        *,
+        context: AgentContext,
+    ) -> bool:
+        """Reauthorize exact message pages admitted through archive_search."""
+
+        adapter = getattr(self, "_message_exact_adapter", None)
+        authenticated = context._authenticated_turn_context
+        composite = context.archive_search_composite
+        try:
+            if type(composite) is not PreparedArchiveSearchComposite:
+                return True
+            pages = composite.message_exact_pages
+            if not pages:
+                return True
+            if (
+                not isinstance(adapter, MessageExactInternalAdapter)
+                or type(authenticated) is not AuthenticatedTurnContext
+            ):
+                return False
+            for page in pages:
+                decision = adapter.reauthorize_for_publication_in_transaction(
+                    conn,
+                    context=authenticated,
+                    page=page,
+                )
+                if not decision.authorizes(page):
+                    return False
+            return True
+        except Exception as exc:  # noqa: BLE001 - exact source publication fails closed
+            LOGGER.warning("archive-exact-message: publication recheck failed (%s)", type(exc).__name__)
+            return False
+
+    async def _prepare_archive_memory_exact_publication(
+        self,
+        context: AgentContext,
+    ) -> bool:
+        """Refresh memory-exact receipts before the assistant publication transaction."""
+
+        adapter = getattr(self, "_memory_exact_adapter", None)
+        authenticated = context._authenticated_turn_context
+        composite = context.archive_search_composite
+        context.archive_memory_exact_publication = ()
+        try:
+            if type(composite) is not PreparedArchiveSearchComposite:
+                return True
+            pages = composite.memory_exact_pages
+            if not pages:
+                return True
+            if (
+                not isinstance(adapter, MemoryExactInternalAdapter)
+                or type(authenticated) is not AuthenticatedTurnContext
+            ):
+                return False
+            bundle: list[
+                tuple[MemoryExactPage, MemoryExactPublicationDecision, MemoryExactPublicationRefresh]
+            ] = []
+            for page in pages:
+                decision = await adapter.reauthorize_for_publication(
+                    context=authenticated,
+                    page=page,
+                )
+                refresh = await adapter.refresh_publication_authority(
+                    context=authenticated,
+                    page=page,
+                    decision=decision,
+                )
+                bundle.append((page, decision, refresh))
+            context.archive_memory_exact_publication = tuple(bundle)
+            return True
+        except Exception as exc:  # noqa: BLE001 - exact source publication fails closed
+            LOGGER.warning("archive-exact-memory: publication refresh failed (%s)", type(exc).__name__)
+            context.archive_memory_exact_publication = ()
+            return False
+
+    def _archive_composite_memory_publication_authorized(
+        self,
+        conn: Any,
+        *,
+        context: AgentContext,
+    ) -> bool:
+        """Consume refreshed memory-exact receipts in the assistant transaction."""
+
+        adapter = getattr(self, "_memory_exact_adapter", None)
+        authenticated = context._authenticated_turn_context
+        composite = context.archive_search_composite
+        bundle = context.archive_memory_exact_publication
+        try:
+            if type(composite) is not PreparedArchiveSearchComposite:
+                return True
+            pages = composite.memory_exact_pages
+            if not pages:
+                return True
+            if (
+                not isinstance(adapter, MemoryExactInternalAdapter)
+                or type(authenticated) is not AuthenticatedTurnContext
+                or type(bundle) is not tuple
+                or len(bundle) != len(pages)
+            ):
+                return False
+            for page, item in zip(pages, bundle, strict=True):
+                stored_page, decision, refresh = item
+                if stored_page is not page:
+                    return False
+                if not adapter.consume_publication_authority_in_transaction(
+                    conn,
+                    context=authenticated,
+                    page=page,
+                    decision=decision,
+                    refresh=refresh,
+                ):
+                    return False
+            return True
+        except Exception as exc:  # noqa: BLE001 - exact source publication fails closed
+            LOGGER.warning("archive-exact-memory: publication consume failed (%s)", type(exc).__name__)
+            return False
+        finally:
+            context.archive_memory_exact_publication = ()
+
     def _obsidian_publication_authorized(
         self,
         conn: Any,
@@ -43175,16 +43319,32 @@ class AgentRuntime:
             if result.tool_name != _ARCHIVE_SEARCH_TOOL_NAME or result.success is not True:
                 return None
             prepared = result.prepared_archive_search
+            composite = result.prepared_archive_search_composite
             ledger = context.archive_model_batch_ledger
             visible_bytes = result.archive_model_visible_bytes()
+            llm_message = result.archive_model_llm_message()
+            exact_payload = result.archive_exact_model_payload
             if (
                 type(prepared) is not PreparedArchiveSearch
                 or type(ledger) is not ArchiveModelBatchLedger
                 or type(visible_bytes) is not bytes
                 or not visible_bytes
-                or result.to_llm_message().encode("ascii", errors="strict") != visible_bytes
+                or type(llm_message) is not str
+                or not llm_message
             ):
                 return None
+            if exact_payload is None:
+                if llm_message.encode("ascii", errors="strict") != visible_bytes:
+                    return None
+            else:
+                archive_page = json.loads(visible_bytes)
+                if (
+                    type(archive_page) is not dict
+                    or compose_archive_search_exact_envelope(archive_page, exact_payload) != llm_message
+                    or type(composite) is not PreparedArchiveSearchComposite
+                    or composite.prepared_search is not prepared
+                ):
+                    return None
             batch = prepared.authorized_batch
             public_payload = batch.public_tool_result_payload
             parsed_payload = json.loads(visible_bytes)
@@ -43198,7 +43358,9 @@ class AgentRuntime:
             context.archive_prepared_searches = (*context.archive_prepared_searches, prepared)
             context.archive_exact_file_reader = result.archive_exact_file_reader
             context.archive_search_used = True
-            return visible_bytes.decode("ascii", errors="strict")
+            if type(composite) is PreparedArchiveSearchComposite:
+                context.archive_search_composite = composite
+            return llm_message
         except Exception as exc:  # noqa: BLE001 - malformed private carriers are body-free
             LOGGER.warning("archive-search: model carrier refused (%s)", type(exc).__name__)
             return None
@@ -58889,6 +59051,7 @@ class AgentRuntime:
             # read authority cannot be held atomically across synthesis.
             or context.message_search_used
             or context.message_exact_read_used
+            or context.archive_search_composite is not None
             or adjacent_overview_unresolved_terminal
             or _turn_deadline_expired(context.turn_deadline)
         ):
@@ -59090,6 +59253,7 @@ class AgentRuntime:
             )
             else None
         )
+        archive_memory_exact_publication_ready = await self._prepare_archive_memory_exact_publication(context)
         publication_transaction: Any = self.storage.transaction()
         if generated_files_rollback_guard is not None:
             publication_transaction = generated_files_publication_transaction(
@@ -59192,12 +59356,29 @@ class AgentRuntime:
                             "archive-search: publication attestation failed (%s)",
                             type(exc).__name__,
                         )
-                archive_search_publication_authorized = bool(
+                archive_core_authorized = bool(
                     fresh_archive_actor is not None
                     and archive_authority_context is not None
                     and archive_attestation is not None
                     and archive_attestation.attests_answer(content)
                 )
+                archive_message_exact_authorized = self._archive_composite_message_publication_authorized(
+                    publication_conn,
+                    context=context,
+                )
+                archive_memory_exact_authorized = bool(
+                    archive_memory_exact_publication_ready
+                    and self._archive_composite_memory_publication_authorized(
+                        publication_conn,
+                        context=context,
+                    )
+                )
+                archive_search_publication_authorized = bool(
+                    archive_core_authorized
+                    and archive_message_exact_authorized
+                    and archive_memory_exact_authorized
+                )
+                context.archive_search_composite = None
             obsidian_publication_authorized = bool(
                 not obsidian_owned_response
                 or obsidian_publication_marker_valid
@@ -66644,6 +66825,8 @@ class AgentRuntime:
                         tool_result.error = "Федеративный поиск вернул непроверяемый приватный носитель"
                         tool_result.data = None
                         tool_result.prepared_archive_search = None
+                        tool_result.prepared_archive_search_composite = None
+                        tool_result.archive_exact_model_payload = None
                         tool_result.archive_exact_file_reader = None
                         tool_result.archive_exact_file_reader_owner_id = ""
                         if not context.archive_search_used:

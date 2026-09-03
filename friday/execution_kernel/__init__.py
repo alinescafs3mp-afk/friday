@@ -77,6 +77,14 @@ from friday.retrieval.archive_search_contract import (
     ArchiveSearchRequest,
 )
 from friday.retrieval.archive_search_dense import ArchiveDenseQueryPlan
+from friday.retrieval.archive_search_exact import (
+    ARCHIVE_SEARCH_COMPOSITE_PUBLIC_SCHEMA,
+    ArchiveExactDispatchError,
+    compose_archive_search_exact_envelope,
+    parse_archive_exact_intent,
+    prepare_archive_exact_lanes,
+    seal_archive_exact_composite,
+)
 from friday.retrieval.archive_search_obsidian_reader import (
     BoundArchiveObsidianExactFileReader,
 )
@@ -92,6 +100,9 @@ from friday.retrieval.contracts import (
     TemporalRole,
     TemporalValueKind,
 )
+from friday.retrieval.memory_exact_internal import MemoryExactInternalAdapter
+from friday.retrieval.message_exact_contract import MessageExactContentMode
+from friday.retrieval.message_exact_internal import MessageExactInternalAdapter
 from friday.source_identity import private_source_search_page, raw_source_snapshot
 from friday.storage._conversations import (
     select_promoted_current_conversation_window_in_transaction,
@@ -507,6 +518,8 @@ class _ArchiveSearchHandlerResult:
     exact_file_reader: BoundArchiveObsidianExactFileReader | None
     reader_owner_id: str
     authority: object
+    composite: PreparedArchiveSearchComposite | None = None
+    exact_model_payload: dict[str, object] | None = None
 
     def __repr__(self) -> str:
         return "<_ArchiveSearchHandlerResult sealed private>"
@@ -517,6 +530,8 @@ class _ArchiveSearchHandlerResult:
             prepared = self.prepared
             run = prepared.run_binding
             batch = prepared.authorized_batch
+            composite = self.composite
+            payload = self.exact_model_payload
             return bool(
                 type(self) is _ArchiveSearchHandlerResult
                 and self.authority is _ARCHIVE_SEARCH_RESULT_AUTHORITY
@@ -528,6 +543,13 @@ class _ArchiveSearchHandlerResult:
                     and self.reader_owner_id == ""
                     or type(self.exact_file_reader) is BoundArchiveObsidianExactFileReader
                     and self.exact_file_reader.attests_owner(self.reader_owner_id)
+                )
+                and (
+                    composite is None
+                    and payload is None
+                    or type(composite) is PreparedArchiveSearchComposite
+                    and composite.prepared_search is prepared
+                    and type(payload) is dict
                 )
             )
         except Exception:
@@ -1411,6 +1433,9 @@ class ToolResult:
     # Exact owner/scope/status for an explicitly resolved historical command.
     # Mutually exclusive with an open Work Item continuation and never public.
     engineer_command_ledger_observation: EngineerCommandLedgerObservation | None = None
+    # Synthesis-safe exact projections derived by the archive dispatch owner.
+    # Private exact requests, page handles and cursors stay off this mapping.
+    archive_exact_model_payload: dict[str, object] | None = None
     # Passive R8H hand-off for an already sealed multi-lane page chain.  This
     # final field preserves every released positional constructor slot and is
     # intentionally absent from model and public serialization.
@@ -1454,12 +1479,32 @@ class ToolResult:
         except Exception:
             raise ValueError("archive search result is unavailable") from None
 
+    def archive_model_llm_message(self) -> str:
+        """Return the model-visible archive envelope, including exact projections."""
+
+        archive_bytes = self.archive_model_visible_bytes()
+        payload = self.archive_exact_model_payload
+        if payload is None:
+            return archive_bytes.decode("ascii", errors="strict")
+        archive_page = json.loads(archive_bytes)
+        if type(archive_page) is not dict:
+            raise ValueError("archive search result is unavailable")
+        envelope = compose_archive_search_exact_envelope(archive_page, payload)
+        parsed = json.loads(envelope)
+        if (
+            type(parsed) is not dict
+            or parsed.get("schema") != ARCHIVE_SEARCH_COMPOSITE_PUBLIC_SCHEMA
+            or parsed.get("archive") != archive_page
+        ):
+            raise ValueError("archive search result is unavailable")
+        return envelope
+
     def to_dict(self) -> dict[str, Any]:
         result: dict[str, Any] = {"tool": self.tool_name, "success": self.success}
         encoded: str | None = None
         if self.prepared_archive_search is not None or self.prepared_archive_search_composite is not None:
             try:
-                encoded = self.archive_model_visible_bytes().decode("ascii", errors="strict")
+                encoded = self.archive_model_llm_message()
             except ValueError:
                 return {
                     "tool": self.tool_name,
@@ -1469,7 +1514,11 @@ class ToolResult:
         elif self.data is not None:
             encoded = self.data if isinstance(self.data, str) else json.dumps(self.data, ensure_ascii=False)
         if encoded is not None:
-            if len(encoded) > 8_000:
+            if (
+                self.prepared_archive_search is None
+                and self.prepared_archive_search_composite is None
+                and len(encoded) > 8_000
+            ):
                 encoded = encoded[:7_900] + "\n… (truncated)"
                 self.truncated = True
             result["result"] = encoded
@@ -1482,10 +1531,10 @@ class ToolResult:
             return f"Ошибка инструмента {self.tool_name}: {self.error}"
         if self.prepared_archive_search is not None or self.prepared_archive_search_composite is not None:
             try:
-                # This body is admitted to the private turn ledger byte-for-byte.
-                # Prefixing, pretty-printing or generic round-budget truncation
-                # would invalidate the evidence carried into final publication.
-                return self.archive_model_visible_bytes().decode("ascii", errors="strict")
+                # The sealed archive page remains the ledger body.  Exact
+                # projections may wrap it for synthesis, but they cannot prefix
+                # or pretty-print those attested bytes.
+                return self.archive_model_llm_message()
             except ValueError:
                 return "Ошибка инструмента archive_search: результат не прошёл приватную проверку"
         if self.tool_name == "web_research" and isinstance(self.data, dict):
@@ -3833,6 +3882,8 @@ class ExecutionKernel:
         self.executive: ExecutiveService | None = None
         self.searcher: Any = None
         self._archive_obsidian_exact_file_reader_factory: ArchiveObsidianExactFileReaderFactory | None = None
+        self._message_exact_adapter: MessageExactInternalAdapter | None = None
+        self._memory_exact_adapter: MemoryExactInternalAdapter | None = None
         self._tools: dict[str, ToolSpec] = {}
         self._register_specs()
 
@@ -3847,6 +3898,23 @@ class ExecutionKernel:
         if self._archive_obsidian_exact_file_reader_factory is not None:
             raise RuntimeError("archive Obsidian exact reader factory is already bound")
         self._archive_obsidian_exact_file_reader_factory = factory
+
+    def bind_archive_exact_adapters(
+        self,
+        *,
+        message_exact_adapter: MessageExactInternalAdapter,
+        memory_exact_adapter: MemoryExactInternalAdapter,
+    ) -> None:
+        """Bind the unactivated exact lanes used by archive_search dispatch."""
+
+        if type(message_exact_adapter) is not MessageExactInternalAdapter:
+            raise TypeError("archive search requires MessageExactInternalAdapter")
+        if type(memory_exact_adapter) is not MemoryExactInternalAdapter:
+            raise TypeError("archive search requires MemoryExactInternalAdapter")
+        if self._message_exact_adapter is not None or self._memory_exact_adapter is not None:
+            raise RuntimeError("archive exact adapters are already bound")
+        self._message_exact_adapter = message_exact_adapter
+        self._memory_exact_adapter = memory_exact_adapter
 
     def create_archive_search_invocation(
         self,
@@ -4462,12 +4530,16 @@ class ExecutionKernel:
             prepared_archive_search = None
             archive_exact_file_reader = None
             archive_exact_file_reader_owner_id = ""
+            prepared_archive_search_composite = None
+            archive_exact_model_payload = None
             if name == "archive_search":
                 if type(data) is not _ArchiveSearchHandlerResult or not data.is_valid():
                     raise RuntimeError("archive search handler returned an invalid private carrier")
                 prepared_archive_search = data.prepared
                 archive_exact_file_reader = data.exact_file_reader
                 archive_exact_file_reader_owner_id = data.reader_owner_id
+                prepared_archive_search_composite = data.composite
+                archive_exact_model_payload = data.exact_model_payload
                 data = prepared_archive_search.authorized_batch.model_visible_canonical_bytes.decode(
                     "ascii",
                     errors="strict",
@@ -4671,6 +4743,8 @@ class ExecutionKernel:
                 work_started=work_started,
                 engineer_work_item_continuation=engineer_work_item_continuation,
                 engineer_command_ledger_observation=engineer_command_ledger_observation,
+                archive_exact_model_payload=archive_exact_model_payload,
+                prepared_archive_search_composite=prepared_archive_search_composite,
             )
         except asyncio.CancelledError:
             # A request/turn cancellation can arrive after an observe handler
@@ -6285,6 +6359,11 @@ class ExecutionKernel:
         context: dict[str, Any] | None = None,
         continuation: str | None = None,
         focus: str = "",
+        as_of: str = "",
+        known_at: str = "",
+        exact_window: bool = False,
+        include_graph: bool = False,
+        content_mode: str = MessageExactContentMode.EXCERPT.value,
         _archive_invocation: object | None = None,
     ) -> _ArchiveSearchHandlerResult:
         """Run the federated archive facade inside one private turn scope."""
@@ -6391,6 +6470,35 @@ class ExecutionKernel:
                 elif candidate_reader is not None:
                     LOGGER.warning("Archive Obsidian exact reader failed owner/composition attestation")
 
+        try:
+            exact_intent = parse_archive_exact_intent(
+                as_of=as_of,
+                known_at=known_at,
+                exact_window=exact_window,
+                include_graph=include_graph,
+                content_mode=content_mode,
+            )
+        except ArchiveExactDispatchError as exc:
+            raise ValueError(str(exc)) from exc
+        exact_lanes = None
+        if exact_intent.active:
+            try:
+                exact_lanes = await prepare_archive_exact_lanes(
+                    request=request,
+                    intent=exact_intent,
+                    storage=storage,
+                    turn_context=current_primary_authenticated_turn_context(),
+                    tenant_id=invocation.tenant_id,
+                    principal_id=invocation.principal_id,
+                    conversation_id=invocation.current_conversation_id,
+                    boundary_user_message_id=invocation.boundary_user_message_id,
+                    message_adapter=self._message_exact_adapter,
+                    memory_adapter=self._memory_exact_adapter,
+                )
+            except (ArchiveExactDispatchError, PermissionError) as exc:
+                raise ValueError(str(exc) or "exact archive selection is unavailable") from exc
+            request = exact_lanes.execution_request
+
         with storage.transaction() as conn:
             # The generic execute gate ran before the optional awaited vault
             # reader binding.  Re-resolve the principal and the global search
@@ -6427,11 +6535,21 @@ class ExecutionKernel:
                 exact_file_reader=exact_file_reader,
                 dense_query_plan=dense_query_plan,
             )
+        composite = None
+        exact_model_payload = None
+        if exact_lanes is not None and exact_lanes.model_payload is not None:
+            try:
+                composite = seal_archive_exact_composite(prepared, exact_lanes)
+            except Exception as exc:
+                raise ValueError("exact archive composite is unavailable") from exc
+            exact_model_payload = exact_lanes.model_payload
         return _ArchiveSearchHandlerResult(
             prepared=prepared,
             exact_file_reader=exact_file_reader,
             reader_owner_id=actor.own_id if exact_file_reader is not None else "",
             authority=_ARCHIVE_SEARCH_RESULT_AUTHORITY,
+            composite=composite,
+            exact_model_payload=exact_model_payload,
         )
 
     async def _memory_search(
@@ -9696,6 +9814,9 @@ class ExecutionKernel:
             "переписке и Obsidian. Это только локальный read-only поиск: он никогда "
             "не отправляет запрос в интернет. Проверяй coverage и absence: неполная, "
             "недоступная или ограниченная полоса не доказывает отсутствие сведений. "
+            "exact_window читает текущий разговор целиком, без queryless message_search. "
+            "as_of и known_at задают valid-time и transaction-time снимки знаний; "
+            "include_graph добавляет ограниченный графовый контекст. "
             "Для следующей страницы передай выданный opaque continuation без изменений.",
             "search.use",
             {
@@ -9775,6 +9896,34 @@ class ExecutionKernel:
                     "type": "string",
                     "maxLength": 512,
                     "pattern": r"^[A-Za-z0-9_-]+$",
+                },
+                "as_of": {
+                    "type": "string",
+                    "description": "Дата ГГГГ-ММ-ДД: графовые связи и знания, верные на этот день",
+                },
+                "known_at": {
+                    "type": "string",
+                    "format": "date-time",
+                    "description": (
+                        "Transaction-time RFC3339 с UTC offset: что уже было известно "
+                        "Пятнице к этому точному моменту"
+                    ),
+                },
+                "exact_window": {
+                    "type": "boolean",
+                    "description": "Текущий разговор целиком до принятой границы, без тематического query",
+                },
+                "include_graph": {
+                    "type": "boolean",
+                    "description": "Ограниченный графовый контекст подтверждённых знаний",
+                },
+                "content_mode": {
+                    "type": "string",
+                    "enum": [
+                        MessageExactContentMode.EXCERPT.value,
+                        MessageExactContentMode.FULL_CONTENT.value,
+                    ],
+                    "description": "Только с exact_window: excerpt или полный текст строк окна",
                 },
             },
             ["query", "corpora"],

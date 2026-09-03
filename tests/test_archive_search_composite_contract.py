@@ -946,4 +946,9 @@ def test_r8h_import_surface_is_passive_and_backward_compatible() -> None:
     assert "message_exact_request" not in archive_parameters
     assert "memory_exact_request" not in archive_parameters
     assert "prepared_archive_search_composite" not in archive_parameters
+    assert "as_of" in archive_parameters
+    assert "known_at" in archive_parameters
+    assert "exact_window" in archive_parameters
+    assert "include_graph" in archive_parameters
+    assert "content_mode" in archive_parameters
     assert not hasattr(kernel, "compose_prepared_archive_searches")
