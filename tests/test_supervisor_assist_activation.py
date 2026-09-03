@@ -28,8 +28,8 @@ from friday.orchestration.supervisor_assist_activation import (
     RawAssistPromotionActivationSettings,
     derive_installed_release_tree_sha256,
     load_assist_promotion_live_evidence,
-    resolve_installed_release_root,
     parse_assist_promotion_live_evidence,
+    resolve_installed_release_root,
     scheduler_admission_snapshot_from_status,
 )
 from friday.orchestration.supervisor_assist_activation import (
