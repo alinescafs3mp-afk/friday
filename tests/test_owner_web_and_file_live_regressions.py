@@ -1411,10 +1411,47 @@ async def test_explicit_public_web_private_contours_never_leave_private_conversa
 
 
 @pytest.mark.asyncio
+async def test_current_unused_file_does_not_block_explicit_public_web(
+    settings,
+    storage,
+) -> None:
+    storage.ensure_user(OWNER, preset_key="owner")
+    document = _store_generic_text(settings, storage)
+    kernel = _SyntheticWebKernel(
+        url=GENERIC_WEB_URL,
+        fact=GENERIC_WEB_FACT,
+        title="Synthetic official Nextcloud project page",
+    )
+    runtime = AgentRuntime(
+        replace(settings, verify_answers=False),
+        storage,
+        llm=_ScriptedModel(
+            {document.marker: "Синтетическая локальная сводка."},
+            web_fact=GENERIC_WEB_FACT,
+            web_url=GENERIC_WEB_URL,
+        ),
+        kernel=kernel,
+    )
+    query_text = "Найди в интернете официальный сайт проекта Nextcloud"
+    response = await runtime.chat(
+        OWNER,
+        query_text,
+        actor=_actor(),
+        attachments=[document.attachment],
+    )
+    assert kernel.calls
+    query = str(kernel.calls[0][1].get("query") or "")
+    assert "nextcloud" in query.casefold()
+    assert document.marker not in query
+    assert GENERIC_WEB_FACT in response["message"]
+    metadata = _stored_metadata(storage, response)
+    assert metadata["structural"].get("private_web_search_blocked") is not True
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("carrier", "expected_count", "expected_restored"),
     [
-        ("current", 1, 0),
         ("reply", 0, 0),
         ("replay", 0, 0),
         ("restored", 1, 1),
@@ -1455,9 +1492,7 @@ async def test_explicit_public_web_attachment_carriers_never_enter_isolated_lane
     )
     query_text = "Найди в интернете официальный сайт проекта Nextcloud"
     chat_kwargs: dict[str, Any] = {}
-    if carrier == "current":
-        chat_kwargs["attachments"] = [document.attachment]
-    elif carrier == "reply":
+    if carrier == "reply":
         chat_kwargs["reply_to"] = f"Приватный ответ: {PRIVATE_HISTORY_CANARY}"
     elif carrier == "replay":
         replay_source = storage.store_message(
@@ -1705,7 +1740,7 @@ async def test_news_inside_a_current_document_is_local_not_a_web_request(
 
 
 @pytest.mark.asyncio
-async def test_same_sentence_document_summary_and_web_request_denies_public_research(
+async def test_same_sentence_document_summary_and_vague_web_keeps_local_read(
     settings,
     storage,
 ) -> None:
@@ -1729,20 +1764,45 @@ async def test_same_sentence_document_summary_and_web_request_denies_public_rese
         attachments=[document.attachment],
     )
 
-    assert response["tools_used"] == []
+    assert kernel.calls == []
     assert response["web_evidence_status"] == "none"
     assert response["attachment_context_expected_count"] == 1
-    assert "приватные вложения" in response["message"].casefold()
-    assert kernel.calls == []
+    assert "приватные вложения" not in response["message"].casefold()
+    assert "Синтетическая локальная сводка." in response["message"]
     metadata = _stored_metadata(storage, response)
-    assert metadata["structural"]["private_web_search_blocked"] is True
+    assert metadata["structural"].get("private_web_search_blocked") is not True
+
+
+@pytest.mark.asyncio
+async def test_current_unused_file_does_not_block_public_news(settings, storage) -> None:
+    storage.ensure_user(OWNER, preset_key="owner")
+    document = _store_docx(settings, storage, target_chars=832, document_number=74)
+    kernel = _SyntheticWebKernel()
+    runtime = AgentRuntime(
+        replace(settings, verify_answers=False),
+        storage,
+        llm=_ScriptedModel({document.marker: "Синтетическая локальная сводка."}),
+        kernel=kernel,
+    )
+    response = await runtime.chat(
+        OWNER,
+        NEWS_REQUEST,
+        actor=_actor(),
+        attachments=[document.attachment],
+    )
+    assert kernel.calls
+    assert kernel.calls[0][0] == "web_research"
+    query = str(kernel.calls[0][1].get("query") or "")
+    assert document.marker not in query
+    assert "приватные вложения" not in response["message"].casefold()
+    metadata = _stored_metadata(storage, response)
+    assert metadata["structural"].get("private_web_search_blocked") is not True
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("carrier", "expected_count", "expected_restored"),
     [
-        ("current", 1, 0),
         ("explicit_reference", 1, 1),
         ("deictic_reference", 1, 1),
         ("reply_reference", 0, 0),
@@ -1780,8 +1840,6 @@ async def test_attachment_derived_news_carriers_cannot_use_web(
             query = "Найди в интернете свежие новости по нему за прошедшие сутки."
         else:
             chat_kwargs["reply_to"] = f"Ответ по файлу: {document.marker}"
-    elif carrier == "current":
-        chat_kwargs["attachments"] = [document.attachment]
     else:
         first = await runtime.chat(
             OWNER,
@@ -1868,7 +1926,7 @@ async def test_current_file_public_web_compare_searches_only_the_public_topic(
 
 
 @pytest.mark.asyncio
-async def test_summarize_document_and_search_web_still_blocks_public_research(
+async def test_summarize_document_and_vague_web_keeps_local_read(
     settings,
     storage,
 ) -> None:
@@ -1889,13 +1947,14 @@ async def test_summarize_document_and_search_web_still_blocks_public_research(
         attachments=[document.attachment],
     )
     assert kernel.calls == []
-    assert "приватные вложения" in response["message"].casefold()
+    assert "приватные вложения" not in response["message"].casefold()
+    assert "Синтетическая локальная сводка." in response["message"]
     metadata = _stored_metadata(storage, response)
-    assert metadata["structural"]["private_web_search_blocked"] is True
+    assert metadata["structural"].get("private_web_search_blocked") is not True
 
 
 @pytest.mark.asyncio
-async def test_summarize_then_compare_public_rules_still_blocks_public_research(
+async def test_summarize_then_compare_public_rules_searches_only_the_public_topic(
     settings,
     storage,
 ) -> None:
@@ -1906,7 +1965,11 @@ async def test_summarize_then_compare_public_rules_still_blocks_public_research(
     runtime = AgentRuntime(
         replace(settings, verify_answers=False),
         storage,
-        llm=_ScriptedModel({document.marker: "Синтетическая локальная сводка."}),
+        llm=_ScriptedModel(
+            {document.marker: "Синтетическая локальная сводка."},
+            web_fact=PUBLIC_FACT,
+            web_url=PUBLIC_URL,
+        ),
         kernel=kernel,
     )
     response = await runtime.chat(
@@ -1915,15 +1978,18 @@ async def test_summarize_then_compare_public_rules_still_blocks_public_research(
         actor=_actor(),
         attachments=[document.attachment],
     )
-    assert kernel.calls == []
-    assert response["web_evidence_status"] == "none"
-    assert PUBLIC_FACT not in response["message"]
+    assert kernel.calls
+    query = str(kernel.calls[0][1].get("query") or "")
+    assert "публичн" in query.casefold()
+    assert document.marker not in query
+    assert "документ" not in query.casefold()
+    assert PUBLIC_FACT in response["message"]
     metadata = _stored_metadata(storage, response)
     assert metadata["structural"].get("private_web_search_blocked") is not True
 
 
 @pytest.mark.asyncio
-async def test_two_current_files_cannot_open_public_web_compare(
+async def test_two_current_files_open_public_web_compare(
     settings,
     storage,
 ) -> None:
@@ -1934,7 +2000,11 @@ async def test_two_current_files_cannot_open_public_web_compare(
     runtime = AgentRuntime(
         replace(settings, verify_answers=False),
         storage,
-        llm=_ScriptedModel({first.marker: "Синтетическая локальная сводка."}),
+        llm=_ScriptedModel(
+            {first.marker: "Синтетическая локальная сводка."},
+            web_fact=PUBLIC_FACT,
+            web_url=PUBLIC_URL,
+        ),
         kernel=kernel,
     )
     response = await runtime.chat(
@@ -1943,14 +2013,19 @@ async def test_two_current_files_cannot_open_public_web_compare(
         actor=_actor(),
         attachments=[first.attachment, second.attachment],
     )
-    assert kernel.calls == []
-    assert "приватные вложения" in response["message"].casefold()
+    assert kernel.calls
+    query = str(kernel.calls[0][1].get("query") or "")
+    assert "публичн" in query.casefold()
+    assert first.marker not in query
+    assert second.marker not in query
+    assert "приватные вложения" not in response["message"].casefold()
+    assert PUBLIC_FACT in response["message"]
     metadata = _stored_metadata(storage, response)
-    assert metadata["structural"]["private_web_search_blocked"] is True
+    assert metadata["structural"].get("private_web_search_blocked") is not True
 
 
 @pytest.mark.asyncio
-async def test_prior_file_history_cannot_open_public_web_compare(
+async def test_prior_file_history_opens_public_web_compare(
     settings,
     storage,
 ) -> None:
@@ -1960,7 +2035,11 @@ async def test_prior_file_history_cannot_open_public_web_compare(
     runtime = AgentRuntime(
         replace(settings, verify_answers=False),
         storage,
-        llm=_ScriptedModel({document.marker: "Синтетическая локальная сводка."}),
+        llm=_ScriptedModel(
+            {document.marker: "Синтетическая локальная сводка."},
+            web_fact=PUBLIC_FACT,
+            web_url=PUBLIC_URL,
+        ),
         kernel=kernel,
     )
     first = await runtime.chat(
@@ -1976,7 +2055,12 @@ async def test_prior_file_history_cannot_open_public_web_compare(
         actor=_actor(),
         conversation_id=str(first["conversation_id"]),
     )
-    assert kernel.calls == []
-    assert "приватные вложения" in response["message"].casefold()
+    assert kernel.calls
+    query = str(kernel.calls[0][1].get("query") or "")
+    assert "публичн" in query.casefold()
+    assert document.marker not in query
+    assert "договор" not in query.casefold()
+    assert "приватные вложения" not in response["message"].casefold()
+    assert PUBLIC_FACT in response["message"]
     metadata = _stored_metadata(storage, response)
-    assert metadata["structural"]["private_web_search_blocked"] is True
+    assert metadata["structural"].get("private_web_search_blocked") is not True

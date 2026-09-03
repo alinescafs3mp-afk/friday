@@ -292,7 +292,11 @@ from friday.orchestration.conversation_document_comparison import (
     conversation_document_model_evidence_identity,
 )
 from friday.orchestration.current_file_web_query import (
+    compare_current_file_web_cues_present,
     extract_compare_current_file_public_web_query,
+    extract_independent_public_web_query,
+    utterance_names_local_file,
+    web_clause_names_local_file,
 )
 from friday.orchestration.effect_outcome import (
     EffectAction,
@@ -34060,9 +34064,10 @@ _DANGEROUS_INSTRUCTIONS_REFUSAL = (
     "вещества: не трогать его, отойти и обратиться в экстренные службы."
 )
 _PRIVATE_WEB_SEARCH_BLOCKED = (
-    "Не могу выполнить внешний интернет-поиск в этой переписке: в её контексте есть "
-    "приватные вложения. Чтобы их содержимое не ушло наружу, веб-инструменты здесь "
-    "отключены. Открой новый диалог без файлов и повтори запрос."
+    "Не могу выполнить внешний интернет-поиск по содержимому приватных вложений: "
+    "приватные вложения не уходят в публичный веб. Файл остаётся доступен локально "
+    "в этом же диалоге. Если нужен веб — назови независимую публичную тему, "
+    "а не содержимое файла."
 )
 _PRIVATE_MCP_OUTPUT_BLOCKED = (
     "Не могу создать файл во внешнем MCP outbox из приватного источника: "
@@ -37335,8 +37340,8 @@ class AgentContext:
     #: History, retrieval and attachment-derived context are removed for this
     #: one turn; the sticky lineage itself remains persisted for future safety.
     isolated_outbound_turn: bool = False
-    #: One current-turn file stays local while an independent public-web topic
-    #: from the same utterance is prefetched. File bytes never become the query.
+    #: Local files stay in this turn while an independent public-web topic from
+    #: the same utterance is prefetched. File bytes never become the query.
     isolated_current_file_web_compare_turn: bool = False
     compare_current_file_public_web_query: str = ""
     #: A private source or its sticky lineage participates in this turn. This
@@ -49649,6 +49654,19 @@ class AgentRuntime:
                     tenant_id=tenant_id,
                     person_id=person_id,
                 )
+            if (
+                already_supplied_count <= 0
+                and allow_file_read
+                and extract_independent_public_web_query(message)
+                and compare_current_file_web_cues_present(message)
+            ):
+                latest_uploads, expected = self._restore_latest_uploaded_attachments(
+                    history,
+                    tenant_id=tenant_id,
+                    person_id=person_id,
+                )
+                if expected:
+                    return latest_uploads, expected
             if not (
                 reference_kind
                 or _multi_attachment_open_task_count(message) is not None
@@ -51421,15 +51439,17 @@ class AgentRuntime:
             selected_expected_count = restored_attachment_expected_count
 
         # Every self-contained public-news request stays in a one-way chamber so
-        # only current bytes can become the outbound query.  The narrower simple
-        # synthesis admission below separately requires an exact provider
-        # freshness window; unsupported calendar scopes remain isolated without
-        # being silently rewritten to ``day``.
+        # only current bytes can become the outbound query.  Unused current
+        # uploads do not veto that chamber: they are stripped from this turn
+        # rather than turning a public-news request into a private-source
+        # refusal.  A restored or deictic file is local work and stays out.
+        # The narrower simple synthesis admission below separately requires an
+        # exact provider freshness window; unsupported calendar scopes remain
+        # isolated without being silently rewritten to ``day``.
         isolated_public_news_turn = bool(
             file_turn.actions == frozenset({"web"})
             and _public_news_site_request(file_turn.speech)
             and not synthetic_document_notice
-            and not supplied_attachment_count
             and not quoted_attachment_reference
             and not reply_assistant_reference
             and not reply_quote
@@ -51447,8 +51467,6 @@ class AgentRuntime:
         isolated_public_product_spec_turn = bool(
             public_product_spec_query
             and not synthetic_document_notice
-            and not supplied_attachment_count
-            and not attachments
             and not quoted_attachment_reference
             and not reply_assistant_reference
             and not reply_quote
@@ -51470,13 +51488,11 @@ class AgentRuntime:
         )
         public_market_query = _self_contained_public_market_query(file_turn.speech)
         isolated_public_market_turn = bool(
-            inherited_private_context_lineage
+            (inherited_private_context_lineage or supplied_attachment_count or attachments)
             and public_market_query
             and file_turn.actions.issubset({"web"})
             and not file_turn.source_filenames()
             and not synthetic_document_notice
-            and not supplied_attachment_count
-            and not attachments
             and not quoted_attachment_reference
             and not reply_assistant_reference
             and not reply_quote
@@ -51498,15 +51514,24 @@ class AgentRuntime:
             and obsidian_result_request_candidate is None
         )
         explicit_public_web_query = _self_contained_explicit_public_web_query(routing_message)
+        independent_public_web_query = extract_independent_public_web_query(routing_message)
+        local_source_for_sealed_web = bool(
+            (supplied_attachment_count >= 1 and attachments)
+            or (restored_attachment_expected_count >= 1 and restored_attachments)
+        )
+        wants_local_file_work = bool(
+            compare_current_file_web_cues_present(routing_message)
+            or bool(attachment_reference_kind)
+            or bool(file_turn.source_filenames())
+            or utterance_names_local_file(routing_message)
+        )
         isolated_explicit_public_web_turn = bool(
-            inherited_private_context_lineage
+            (inherited_private_context_lineage or supplied_attachment_count or attachments)
             and explicit_public_web_query
             and file_turn.proved("web")
             and file_turn.actions.issubset({"web", "local_read"})
             and not file_turn.source_filenames()
             and not synthetic_document_notice
-            and not supplied_attachment_count
-            and not attachments
             and not quoted_attachment_reference
             and not reply_assistant_reference
             and not reply_quote
@@ -51527,20 +51552,19 @@ class AgentRuntime:
             and obsidian_intent is None
             and obsidian_result_request_candidate is None
         )
-        compare_current_file_public_web_query = extract_compare_current_file_public_web_query(routing_message)
+        compare_current_file_public_web_query = (
+            extract_compare_current_file_public_web_query(routing_message) or independent_public_web_query
+        )
         isolated_current_file_web_compare_turn = bool(
             compare_current_file_public_web_query
-            and supplied_attachment_count == 1
-            and attachments
-            and restored_attachment_expected_count == 0
-            and not restored_attachments
+            and local_source_for_sealed_web
+            and wants_local_file_work
             and not synthetic_document_notice
             and not quoted_attachment_reference
             and not reply_assistant_reference
             and not reply_quote
             and not replay_source_message_id
             and not replay_had_attachments
-            and not attachment_reference_kind
             and workspace_inbox_request is None
             and not message_locate_flow
             and not person_inventory_turn
@@ -51550,7 +51574,18 @@ class AgentRuntime:
             and obsidian_intent is None
             and obsidian_result_request_candidate is None
         )
-        if not isolated_current_file_web_compare_turn:
+        if isolated_current_file_web_compare_turn:
+            compare_current_file_public_web_query = (
+                extract_compare_current_file_public_web_query(routing_message)
+                or independent_public_web_query
+            )
+        elif (
+            isolated_explicit_public_web_turn
+            and independent_public_web_query
+            and explicit_public_web_query == independent_public_web_query
+        ):
+            compare_current_file_public_web_query = independent_public_web_query
+        else:
             compare_current_file_public_web_query = ""
         isolated_obsidian_result_turn = bool(
             obsidian_result_request_candidate is not None
@@ -51597,12 +51632,15 @@ class AgentRuntime:
         # query is fully determined by the current message/policy and no stale
         # private lineage is allowed to observe or veto it.
         isolated_outbound_turn = bool(
-            isolated_public_news_turn
-            or isolated_public_product_spec_turn
-            or isolated_public_market_turn
-            or isolated_explicit_public_web_turn
-            or isolated_obsidian_result_turn
-            or policy_weather_outbound_turn
+            not isolated_current_file_web_compare_turn
+            and (
+                isolated_public_news_turn
+                or isolated_public_product_spec_turn
+                or isolated_public_market_turn
+                or isolated_explicit_public_web_turn
+                or isolated_obsidian_result_turn
+                or policy_weather_outbound_turn
+            )
         )
         archived_source_query = direct_archived_source_query or contextual_source_query
         archived_source_focus = (
@@ -52690,6 +52728,10 @@ class AgentRuntime:
             expected_count=attachment_expected_count,
             carriers=attachments,
         )
+        if isolated_outbound_turn or isolated_current_file_web_compare_turn:
+            # A self-contained public-web clause is not a lookup into the
+            # current file.  The unused attachment stays out of this turn.
+            attachment_query_closed_answer = ""
         attachment_has_unread_tail = bool(
             not document_metadata_owned
             and terminal_evidence_set is not None
@@ -53749,6 +53791,7 @@ class AgentRuntime:
                     or isolated_public_market_turn
                     or isolated_explicit_public_web_turn
                 ),
+                compare_current_file_public_web_query=compare_current_file_public_web_query,
             )
         elif preparse_pure_past_timeline:
             # The current text fully determines one past calendar window. Do
@@ -54628,7 +54671,20 @@ class AgentRuntime:
             # negated sibling web clause must not be resurrected by legacy
             # ``file_web`` parsing and turned into a structural refusal.
             web_intent_authorized = False
-        private_web_search_blocked = bool(private_outbound_restricted and web_intent_authorized)
+        private_web_search_blocked = bool(
+            private_outbound_restricted
+            and web_intent_authorized
+            and not isolated_current_file_web_compare_turn
+            and not isolated_outbound_turn
+            and (
+                web_clause_names_local_file(routing_message)
+                or not (
+                    file_turn.proved("local_read")
+                    and local_source_for_sealed_web
+                    and not attachment_reference_kind
+                )
+            )
+        )
         outbound_blocked = bool(
             private_outbound_restricted or (topic.startswith("человек") and not web_intent_authorized)
         )
@@ -73343,7 +73399,7 @@ class AgentRuntime:
         turn_auth = file_turn_authority(message)
         sealed_compare_query = (
             str(getattr(context, "compare_current_file_public_web_query", "") or "")
-            if context is not None and context.isolated_current_file_web_compare_turn
+            if context is not None
             else ""
         )
         if context is not None and context.private_source_boundary_active and not sealed_compare_query:
@@ -73361,7 +73417,11 @@ class AgentRuntime:
                 }
             )
             return
-        if turn_auth.proved("local_read") and not turn_auth.proved("web"):
+        if (
+            turn_auth.proved("local_read")
+            and not turn_auth.proved("web")
+            and not sealed_compare_query
+        ):
             return
         web_message, _local_remainder = _file_effect_projection(message, turn_auth, "web")
         asked_outright = asks_for_the_web(web_message) or bool(
@@ -74702,7 +74762,7 @@ class AgentRuntime:
                     "content": context.attachment_hierarchy_bundle.evidence,
                 }
             )
-        elif attachments:
+        elif attachments and not context.isolated_outbound_turn:
             projected_attachments = _bounded_attachment_projection(attachments)
             office_prompt = next(
                 (

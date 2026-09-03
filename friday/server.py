@@ -141,6 +141,7 @@ from friday.orchestration.capability_binding import (
 )
 from friday.orchestration.current_file_web_query import (
     extract_compare_current_file_public_web_query,
+    extract_independent_public_web_query,
 )
 from friday.orchestration.file_read import V12FileReadHandler
 from friday.orchestration.semantic_supervisor_runtime import build_semantic_supervisor_runtime
@@ -6101,6 +6102,14 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
                             "сравнение текущего файла с публичным вебом — команда, "
                             "а не материал архива"
                         ),
+                    }
+                elif extract_independent_public_web_query(message):
+                    ingestion_result = {
+                        "promoted": False,
+                        "queued_for_review": False,
+                        "action": "transient",
+                        "category": "web_request",
+                        "reason": "явная просьба поискать в интернете — команда, а не материал",
                     }
                 elif asks_for_the_web(message):
                     # «Найди в интернете курс доллара» — это команда, а не факт,
