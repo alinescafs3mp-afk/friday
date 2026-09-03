@@ -1,6 +1,6 @@
 # Friday: canonical project backlog
 
-Updated: 2026-09-02
+Updated: 2026-09-03
 
 This is the project's only backlog and mutable status register. It owns the
 current production identity, execution order, acceptance gaps and owner actions.
@@ -67,7 +67,8 @@ current release. P0H reader, pair-bearing writer and safe no-delete continuation
 remain live through `0.207.98`; the permanent `io_uring_disabled=2` R3 proposal
 is rejected, so P0H remains open only for a one-shot maintenance authority and
 reviewed bounded deletion that preserves the ordinary Engineer environment. S4-R8 remains open for sole-facade
-parity. Local `main` now has unactivated R8E, a passive composite seam and a
+parity. Local `main` now has unactivated R8E, a composite seam, a dispatch
+owner that can express exact window / `as_of` / `known_at` / graph, and a
 refreshed not-ready measurement; the released legacy tool catalog stays until
 semantic parity is real rather than nominal.
 Keep the released S3 path in shadow
@@ -416,9 +417,10 @@ document passage recall is deployed in `0.207.96`; the R8B internal retrieval
 foundation is deployed in `0.207.98`; R8C exact focused-source parity is
 deployed in `0.207.99`; and R8D authenticated exact-message windows are
 deployed in `0.208.0`. Local `main` additionally carries the unactivated R8E
-bitemporal/graph internal lane, a passive archive composite seam, and a
-refreshed sole-facade measurement that is still `not ready`. R8 sole
-dialogue-facade retirement is not deployed.
+bitemporal/graph internal lane, the archive composite seam, a dispatch owner
+that can express exact window / `as_of` / `known_at` / graph without hiding
+legacy dialogue tools, and a refreshed sole-facade measurement that is still
+`not ready`. R8 sole dialogue-facade retirement is not deployed.
 
 1. Add reader-first `document_passages` with a schema-capable fallback, bounded
    writer, restart-safe resumable backfill and honest `index_incomplete`.
@@ -798,10 +800,11 @@ checks.
 2. Keep released `EngineerWorkItem v1` stable; do not expand its scope.
 3. Keep the released bounded S3 advisor in shadow until a genuine eligible turn
    creates its exact production witness; do not fabricate activation evidence.
-4. Keep the released S4-R6/R7/R8C/R8D recall paths green. R8E and the passive
-   composite seam are on local `main` and still unactivated; do not retire any
-   dialogue-facing adapter until the refreshed sole-facade measurement is
-   ready.
+4. Keep the released S4-R6/R7/R8C/R8D recall paths green. R8E, the composite
+   seam and the exact archive dispatch owner are on local `main` and still
+   unactivated in the catalogue; do not retire any dialogue-facing adapter
+   until the refreshed sole-facade measurement is ready. Replay the thirteen
+   contours and the historical ten-file union before any catalogue cutover.
 5. Keep the released S5 measured-lease contract green; extend cognition only
    through another measured, reversible journey release.
 6. Keep released S6-R4 exact clean/restart/production evidence green while P0G
