@@ -73510,7 +73510,6 @@ class AgentRuntime:
         if sealed_compare_query:
             # The public topic is already sealed. Do not let the arbiter, the
             # raw utterance, or file deictics choose a different outbound query.
-            query = sealed_compare_query
             kind, second = "интернет", sealed_compare_query
             verdict = ("интернет", sealed_compare_query)
             asked_outright = True
@@ -73576,7 +73575,7 @@ class AgentRuntime:
         # но только на ветке БЕЗ прямой просьбы поискать: при явной просьбе они
         # пропускают ход, и чужое поле доезжало до поисковика мимо них. Ворота на
         # одной дороге не охраняют ничего.
-        query = second if kind.startswith("интернет") and second else ""
+        query = second if kind.startswith("интернет") else ""
         if kind.startswith("знание") and not asked_outright:
             # Факт устоялся, и модель его знает. Замерено на вопросах владельца:
             # «кто был вторым президентом США» и «кто был первым президентом
