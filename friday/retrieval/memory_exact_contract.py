@@ -955,6 +955,23 @@ def _candidate_revision_sha256(
 class MemoryExactCandidate(_ProcessPrivate):
     """One exact selected knowledge row without its full stored body."""
 
+    _request_identity_sha256: str
+    _seal: str
+    body_sha256: str
+    candidate_revision_sha256: str
+    content_chars: int
+    excerpt: str
+    excerpt_truncated: bool
+    knowledge_id: str
+    knowledge_kind: str
+    knowledge_revision_sha256: str
+    lifecycle_stage: MemoryExactLifecycleStage
+    raw_object_id: str
+    raw_revision_sha256: str
+    source_handle: str
+    title: str
+    updated_at: str
+
     __slots__ = (
         "_request_identity_sha256",
         "_seal",
@@ -1652,12 +1669,12 @@ class MemoryExactGraphProjection:
             or any(type(item) is not MemoryExactGraphPathProjection for item in self.paths)
         ):
             raise MemoryExactContractError("memory graph paths exceed the closed projection")
-        for item in self.nodes:
-            item._validate()
-        for item in self.relations:
-            item._validate()
-        for item in self.paths:
-            item._validate()
+        for node in self.nodes:
+            node._validate()
+        for relation in self.relations:
+            relation._validate()
+        for path in self.paths:
+            path._validate()
         if tuple(item.ordinal for item in self.nodes) != tuple(range(1, len(self.nodes) + 1)):
             raise MemoryExactContractError("memory graph node aliases must be consecutive")
         if tuple(item.ordinal for item in self.relations) != tuple(range(1, len(self.relations) + 1)):
@@ -1893,6 +1910,22 @@ def _page_selection_handle(
 
 class MemoryExactPage(_ProcessPrivate):
     """One authorized, stable top-snapshot page of exact candidates."""
+
+    _seal: str
+    authority_handle: str
+    candidates: tuple[MemoryExactCandidate, ...]
+    date_window_status: MemoryExactDateWindowStatus
+    graph_projection: MemoryExactGraphProjection
+    graph_source_set_sha256: str
+    matched_rows: int
+    next_continuation: MemoryExactContinuation | None
+    offset: int
+    request: MemoryExactRequest
+    selection_handle: str
+    snapshot_handle: str
+    snapshot_rows: int
+    temporal_status: MemoryExactTemporalStatus
+    total_rows: int
 
     __slots__ = (
         "_seal",
@@ -2383,6 +2416,13 @@ def project_memory_exact_page(page: MemoryExactPage) -> MemoryExactProjection:
 
 class MemoryExactPublicationDecision(_ProcessPrivate):
     """A body-free, process-sealed, one-shot late-authorization receipt."""
+
+    _authority_handle: str
+    _claim_sha256: str | None
+    _consumed: bool
+    _seal: str
+    _selection_handle: str
+    status: MemoryExactPublicationStatus
 
     __slots__ = (
         "_authority_handle",

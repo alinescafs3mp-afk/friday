@@ -715,6 +715,18 @@ def _copy_graph_context(
 class MemoryExactProviderSnapshot:
     """Process-private, sealed copy of one bounded HybridSearcher proposal."""
 
+    _date_window_applied: bool
+    _date_window_empty: bool
+    _effective_query: str
+    _graph_json: str
+    _knowledge_ids: tuple[str, ...]
+    _knowledge_revision_sha256s: tuple[str, ...]
+    _matched_at_least: int
+    _request: MemoryExactRequest
+    _request_identity_sha256: str
+    _seal: str
+    _temporal_json: str
+
     __slots__ = (
         "_date_window_applied",
         "_date_window_empty",
@@ -1009,6 +1021,23 @@ def _authorization_payload(
 
 class MemoryExactStorageAuthority:
     """Database-keyed storage capability for one exact request and turn."""
+
+    _adapter_binding_sha256: str
+    _authority_context_sha256: str
+    _authority_handle: str
+    _authorization_binding_sha256: str
+    _capability_binding_sha256: str
+    _context_authority_sha256: str
+    _person_binding_sha256: str
+    _principal_id: str
+    _request: MemoryExactRequest
+    _request_identity_sha256: str
+    _seal: str
+    _selector_sha256: str
+    _tenant_binding_sha256: str
+    _tenant_id: str
+    _turn_authority_sha256: str
+    _turn_id_sha256: str
 
     __slots__ = (
         "_adapter_binding_sha256",

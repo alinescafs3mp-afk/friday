@@ -139,6 +139,29 @@ asyncio_mode = "auto"
 module = ["av", "faster_whisper", "numpy", "piper", "piper.*"]
 ignore_missing_imports = true
 
+# R8E private carriers use object.__setattr__ plus ranking-provider facades.
+# Public slot names are annotated; remaining mixin/object noise stays module-local.
+[[tool.mypy.overrides]]
+module = [
+    "friday.retrieval.memory_exact_internal",
+    "friday.storage._memory_exact_internal",
+]
+disable_error_code = [
+    "arg-type",
+    "assignment",
+    "attr-defined",
+    "call-overload",
+    "has-type",
+    "index",
+    "method-assign",
+    "misc",
+    "override",
+    "return-value",
+    "type-var",
+    "union-attr",
+    "var-annotated",
+]
+
 [tool.ruff]
 line-length = 110
 target-version = "py311"

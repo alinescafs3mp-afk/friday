@@ -815,6 +815,12 @@ def _freeze_provider_read_arguments(value: object, *, depth: int = 0) -> object:
 class _ProviderReadWitness:
     """One immutable body-free binding between a bounded call and its result."""
 
+    _arguments: tuple[object, ...]
+    _arguments_sha256: str
+    _kind: str
+    _result_sha256: str
+    _seal: str
+
     __slots__ = (
         "_arguments",
         "_arguments_sha256",
@@ -1258,6 +1264,28 @@ class _ProviderReadSet:
 
 class _ProviderDependencyLedger:
     """Immutable O(1) mutation epoch plus one sealed bounded provider read set."""
+
+    _connection: sqlite3.Connection
+    _database_identity_sha256: str
+    _graph: KnowledgeGraph
+    _observer: sqlite3.Connection
+    _observer_data_version: int
+    _observer_lock: Any
+    _provider_configuration_sha256: str
+    _read_set: _ProviderReadSet
+    _request_identity_sha256: str
+    _schema_version: int
+    _seal: str
+    _searcher: HybridSearcher
+    _source_data_version: int
+    _source_identity: tuple[int, int]
+    _storage: FridayStorage
+    _storage_generation: int
+    _temp_schema_version: int
+    _tenant_sha256: str
+    _total_changes: int
+    _trusted_function_schema_sha256: str
+    _trusted_temp_schema_sha256: str
 
     __slots__ = (
         "_connection",
@@ -2653,6 +2681,16 @@ def _publication_refresh_seal(value: object) -> str:
 
 class MemoryExactPublicationRefresh:
     """Process-private, source-thread-bound final provider refresh result."""
+
+    _authorization_bindings: tuple[tuple[str, str, str], ...]
+    _context_authority_sha256: str
+    _decision: MemoryExactPublicationDecision
+    _dependency_ledger: _ProviderDependencyLedger | None
+    _page: MemoryExactPage
+    _provider_snapshot: object | None
+    _seal: str
+    _turn_id_sha256: str
+    status: MemoryExactPublicationStatus
 
     __slots__ = (
         "_authorization_bindings",
