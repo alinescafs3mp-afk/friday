@@ -141,6 +141,7 @@ async def test_explicit_agent_source_search_reads_pending_owned_file_but_not_rej
         "source_search",
         {"query": "Иванов должность", "limit": 20},
         actor=authorization.actor_for_user(owner, source="test"),
+        execution_scope="internal",
     )
 
     assert result.success is True
@@ -298,6 +299,7 @@ async def test_source_search_adopts_dense_reranked_passage_from_canonical_raw(se
         "source_search",
         {"query": "где находится оперативный центр", "limit": 10},
         actor=authorization.actor_for_user(owner, source="test"),
+        execution_scope="internal",
     )
 
     assert result.success is True, result.error
@@ -391,6 +393,7 @@ async def test_focused_semantic_query_keeps_anchor_and_rejects_another_section(
         "source_search",
         {"query": "РЭБ", "focus": "командир взвода", "limit": 10},
         actor=authorization.actor_for_user(owner, source="test"),
+        execution_scope="internal",
     )
 
     assert result.success is True, result.error
@@ -485,6 +488,7 @@ async def test_semantic_source_candidates_are_reauthorized_by_uploader_and_verdi
         "source_search",
         {"query": "аварийная командная площадка", "limit": 10},
         actor=actor,
+        execution_scope="internal",
     )
 
     assert result.success is True, result.error
@@ -524,6 +528,7 @@ async def test_one_literal_source_hit_does_not_pay_for_or_yield_to_semantic_fall
         "source_search",
         {"query": "UNIQUE-LITERAL-SOURCE-MARKER", "limit": 10},
         actor=authorization.actor_for_user(owner, source="test"),
+        execution_scope="internal",
     )
 
     assert result.success is True, result.error
@@ -568,6 +573,7 @@ async def test_multiple_literal_source_hits_invoke_semantic_fallback(settings, s
         "source_search",
         {"query": "AMBIGUOUS-LITERAL-MARKER", "limit": 10},
         actor=authorization.actor_for_user(owner, source="test"),
+        execution_scope="internal",
     )
 
     assert result.success is True, result.error
@@ -663,6 +669,7 @@ async def test_source_search_projects_closed_evidence_authority(settings, storag
         "source_search",
         {"query": marker, "limit": 20},
         actor=authorization.actor_for_user(owner, source="test"),
+        execution_scope="internal",
     )
 
     assert result.success is True, result.error
@@ -685,6 +692,7 @@ async def test_source_search_requires_knowledge_read(settings, storage):
         "source_search",
         {"query": PHRASE},
         actor=authorization.actor_for_user("source-guest", source="test"),
+        execution_scope="internal",
     )
 
     assert result.success is False
@@ -705,9 +713,12 @@ def test_source_search_is_detailed_for_file_work_and_withheld_from_small_talk(se
         str((item.get("function") or {}).get("name") or "")
         for item in kernel.get_tool_definitions(actor, topic="быт")
     }
+    internal_tools = set(kernel.get_tool_names(actor, execution_scope="internal"))
 
-    assert "source_search" in file_tools
+    assert "source_search" not in file_tools
     assert "source_search" not in household_tools
+    assert "archive_search" in file_tools
+    assert "source_search" in internal_tools
 
 
 @pytest.mark.asyncio
@@ -734,6 +745,7 @@ async def test_source_search_page_reaches_the_model_without_tail_truncation(sett
         "source_search",
         {"query": PHRASE, "limit": 20},
         actor=authorization.actor_for_user(owner, source="test"),
+        execution_scope="internal",
     )
     rendered = result.to_llm_message()
 
@@ -791,6 +803,7 @@ async def test_source_search_uses_a_separate_focus_without_broadening_retrieval(
         "source_search",
         {"query": "Иванов", "focus": "Иванов должность", "limit": 10},
         actor=authorization.actor_for_user(owner, source="test"),
+        execution_scope="internal",
     )
 
     assert result.success is True
@@ -841,6 +854,7 @@ async def test_source_search_binds_a_single_cell_section_heading_to_its_first_re
             "limit": 10,
         },
         actor=authorization.actor_for_user(owner, source="test"),
+        execution_scope="internal",
     )
 
     assert result.success is True
@@ -879,6 +893,7 @@ async def test_source_search_never_cross_joins_a_far_predicate_in_the_same_docum
         "source_search",
         {"query": "Иванов", "focus": "Иванов должность", "limit": 10},
         actor=authorization.actor_for_user(owner, source="test"),
+        execution_scope="internal",
     )
 
     assert result.success is True
@@ -927,6 +942,7 @@ async def test_source_search_context_boilerplate_cannot_page_out_an_implicit_val
         "source_search",
         {"query": "Иванов", "focus": "Иванов должность", "limit": 10},
         actor=authorization.actor_for_user(owner, source="test"),
+        execution_scope="internal",
     )
 
     assert result.success is True
@@ -978,6 +994,7 @@ async def test_source_search_focus_first_reaches_target_beyond_anchor_candidate_
         "source_search",
         {"query": "Иванов", "focus": "Иванов должность", "limit": 10},
         actor=authorization.actor_for_user(owner, source="test"),
+        execution_scope="internal",
     )
 
     assert result.success is True, result.error
@@ -1028,6 +1045,7 @@ async def test_source_search_maximum_metadata_page_remains_valid_untruncated_jso
         "source_search",
         {"query": "Иванов", "focus": "Иванов должность", "limit": 10},
         actor=authorization.actor_for_user(owner, source="test"),
+        execution_scope="internal",
     )
     rendered = result.to_llm_message()
 

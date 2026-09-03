@@ -221,6 +221,7 @@ async def test_source_search_stamp_is_private_and_unchanged_page_publishes(
         "source_search",
         {"query": _QUERY, "focus": _FOCUS, "limit": 10},
         actor=actor,
+        execution_scope="internal",
     )
     snapshots = source_search_page_snapshots(tool_result.data)
     assert tool_result.success is True

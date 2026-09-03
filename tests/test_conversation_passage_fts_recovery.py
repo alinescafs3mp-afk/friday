@@ -59,35 +59,33 @@ def test_concurrent_current_schema_repairs_one_missing_fts_artifact_once(
     count_lock = threading.Lock()
     rebuild_statements: list[str] = []
 
-    class CoordinatedConnection(sqlite3.Connection):
-        _first_explicit_commit = True
-
-        def __init__(self, *args: Any, **kwargs: Any) -> None:
-            super().__init__(*args, **kwargs)
-            self.set_trace_callback(self._trace)
-
-        @staticmethod
-        def _trace(statement: str) -> None:
-            normalized = "".join(statement.casefold().split())
-            if "insertintomessages_fts(messages_fts)values('rebuild')" in normalized:
-                with count_lock:
-                    rebuild_statements.append(statement)
-
-        def commit(self) -> None:
-            super().commit()
-            if self._first_explicit_commit:
-                self._first_explicit_commit = False
-                # Both openers have completed the authoritative phase.  Older
-                # code had already cached the missing-table observation here;
-                # both would subsequently rebuild from that stale decision.
-                first_phase_committed.wait()
+    def _trace(statement: str) -> None:
+        normalized = "".join(statement.casefold().split())
+        if "insertintomessages_fts(messages_fts)values('rebuild')" in normalized:
+            with count_lock:
+                rebuild_statements.append(statement)
 
     worker_names = {"fts-recovery-opener-1", "fts-recovery-opener-2"}
+    real_token_init = storage_core._MainFileProvenanceToken.__init__
+
+    def token_init(self: Any, *args: Any, **kwargs: Any) -> None:
+        real_token_init(self, *args, **kwargs)
+        if threading.current_thread().name in worker_names:
+            # Both openers have completed the authoritative phase.  Older
+            # code had already cached the missing-table observation here;
+            # both would subsequently rebuild from that stale decision.
+            first_phase_committed.wait()
+
+    monkeypatch.setattr(storage_core._MainFileProvenanceToken, "__init__", token_init)
 
     def controlled_connect(database_arg: Any, *args: Any, **kwargs: Any) -> sqlite3.Connection:
+        # Provenance binds type(conn) is sqlite3.Connection.  Keep the real
+        # type; Python 3.14 makes Connection.commit/execute read-only.
+        kwargs.pop("factory", None)
+        conn = real_connect(database_arg, *args, **kwargs)
         if threading.current_thread().name in worker_names:
-            kwargs = {**kwargs, "factory": CoordinatedConnection}
-        return real_connect(database_arg, *args, **kwargs)
+            conn.set_trace_callback(_trace)
+        return conn
 
     monkeypatch.setattr(sqlite3, "connect", controlled_connect)
     reopened_settings = replace(configured, database_must_exist=True)

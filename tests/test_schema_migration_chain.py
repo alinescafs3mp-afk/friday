@@ -206,21 +206,30 @@ def test_concurrent_schema_open_refreshes_marker_after_acquiring_write_lock(
     writer_finished = threading.Event()
     reader_errors: list[BaseException] = []
 
-    class DelayedBeginConnection(sqlite3.Connection):
-        _delayed = False
-
-        def execute(self, sql, parameters=(), /):
-            if str(sql).strip().upper() == "BEGIN IMMEDIATE" and not self._delayed:
-                self._delayed = True
-                reader_at_begin.set()
-                if not writer_finished.wait(timeout=10):
-                    raise AssertionError("concurrent schema writer did not finish")
-            return super().execute(sql, parameters)
-
     def controlled_connect(database_arg, *args, **kwargs):
-        if str(database_arg) == str(database) and threading.current_thread().name == "schema-stale-reader":
-            kwargs = {**kwargs, "factory": DelayedBeginConnection}
-        return real_connect(database_arg, *args, **kwargs)
+        # Provenance binds type(conn) is sqlite3.Connection.  Keep the real
+        # type; Python 3.14 makes Connection.execute read-only, so delay the
+        # first BEGIN through the authorizer instead of a Connection subclass.
+        kwargs.pop("factory", None)
+        conn = real_connect(database_arg, *args, **kwargs)
+        if threading.current_thread().name == "schema-stale-reader":
+            delayed = False
+
+            def authorizer(action: int, arg1: str | None, *_rest: object) -> int:
+                nonlocal delayed
+                if (
+                    action == sqlite3.SQLITE_TRANSACTION
+                    and str(arg1 or "").upper() == "BEGIN"
+                    and not delayed
+                ):
+                    delayed = True
+                    reader_at_begin.set()
+                    if not writer_finished.wait(timeout=10):
+                        raise AssertionError("concurrent schema writer did not finish")
+                return sqlite3.SQLITE_OK
+
+            conn.set_authorizer(authorizer)
+        return conn
 
     monkeypatch.setattr(sqlite3, "connect", controlled_connect)
 

@@ -197,10 +197,14 @@ def test_no_method_is_defined_twice_across_the_class_hierarchy() -> None:
 # authenticated reader remains transaction-private.
 # 433 → 434: Inbox advice selects only still-eligible privacy-safe rows before
 # its finite worker page, without a durable or process-local scan cursor.
-EXPECTED_MEMBER_COUNT = 434
+# 434 → 436: R8E open-handle provenance accessors bind exact-memory reads to the
+# live SQLite inode; they are storage-private, not a second data-access surface.
+EXPECTED_MEMBER_COUNT = 436
 EXPECTED_SIGNATURES: dict[str, str] = {
     "_begin_database_restore_open": "(self) -> 'bool'",
     "_end_database_restore_open": "(self, previous: 'bool') -> 'None'",
+    "_main_file_provenance_token": "(self, conn: 'sqlite3.Connection') -> '_MainFileProvenanceToken'",
+    "_validate_main_file_provenance_token": "(self, conn: 'sqlite3.Connection', token: '_MainFileProvenanceToken') -> 'None'",
     "acknowledge_notifications": "(self, sent_ids: 'Sequence[str]' = (), failed_ids: 'Sequence[str]' = (), uncertain_ids: 'Sequence[str]' = (), *, max_attempts: 'int' = 5) -> 'dict[str, list[str]]'",
     "bind_engineer_command_backup_authority": "(self, authority: 'Any') -> 'None'",
     "_required_engineer_backup_authority": "(self) -> 'Any | None'",

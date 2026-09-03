@@ -622,9 +622,9 @@ async def test_live_staffing_question_executes_one_authorized_source_search_afte
     authority = file_turn_authority(STAFF_REQUEST)
     assert authority.proved("local_read")
     authorized_schemas = kernel.get_tool_definitions(actor, topic="файл")
-    assert any(
-        str((item.get("function") or {}).get("name") or "") == "source_search" for item in authorized_schemas
-    )
+    offered = {str((item.get("function") or {}).get("name") or "") for item in authorized_schemas}
+    assert "source_search" not in offered
+    assert "archive_search" in offered
     model_visible_schemas = _file_turn_capability_tools(authorized_schemas, authority)
     assert all(
         str((item.get("function") or {}).get("name") or "") != "source_search"
