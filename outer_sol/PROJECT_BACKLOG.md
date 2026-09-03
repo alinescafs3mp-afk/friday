@@ -1,6 +1,6 @@
 # Friday: canonical project backlog
 
-Updated: 2026-09-03
+Updated: 2026-09-03 (R8I remainder on `main` `a914944f`; owner-parked rows moved out of the live queue)
 
 This is the project's only backlog and mutable status register. It owns the
 current production identity, execution order, acceptance gaps and owner actions.
@@ -79,8 +79,13 @@ fail-closed activation gate. The secondary runtime admission is now refreshed
 on genuine eligible assist demand, after every static/code-owned promotion gate
 and before model traffic. S5 measured cognition and exact 40k lease adoption
 are live. S6 mission, reminder and Telegram recovery plus Telegram
-browse-to-full-document closure are live; physical Android acceptance remains
-owner/device-bound.
+browse-to-full-document closure are live. S4-R8I runtime activation is not a
+second exact owner: live dialogue already dispatches exact window, temporal and
+graph through `archive_search` on `0.208.1`. The parked competing invocation
+patch is discarded. `main` `a914944f` additionally refuses to start those exact
+lanes on a generic continuation; production still runs `8b6a8c13` until the
+next accepted release. Physical Android, P0H deletion, off-machine mirror and
+provider-credential rotation are owner-parked and are not in the live queue.
 
 ## Operating rules
 
@@ -784,16 +789,24 @@ checks.
   product convergence.
 - Old WIP blobs, old V12 model-first branch and PLAN-002/004: superseded.
 - Broad exploit validation: no work without separate scope and safe target.
+- Owner-parked 2026-09-03 (Pandora; not the live queue). Re-entry needs an
+  explicit owner request. Named evidence is still required before any of these
+  can be marked complete:
+  - P0H reviewed bounded deletion — one-shot maintenance authority; no
+    apply/delete while Linux cannot prove global open-reference absence.
+  - S6 physical Android / Obsidian round-trip — owner and device. Do not
+    touch the companion plugin without a separate request.
+  - Off-machine backup/file mirror — implementation present, target empty.
+  - External web-search credential rotation at the provider, then the single
+    protected runtime secret.
+  - Parked Sol R8I worktree/patch under `~/.jericho/runtime/friday-s4-r8i-exact-runtime.worktree`
+    and `~/.jericho/grok-takeover/patches/s4-r8i-exact-runtime.unstaged.diff`.
+    Do not merge it; it fights the landed dispatch owner.
 
 ## Owner/external actions
 
-- Configure and verify an off-machine backup/file mirror; the implementation is
-  present but an empty target leaves the installation without an offsite copy.
-- Rotate the external web-search credential at its provider, then update the
-  single protected runtime secret. Local duplicate cleanup did not revoke the
-  old value.
-- S6 physical Android acceptance requires the owner and device; all other work
-  proceeds independently.
+- S3 Supervisor promotion remains observation-bound: one genuine eligible
+  current-file-plus-public-web consumed witness. Do not fabricate traffic.
 
 ## Standing lead-architect checklist
 
@@ -825,21 +838,19 @@ checklist elsewhere.
       `0.208.1` / `8b6a8c13` / tree `5587e4c3` / wheel `1cadf576` /
       schema 50. Production observation for scheduled work stays honestly
       `STALE` on the `0.208.0` / `75b165a2` artifact.
+- [x] S4-R8I: competing invocation-local runtime discarded. Exact lanes
+      already dispatch through landed `archive_search` on `0.208.1`. Unique
+      remainder — generic continuation must not start a fresh exact selector —
+      is on `main` `a914944f`. Not a production deploy.
 
 ### Open and implementable
 
-None. Remaining rows are owner, device, observation or secret-bound.
+None.
 
 ### Open and blocked
 
-- [ ] P0H reviewed bounded deletion — owner one-shot maintenance authority;
-      Linux still cannot prove global open-reference absence. No apply/delete.
 - [ ] S3 Supervisor promotion — observation-bound. Need a genuine eligible
       current-file-plus-public-web consumed witness. Do not fabricate traffic.
-- [ ] S6 physical Android / Obsidian round-trip — owner and device.
-- [ ] Off-machine backup/file mirror — implementation present, target empty.
-- [ ] Rotate the external web-search credential at the provider, then update
-      the single protected runtime secret.
 
 ### Operating invariants (never "done", always in force)
 
