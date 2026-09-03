@@ -51576,8 +51576,7 @@ class AgentRuntime:
         )
         if isolated_current_file_web_compare_turn:
             compare_current_file_public_web_query = (
-                extract_compare_current_file_public_web_query(routing_message)
-                or independent_public_web_query
+                extract_compare_current_file_public_web_query(routing_message) or independent_public_web_query
             )
         elif (
             isolated_explicit_public_web_turn
@@ -73417,11 +73416,7 @@ class AgentRuntime:
                 }
             )
             return
-        if (
-            turn_auth.proved("local_read")
-            and not turn_auth.proved("web")
-            and not sealed_compare_query
-        ):
+        if turn_auth.proved("local_read") and not turn_auth.proved("web") and not sealed_compare_query:
             return
         web_message, _local_remainder = _file_effect_projection(message, turn_auth, "web")
         asked_outright = asks_for_the_web(web_message) or bool(

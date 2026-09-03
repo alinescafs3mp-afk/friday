@@ -6099,8 +6099,7 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
                         "action": "transient",
                         "category": "compare_current_file_web",
                         "reason": (
-                            "сравнение текущего файла с публичным вебом — команда, "
-                            "а не материал архива"
+                            "сравнение текущего файла с публичным вебом — команда, а не материал архива"
                         ),
                     }
                 elif extract_independent_public_web_query(message):
