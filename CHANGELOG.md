@@ -1,3 +1,12 @@
+## 0.208.4 — 2026-09-03
+
+### Semantic supervisor assist candidate
+
+- Distinct sealed candidate for the evidence-gated `shadow→assist` ENV
+  transition; assist stays off until that one-shot operator consume.
+- SQLite remains at schema 50; exact `0.208.3` is the predecessor and
+  `0.207.90` the fallback.
+
 ## 0.208.3 — 2026-09-03
 
 ### Supervisor shadow timeout after primary
