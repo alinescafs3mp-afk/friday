@@ -207,7 +207,7 @@ failed/error/skipped-тест в любой фазе делает гейт кр�
 Для optional GPT-OSS secondary brain начиная с 0.207.11 дополнительно:
 
 - release принимается и первый раз запускается без `FRIDAY_SECONDARY_LLM_*`:
-  health имеет `status=ok`, `version=0.208.4`, `secondary.mode=disabled`,
+  health имеет `status=ok`, `version=0.208.5`, `secondary.mode=disabled`,
   `secondary.state=disabled` и `secondary.available=false`;
 - `ACCEPTED_SECONDARY_RUNTIME_PROFILES` содержит ровно finalist
   `gptoss20b-2335df123cac7fc0e13e347cde1e1ffa8562daafcaf0fc76ade1a851d2b0ff1f`
@@ -496,7 +496,7 @@ failed/error/skipped-тест в любой фазе делает гейт кр�
 - post-context load допускает bounded convergence не более 20 секунд с шагом
   50 мс только для valid same-epoch busy; invalid/epoch/deadline fail-closed, а
   initial idle и post-cancellation quiet остаются строгими;
-- final startup health имеет `status=ok`, `version=0.208.4`, configured/installed,
+- final startup health имеет `status=ok`, `version=0.208.5`, configured/installed,
   `canary`, routes `[archive_read, file_read]`, точный `profile_id`,
   `verified_context_tokens=40960` и непустой public `attestation_sha256`;
 - q38 выбирает только минимально достаточный closed tier из
@@ -605,6 +605,8 @@ failed/error/skipped-тест в любой фазе делает гейт кр�
   `0.207.90` immutable fallback;
 - `0.208.4/schema50` принимает exact `0.208.3` как previous и сохраняет
   `0.207.90` immutable fallback;
+- `0.208.5/schema50` принимает exact `0.208.3` как previous (`0.208.4` sibling
+  не стал live) и сохраняет `0.207.90` immutable fallback;
 - activation не выполняет retention deletion: destructive apply требует exact
   scope, reviewed plan path+digest, максимум 16 candidates на batch,
   restart-first resume и финальную повторную проверку namespace/DR epoch;
@@ -840,7 +842,9 @@ fallback. `0.208.3/schema50` использует exact
 `0.208.2/schema50` как previous и exact `0.207.90/schema50` как immutable
 fallback. `0.208.4/schema50` использует exact
 `0.208.3/schema50` как previous и exact `0.207.90/schema50` как immutable
-fallback. Исторический переход
+fallback. `0.208.5/schema50` использует exact
+`0.208.3/schema50` как previous (`0.208.4` sibling не стал live) и exact
+`0.207.90/schema50` как immutable fallback. Исторический переход
 `0.207.90` напрямую от `0.207.84`
 сохраняется в legacy bridge и не переопределяется.
 Поштучная замена файлов внутри установленного venv запрещена.

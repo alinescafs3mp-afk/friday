@@ -19,6 +19,7 @@ import json
 import os
 import re
 import stat
+import sys
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from enum import StrEnum
@@ -539,6 +540,37 @@ def _release_manifest_is_well_formed(raw: bytes) -> bool:
             return False
         paths.append(relative)
     return paths == sorted(paths) and len(paths) == len(set(paths))
+
+
+def resolve_installed_release_root(
+    package_parent: Path,
+    *,
+    prefix: Path | None = None,
+) -> Path:
+    """Prefer the sealed sibling that owns the running ``venv/bin/python``.
+
+    Wheel-only ``friday.server`` lives under
+    ``<release>/venv/lib/pythonX/site-packages/friday``.  ``package_parent`` is
+    therefore site-packages, which has no ``artifacts/release-tree.sha256``.
+    ``sys.prefix`` is ``<release>/venv``; its parent is the installed release.
+    Tests and source checkouts keep ``package_parent`` when that manifest is
+    absent.
+    """
+
+    if not isinstance(package_parent, Path):
+        raise TypeError("package_parent must be a pathlib.Path")
+    if prefix is not None and not isinstance(prefix, Path):
+        raise TypeError("prefix must be a pathlib.Path")
+    resolved_parent = package_parent.resolve()
+    resolved_prefix = Path(sys.prefix if prefix is None else prefix).resolve()
+    release_root = resolved_prefix.parent
+    manifest = release_root / "artifacts" / "release-tree.sha256"
+    try:
+        if manifest.is_file() and not manifest.is_symlink():
+            return release_root
+    except OSError:
+        return resolved_parent
+    return resolved_parent
 
 
 def derive_installed_release_tree_sha256(release_root: Path) -> str | None:
@@ -1347,6 +1379,7 @@ __all__ = [
     "SUPERVISOR_ASSIST_ACTIVATION_STATUS_SCHEMA",
     "derive_installed_release_tree_sha256",
     "load_assist_promotion_activation",
+    "resolve_installed_release_root",
     "load_assist_promotion_live_evidence",
     "parse_assist_promotion_live_evidence",
     "scheduler_admission_snapshot_from_status",

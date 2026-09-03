@@ -4,6 +4,7 @@ import json
 import time
 import uuid
 from dataclasses import replace
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -58,6 +59,31 @@ def _signed_bridge_post(client: TestClient, settings: Any, payload: dict[str, An
             ),
         },
     )
+
+
+def test_health_status_drops_controller_restart_recovery_aggregate() -> None:
+    from friday.server import _semantic_supervisor_health_status
+
+    class Runtime:
+        def semantic_supervisor_status(self) -> dict[str, object]:
+            return {
+                "schema": "friday.semantic-supervisor-assist-controller-status.v1",
+                "ordinary_event_success_total": 0,
+                "restart_recovery": {
+                    "schema": "friday.supervisor-assist-restart-status.v1",
+                    "started": False,
+                },
+            }
+
+    status = _semantic_supervisor_health_status(
+        Runtime(),
+        SimpleNamespace(semantic_supervisor_mode="assist"),
+        None,
+    )
+    assert "restart_recovery" not in status
+    assert status["ordinary_event_success_total"] == 0
+    assert status["schema"] == "friday.semantic-supervisor-assist-controller-status.v1"
+    assert "activation" in status
 
 
 def test_health_exposes_closed_semantic_supervisor_default(settings: Any) -> None:

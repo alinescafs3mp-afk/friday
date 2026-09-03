@@ -28,6 +28,7 @@ from friday.orchestration.supervisor_assist_activation import (
     RawAssistPromotionActivationSettings,
     derive_installed_release_tree_sha256,
     load_assist_promotion_live_evidence,
+    resolve_installed_release_root,
     parse_assist_promotion_live_evidence,
     scheduler_admission_snapshot_from_status,
 )
@@ -1049,6 +1050,27 @@ def test_real_server_loader_requires_exact_consumed_representative_window(
     assert material.configured is configured
     assert material.reason.value == reason
     assert loaded_binding == binding
+
+
+def test_wheel_installed_release_root_is_the_venv_parent_not_site_packages(
+    tmp_path: Path,
+) -> None:
+    root, _digest = _release_root(tmp_path)
+    venv = root / "venv"
+    venv.mkdir()
+    package_parent = tmp_path / "site-packages"
+    package_parent.mkdir()
+
+    assert resolve_installed_release_root(package_parent, prefix=venv) == root.resolve()
+
+
+def test_missing_release_manifest_keeps_package_parent(tmp_path: Path) -> None:
+    package_parent = tmp_path / "repo"
+    package_parent.mkdir()
+    prefix = tmp_path / "unrelated-venv"
+    prefix.mkdir()
+
+    assert resolve_installed_release_root(package_parent, prefix=prefix) == package_parent.resolve()
 
 
 def test_release_tree_identity_is_the_exact_installed_manifest_bytes(tmp_path: Path) -> None:

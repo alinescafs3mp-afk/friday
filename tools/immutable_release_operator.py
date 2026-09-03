@@ -927,6 +927,7 @@ _SEMANTIC_SUPERVISOR_ACTIVATION_STATUS_KEYS = frozenset(
         "evidence_accepted",
         "acceptance_authority",
         "body_free",
+        "representative_window_verified",
     }
 )
 _SEMANTIC_SUPERVISOR_ASSIST_CONTROLLER_STATUS_SCHEMA = (
@@ -1843,6 +1844,7 @@ def _semantic_supervisor_health_identity_matches(
             and activation.get("evidence_loaded") is True
             and activation.get("evidence_authority") == "production_joined"
             and activation.get("operator_gate_enabled") is True
+            and activation.get("representative_window_verified") is True
             and activation.get("promotion_admitted") is False
             and activation.get("evidence_accepted") is False
             and activation.get("acceptance_authority") == "none"

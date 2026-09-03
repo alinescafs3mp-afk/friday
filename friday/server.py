@@ -150,6 +150,7 @@ from friday.orchestration.supervisor_assist_activation import (
     AssistPromotionActivationMaterial,
     RawAssistPromotionActivationSettings,
     load_assist_promotion_activation,
+    resolve_installed_release_root,
 )
 from friday.orchestration.supervisor_assist_composition import (
     build_supervisor_assist_production_runtime,
@@ -409,7 +410,9 @@ def _load_semantic_supervisor_activation_material(
         bindings = operational_capability_snapshot()
         material = load_assist_promotion_activation(
             raw,
-            installed_release_root=Path(__file__).resolve(strict=True).parents[1],
+            installed_release_root=resolve_installed_release_root(
+                Path(__file__).resolve(strict=True).parents[1],
+            ),
             scheduler_public_status=_secondary_status_projection(
                 secondary_brain,
                 "public_status",
@@ -446,6 +449,7 @@ def _semantic_supervisor_health_status(
         status = dict(raw_status) if isinstance(raw_status, Mapping) else {}
     else:
         status = {}
+    status.pop("restart_recovery", None)
     if not status:
         status = {
             "schema": "friday.semantic-supervisor-shadow-runtime.v1",
@@ -3044,7 +3048,9 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
                         effect_shadow_activation_status,
                     ) = load_configured_supervisor_effect_maturity(
                         settings,
-                        installed_release_root=Path(__file__).resolve(strict=True).parents[1],
+                        installed_release_root=resolve_installed_release_root(
+                            Path(__file__).resolve(strict=True).parents[1],
+                        ),
                         binding_snapshot=effect_read_binding_snapshot,
                         effect_binding_snapshot=effect_binding_snapshot,
                     )

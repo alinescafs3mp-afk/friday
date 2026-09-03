@@ -1,3 +1,14 @@
+## 0.208.5 — 2026-09-04
+
+### Assist health identity on wheel-only installs
+
+- Resolves `artifacts/release-tree.sha256` from the sealed sibling that owns
+  `venv/bin/python`, not from site-packages.
+- Drops controller `restart_recovery` from `/api/health` and binds
+  `representative_window_verified` on the assist activation key set.
+- SQLite remains at schema 50; exact live predecessor is `0.208.3`
+  (`0.208.4` never cleared) and `0.207.90` the fallback.
+
 ## 0.208.4 — 2026-09-03
 
 ### Semantic supervisor assist candidate

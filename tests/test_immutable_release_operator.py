@@ -5698,6 +5698,7 @@ def _semantic_supervisor_health_payload(mode: str) -> dict[str, object]:
             "evidence_loaded": True,
             "evidence_authority": "production_joined",
             "operator_gate_enabled": True,
+            "representative_window_verified": True,
             "canary_actor_binding_count": 0 if mode == "assist" else 2,
             "promotion_admitted": False,
             "evidence_accepted": False,
@@ -5780,6 +5781,7 @@ def test_semantic_supervisor_promoted_health_binds_loaded_activation_material(mo
         ("evidence_loaded", False),
         ("evidence_authority", "self_reported"),
         ("operator_gate_enabled", False),
+        ("representative_window_verified", False),
         ("promotion_admitted", True),
         ("body_free", False),
     )
@@ -5820,6 +5822,16 @@ def test_semantic_supervisor_promoted_health_binds_loaded_activation_material(mo
                 mutated,
                 expected_mode=mode,
             )
+
+    restart_recovery = json.loads(json.dumps(payload))
+    restart_recovery["semantic_supervisor"]["restart_recovery"] = {
+        "schema": "friday.supervisor-assist-restart-status.v1",
+        "started": False,
+    }
+    assert not operator._semantic_supervisor_health_identity_matches(  # noqa: SLF001
+        restart_recovery,
+        expected_mode=mode,
+    )
 
     discarded = json.loads(json.dumps(payload))
     discarded["semantic_supervisor"] = {
