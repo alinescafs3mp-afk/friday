@@ -85,7 +85,7 @@ steps, capabilities, commands, paths, IDs, tools, effects, review, or publicatio
 """
 _SMALL_TALK = ("привет", "здравствуй", "добрый", "hello", "hi", "hey", "спасибо", "ок", "ok")
 _WEB_CUES = ("интернет", "web", "публичн", "актуальн", "нынешн", "в сети", "current public")
-_COMPARE_CUES = ("сравни", "отлич", "разниц", "versus", " vs ", "сопостав")
+_COMPARE_CUES = ("сравни", "отлич", "разниц", "versus", " vs ", "сопостав", "compare")
 _ARCHIVE_CUES = ("архив", "в базе", "найди документ", "в знаниях")
 _HTTP_URL_TOKEN = re.compile(r"\bhttps?://[^\s<>\"'{}]*", re.IGNORECASE)
 _PUBLIC_HTTP_URL = re.compile(

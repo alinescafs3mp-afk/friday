@@ -13,6 +13,9 @@ from typing import Any
 
 import pytest
 
+from friday.orchestration.current_file_web_query import (
+    extract_compare_current_file_public_web_query,
+)
 from friday.orchestration.transient_web_comparison import (
     TRANSIENT_WEB_ADAPTER_ID,
     TRANSIENT_WEB_SECURITY_ID,
@@ -20,6 +23,7 @@ from friday.orchestration.transient_web_comparison import (
     TransientWebComparisonError,
     TransientWebEvidenceStatus,
     TransientWebUnavailableReason,
+    seal_compare_current_file_public_web_query,
     seal_explicit_public_web_query,
 )
 from friday.permissions import (
@@ -391,3 +395,67 @@ async def test_malformed_or_unbound_provider_report_fails_closed(storage) -> Non
             current_user_message=message,
         )
     assert len(web.calls) == 1
+
+
+@pytest.mark.parametrize(
+    ("message", "expected"),
+    [
+        (
+            "Найди в интернете текущие публичные правила и сравни их с этим договором.",
+            "текущие публичные правила",
+        ),
+        (
+            "Сравни этот договор с текущими публичными правилами в интернете.",
+            "текущими публичными правилами",
+        ),
+        (
+            "Compare this contract with current public HTTP Date header rules on the web.",
+            "current public HTTP Date header rules",
+        ),
+    ],
+)
+def test_compare_file_web_extracts_independent_public_topic(message: str, expected: str) -> None:
+    assert extract_compare_current_file_public_web_query(message) == expected
+
+
+@pytest.mark.parametrize(
+    "message",
+    [
+        "Обобщи весь документ и поищи актуальные данные в интернете.",
+        "Обобщи документ и сравни с текущими публичными правилами в интернете.",
+        "Найди в интернете то, что написано в этом файле.",
+        "Сравни этот файл с интернетом.",
+        "Перескажи файл.",
+        "Найди в интернете курс доллара.",
+        "Сравни этот договор с тем что в файле.",
+        "Сравни договор с текущими публичными правилами в интернете.",
+    ],
+)
+def test_compare_file_web_extraction_fails_closed_when_topic_is_the_file(message: str) -> None:
+    assert extract_compare_current_file_public_web_query(message) == ""
+
+
+@pytest.mark.anyio
+async def test_compare_file_web_seal_executes_only_the_public_topic(
+    storage,
+) -> None:
+    actor = _actor(storage)
+    authorization = _grant(storage, actor)
+    message = "Найди в интернете текущие публичные правила и сравни их с этим договором."
+    plan = seal_compare_current_file_public_web_query(
+        current_user_message=message,
+        actor=actor,
+        conversation_id="conversation-1",
+    )
+    web = _RecordingWeb(_report(_source(1)))
+    evidence = await TransientWebComparisonAdapter(authorization, web).research(
+        plan=plan,
+        actor=actor,
+        conversation_id="conversation-1",
+        current_user_message=message,
+    )
+    assert web.calls == [("текущие публичные правила", 3)]
+    assert evidence.status is TransientWebEvidenceStatus.SOURCED
+    assert evidence.sources
+    assert "договор" not in web.calls[0][0].casefold()
+    assert "файл" not in web.calls[0][0].casefold()

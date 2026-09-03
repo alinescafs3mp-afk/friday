@@ -7,9 +7,11 @@ reader -- and returns an in-memory projection.  It does not publish an answer
 and it is not a router entry point.
 
 Most importantly, the outbound query is not accepted as an argument.  Code can
-seal it only from one explicitly quoted public clause in the exact current user
-message.  A later executor must present that same message, actor and
-conversation scope again before the single outbound call.
+seal it only from the current user message: either one explicitly quoted public
+clause, or the independent public-web topic of an admitted current-file
+comparison turn.  File bytes never enter the sealer.  A later executor must
+present that same message, actor and conversation scope again before the
+single outbound call.
 """
 
 from __future__ import annotations
@@ -27,6 +29,9 @@ from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Any, Protocol
 
+from friday.orchestration.current_file_web_query import (
+    extract_compare_current_file_public_web_query,
+)
 from friday.orchestration.supervisor_contracts import SupervisorContractError, parse_query_intent
 from friday.permissions import ActorContext, AuthorizationService
 
@@ -174,6 +179,26 @@ def _extract_explicit_public_query(current_user_message: object) -> tuple[str, s
     return query, _sha256_bytes(encoded)
 
 
+def _extract_compare_current_file_public_query(current_user_message: object) -> tuple[str, str]:
+    encoded = _message_bytes(current_user_message)
+    query = extract_compare_current_file_public_web_query(current_user_message)
+    if not query:
+        raise TransientWebComparisonError("compare-current-file public-web topic is not separable")
+    return query, _sha256_bytes(encoded)
+
+
+def _bound_query_candidates(current_user_message: object) -> tuple[tuple[str, str], ...]:
+    """Return every closed query this exact message may mint."""
+
+    candidates: list[tuple[str, str]] = []
+    for extractor in (_extract_explicit_public_query, _extract_compare_current_file_public_query):
+        try:
+            candidates.append(extractor(current_user_message))
+        except TransientWebComparisonError:
+            continue
+    return tuple(candidates)
+
+
 def _plan_seal(fields: Mapping[str, object]) -> str:
     payload = json.dumps(
         dict(fields),
@@ -250,6 +275,37 @@ def seal_explicit_public_web_query(
         "security_id": TRANSIENT_WEB_SECURITY_ID,
         "current_message_sha256": message_sha256,
         "query_sha256": _sha256_text(query, label="explicit public web query"),
+        "actor_sha256": _actor_sha256(actor),
+        "conversation_scope_sha256": _scope_sha256(conversation_id),
+        "max_sources": _MAX_SOURCES,
+    }
+    return SealedPublicWebQuery(
+        current_message_sha256=message_sha256,
+        query_sha256=str(fields["query_sha256"]),
+        actor_sha256=str(fields["actor_sha256"]),
+        conversation_scope_sha256=str(fields["conversation_scope_sha256"]),
+        max_sources=_MAX_SOURCES,
+        _query=query,
+        _seal=_plan_seal(fields),
+        _process_authority=_PROCESS_AUTHORITY,
+    )
+
+
+def seal_compare_current_file_public_web_query(
+    *,
+    current_user_message: str,
+    actor: ActorContext,
+    conversation_id: str | None,
+) -> SealedPublicWebQuery:
+    """Mint outbound authority from the independent public topic of a file compare."""
+
+    query, message_sha256 = _extract_compare_current_file_public_query(current_user_message)
+    fields: dict[str, object] = {
+        "schema": TRANSIENT_WEB_PLAN_SCHEMA,
+        "adapter_id": TRANSIENT_WEB_ADAPTER_ID,
+        "security_id": TRANSIENT_WEB_SECURITY_ID,
+        "current_message_sha256": message_sha256,
+        "query_sha256": _sha256_text(query, label="compare-current-file public web query"),
         "actor_sha256": _actor_sha256(actor),
         "conversation_scope_sha256": _scope_sha256(conversation_id),
         "max_sources": _MAX_SOURCES,
@@ -721,10 +777,16 @@ class TransientWebComparisonAdapter:
         # Re-running __post_init__ catches a deliberately corrupted object even
         # if a caller bypassed frozen dataclass assignment with object.__setattr__.
         plan.__post_init__()
-        query, message_sha256 = _extract_explicit_public_query(current_user_message)
+        bound = False
+        for query, message_sha256 in _bound_query_candidates(current_user_message):
+            if (
+                message_sha256 == plan.current_message_sha256
+                and _sha256_text(query, label="executed public web query") == plan.query_sha256
+            ):
+                bound = True
+                break
         if (
-            message_sha256 != plan.current_message_sha256
-            or _sha256_text(query, label="executed public web query") != plan.query_sha256
+            not bound
             or _actor_sha256(actor) != plan.actor_sha256
             or _scope_sha256(conversation_id) != plan.conversation_scope_sha256
         ):
