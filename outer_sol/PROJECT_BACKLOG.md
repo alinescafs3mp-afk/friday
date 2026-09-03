@@ -395,12 +395,13 @@ file, prompt claim or fabricated observation.
 
 Remaining promotion work is observation-bound, not implementation-bound.
 
-The primary now admits one current-turn file plus an independent sealed
-public-web topic from the same utterance: the file stays local, the provider
-query is the extracted public topic, and file bytes/filenames/deictics never
-cross that boundary. Same-sentence summarize+web, two files, restored/history
-carriers and leftover file nouns still fail closed. Assist stays off until a
-genuine consumed representative-window witness exists.
+The primary keeps files local and sends only an independent sealed public-web
+topic. Current files (one or several), a restored prior file, and an unused
+current upload no longer veto an independent public-web clause. Same-sentence
+summarize without a sealable public topic stays local and skips web instead of
+refusing the whole turn. File-as-query and leftover file nouns still fail
+closed for the outbound query. Assist stays off until a genuine consumed
+representative-window witness exists.
 
 Demand-refresh acceptance: every static eligibility, evidence, actor and
 capability gate is evaluated before secondary traffic; only a genuine eligible
