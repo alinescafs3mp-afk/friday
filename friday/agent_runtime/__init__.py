@@ -34379,10 +34379,10 @@ def _tool_request_boundaries(tool_name: str, arguments: Any) -> tuple[str, str]:
             continue
         if key == "known_at":
             normalized[key] = normalize_known_at(cleaned)
-        elif tool_name == "memory_search":
+        elif tool_name in {"memory_search", "archive_search"}:
             parsed = iso_date(cleaned)
             if parsed is None:
-                raise ValueError("requested as_of is invalid for memory_search")
+                raise ValueError(f"requested as_of is invalid for {tool_name}")
             normalized[key] = parsed
         else:
             normalized[key] = normalize_event_date(cleaned)[0]
@@ -34446,6 +34446,50 @@ def _tool_temporal_contract(
     if raw.get("temporal_basis") != "valid_time":
         raise ValueError(f"{label} returned an unsupported valid-time basis")
     return "", as_of, "", False, "", "valid_time"
+
+
+def _closed_temporal_axis(value: object) -> str:
+    if value is None:
+        return ""
+    if type(value) is not str:
+        raise ValueError("temporal axis is not text")
+    return value
+
+
+def _archive_search_memory_graph_envelope(tool_result: Any) -> dict[str, Any] | None:
+    """Project one exact memory page into the released graph-adoption envelope."""
+
+    payload = getattr(tool_result, "archive_exact_model_payload", None)
+    if type(payload) is not dict:
+        return None
+    memory = payload.get("memory")
+    if type(memory) is not dict:
+        return None
+    pages = memory.get("pages")
+    if type(pages) is not list or not pages:
+        return None
+    first = pages[0]
+    if type(first) is not dict:
+        return None
+    graph = first.get("graph_context")
+    if type(graph) is not dict:
+        return None
+    echo = {
+        "as_of": _closed_temporal_axis(first.get("as_of")),
+        "known_at": _closed_temporal_axis(first.get("known_at")),
+        "known_at_floor": _closed_temporal_axis(first.get("known_at_floor")),
+        "history_complete": first.get("history_complete") is True,
+        "identity_basis": first.get("identity_basis") if type(first.get("identity_basis")) is str else "",
+        "temporal_basis": first.get("temporal_basis") if type(first.get("temporal_basis")) is str else "",
+    }
+    query = first.get("query") if type(first.get("query")) is str else ""
+    if not query and type(graph.get("query")) is str:
+        query = graph["query"]
+    return {
+        **echo,
+        "query": query,
+        "graph_context": {**graph, **echo, "query": query or str(graph.get("query") or "")},
+    }
 
 
 def _historical_tool_graph_context(
@@ -41994,7 +42038,7 @@ class AgentRuntime:
             str(getattr(tool_spec, "name", "") or "") != "message_search"
             or str(getattr(tool_spec, "security_id", "") or "") != "search.use"
             or str(getattr(tool_spec, "risk", "") or "") != "observe"
-            or scopes != frozenset({"dialogue", "internal", "mission"})
+            or scopes != frozenset({"internal", "mission"})
             or not callable(getattr(tool_spec, "handler", None))
             or not callable(authorize)
             or context.user_id != actor.user_id
@@ -43129,6 +43173,24 @@ class AgentRuntime:
         )
 
     @staticmethod
+    def _archive_search_local_contour_owns_turn(
+        context: AgentContext,
+        message: str,
+        attachments: Sequence[Mapping[str, Any]] | None,
+    ) -> bool:
+        """Keep named uploader/file/source contours off the generic archive facade."""
+
+        if AgentRuntime._archive_search_has_competing_carrier(context, attachments):
+            return True
+        literal = _archive_search_literal_free_message(message)
+        speech = file_turn_authority(literal).speech
+        return bool(
+            _person_document_inventory_request(speech)
+            or _named_uploader_exact_file_request(literal) is not None
+            or _archive_search_has_explicit_source_person(speech)
+        )
+
+    @staticmethod
     def _isolate_archive_search_context(
         context: AgentContext,
         message: str,
@@ -43482,7 +43544,7 @@ class AgentRuntime:
             or str(getattr(tool_spec, "security_id", "") or "") != "search.use"
             or str(getattr(tool_spec, "risk", "") or "") != "observe"
             or frozenset(getattr(tool_spec, "allowed_execution_scopes", ()) or ())
-            != frozenset({"dialogue", "internal", "mission"})
+            != frozenset({"internal", "mission"})
             or not callable(getattr(tool_spec, "handler", None))
         ):
             return "unavailable"
@@ -64329,9 +64391,7 @@ class AgentRuntime:
             not autonomous_engineer and self._archive_search_requested(context, message)
         )
         archive_search_corpora = (
-            _archive_search_code_owned_corpora(message)
-            if archive_search_requested or autonomous_engineer
-            else ()
+            _archive_search_code_owned_corpora(message) if archive_search_was_offered else ()
         )
         archive_search_competing = bool(
             archive_search_requested
@@ -64364,15 +64424,22 @@ class AgentRuntime:
                 if str((tool.get("function") or {}).get("name") or tool.get("name") or "")
                 == _ARCHIVE_SEARCH_TOOL_NAME
             ]
-        elif archive_search_was_offered and not autonomous_engineer:
+        elif not autonomous_engineer and self._archive_search_local_contour_owns_turn(
+            context,
+            message,
+            attachments,
+        ):
             tools[:] = [
                 tool
                 for tool in tools
                 if str((tool.get("function") or {}).get("name") or tool.get("name") or "")
                 != _ARCHIVE_SEARCH_TOOL_NAME
             ]
-        archive_search_current_turn_authorized = bool(
-            archive_search_was_offered and (archive_search_requested or autonomous_engineer)
+        archive_search_current_turn_authorized = any(
+            str((tool.get("function") or {}).get("name") or tool.get("name") or "")
+            == _ARCHIVE_SEARCH_TOOL_NAME
+            for tool in tools
+            if isinstance(tool, Mapping)
         )
         if archive_search_competing or (
             archive_search_requested and not archive_search_current_turn_authorized
@@ -67112,11 +67179,18 @@ class AgentRuntime:
                     )
                 if tool_result.success:
                     raw_tool_data = tool_result.data
-                    graph_bearing = _graph_tool_result_is_graph_bearing(call.name, raw_tool_data)
+                    graph_tool_name = call.name
+                    graph_payload: Any = raw_tool_data
+                    if call.name == _ARCHIVE_SEARCH_TOOL_NAME:
+                        archive_graph = _archive_search_memory_graph_envelope(tool_result)
+                        if archive_graph is not None:
+                            graph_tool_name = "memory_search"
+                            graph_payload = archive_graph
+                    graph_bearing = _graph_tool_result_is_graph_bearing(graph_tool_name, graph_payload)
                     try:
                         historical_context = _historical_tool_graph_context(
-                            call.name,
-                            raw_tool_data,
+                            graph_tool_name,
+                            graph_payload,
                             call.arguments,
                         )
                         candidate_boundary = (
@@ -67141,7 +67215,7 @@ class AgentRuntime:
                         # projection is not.  Keeping it inside the historical
                         # branch let current entity metadata and relation payloads
                         # bypass every size/field allowlist.
-                        if graph_bearing:
+                        if graph_bearing and call.name != _ARCHIVE_SEARCH_TOOL_NAME:
                             tool_result.data = _safe_graph_tool_payload(
                                 call.name,
                                 raw_tool_data,

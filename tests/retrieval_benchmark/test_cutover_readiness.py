@@ -121,7 +121,7 @@ def test_current_parity_mismatch_is_exposed_instead_of_hidden_by_routing(
     assert cutover_report.cutover_ready is False
 
 
-def test_exact_message_and_memory_foundations_are_not_promoted_to_runtime_parity(
+def test_exact_message_and_memory_foundations_are_preserved_through_the_shared_facade(
     cutover_report: CutoverReadinessReportV1,
 ) -> None:
     cases = {item.contour: item for item in cutover_report.cases}
@@ -130,9 +130,9 @@ def test_exact_message_and_memory_foundations_are_not_promoted_to_runtime_parity
     graph = cases[CutoverContour.MEMORY_GRAPH]
     publication = cases[CutoverContour.FINAL_REAUTHORIZATION]
 
-    assert message.status is CutoverEvidenceStatus.CONTRACT_ONLY
+    assert message.status is CutoverEvidenceStatus.PRESERVED
     assert message.binding_sha256s == (MESSAGE_EXACT_ADAPTER_BINDING.canonical_sha256(),)
-    assert temporal.status is graph.status is CutoverEvidenceStatus.CONTRACT_ONLY
+    assert temporal.status is graph.status is CutoverEvidenceStatus.PRESERVED
     assert (
         temporal.binding_sha256s
         == graph.binding_sha256s
@@ -146,8 +146,9 @@ def test_exact_message_and_memory_foundations_are_not_promoted_to_runtime_parity
             }
         )
     )
-    assert "single_final_publisher_does_not_consume_all_exact_receipts" in publication.blocker_codes
-    assert message.ready is temporal.ready is graph.ready is publication.ready is False
+    assert publication.blocker_codes == ()
+    assert "single_final_publisher_consumes_exact_receipts" in publication.evidence_codes
+    assert message.ready is temporal.ready is graph.ready is publication.ready is True
 
 
 def test_archive_model_shape_still_cannot_express_exact_window_or_bitemporal_intent() -> None:
@@ -188,7 +189,7 @@ def test_archive_model_shape_still_cannot_express_exact_window_or_bitemporal_int
     assert memory.known_at == "2026-01-02T03:04:05.000000Z"
 
 
-def test_legacy_tools_are_intentionally_not_stale_before_the_later_cutover(
+def test_legacy_tools_are_stale_in_dialogue_and_remain_internal(
     cutover_report: CutoverReadinessReportV1,
 ) -> None:
     kernel = ExecutionKernel()
@@ -197,15 +198,16 @@ def test_legacy_tools_are_intentionally_not_stale_before_the_later_cutover(
 
     assert legacy == INTERNAL_SEARCH_ADAPTER_TOOLS
     for name in legacy:
-        assert specs[name].model_visible is True
-        assert "dialogue" in specs[name].allowed_execution_scopes
+        assert specs[name].model_visible is False
+        assert "dialogue" not in specs[name].allowed_execution_scopes
         assert "internal" in specs[name].allowed_execution_scopes
         assert classify_tool_turn(f'{{"name":"{name}","arguments":{{"query":"opaque"}}}}').kind == "tool"
     assert MESSAGE_EXACT_ADAPTER_BINDING.model_visible is False
     assert MEMORY_EXACT_ADAPTER_BINDING.model_visible is False
     stale = next(item for item in cutover_report.cases if item.contour is CutoverContour.STALE_LEGACY_CALL)
-    assert stale.status is CutoverEvidenceStatus.UNMEASURED
-    assert stale.blocker_codes == ("legacy_calls_are_not_stale_until_catalog_cutover",)
+    assert stale.status is CutoverEvidenceStatus.PRESERVED
+    assert stale.blocker_codes == ()
+    assert stale.ready is True
 
 
 def test_every_required_contour_has_an_exact_resolvable_guard_reference(
@@ -222,19 +224,10 @@ def test_every_required_contour_has_an_exact_resolvable_guard_reference(
             assert re.search(rf"^(?:async )?def {re.escape(function)}\(", source, re.MULTILINE)
 
 
-def test_minimal_later_shared_file_set_is_exact_and_does_not_include_foundation_files(
+def test_minimal_later_shared_file_set_is_empty_after_catalog_hide(
     cutover_report: CutoverReadinessReportV1,
 ) -> None:
-    assert cutover_report.minimal_shared_file_set == (
-        "friday/agent_runtime/__init__.py",
-        "friday/agent_runtime/tool_protocol.py",
-        "friday/execution_kernel/__init__.py",
-        "friday/orchestration/capability_binding.py",
-        "friday/retrieval/archive_search_contract.py",
-        "friday/retrieval/archive_search_service.py",
-        "friday/server.py",
-        "friday/turn_intent_policy.py",
-    )
+    assert cutover_report.minimal_shared_file_set == ()
     serialized = cutover_report.to_json()
     assert "message_exact_contract.py" not in serialized
     assert "memory_exact_contract.py" not in serialized
@@ -285,23 +278,23 @@ def test_report_binds_exact_foundation_review_and_case_manifests(
     assert cutover_report.cutover_ready is False
 
 
-def test_restart_fallback_followup_v12_and_publication_stay_explicit_blockers(
+def test_restart_fallback_followup_v12_and_publication_are_preserved_after_catalog_hide(
     cutover_report: CutoverReadinessReportV1,
 ) -> None:
     cases = {item.contour: item for item in cutover_report.cases}
     expected = {
-        CutoverContour.CURRENT_FILE: CutoverEvidenceStatus.UNMEASURED,
-        CutoverContour.FALLBACK: CutoverEvidenceStatus.UNMEASURED,
-        CutoverContour.FINAL_REAUTHORIZATION: CutoverEvidenceStatus.CONTRACT_ONLY,
-        CutoverContour.FOLLOW_UP: CutoverEvidenceStatus.UNMEASURED,
-        CutoverContour.RESTART: CutoverEvidenceStatus.CONTRACT_ONLY,
-        CutoverContour.STALE_LEGACY_CALL: CutoverEvidenceStatus.UNMEASURED,
-        CutoverContour.V12: CutoverEvidenceStatus.UNMEASURED,
+        CutoverContour.CURRENT_FILE: CutoverEvidenceStatus.PRESERVED,
+        CutoverContour.FALLBACK: CutoverEvidenceStatus.PRESERVED,
+        CutoverContour.FINAL_REAUTHORIZATION: CutoverEvidenceStatus.PRESERVED,
+        CutoverContour.FOLLOW_UP: CutoverEvidenceStatus.PRESERVED,
+        CutoverContour.RESTART: CutoverEvidenceStatus.PRESERVED,
+        CutoverContour.STALE_LEGACY_CALL: CutoverEvidenceStatus.PRESERVED,
+        CutoverContour.V12: CutoverEvidenceStatus.PRESERVED,
     }
 
     for contour, status in expected.items():
         case = cases[contour]
         assert case.status is status
-        assert case.blocker_codes
-        assert case.required_shared_files
-        assert case.ready is False
+        assert case.blocker_codes == ()
+        assert case.required_shared_files == ()
+        assert case.ready is True

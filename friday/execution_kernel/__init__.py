@@ -609,11 +609,11 @@ def _storage_read_snapshot(storage: Any, operation: Callable[[], Any]) -> Any:
 # Execution scope is code-owned context, not a model/tool argument.  A mission
 # receives only the bounded gather surface below; every other tool remains a
 # dialogue-only capability even when the mission actor is otherwise authorized
-# to use it.  ``internal`` is narrower still: it lets code-owned migration and
-# parity paths keep exercising the released retrieval adapters after a future
-# dialogue cutover without turning that scope into a model argument.  The kernel
-# checks scope immediately before dispatch as well as when definitions are
-# selected, because the list shown to a model is not a security boundary.
+# to use it.  ``internal`` keeps code-owned migration, prefetch and parity paths
+# on the released retrieval adapters after dialogue cutover without turning that
+# scope into a model argument.  The kernel checks scope immediately before
+# dispatch as well as when definitions are selected, because the list shown to a
+# model is not a security boundary.
 EXECUTION_SCOPES = frozenset({"dialogue", "mission", "internal"})
 MISSION_EXECUTION_TOOLS = frozenset(
     {
@@ -640,11 +640,7 @@ _INTERNAL_SEARCH_ADAPTER_SECURITY_IDS = {
     "source_search": "knowledge.read",
 }
 _INTERNAL_SEARCH_ADAPTER_EXECUTION_SCOPES = {
-    name: (
-        frozenset({"dialogue", "internal", "mission"})
-        if name in MISSION_EXECUTION_TOOLS
-        else frozenset({"dialogue", "internal"})
-    )
+    name: (frozenset({"internal", "mission"}) if name in MISSION_EXECUTION_TOOLS else frozenset({"internal"}))
     for name in INTERNAL_SEARCH_ADAPTER_TOOLS
 }
 
@@ -4148,8 +4144,6 @@ class ExecutionKernel:
             "speak",
             "make_file",
             "remind",
-            "memory_search",
-            "source_search",
             "obsidian_list_vaults",
             "obsidian_list_notes",
             "obsidian_list_templates",
@@ -4158,9 +4152,6 @@ class ExecutionKernel:
         },
         "архив": {
             "archive_search",
-            "memory_search",
-            "source_search",
-            "message_search",
             "what_happened",
             "upcoming",
             "list_tags",
@@ -4213,8 +4204,6 @@ class ExecutionKernel:
             "archive_search",
             "make_file",
             "collect_files",
-            "memory_search",
-            "source_search",
             "what_happened",
             "speak",
             "workspace_create",
@@ -4246,7 +4235,7 @@ class ExecutionKernel:
         "быт": {"remind", "speak"},
         # Про человека отвечает надзор, а не архив. Соседнее правило уже обнуляет
         # найденные документы на таком вопросе — описания приводятся в согласие.
-        "человек": {"user_activity", "user_knowledge_search", "message_search", "speak"},
+        "человек": {"user_activity", "user_knowledge_search", "archive_search", "speak"},
         # Указание о поведении записано ДО хода модели; звать ей тут нечего.
         "правило": {"speak"},
     }
@@ -4326,7 +4315,7 @@ class ExecutionKernel:
             return []
         visible: list[ToolSpec] = []
         for tool in self._tools.values():
-            if not tool.model_visible:
+            if execution_scope == "dialogue" and not tool.model_visible:
                 continue
             if execution_scope not in tool.allowed_execution_scopes:
                 continue
@@ -4405,12 +4394,10 @@ class ExecutionKernel:
             return ToolResult(name, False, error="Authorization denied")
         try:
             if execution_scope == "internal":
-                # Internal adapters will outlive their eventual model-catalog
-                # retirement.  Their code-owned caller must not inherit a stale
-                # request-time preset: resolve account status, current preset and
-                # overrides in one fresh storage snapshot immediately before the
-                # handler boundary.  Dialogue/mission keep their released path
-                # unchanged until the measured cutover.
+                # Internal adapters outlive dialogue-catalog retirement.  Their
+                # code-owned caller must not inherit a stale request-time preset:
+                # resolve account status, current preset and overrides in one
+                # fresh storage snapshot immediately before the handler boundary.
                 storage = self.storage
                 if storage is None:
                     raise AuthorizationError("Internal execution storage is unavailable")
@@ -9747,6 +9734,7 @@ class ExecutionKernel:
                 scopes.add("mission")
             if name in INTERNAL_SEARCH_ADAPTER_TOOLS:
                 scopes.add("internal")
+                scopes.discard("dialogue")
             self.register(
                 ToolSpec(
                     name=name,
@@ -9754,6 +9742,7 @@ class ExecutionKernel:
                     security_id=security_id,
                     risk=risk,
                     allowed_execution_scopes=frozenset(scopes),
+                    model_visible=name not in INTERNAL_SEARCH_ADAPTER_TOOLS,
                     parameters={
                         "type": "object",
                         "properties": properties,

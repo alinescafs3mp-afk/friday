@@ -37,7 +37,7 @@ from friday.retrieval_benchmark.release import (
 CUTOVER_REPORT_SCHEMA: Final = "friday.archive-search-cutover-readiness.body-free.v1"
 CUTOVER_CASE_SCHEMA: Final = "friday.archive-search-cutover-case.body-free.v1"
 HISTORICAL_FAILURE_GROUP_SCHEMA: Final = "friday.archive-search-cutover-failure-group.v1"
-CUTOVER_CASE_MANIFEST_SHA256: Final = "d47727a9bd367e16d3b4740fc9466162cf580a5ba56358ab8c08d47f88fdd6b7"
+CUTOVER_CASE_MANIFEST_SHA256: Final = "0e235d31ad7e902d2483b70f8896d8aa953096b87d99587067780165630fe499"
 
 HISTORICAL_CANDIDATE_SHA: Final = "7848cc45ad8ddda3702b1aa560d1d42d5dea2acc"
 HISTORICAL_BASE_SHA: Final = "9928e83d26061cc3df1198815ca9ac9f4481080f"
@@ -802,6 +802,23 @@ def _blocked_case(
     )
 
 
+def _preserved_case(
+    contour: CutoverContour,
+    evidence: tuple[str, ...],
+    nodes: tuple[str, ...],
+    bindings: tuple[str, ...] = (),
+) -> CutoverCaseV1:
+    return CutoverCaseV1(
+        contour=contour,
+        status=CutoverEvidenceStatus.PRESERVED,
+        evidence_codes=tuple(sorted(evidence)),
+        blocker_codes=(),
+        required_shared_files=(),
+        executable_nodes=tuple(sorted(nodes)),
+        binding_sha256s=tuple(sorted(bindings)),
+    )
+
+
 def build_cutover_readiness_report(parity: ParityReportV1) -> CutoverReadinessReportV1:
     """Classify current contracts without pretending that unwired lanes are live."""
 
@@ -838,132 +855,115 @@ def build_cutover_readiness_report(parity: ParityReportV1) -> CutoverReadinessRe
             ),
             mismatch_file=_MESSAGE_SELECTOR,
         ),
-        _blocked_case(
+        _preserved_case(
             CutoverContour.CURRENT_FILE,
-            CutoverEvidenceStatus.UNMEASURED,
-            ("current_file_v12_contract_remains_separate",),
-            ("future_catalog_current_file_union_not_replayed",),
-            (_AGENT_RUNTIME,),
+            (
+                "current_file_guard_holds_after_catalog_hide",
+                "current_file_v12_contract_remains_separate",
+            ),
             (
                 "tests/test_v12_file_read_handler.py::test_authenticated_current_file_route_keeps_exact_context_and_effect_owner",
             ),
         ),
-        _blocked_case(
+        _preserved_case(
             CutoverContour.MESSAGE_WINDOW,
-            CutoverEvidenceStatus.CONTRACT_ONLY,
-            ("queryless_current_conversation_exact_contract",),
-            ("message_exact_not_wired_to_archive_search",),
             (
-                _AGENT_RUNTIME,
-                _CAPABILITY_BINDING,
-                _ARCHIVE_CONTRACT,
-                _EXECUTION_KERNEL,
-                _SERVER,
+                "message_exact_wired_to_archive_search",
+                "queryless_current_conversation_exact_contract",
             ),
             (
+                "tests/test_archive_search_exact_dispatch.py::test_exact_window_dispatches_message_lane_through_archive_search",
                 "tests/test_message_exact_internal.py::test_queryless_current_scope_preserves_message_and_reply_identity",
                 "tests/test_message_exact_internal.py::test_role_and_microsecond_half_open_window_are_exact",
             ),
             (message_binding,),
         ),
-        _blocked_case(
+        _preserved_case(
             CutoverContour.MEMORY_TEMPORAL,
-            CutoverEvidenceStatus.CONTRACT_ONLY,
-            ("memory_exact_as_of_known_at_contract",),
-            ("archive_model_request_does_not_express_as_of_known_at",),
             (
-                _AGENT_RUNTIME,
-                _CAPABILITY_BINDING,
-                _ARCHIVE_CONTRACT,
-                _EXECUTION_KERNEL,
-                _SERVER,
+                "archive_handler_expresses_as_of_known_at",
+                "memory_exact_as_of_known_at_contract",
             ),
             (
+                "tests/test_archive_search_exact_dispatch.py::test_as_of_and_graph_dispatch_memory_lane_through_archive_search",
                 "tests/test_memory_exact_internal.py::test_as_of_graph_context_is_bounded_id_free_and_source_bound",
                 "tests/test_memory_exact_internal.py::test_known_at_relation_history_matches_legacy_snapshot",
             ),
             (memory_binding,),
         ),
-        _blocked_case(
+        _preserved_case(
             CutoverContour.MEMORY_GRAPH,
-            CutoverEvidenceStatus.CONTRACT_ONLY,
-            ("memory_exact_bounded_graph_projection",),
-            ("memory_exact_graph_not_wired_to_archive_search",),
             (
-                _AGENT_RUNTIME,
-                _CAPABILITY_BINDING,
-                _ARCHIVE_CONTRACT,
-                _EXECUTION_KERNEL,
-                _SERVER,
+                "memory_exact_bounded_graph_projection",
+                "memory_exact_graph_wired_to_archive_search",
             ),
             (
+                "tests/test_archive_search_exact_dispatch.py::test_kernel_include_graph_uses_the_same_dispatch_owner",
                 "tests/test_memory_exact_internal.py::test_current_implicit_graph_keeps_cooccurrence_and_local_grounding",
                 "tests/test_memory_exact_internal.py::test_explicit_legacy_merged_endpoint_is_exactly_canonicalized",
             ),
             (memory_binding,),
         ),
-        _blocked_case(
+        _preserved_case(
             CutoverContour.FOLLOW_UP,
-            CutoverEvidenceStatus.UNMEASURED,
-            ("legacy_follow_up_state_is_distinct_from_archive_cursor",),
-            ("sole_facade_follow_up_union_not_replayed",),
-            (_AGENT_RUNTIME, _ARCHIVE_SERVICE),
+            (
+                "follow_up_guards_hold_after_catalog_hide",
+                "legacy_follow_up_state_is_distinct_from_archive_cursor",
+            ),
             (
                 "tests/test_followup_query_order.py::test_real_follow_ups_still_get_the_context",
                 "tests/test_v12_archive_read_handler.py::test_non_closed_source_search_followups_remain_legacy_owned",
             ),
         ),
-        _blocked_case(
+        _preserved_case(
             CutoverContour.V12,
-            CutoverEvidenceStatus.UNMEASURED,
-            ("v12_archive_reader_remains_separate",),
-            ("sole_facade_v12_union_not_replayed",),
-            (_AGENT_RUNTIME, _EXECUTION_KERNEL),
+            (
+                "v12_archive_reader_remains_separate",
+                "v12_guard_holds_after_catalog_hide",
+            ),
             (
                 "tests/test_v12_archive_router.py::test_exact_archive_shape_dispatches_to_the_registered_read_only_handler",
             ),
         ),
-        _blocked_case(
+        _preserved_case(
             CutoverContour.RESTART,
-            CutoverEvidenceStatus.CONTRACT_ONLY,
-            ("exact_cursors_survive_storage_reopen",),
-            ("exact_lane_process_rehydration_not_wired",),
-            (_AGENT_RUNTIME, _CAPABILITY_BINDING, _SERVER),
+            (
+                "exact_cursors_survive_storage_reopen",
+                "exact_lane_restart_is_fail_closed",
+            ),
             (
                 "tests/test_memory_exact_internal.py::test_signed_continuation_survives_storage_restart",
                 "tests/test_message_exact_internal.py::test_equal_timestamp_restart_paging_is_chronological_and_never_deduplicates",
             ),
             (memory_binding, message_binding),
         ),
-        _blocked_case(
+        _preserved_case(
             CutoverContour.FALLBACK,
-            CutoverEvidenceStatus.UNMEASURED,
-            ("released_primary_only_fallback_is_unchanged",),
-            ("sole_facade_fallback_union_not_replayed",),
-            (_AGENT_RUNTIME, _EXECUTION_KERNEL),
+            (
+                "fallback_guard_holds_after_catalog_hide",
+                "released_primary_only_fallback_is_unchanged",
+            ),
             (
                 "tests/test_v12_archive_router.py::test_archive_plan_with_insufficient_max_items_falls_back_before_preparation",
             ),
         ),
-        _blocked_case(
+        _preserved_case(
             CutoverContour.STALE_LEGACY_CALL,
-            CutoverEvidenceStatus.UNMEASURED,
-            ("legacy_calls_remain_dialogue_visible_and_executable",),
-            ("legacy_calls_are_not_stale_until_catalog_cutover",),
-            (_AGENT_RUNTIME, _TOOL_PROTOCOL, _EXECUTION_KERNEL, _TURN_INTENT_POLICY),
             (
-                "tests/test_archive_search_model_discovery.py::test_legacy_archive_retrieval_tools_remain_visible_and_executable",
+                "legacy_dialogue_calls_fail_closed",
+                "legacy_internal_adapters_remain_executable",
+            ),
+            (
+                "tests/test_archive_search_model_discovery.py::test_legacy_archive_retrieval_tools_are_stale_and_internally_executable",
             ),
         ),
-        _blocked_case(
+        _preserved_case(
             CutoverContour.FINAL_REAUTHORIZATION,
-            CutoverEvidenceStatus.CONTRACT_ONLY,
             (
                 "memory_exact_late_reauthorization_contract",
                 "message_exact_late_reauthorization_contract",
+                "single_final_publisher_consumes_exact_receipts",
             ),
-            ("single_final_publisher_does_not_consume_all_exact_receipts",),
-            (_AGENT_RUNTIME, _CAPABILITY_BINDING, _SERVER),
             (
                 "tests/test_memory_exact_internal.py::test_fresh_read_and_one_shot_publication_authority",
                 "tests/test_message_exact_internal.py::test_late_revoke_returns_a_source_free_denial",

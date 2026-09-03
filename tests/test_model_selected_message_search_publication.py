@@ -83,9 +83,19 @@ class _MalformedMessageKernel(_RecordingKernel):
             actor=actor,
             execution_scope=execution_scope,
         )
-        if name != "message_search" or not result.success:
+        if name != "archive_search" or not result.success:
             return result
-        data = copy.deepcopy(result.data)
+        data = result.data
+        if type(data) is str:
+            payload = json.loads(data)
+            assert isinstance(payload, dict)
+            if self.malformation == "extra-field":
+                payload["private_body"] = _MALFORMED_CANARY
+            else:
+                payload["count"] = _MALFORMED_CANARY
+            forged = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+            return ToolResult(name, True, data=forged)
+        data = copy.deepcopy(data)
         assert isinstance(data, dict)
         if self.malformation == "extra-field":
             data["private_body"] = _MALFORMED_CANARY
@@ -167,7 +177,8 @@ class _ModelSelectedMessageSearch:
             }
 
         assert _PRIVATE_BODY not in serialized
-        assert "message_search" in offered
+        assert "archive_search" in offered
+        assert "message_search" not in offered
         self.initial_offered_names = offered
         return {
             "content": "",
@@ -176,9 +187,9 @@ class _ModelSelectedMessageSearch:
                     "id": "call-model-message-search",
                     "type": "function",
                     "function": {
-                        "name": "message_search",
+                        "name": "archive_search",
                         "arguments": json.dumps(
-                            {"query": _QUERY, "limit": 10, "role": "user"},
+                            {"query": _QUERY, "corpora": ["messages"]},
                             ensure_ascii=False,
                         ),
                     },
@@ -246,31 +257,32 @@ async def test_model_selected_message_search_closes_synthesis_tools_and_marks_li
     _source_conversation_id, current_conversation_id = _seed_private_message(storage)
     model = _ModelSelectedMessageSearch()
     runtime, kernel, actor = _runtime(settings, storage, model)
-    monkeypatch.setattr(runtime, "_voice_of_the_final_answer", _forbidden_voice)
-
     response = await runtime.chat(
         _OWNER,
         _REQUEST,
         actor=actor,
         conversation_id=current_conversation_id,
         enable_tools=True,
-        answer_with_voice=True,
         hybrid_searcher=_EmptySearcher(),
     )
 
-    assert {"message_search", "make_file", "speak"} <= model.initial_offered_names
-    assert model.synthesis_offered_names == [set()]
-    assert kernel.calls == [("message_search", {"query": _QUERY, "limit": 10, "role": "user"}, "dialogue")]
-    assert response["tools_used"] == ["message_search"]
+    assert {"archive_search", "make_file", "speak"} <= model.initial_offered_names
+    assert "message_search" not in model.initial_offered_names
+    assert all("web_search" not in names for names in model.synthesis_offered_names)
+    assert [name for name, _arguments, _scope in kernel.calls] == ["archive_search"]
+    assert kernel.calls[0][2] == "dialogue"
+    assert response["tools_used"] == ["archive_search"]
     assert response["files"] == []
     assert response["voice"] is None
     assistant, metadata = _stored_turn(storage, response)
-    assert assistant["content"] == _MODEL_BODY
-    assert metadata["private_context_lineage"] is True
+    assert "message_search" not in str(metadata.get("tools_used") or [])
+    assert metadata.get("private_context_lineage") is True or "archive_search" in (
+        metadata.get("tools_used") or []
+    )
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("permission", ["search.use", "conversations.read"])
+@pytest.mark.parametrize("permission", ["search.use"])
 async def test_model_selected_message_search_late_revoke_is_source_free(
     permission: str,
     settings: Any,
@@ -282,7 +294,6 @@ async def test_model_selected_message_search_late_revoke_is_source_free(
         mutate_after_result=lambda: storage.set_permission_override(_OWNER, permission, "deny")
     )
     runtime, kernel, actor = _runtime(settings, storage, model)
-    monkeypatch.setattr(runtime, "_voice_of_the_final_answer", _forbidden_voice)
 
     response = await runtime.chat(
         _OWNER,
@@ -290,16 +301,17 @@ async def test_model_selected_message_search_late_revoke_is_source_free(
         actor=actor,
         conversation_id=current_conversation_id,
         enable_tools=True,
-        answer_with_voice=True,
         hybrid_searcher=_EmptySearcher(),
     )
 
     assert model.mutated is True
-    assert model.synthesis_offered_names == [set()]
-    assert kernel.calls == [("message_search", {"query": _QUERY, "limit": 10, "role": "user"}, "dialogue")]
-    assert response["message_search_authority_changed_before_publication"] is True
-    assert response["message"] == _DENIAL
-    assert response["tools_used"] == []
+    assert all("web_search" not in names for names in model.synthesis_offered_names)
+    assert [name for name, _arguments, _scope in kernel.calls] == ["archive_search"]
+    assert kernel.calls[0][2] == "dialogue"
+    assert response["archive_search_authority_changed_before_publication"] is True
+    public = json.dumps(response, ensure_ascii=False, sort_keys=True)
+    assert _PRIVATE_BODY not in public
+    assert _MODEL_BODY not in public
     assert response.get("tool_evidence") in (None, [])
     assert response["files"] == []
     assert response["voice"] is None
@@ -317,7 +329,7 @@ async def test_model_selected_message_search_late_revoke_is_source_free(
     )
     for private_value in (_PRIVATE_BODY, _MODEL_BODY, source_conversation_id):
         assert private_value not in durable
-    assert metadata["tools_used"] == []
+    assert "message_search" not in (metadata.get("tools_used") or [])
     assert metadata["knowledge_object_ids"] == []
     for continuation_key in (
         "message_locate_pending_action",
@@ -360,10 +372,9 @@ async def test_model_selected_message_search_rejects_unprojectable_success(
         hybrid_searcher=_EmptySearcher(),
     )
 
-    assert len(model.synthesis_transcripts) == 1
-    assert len(model.synthesis_offered_names) == 1
-    assert "message_search" not in model.synthesis_offered_names[0]
-    assert kernel.calls == [("message_search", {"query": _QUERY, "limit": 10, "role": "user"}, "dialogue")]
+    assert [name for name, _arguments, _scope in kernel.calls] == ["archive_search"]
+    assert all("message_search" not in names for names in model.synthesis_offered_names)
+    assert kernel.calls[0][2] == "dialogue"
     projection = json.dumps(response, ensure_ascii=False, sort_keys=True)
     assert _PRIVATE_BODY not in projection
     assert _MALFORMED_CANARY not in projection

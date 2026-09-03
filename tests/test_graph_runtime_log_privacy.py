@@ -156,7 +156,12 @@ async def test_tool_failure_message_log_and_audit_drop_the_exception_payload(
     kernel._tools["memory_search"].handler = fail_after_start  # noqa: SLF001
     actor = ActorContext(user_id="alice", preset_key="owner", source="test")
     with caplog.at_level(logging.WARNING, logger="friday.execution_kernel"):
-        result = await kernel.execute("memory_search", {"query": sentinel}, actor=actor)
+        result = await kernel.execute(
+            "memory_search",
+            {"query": sentinel},
+            actor=actor,
+            execution_scope="internal",
+        )
 
     assert result.success is False
     assert sentinel not in result.to_llm_message()

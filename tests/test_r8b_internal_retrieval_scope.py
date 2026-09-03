@@ -29,7 +29,7 @@ def _bound_kernel(settings, storage):  # noqa: ANN001, ANN202
     return kernel, authorization
 
 
-def test_internal_scope_is_closed_without_changing_dialogue_visibility(settings, storage) -> None:
+def test_internal_scope_is_closed_after_dialogue_catalog_cutover(settings, storage) -> None:
     storage.ensure_user("r8b-owner", preset_key="owner")
     kernel, authorization = _bound_kernel(settings, storage)
     actor = authorization.actor_for_user("r8b-owner", source="r8b-test")
@@ -37,7 +37,8 @@ def test_internal_scope_is_closed_without_changing_dialogue_visibility(settings,
     dialogue = set(kernel.get_tool_names(actor))
     internal = set(kernel.get_tool_names(actor, execution_scope="internal"))
 
-    assert dialogue >= INTERNAL_SEARCH_ADAPTER_TOOLS | {"archive_search"}
+    assert "archive_search" in dialogue
+    assert dialogue.isdisjoint(INTERNAL_SEARCH_ADAPTER_TOOLS)
     assert internal == INTERNAL_SEARCH_ADAPTER_TOOLS
     assert "archive_search" not in internal
     assert all(kernel.internal_search_adapter_available(name, actor) for name in internal)

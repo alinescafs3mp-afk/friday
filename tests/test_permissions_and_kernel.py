@@ -115,7 +115,12 @@ async def test_kernel_enforces_actor_and_never_captures_one_owner(settings, stor
         assert saved.data["promoted"] is False
         assert storage.count_knowledge_objects("bob") == 0
 
-        bob_search = await kernel.execute("memory_search", {"query": "Alpha"}, actor=bob)
+        bob_search = await kernel.execute(
+            "memory_search",
+            {"query": "Alpha"},
+            actor=bob,
+            execution_scope="internal",
+        )
         assert bob_search.success is True
         assert bob_search.data["count"] == 0
 

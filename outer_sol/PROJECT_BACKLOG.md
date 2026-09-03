@@ -67,10 +67,11 @@ current release. P0H reader, pair-bearing writer and safe no-delete continuation
 remain live through `0.207.98`; the permanent `io_uring_disabled=2` R3 proposal
 is rejected, so P0H remains open only for a one-shot maintenance authority and
 reviewed bounded deletion that preserves the ordinary Engineer environment. S4-R8 remains open for sole-facade
-parity. Local `main` now has unactivated R8E, a composite seam, a dispatch
-owner that can express exact window / `as_of` / `known_at` / graph, and a
-refreshed not-ready measurement; the released legacy tool catalog stays until
-semantic parity is real rather than nominal.
+parity. `origin/main` now has unactivated R8E, a composite seam, exact archive
+dispatch, and a dialogue-catalogue hide: `memory_search` / `source_search` /
+`message_search` are internal (and mission) only. Formal `cutover_ready` stays
+false while R8E review status is `integrated`. Production `0.208.0` still
+serves the previous catalogue until a clean release boundary.
 Keep the released S3 path in shadow
 until its genuine production witness exists; then promote only the
 current-file-plus-current-public-web journey through the already released
@@ -794,23 +795,70 @@ checks.
 - S6 physical Android acceptance requires the owner and device; all other work
   proceeds independently.
 
-## First 24 clean-work hours
+## Standing lead-architect checklist
 
-1. Keep the deployed P0/P1 production paths green.
-2. Keep released `EngineerWorkItem v1` stable; do not expand its scope.
-3. Keep the released bounded S3 advisor in shadow until a genuine eligible turn
-   creates its exact production witness; do not fabricate activation evidence.
-4. Keep the released S4-R6/R7/R8C/R8D recall paths green. R8E, the composite
-   seam and the exact archive dispatch owner are on local `main` and still
-   unactivated in the catalogue; do not retire any dialogue-facing adapter
-   until the refreshed sole-facade measurement is ready. Replay the thirteen
-   contours and the historical ten-file union before any catalogue cutover.
-5. Keep the released S5 measured-lease contract green; extend cognition only
-   through another measured, reversible journey release.
-6. Keep released S6-R4 exact clean/restart/production evidence green while P0G
-   reduces the canonical gate without losing a unique release-blocking invariant.
-7. Preserve the released exact-evidence verifier and reject mutable or
-   self-declared proof while real joined Supervisor observations accumulate.
+This is the live remaining-work register. Owner/external and observation-bound
+rows stay open until their named evidence exists. Do not invent a second
+checklist elsewhere.
+
+### Closed on production `0.208.0`
+
+- [x] P0G Gate Diet
+- [x] P0 production message stability
+- [x] P1 Engineer Mode complete user workflow, including P1B `EngineerWorkItem v1`
+- [x] S0 constructor freeze
+- [x] S1 Engineer continuation
+- [x] S2 one-turn nervous system
+- [x] S4-R0..R8D recall, passages, facade parity, exact message windows
+- [x] S5 measured cognition and exact 40k lease
+- [x] S6-R0..R4 mission/reminder/Telegram recovery, browse-to-document, journey evidence
+- [x] Inbox-advice fairness selection
+
+### Closed on `origin/main`, not yet a production release
+
+- [x] S4-R8E unactivated exact bitemporal/graph internal lane + open-handle provenance
+- [x] S4-R8H composite seam
+- [x] S4-R8H exact archive dispatch (`exact_window` / `as_of` / `known_at` / `include_graph`)
+- [x] S4-R8F body-free measurement snapshot (honestly `not ready` at that commit)
+
+Head: `2ca633ba`. Production remains `0.208.0` / `75b165a2`.
+
+### Open and implementable
+
+- [x] S4-R8F step 3: hide `memory_search` / `source_search` / `message_search`
+      from dialogue; keep them internal/mission; offer `archive_search` as the
+      sole ordinary retrieval facade; close stale dialogue calls. Historical
+      ten-file union 1,197/1,197; thirteen contours `parity` or `preserved`.
+- [ ] S4-R8F step 4: formal `cutover_ready` requires R8E review status
+      `accepted` (currently `integrated`). Release and activation remain
+      Mainline-owned. Do not deploy until a clean release boundary.
+
+### Open and blocked
+
+- [ ] P0H reviewed bounded deletion — owner one-shot maintenance authority;
+      Linux still cannot prove global open-reference absence. No apply/delete.
+- [ ] S3 Supervisor promotion — observation-bound. Need a genuine eligible
+      current-file-plus-public-web consumed witness. Do not fabricate traffic.
+- [ ] S6 physical Android / Obsidian round-trip — owner and device.
+- [ ] Off-machine backup/file mirror — implementation present, target empty.
+- [ ] Rotate the external web-search credential at the provider, then update
+      the single protected runtime secret.
+- [ ] Golden-journey evidence refresh — clean-artifact/restart rows are `STALE`
+      at a previous release binding. Refresh only at a clean release boundary.
+- [ ] Full exact-release gate + production deploy of post-`0.208.0` main —
+      no clean release boundary yet.
+
+### Operating invariants (never "done", always in force)
+
+- Keep deployed P0/P1 paths green; do not expand `EngineerWorkItem v1`.
+- Keep S3 in shadow until the exact production witness exists.
+- Primary-only path when the laptop/secondary is absent.
+- Do not use Docker to certify primary Friday.
+- Do not touch the Obsidian companion without a separate owner request.
+- Do not merge old feature branches wholesale.
+- During implementation: focused tests. Full exact-release gate only at a
+  clean release boundary.
+- Never overlap our full native/UI gate with SolGoodman's full gate.
 
 ## Canonical golden-journey/evidence registry
 

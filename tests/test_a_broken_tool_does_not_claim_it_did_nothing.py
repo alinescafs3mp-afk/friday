@@ -112,7 +112,12 @@ async def test_an_observing_tool_keeps_the_short_refusal(kernel):
     """
     _break(kernel, "memory_search", ValueError("плохой запрос"))
 
-    result = await kernel.execute("memory_search", {"query": "х"}, actor=_actor())
+    result = await kernel.execute(
+        "memory_search",
+        {"query": "х"},
+        actor=_actor(),
+        execution_scope="internal",
+    )
 
     assert result.success is False
     assert "НАЧАВ" not in result.error

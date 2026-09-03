@@ -272,12 +272,11 @@ def test_model_payload_still_cannot_inject_exact_authority() -> None:
         )
 
 
-def test_legacy_catalogue_still_offers_dialogue_adapters(settings: Any) -> None:
+def test_legacy_catalogue_keeps_internal_adapters_off_dialogue(settings: Any) -> None:
     kernel = ExecutionKernel(settings=settings)
-    for name in ("archive_search", "memory_search", "message_search", "source_search"):
-        assert kernel.get_tool(name) is not None
     archive = kernel.get_tool("archive_search")
     assert archive is not None
+    assert archive.model_visible is True
     properties = archive.parameters["properties"]
     assert "as_of" in properties
     assert "known_at" in properties
@@ -285,6 +284,12 @@ def test_legacy_catalogue_still_offers_dialogue_adapters(settings: Any) -> None:
     assert "include_graph" in properties
     assert "message_exact_request" not in properties
     assert "memory_exact_request" not in properties
+    for name in ("memory_search", "message_search", "source_search"):
+        registered = kernel.get_tool(name)
+        assert registered is not None
+        assert registered.model_visible is False
+        assert "dialogue" not in registered.allowed_execution_scopes
+        assert "internal" in registered.allowed_execution_scopes
 
 
 @pytest.mark.asyncio

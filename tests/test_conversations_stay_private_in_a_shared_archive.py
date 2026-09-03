@@ -59,7 +59,14 @@ def test_one_persons_words_do_not_surface_in_anothers_search(shared):
     stranger = auth.actor_for_user("telegram:test:5002", source="telegram")
     assert stranger.user_id == LEGACY_OWNER_USER_ID, "общий архив не включился — тест бессмыслен"
 
-    result = asyncio.run(core.execute("message_search", {"query": "перегородки"}, actor=stranger))
+    result = asyncio.run(
+        core.execute(
+            "message_search",
+            {"query": "перегородки"},
+            actor=stranger,
+            execution_scope="internal",
+        )
+    )
     rendered = f"{result.to_llm_message()} {result.data}"
     assert SECRET not in rendered, "чужая реплика нашлась по слову из неё"
 
@@ -70,7 +77,14 @@ def test_a_person_still_finds_their_own_words(shared):
     _say(storage, "telegram:test:5002", f"надо заказать {SECRET}")
 
     person = auth.actor_for_user("telegram:test:5002", source="telegram")
-    result = asyncio.run(core.execute("message_search", {"query": "перегородки"}, actor=person))
+    result = asyncio.run(
+        core.execute(
+            "message_search",
+            {"query": "перегородки"},
+            actor=person,
+            execution_scope="internal",
+        )
+    )
     assert result.success
     assert result.data.get("results"), "человек перестал находить собственную переписку"
 

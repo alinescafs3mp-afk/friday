@@ -66,7 +66,7 @@ def _bound_kernel(settings, storage):  # noqa: ANN001, ANN202
     return kernel, actor
 
 
-def test_ordinary_dialogue_keeps_released_legacy_retrieval_schemas(
+def test_ordinary_dialogue_offers_archive_search_without_legacy_retrieval_schemas(
     settings,
     storage,
 ) -> None:
@@ -74,20 +74,17 @@ def test_ordinary_dialogue_keeps_released_legacy_retrieval_schemas(
 
     names = set(kernel.get_tool_names(actor))
     assert "archive_search" in names
-    assert names >= _LEGACY_RETRIEVAL_TOOLS
+    assert names.isdisjoint(_LEGACY_RETRIEVAL_TOOLS)
 
-    # Topic shortening changes descriptions, not the released ordinary
-    # capability surface. Explicit archive turns are isolated later by
-    # AgentRuntime before the first model token.
     for topic in ("", "архив", "знание", "файл", "человек"):
         definitions = kernel.get_tool_definitions(actor, topic=topic)
         offered = {str((definition.get("function") or {}).get("name") or "") for definition in definitions}
         assert "archive_search" in offered
-        assert offered >= _LEGACY_RETRIEVAL_TOOLS
+        assert offered.isdisjoint(_LEGACY_RETRIEVAL_TOOLS)
 
 
 @pytest.mark.asyncio
-async def test_unclassified_ordinary_first_model_call_keeps_legacy_retrieval_schemas(
+async def test_unclassified_ordinary_first_model_call_offers_archive_search_only(
     settings,
     storage,
     monkeypatch: pytest.MonkeyPatch,
@@ -125,13 +122,13 @@ async def test_unclassified_ordinary_first_model_call_keeps_legacy_retrieval_sch
     assert arbiter_calls == [message]
     assert len(model.offered_tool_names) == 1
     first_offered = model.offered_tool_names[0]
-    assert first_offered >= _LEGACY_RETRIEVAL_TOOLS
-    assert "archive_search" not in first_offered
+    assert "archive_search" in first_offered
+    assert first_offered.isdisjoint(_LEGACY_RETRIEVAL_TOOLS)
     assert reply["message"] == "Уточните, пожалуйста, с какого шага продолжить."
 
 
 @pytest.mark.asyncio
-async def test_legacy_archive_retrieval_tools_remain_visible_and_executable(
+async def test_legacy_archive_retrieval_tools_are_stale_and_internally_executable(
     settings,
     storage,
 ) -> None:
@@ -140,11 +137,22 @@ async def test_legacy_archive_retrieval_tools_remain_visible_and_executable(
     for name in sorted(_LEGACY_RETRIEVAL_TOOLS):
         registered = kernel.get_tool(name)
         assert registered is not None
-        assert registered.model_visible is True
+        assert registered.model_visible is False
+        assert "dialogue" not in registered.allowed_execution_scopes
+        assert "internal" in registered.allowed_execution_scopes
         assert registered.handler is not None
 
-        result = await kernel.execute(name, {"query": "absentretrievalcanary"}, actor=actor)
-        assert result.success is True, f"{name} ceased to be internally executable: {result.error}"
+        stale = await kernel.execute(name, {"query": "absentretrievalcanary"}, actor=actor)
+        assert stale.success is False
+        assert "scope" in str(stale.error or "").casefold()
+
+        internal = await kernel.execute(
+            name,
+            {"query": "absentretrievalcanary"},
+            actor=actor,
+            execution_scope="internal",
+        )
+        assert internal.success is True, f"{name} ceased to be internally executable: {internal.error}"
 
 
 @pytest.mark.asyncio
@@ -201,7 +209,8 @@ async def test_visible_message_search_still_serves_code_owned_owner_history_pref
         str((definition.get("function") or {}).get("name") or "")
         for definition in kernel.get_tool_definitions(actor, topic="человек")
     }
-    assert "message_search" in offered
+    assert "message_search" not in offered
+    assert "archive_search" in offered
     assert len(calls) == 1
     assert execution_scopes == ["internal"]
     boundary_id = str(calls[0].pop("before_message_id", ""))

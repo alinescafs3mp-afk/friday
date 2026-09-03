@@ -236,9 +236,8 @@ def test_parser_rejects_absolute_shared_path_before_digest_check(
 ) -> None:
     payload = report.to_payload()
     cases = payload["cases"]
-    assert isinstance(cases, list)
-    blocked = next(item for item in cases if isinstance(item, dict) and item["blocker_codes"])
-    blocked["required_shared_files"] = ["/home/jericho/private.py"]
+    assert isinstance(cases, list) and isinstance(cases[0], dict)
+    cases[0]["required_shared_files"] = ["/home/jericho/private.py"]
 
     with pytest.raises(CutoverReadinessError):
         CutoverReadinessReportV1.from_payload(payload)

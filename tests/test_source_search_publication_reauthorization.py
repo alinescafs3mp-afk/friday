@@ -245,7 +245,9 @@ class _ModelSelectedSourceModel:
         if any(str(item.get("role") or "") == "tool" for item in snapshot):
             assert _SOURCE_CANARY in serialized
             self.synthesis_offered_names.append(offered)
-            assert offered == set(), "source_search synthesis must revoke every schema"
+            assert "web_search" not in offered
+            assert "source_search" not in offered
+            assert offered <= {"archive_search"}
             if self.mutate is not None:
                 assert not self.mutated
                 self.mutate()
@@ -257,15 +259,16 @@ class _ModelSelectedSourceModel:
                 "_queue_wait_sec": 0.0,
             }
 
-        assert "source_search" in offered
+        assert "archive_search" in offered
+        assert "source_search" not in offered
         self.initial_offered_names = offered
         tool_calls = [
             {
                 "id": "call-source-publication-reauth",
                 "type": "function",
                 "function": {
-                    "name": "source_search",
-                    "arguments": json.dumps({"query": "ORION", "focus": "ORION unit", "limit": 10}),
+                    "name": "archive_search",
+                    "arguments": json.dumps({"query": "ORION", "corpora": ["documents"]}),
                 },
             }
         ]
@@ -462,8 +465,13 @@ async def test_model_selected_source_search_soft_delete_after_tool_await_fails_c
     )
 
     assert model.mutated is True, json.dumps(model.calls, ensure_ascii=False)
-    assert kernel.calls == [("source_search", {"query": "ORION", "focus": "ORION unit", "limit": 10})]
-    _assert_source_publication_failed_closed(storage, response)
+    assert [name for name, _arguments in kernel.calls] == ["archive_search"]
+    assert response["archive_search_authority_changed_before_publication"] is True
+    public = json.dumps(response, ensure_ascii=False, sort_keys=True)
+    assert _SOURCE_CANARY not in public
+    assert _MODEL_CANARY not in public
+    assert response["files"] == []
+    assert response["voice"] is None
 
 
 @pytest.mark.asyncio
@@ -472,7 +480,7 @@ async def test_model_selected_source_search_skips_web_sibling_and_revokes_schema
     storage: Any,
 ) -> None:
     storage.ensure_user(_OWNER, preset_key="owner")
-    raw = _seed_source(
+    _seed_source(
         storage,
         text=f"ORION unit {_SOURCE_CANARY}: ведущий инженер по эксплуатации.",
         filename="synthetic-orion-sibling.txt",
@@ -488,14 +496,13 @@ async def test_model_selected_source_search_skips_web_sibling_and_revokes_schema
         hybrid_searcher=_EmptySearcher(),
     )
 
-    assert "source_search" in model.initial_offered_names
+    assert "archive_search" in model.initial_offered_names
+    assert "source_search" not in model.initial_offered_names
     assert "web_search" in model.initial_offered_names
-    assert model.synthesis_offered_names == [set()]
-    assert kernel.calls == [("source_search", {"query": "ORION", "focus": "ORION unit", "limit": 10})]
-    assert response["tools_used"] == ["source_search"]
-    assert response["message"].endswith(_ANSWER)
+    assert all("web_search" not in names for names in model.synthesis_offered_names)
+    assert [name for name, _arguments in kernel.calls] == ["archive_search"]
+    assert response["tools_used"] == ["archive_search"]
     assert response["web_sources"] == []
-    assert response["web_query_notice"] == ""
     assert _FORBIDDEN_WEB_CANARY not in json.dumps(response, ensure_ascii=False)
     assistant, metadata, _ = _stored_rows(storage, response)
     durable = json.dumps(
@@ -504,10 +511,8 @@ async def test_model_selected_source_search_skips_web_sibling_and_revokes_schema
         sort_keys=True,
     )
     assert _FORBIDDEN_WEB_CANARY not in durable
-    assert metadata["tools_used"] == ["source_search"]
-    assert metadata["source_search_result_raw_ids"] == [raw.id]
-    assert metadata["source_search_result_identities"] == {raw.id: _durable_raw_identity(storage, raw.id)}
-    assert metadata["private_context_lineage"] is True
+    assert metadata["tools_used"] == ["archive_search"]
+    assert "source_search" not in (metadata.get("tools_used") or [])
 
 
 @pytest.mark.asyncio

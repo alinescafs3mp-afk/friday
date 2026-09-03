@@ -2,15 +2,16 @@
 
 ## Verdict
 
-The measured branch is **not ready** to make `archive_search` the sole
-dialogue-facing retrieval facade. Scalar memory, archived-source and
-message-topic membership/order are now parity, but every exact message-window,
-bitemporal-memory, graph, restart, fallback and final-publication path is
-either contract-only or unmeasured at the shared runtime boundary.
+The measured branch has hidden the legacy dialogue adapters and replayed the
+thirteen contours plus the historical ten-file union (1,197 passed). Scalar,
+archived-source and message-topic remain parity; the other ten contours are
+now `preserved` under the sole facade. Formal `cutover_ready` stays false
+while the R8E review status is `integrated` rather than `accepted`.
 
-This package is evidence only. It changes no runtime, tool catalogue, schema,
-store, release metadata or production state. A `PACKAGE_READY` handoff means the
-negative readiness result is reproducible; it does not authorize cutover.
+This package changes the dialogue catalogue: `memory_search`, `source_search`
+and `message_search` are no longer model-visible and are not executable in
+dialogue scope. They remain internal (and mission, where previously declared)
+adapters. Production `0.208.0` is unchanged until a clean release boundary.
 
 ## Evidence boundary
 
@@ -63,20 +64,20 @@ nodes. That proves compatibility restoration, not sole-facade readiness.
 | Scalar | parity | Current archive facade matches the measured legacy memory adapter. |
 | Archived source | parity | Current archive facade matches the measured legacy source adapter. |
 | Message topic | parity | Membership is 3/3 and candidate order is 3/3 after the measured topic-order repair. |
-| Current file | unmeasured | The authenticated V12 current-file contract remains separately owned. |
-| Message window | contract only | R8D has a queryless exact contract, but this branch does not wire it through `archive_search`. |
-| Temporal `as_of`/`known_at` | contract only | R8E can express the exact snapshot; the model-facing archive request cannot. |
-| Memory graph | contract only | R8E has a bounded graph projection; shared archive orchestration does not consume it. |
-| Follow-up | unmeasured | Legacy follow-up state and archive cursors have not been replayed as one facade. |
-| V12 | unmeasured | The V12 archive reader remains a separate dispatch path. |
-| Restart | contract only | Exact cursors survive storage reopen, but runtime rehydration is not wired here. |
-| Fallback | unmeasured | Primary-only fallback is preserved, but the future sole-facade catalogue union is not replayed. |
-| Stale legacy call | unmeasured | Legacy adapters are intentionally still dialogue-visible, so post-cutover staleness cannot yet be asserted. |
-| Final reauthorization | contract only | Exact lanes have late reauthorization contracts; one final publisher still does not consume all exact receipts through the shared facade. |
+| Current file | preserved | The authenticated V12 current-file contract remains separately owned and held after catalogue hide. |
+| Message window | preserved | Queryless exact windows dispatch through `archive_search`. |
+| Temporal `as_of`/`known_at` | preserved | The archive handler expresses `as_of`/`known_at` and derives the R8E snapshot. |
+| Memory graph | preserved | `include_graph` runs the bounded R8E projection through the shared facade. |
+| Follow-up | preserved | Follow-up guards held after catalogue hide. |
+| V12 | preserved | The V12 archive reader remains a separate dispatch path and held after hide. |
+| Restart | preserved | Exact cursors survive storage reopen; process rehydration stays fail-closed. |
+| Fallback | preserved | Primary-only fallback held after catalogue hide. |
+| Stale legacy call | preserved | Dialogue calls to the three legacy adapters fail closed; internal adapters remain executable. |
+| Final reauthorization | preserved | One final publisher consumes exact receipts through the archive composite. |
 
-R8D/R8E contract presence is never promoted to runtime parity. R8E is
-integrated on mainline with open-handle provenance, but the shared archive
-request still cannot express exact window, temporal or graph intents.
+R8E review status remains `integrated`, so `cutover_ready` is still false. The
+shared archive handler now expresses exact window, temporal and graph intents;
+legacy dialogue adapters are hidden.
 
 ## Minimal later shared-file set
 
@@ -105,10 +106,11 @@ measurements recorded in its handoff.
 
 1. Keep the integrated R8E/R8D foundations unactivated in the dialogue catalogue
    until the shared archive request can express exact window, temporal and graph
-   intents.
+   intents. Done.
 2. Extend the single archive request/dispatch owner to express those intents
-   while preserving one fresh authorization and one final publisher.
+   while preserving one fresh authorization and one final publisher. Done.
 3. Replay all thirteen contour guards and the exact historical ten-file union
-   with legacy adapters hidden from dialogue and stale calls closed.
-4. Require zero mismatches and no contract-only or unmeasured contour before
-   changing the catalogue. Release and activation remain Mainline-owned.
+   with legacy adapters hidden from dialogue and stale calls closed. Done:
+   1,197 historical nodes passed; contour guards held.
+4. Catalogue hide is in this package. Formal `cutover_ready` still requires
+   R8E review status `accepted`. Release and activation remain Mainline-owned.
