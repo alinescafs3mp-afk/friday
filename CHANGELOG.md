@@ -1,3 +1,17 @@
+## 0.208.2 — 2026-09-03
+
+### Local files beside independent public web
+
+- Stops a generic continuation from opening exact window, temporal or graph
+  lanes; those remain on `archive_search`.
+- Reads current or restored files locally while prefetching only a sealed
+  independent public-web topic from the same utterance.
+- Lets unused current uploads and prior-file history keep an independent
+  public-web clause instead of refusing the whole turn.
+- Still fails closed when the outbound query would be the file, a deictic or a
+  leftover file noun. SQLite remains at schema 50; exact `0.208.1` is the
+  predecessor and `0.207.90` the fallback.
+
 ## 0.208.1 — 2026-09-03
 
 ### Sole archive_search cutover
