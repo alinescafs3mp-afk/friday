@@ -1740,7 +1740,7 @@ async def test_news_inside_a_current_document_is_local_not_a_web_request(
 
 
 @pytest.mark.asyncio
-async def test_same_sentence_document_summary_and_vague_web_keeps_local_read(
+async def test_same_sentence_document_summary_and_web_request_denies_public_research(
     settings,
     storage,
 ) -> None:
