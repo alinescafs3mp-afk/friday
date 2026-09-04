@@ -1,3 +1,14 @@
+## 0.208.12 — 2026-09-04
+
+### Operation progress contract
+
+- Closed `OperationProgressProjectionV1` and a code-owned Russian renderer.
+  Presentation only: no effect owner, scheduler or WorkGraph. Two-message
+  Telegram migration is the next N1 slice.
+- Canonical backlog records live `0.208.11` identity and opens N1–N5.
+- SQLite remains at schema 50; exact `0.208.11` is the predecessor and
+  `0.207.90` the fallback.
+
 ## 0.208.11 — 2026-09-04
 
 ### Semantic supervisor assist candidate
