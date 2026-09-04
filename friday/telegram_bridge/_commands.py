@@ -32,7 +32,7 @@ from friday.telegram_bridge._base import (
 )
 from friday.telegram_bridge._media import _reply_document_file_unique_id
 from friday.telegram_bridge._obsidian import obsidian_panel
-from friday.telegram_bridge._status import TelegramStatusStage, render_chat_status
+from friday.telegram_bridge._status import TelegramStatusStage, render_interactive_turn_status
 from friday.telegram_bridge._views import _TIMELINE_SHOWN
 
 
@@ -148,7 +148,7 @@ def _queue_chat_progress(
     revision = state.revision
     stage = state.stage
     elapsed = max(0.0, _progress_clock() - state.started_at)
-    status_text = render_chat_status(
+    status_text = render_interactive_turn_status(
         stage,
         elapsed,
         item_total=state.item_total,

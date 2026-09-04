@@ -21,6 +21,10 @@ from friday.orchestration.operation_progress import (
 )
 from friday.telegram_bridge._base import LOGGER, TELEGRAM_TEXT_LIMIT, split_for_telegram
 from friday.telegram_bridge._engineer_progress import build_engineer_operation_progress
+from friday.telegram_bridge._journey_status import (
+    FilesStatusStage,
+    build_files_operation_progress,
+)
 
 _OPERATION_ID_RE = re.compile(r"[A-Za-z0-9_.:-]{1,128}")
 _RATE_LIMIT_RETRIES = 3
@@ -257,6 +261,58 @@ def render_chat_status(
             authenticated_turn_id=authenticated_turn_id,
             revision=revision,
         )
+    )
+
+
+_CHAT_TO_FILES_STAGE = {
+    TelegramStatusStage.RECEIVING_MEDIA: FilesStatusStage.RECEIVING_FILES,
+    TelegramStatusStage.STAGING_DOCUMENTS: FilesStatusStage.PROCESSING_DOCUMENTS,
+    TelegramStatusStage.BACKEND_WAIT: FilesStatusStage.PROCESSING_DOCUMENTS,
+    TelegramStatusStage.DELIVERING_RESULT: FilesStatusStage.DELIVERING_RESULT,
+    TelegramStatusStage.COMPLETE: FilesStatusStage.COMPLETE,
+    TelegramStatusStage.STOPPED: FilesStatusStage.STOPPED,
+}
+
+
+def render_interactive_turn_status(
+    stage: TelegramStatusStage,
+    elapsed_sec: float,
+    *,
+    item_total: int = 0,
+    received_items: int = 0,
+    received_bytes: int = 0,
+    staged_items: int = 0,
+    staged_bytes: int = 0,
+    operation_id: str = "chat:status",
+    authenticated_turn_id: str = "chat:status",
+    revision: int = 1,
+) -> str:
+    """Render chat text through CHAT mode and file turns through DOCUMENT mode."""
+
+    if item_total > 0:
+        return render_operation_progress(
+            build_files_operation_progress(
+                _CHAT_TO_FILES_STAGE[stage],
+                elapsed_sec,
+                file_total=item_total,
+                received_files=received_items,
+                processed_files=staged_items,
+                operation_id=operation_id,
+                authenticated_turn_id=authenticated_turn_id,
+                revision=revision,
+            )
+        )
+    return render_chat_status(
+        stage,
+        elapsed_sec,
+        item_total=item_total,
+        received_items=received_items,
+        received_bytes=received_bytes,
+        staged_items=staged_items,
+        staged_bytes=staged_bytes,
+        operation_id=operation_id,
+        authenticated_turn_id=authenticated_turn_id,
+        revision=revision,
     )
 
 
@@ -628,4 +684,5 @@ __all__ = [
     "build_chat_operation_progress",
     "render_chat_status",
     "render_engineer_status",
+    "render_interactive_turn_status",
 ]

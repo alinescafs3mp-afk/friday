@@ -449,8 +449,7 @@ async def test_album_status_observes_download_staging_backend_and_delivery_in_or
     combined["friday_media_group_messages"] = [first["message"], second["message"]]
     statuses: list[dict[str, Any]] = []
     receiving_seen = asyncio.Event()
-    staging_seen = asyncio.Event()
-    backend_seen = asyncio.Event()
+    processing_seen = asyncio.Event()
 
     async def immediate_progress_delay(_delay: float) -> None:
         return None
@@ -464,12 +463,10 @@ async def test_album_status_observes_download_staging_backend_and_delivery_in_or
         **kwargs: Any,
     ) -> str:
         statuses.append({"operation_id": operation_id, "revision": revision, "text": text, **kwargs})
-        if "получаю вложения" in text:
+        if "получаю файлы" in text:
             receiving_seen.set()
-        if "передаю вложения" in text:
-            staging_seen.set()
-        if "ядро обрабатывает" in text:
-            backend_seen.set()
+        if "обрабатываю документы" in text:
+            processing_seen.set()
         return "sent" if len(statuses) == 1 else "edited"
 
     async def prepare(
@@ -493,7 +490,7 @@ async def test_album_status_observes_download_staging_backend_and_delivery_in_or
         _chat: str,
     ) -> dict[str, Any]:
         if payload.get("document_stage_only") is True:
-            await staging_seen.wait()
+            await processing_seen.wait()
             return {
                 "file_ingestions": [
                     {
@@ -506,7 +503,7 @@ async def test_album_status_observes_download_staging_backend_and_delivery_in_or
                     for item in payload["documents"]
                 ]
             }
-        await backend_seen.wait()
+        await processing_seen.wait()
         return {"message": "Готово", "message_format": "plain"}
 
     async def send(*_args: Any, **_kwargs: Any) -> None:
@@ -529,17 +526,16 @@ async def test_album_status_observes_download_staging_backend_and_delivery_in_or
         bridge._inbox.close()  # noqa: SLF001
 
     joined = "\n".join(item["text"] for item in statuses)
-    assert joined.index("получаю вложения") < joined.index("передаю вложения")
-    assert joined.index("передаю вложения") < joined.index("ядро обрабатывает")
-    assert joined.index("ядро обрабатывает") < joined.index("отправляю готовый результат")
+    assert joined.index("получаю файлы") < joined.index("обрабатываю документы")
+    assert joined.index("обрабатываю документы") < joined.index("отправляю готовый результат")
     assert statuses[-1]["terminal"] is True
+    assert statuses[0]["text"].startswith("⏳ Обрабатываю файлы")
     assert {item["operation_id"] for item in statuses} == {"chat:8810"}
     revisions = [item["revision"] for item in statuses]
     assert revisions == sorted(set(revisions))
     assert "private album prompt" not in joined
     assert any("из 2 файлов" in item["text"] for item in statuses)
-    assert "✅ передаю вложения в ядро - 100%" in joined
-    assert "✅ ядро обрабатывает запрос - 100%" in joined
+    assert "✅ обрабатываю документы - 100%" in joined
 
 
 def test_recurring_schedule_stays_strictly_below_configured_bridge_ceiling() -> None:
