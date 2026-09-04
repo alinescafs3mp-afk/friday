@@ -128,6 +128,22 @@ class CodingResultRestartAdmissionV1:
         return self.admission
 
     @property
+    def admission_state(self) -> CodingResultRestartAdmissionState:
+        return self.admission
+
+    @property
+    def closed_admission(self) -> CodingResultRestartAdmissionState:
+        return self.admission
+
+    @property
+    def decision(self) -> CodingResultRestartAdmissionState:
+        return self.admission
+
+    @property
+    def exact_operation_id(self) -> str | None:
+        return self.operation_id
+
+    @property
     def restart(self) -> CodingResultRestartAdmissionState:
         return self.admission
 
@@ -150,6 +166,8 @@ class CodingResultRestartAdmissionV1:
 
 RestartAdmissionState = CodingResultRestartAdmissionState
 RestartAdmissionReason = CodingResultRestartAdmissionReason
+CodingResultRestartState = CodingResultRestartAdmissionState
+CodingResultRestartReason = CodingResultRestartAdmissionReason
 CodingResultRestartAdmission = CodingResultRestartAdmissionV1
 CodingResultRestartAdmissionDecision = CodingResultRestartAdmissionState
 
@@ -199,6 +217,8 @@ def build_coding_result_restart_admission(
     *,
     pack_admission: object = None,
     revision_selector: object = None,
+    selector: object = None,
+    operation_selector: object = None,
 ) -> CodingResultRestartAdmissionV1:
     """Admit restart only for an exact operation and admitted archive pack."""
 
@@ -212,6 +232,8 @@ def build_coding_result_restart_admission(
             "pack",
             "pack_admission",
             "revision_selector",
+            "selector",
+            "operation_selector",
             "admission",
             "state",
             "pack_id",
@@ -220,6 +242,18 @@ def build_coding_result_restart_admission(
         if set(raw) - allowed:
             _fail("restart", "unknown_fields")
         if {"admission", "state", "reason"}.intersection(raw):
+            required = {
+                "schema",
+                "restart_id",
+                "authenticated_turn_id",
+                "admission",
+                "operation_id",
+                "pack_id",
+                "revision_selector",
+                "reason",
+            }
+            if set(raw) != required or raw.get("schema") != CODING_RESULT_RESTART_ADMISSION_SCHEMA:
+                _fail("restart", "serialized")
             return CodingResultRestartAdmissionV1(
                 restart_id=cast(str, raw.get("restart_id")),
                 authenticated_turn_id=cast(str, raw.get("authenticated_turn_id")),
@@ -233,11 +267,15 @@ def build_coding_result_restart_admission(
         authenticated_turn_id = cast(str, raw.get("authenticated_turn_id"))
         operation_id = cast(str | None, raw.get("operation_id"))
         pack = raw.get("pack", raw.get("pack_admission"))
-        revision_selector = raw.get("revision_selector")
+        revision_selector = raw.get("revision_selector", raw.get("selector", raw.get("operation_selector")))
     if pack_admission is not None:
         if pack is not None:
             _fail("restart", "duplicate_pack")
         pack = pack_admission
+    if selector is not None or operation_selector is not None:
+        if revision_selector is not None or (selector is not None and operation_selector is not None):
+            _fail("restart", "duplicate_selector")
+        revision_selector = selector if selector is not None else operation_selector
     restart_key = _identifier(restart_id, field="restart_id", maximum=MAX_RESTART_ID_CHARS)
     turn_key = _identifier(
         authenticated_turn_id,

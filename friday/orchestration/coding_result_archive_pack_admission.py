@@ -138,6 +138,18 @@ class CodingResultArchivePackAdmissionV1:
         return self.admission
 
     @property
+    def admission_state(self) -> CodingResultArchivePackAdmissionState:
+        return self.admission
+
+    @property
+    def closed_admission(self) -> CodingResultArchivePackAdmissionState:
+        return self.admission
+
+    @property
+    def decision(self) -> CodingResultArchivePackAdmissionState:
+        return self.admission
+
+    @property
     def pack(self) -> CodingResultArchivePackAdmissionState:
         return self.admission
 
@@ -147,6 +159,14 @@ class CodingResultArchivePackAdmissionV1:
 
     @property
     def member_count(self) -> int:
+        return len(self.member_paths)
+
+    @property
+    def planned_paths(self) -> tuple[str, ...]:
+        return self.member_paths
+
+    @property
+    def planned_member_count(self) -> int:
         return len(self.member_paths)
 
     @property
@@ -169,6 +189,8 @@ class CodingResultArchivePackAdmissionV1:
 
 PackAdmissionState = CodingResultArchivePackAdmissionState
 PackAdmissionReason = CodingResultArchivePackAdmissionReason
+CodingResultArchivePackState = CodingResultArchivePackAdmissionState
+CodingResultArchivePackReason = CodingResultArchivePackAdmissionReason
 CodingResultArchivePackAdmission = CodingResultArchivePackAdmissionV1
 CodingResultArchivePackAdmissionDecision = CodingResultArchivePackAdmissionState
 
@@ -209,6 +231,17 @@ def _plan(value: object) -> CodingResultArchivePlanV1 | None:
         return None
     output = {"plan", "state", "carrier", "reason"}
     if output.intersection(value):
+        required = {
+            "schema",
+            "plan_id",
+            "authenticated_turn_id",
+            "plan",
+            "carrier",
+            "files",
+            "reason",
+        }
+        if set(value) != required or not isinstance(value.get("files"), list):
+            return None
         if (
             value.get("schema", "friday.coding-result-archive-plan.v1")
             != "friday.coding-result-archive-plan.v1"
@@ -294,6 +327,19 @@ def build_coding_result_archive_pack_admission(
         if set(raw) - allowed:
             _fail("pack", "unknown_fields")
         if {"admission", "state", "reason"}.intersection(raw):
+            required = {
+                "schema",
+                "pack_id",
+                "authenticated_turn_id",
+                "admission",
+                "plan_id",
+                "manifest_id",
+                "member_paths",
+                "archive_filename",
+                "reason",
+            }
+            if set(raw) != required or raw.get("schema") != CODING_RESULT_ARCHIVE_PACK_ADMISSION_SCHEMA:
+                _fail("pack", "serialized")
             return CodingResultArchivePackAdmissionV1(
                 pack_id=cast(str, raw.get("pack_id")),
                 authenticated_turn_id=cast(str, raw.get("authenticated_turn_id")),

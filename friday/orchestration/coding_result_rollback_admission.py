@@ -138,6 +138,18 @@ class CodingResultRollbackAdmissionV1:
         return self.admission
 
     @property
+    def admission_state(self) -> CodingResultRollbackAdmissionState:
+        return self.admission
+
+    @property
+    def closed_admission(self) -> CodingResultRollbackAdmissionState:
+        return self.admission
+
+    @property
+    def decision(self) -> CodingResultRollbackAdmissionState:
+        return self.admission
+
+    @property
     def rollback(self) -> CodingResultRollbackAdmissionState:
         return self.admission
 
@@ -164,6 +176,8 @@ class CodingResultRollbackAdmissionV1:
 
 RollbackAdmissionState = CodingResultRollbackAdmissionState
 RollbackAdmissionReason = CodingResultRollbackAdmissionReason
+CodingResultRollbackState = CodingResultRollbackAdmissionState
+CodingResultRollbackReason = CodingResultRollbackAdmissionReason
 CodingResultRollbackAdmission = CodingResultRollbackAdmissionV1
 CodingResultRollbackAdmissionDecision = CodingResultRollbackAdmissionState
 
@@ -229,6 +243,7 @@ def build_coding_result_rollback_admission(
     *,
     revision: object = None,
     revision_selector: object = None,
+    selector: object = None,
 ) -> CodingResultRollbackAdmissionV1:
     """Admit rollback only to the caller-supplied exact previous revision."""
 
@@ -242,6 +257,7 @@ def build_coding_result_rollback_admission(
             "previous_revision",
             "revision",
             "revision_selector",
+            "selector",
             "admission",
             "state",
             "reason",
@@ -249,6 +265,18 @@ def build_coding_result_rollback_admission(
         if set(raw) - allowed:
             _fail("rollback", "unknown_fields")
         if {"admission", "state", "reason"}.intersection(raw):
+            required = {
+                "schema",
+                "rollback_id",
+                "authenticated_turn_id",
+                "admission",
+                "operation_id",
+                "previous_revision",
+                "revision_selector",
+                "reason",
+            }
+            if set(raw) != required or raw.get("schema") != CODING_RESULT_ROLLBACK_ADMISSION_SCHEMA:
+                _fail("rollback", "serialized")
             return CodingResultRollbackAdmissionV1(
                 rollback_id=cast(str, raw.get("rollback_id")),
                 authenticated_turn_id=cast(str, raw.get("authenticated_turn_id")),
@@ -262,11 +290,15 @@ def build_coding_result_rollback_admission(
         authenticated_turn_id = cast(str, raw.get("authenticated_turn_id"))
         operation_id = cast(str | None, raw.get("operation_id"))
         previous_revision = raw.get("previous_revision", raw.get("revision"))
-        revision_selector = raw.get("revision_selector")
+        revision_selector = raw.get("revision_selector", raw.get("selector"))
     if revision is not None:
         if previous_revision is not None:
             _fail("rollback", "duplicate_revision")
         previous_revision = revision
+    if selector is not None:
+        if revision_selector is not None:
+            _fail("rollback", "duplicate_selector")
+        revision_selector = selector
     rollback_key = _identifier(rollback_id, field="rollback_id", maximum=MAX_ROLLBACK_ID_CHARS)
     turn_key = _identifier(
         authenticated_turn_id,

@@ -131,6 +131,18 @@ class CodingResultUncertaintyV1:
         return self.uncertainty
 
     @property
+    def uncertainty_state(self) -> CodingResultUncertaintyState:
+        return self.uncertainty
+
+    @property
+    def closed_uncertainty(self) -> CodingResultUncertaintyState:
+        return self.uncertainty
+
+    @property
+    def decision(self) -> CodingResultUncertaintyState:
+        return self.uncertainty
+
+    @property
     def known(self) -> bool:
         return self.uncertainty is CodingResultUncertaintyState.KNOWN
 
@@ -152,6 +164,7 @@ class CodingResultUncertaintyV1:
 
 UncertaintyState = CodingResultUncertaintyState
 UncertaintyReason = CodingResultUncertaintyReason
+CodingResultUncertaintyStateV1 = CodingResultUncertaintyState
 CodingResultUncertainty = CodingResultUncertaintyV1
 CodingResultUncertaintyDecision = CodingResultUncertaintyState
 
@@ -179,6 +192,21 @@ def _plan(value: object) -> CodingResultArchivePlanV1 | None:
         return None
     try:
         if {"plan", "state", "carrier", "reason"}.intersection(value):
+            required = {
+                "schema",
+                "plan_id",
+                "authenticated_turn_id",
+                "plan",
+                "carrier",
+                "files",
+                "reason",
+            }
+            if (
+                set(value) != required
+                or value.get("schema") != "friday.coding-result-archive-plan.v1"
+                or not isinstance(value.get("files"), list)
+            ):
+                return None
             return CodingResultArchivePlanV1(
                 cast(str, value.get("plan_id")),
                 cast(str, value.get("authenticated_turn_id")),
@@ -186,6 +214,8 @@ def _plan(value: object) -> CodingResultArchivePlanV1 | None:
                 tuple(cast(list[str], value.get("files", []))),
                 cast(Any, value.get("reason")),
             )
+        if set(value) - {"plan_id", "authenticated_turn_id", "tree", "files", "archive_requested"}:
+            return None
         return build_coding_result_archive_plan(
             cast(str, value.get("plan_id")),
             cast(str, value.get("authenticated_turn_id")),
@@ -271,6 +301,17 @@ def build_coding_result_uncertainty(
         if set(raw) - allowed:
             _fail("uncertainty", "unknown_fields")
         if {"uncertainty", "state", "reason"}.intersection(raw):
+            required = {
+                "schema",
+                "uncertainty_id",
+                "authenticated_turn_id",
+                "uncertainty",
+                "plan_id",
+                "pack_id",
+                "reason",
+            }
+            if set(raw) != required or raw.get("schema") != CODING_RESULT_UNCERTAINTY_SCHEMA:
+                _fail("uncertainty", "serialized")
             return CodingResultUncertaintyV1(
                 cast(str, raw.get("uncertainty_id")),
                 cast(str, raw.get("authenticated_turn_id")),

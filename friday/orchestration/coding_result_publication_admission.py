@@ -150,6 +150,18 @@ class CodingResultPublicationAdmissionV1:
         return self.admission
 
     @property
+    def admission_state(self) -> CodingResultPublicationAdmissionState:
+        return self.admission
+
+    @property
+    def closed_admission(self) -> CodingResultPublicationAdmissionState:
+        return self.admission
+
+    @property
+    def decision(self) -> CodingResultPublicationAdmissionState:
+        return self.admission
+
+    @property
     def publication(self) -> CodingResultPublicationAdmissionState:
         return self.admission
 
@@ -172,6 +184,8 @@ class CodingResultPublicationAdmissionV1:
 
 PublicationAdmissionState = CodingResultPublicationAdmissionState
 PublicationAdmissionReason = CodingResultPublicationAdmissionReason
+CodingResultPublicationState = CodingResultPublicationAdmissionState
+CodingResultPublicationReason = CodingResultPublicationAdmissionReason
 CodingResultPublicationAdmission = CodingResultPublicationAdmissionV1
 CodingResultPublicationAdmissionDecision = CodingResultPublicationAdmissionState
 
@@ -209,6 +223,21 @@ def _plan(value: object) -> CodingResultArchivePlanV1 | None:
         return None
     try:
         if {"plan", "state", "carrier", "reason"}.intersection(value):
+            required = {
+                "schema",
+                "plan_id",
+                "authenticated_turn_id",
+                "plan",
+                "carrier",
+                "files",
+                "reason",
+            }
+            if (
+                set(value) != required
+                or value.get("schema") != "friday.coding-result-archive-plan.v1"
+                or not isinstance(value.get("files"), list)
+            ):
+                return None
             return CodingResultArchivePlanV1(
                 cast(str, value.get("plan_id")),
                 cast(str, value.get("authenticated_turn_id")),
@@ -216,6 +245,8 @@ def _plan(value: object) -> CodingResultArchivePlanV1 | None:
                 tuple(cast(list[str], value.get("files", []))),
                 cast(Any, value.get("reason")),
             )
+        if set(value) - {"plan_id", "authenticated_turn_id", "tree", "files", "archive_requested"}:
+            return None
         return build_coding_result_archive_plan(
             cast(str, value.get("plan_id")),
             cast(str, value.get("authenticated_turn_id")),
@@ -318,6 +349,18 @@ def build_coding_result_publication_admission(
         if set(raw) - allowed:
             _fail("publication", "unknown_fields")
         if {"admission", "state", "reason"}.intersection(raw):
+            required = {
+                "schema",
+                "publication_id",
+                "authenticated_turn_id",
+                "admission",
+                "carrier",
+                "plan_id",
+                "pack_id",
+                "reason",
+            }
+            if set(raw) != required or raw.get("schema") != CODING_RESULT_PUBLICATION_ADMISSION_SCHEMA:
+                _fail("publication", "serialized")
             return CodingResultPublicationAdmissionV1(
                 cast(str, raw.get("publication_id")),
                 cast(str, raw.get("authenticated_turn_id")),

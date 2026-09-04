@@ -231,12 +231,32 @@ class CodingResultArchiveManifestV1:
         return self.manifest
 
     @property
+    def manifest_state(self) -> CodingResultArchiveManifestState:
+        return self.manifest
+
+    @property
+    def closed_manifest(self) -> CodingResultArchiveManifestState:
+        return self.manifest
+
+    @property
+    def decision(self) -> CodingResultArchiveManifestState:
+        return self.manifest
+
+    @property
     def entries(self) -> tuple[CodingResultArchiveManifestMemberV1, ...]:
         return self.members
 
     @property
     def files(self) -> tuple[str, ...]:
         return tuple(member.relative_path for member in self.members)
+
+    @property
+    def member_count(self) -> int:
+        return len(self.members)
+
+    @property
+    def listed_member_count(self) -> int:
+        return len(self.members)
 
     @property
     def digests(self) -> dict[str, str]:
@@ -260,6 +280,7 @@ class CodingResultArchiveManifestV1:
 ManifestState = CodingResultArchiveManifestState
 ManifestReason = CodingResultArchiveManifestReason
 CodingResultArchiveManifest = CodingResultArchiveManifestV1
+CodingResultArchiveManifestMember = CodingResultArchiveManifestMemberV1
 CodingResultArchiveManifestEntryV1 = CodingResultArchiveManifestMemberV1
 CodingResultArchiveManifestEntry = CodingResultArchiveManifestMemberV1
 
@@ -341,6 +362,9 @@ def build_coding_result_archive_manifest(
                 members=cast(tuple[CodingResultArchiveManifestMemberV1, ...], raw.get("members", ())),
                 reason=cast(CodingResultArchiveManifestReason, raw.get("reason")),
             )
+        representations = [key for key in ("members", "entries", "files", "digests") if key in raw]
+        if len(representations) > 1:
+            _fail("manifest", "duplicate_representations")
         manifest_id = cast(str, raw.get("manifest_id"))
         authenticated_turn_id = cast(str, raw.get("authenticated_turn_id"))
         members = _input_members(raw)
@@ -448,6 +472,7 @@ __all__ = [
     "CodingResultArchiveManifestEntry",
     "CodingResultArchiveManifestEntryV1",
     "CodingResultArchiveManifestError",
+    "CodingResultArchiveManifestMember",
     "CodingResultArchiveManifestMemberV1",
     "CodingResultArchiveManifestReason",
     "CodingResultArchiveManifestState",
