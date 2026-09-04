@@ -1,8 +1,8 @@
 # FRIDAY PERMANENT LEAD ARCHITECT SUCCESSION DIRECTIVE
 ## Full operational handover from Sol and SolGoodman to Grok
 
-**Directive date:** 2026-09-03  
-**Status:** Standing operating directive  
+**Directive date:** 2026-09-03
+**Status:** Standing operating directive
 **Supersedes:** Any shorter or earlier Grok takeover prompt for the Friday project
 
 ---
