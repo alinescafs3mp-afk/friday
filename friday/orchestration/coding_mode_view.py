@@ -14,6 +14,7 @@ from enum import StrEnum
 from typing import Any, cast
 
 from friday.orchestration.coding_inspect_hazards import (
+    CodingInspectHazardKind,
     CodingInspectHazardsReason,
     CodingInspectHazardsState,
     CodingInspectHazardsV1,
@@ -65,6 +66,14 @@ CODING_MODE_VIEW_SCHEMA = "friday.coding-mode-view.v1"
 MAX_VIEW_ID_CHARS = 128
 MAX_AUTHENTICATED_TURN_ID_CHARS = 128
 _ID_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}\Z")
+
+
+def _closed_value(component: object) -> str:
+    marker = getattr(component, "state", getattr(component, "intent", None))
+    value = getattr(marker, "value", None)
+    if type(value) is not str:
+        raise CodingModeViewError("component_state_invalid")
+    return value
 
 
 class CodingModeViewError(ValueError):
@@ -154,15 +163,11 @@ class CodingModeViewV1:
         if any(component.authenticated_turn_id != self.authenticated_turn_id for component in components):
             raise CodingModeViewError("component_turn_mismatch")
         if state is CodingModeViewState.EMPTY and any(
-            getattr(component, "state", getattr(component, "intent", None)).value != "empty"
-            for component in components
+            _closed_value(component) != "empty" for component in components
         ):
             raise CodingModeViewError("empty_view_has_facts")
         if state is CodingModeViewState.PROJECTED:
-            if any(
-                getattr(component, "state", getattr(component, "intent", None)).value == "blocked"
-                for component in components
-            ):
+            if any(_closed_value(component) == "blocked" for component in components):
                 raise CodingModeViewError("projected_view_has_blocked_component")
             if self.execute_claim.claim is CodingModeExecuteClaimState.EXECUTE_CLAIMED and (
                 self.worker_admission.admission is not CodingWorkerAdmissionState.ADMITTED
@@ -373,7 +378,7 @@ def _inspect(value: object, view_id: str, turn: str) -> CodingInspectReportV1:
                     cast(int, hazards_raw.get("secret_name_count")),
                     cast(int, hazards_raw.get("executable_member_count")),
                     cast(int, hazards_raw.get("nested_vcs_dir_count")),
-                    tuple(cast(list[str], hazards_raw.get("hazard_kinds", []))),
+                    tuple(cast(list[CodingInspectHazardKind], hazards_raw.get("hazard_kinds", []))),
                     cast(CodingInspectHazardsReason, hazards_raw.get("reason")),
                 )
             hint = None
@@ -656,10 +661,7 @@ def build_coding_mode_view(
             _empty_components(view_key, turn_key),
             CodingModeViewReason.TURN_MISMATCH,
         )
-    if any(
-        getattr(component, "state", getattr(component, "intent", None)).value == "blocked"
-        for component in components
-    ):
+    if any(_closed_value(component) == "blocked" for component in components):
         return _result(
             view_key,
             turn_key,

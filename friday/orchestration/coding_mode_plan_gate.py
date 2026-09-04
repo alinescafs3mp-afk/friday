@@ -433,11 +433,16 @@ def build_coding_mode_plan_gate(
         return _result(
             gate_key, turn_key, CodingModePlanGateState.BLOCKED, CodingModePlanGateReason.TURN_MISMATCH
         )
-    if any(
-        getattr(item, "intent", getattr(item, "claim", getattr(item, "admission", None))).value == "blocked"
-        for item in components
-        if hasattr(getattr(item, "intent", getattr(item, "claim", getattr(item, "admission", None))), "value")
-    ):
+
+    def _component_blocked(item: object) -> bool:
+        marker = getattr(item, "intent", None)
+        if marker is None:
+            marker = getattr(item, "claim", None)
+        if marker is None:
+            marker = getattr(item, "admission", None)
+        return getattr(marker, "value", None) == "blocked"
+
+    if any(_component_blocked(item) for item in components):
         if execute_value is not None and execute_value.claim is CodingModeExecuteClaimState.BLOCKED:
             return _result(
                 gate_key,

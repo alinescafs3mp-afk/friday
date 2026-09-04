@@ -374,6 +374,7 @@ def build_coding_mode_carrier(
         pack = pack_admission
     if all(item is None for item in (publication, archive_plan, pack, uncertainty)):
         return _result(carrier_key, turn_key, CodingModeCarrierState.EMPTY, CodingModeCarrierReason.NO_FACTS)
+    publication_value: CodingResultPublicationAdmissionV1 | None
     try:
         plan_value = _plan(archive_plan, carrier_key, turn_key) if archive_plan is not None else None
         pack_value = _pack(pack) if pack is not None else None

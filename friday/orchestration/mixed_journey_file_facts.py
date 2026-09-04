@@ -85,6 +85,15 @@ def _mime(value: object) -> str:
     return value
 
 
+def _reason(value: object) -> MixedJourneyFileFactsReason:
+    if isinstance(value, MixedJourneyFileFactsReason):
+        return value
+    try:
+        return MixedJourneyFileFactsReason(str(value).strip().casefold())
+    except (TypeError, ValueError) as exc:
+        raise MixedJourneyFileFactsError("reason_closed") from exc
+
+
 @dataclass(frozen=True, slots=True)
 class MixedJourneyFileFactsV1:
     """One immutable file-organ result."""
@@ -234,7 +243,7 @@ def build_mixed_journey_file_facts(
                     selected,
                     None,
                     None,
-                    MixedJourneyFileFactsReason(raw.get("reason", "no_facts")),
+                    _reason(raw.get("reason", "no_facts")),
                 )
             if sha256 is not _MISSING or mime_type is not _MISSING or digest is not _MISSING:
                 _fail("facts", "duplicate")

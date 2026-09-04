@@ -70,6 +70,15 @@ def _selector(value: object) -> str:
     return selector
 
 
+def _reason(value: object) -> MixedJourneyConversationFactsReason:
+    if isinstance(value, MixedJourneyConversationFactsReason):
+        return value
+    try:
+        return MixedJourneyConversationFactsReason(str(value).strip().casefold())
+    except (TypeError, ValueError) as exc:
+        raise MixedJourneyConversationFactsError("reason_closed") from exc
+
+
 @dataclass(frozen=True, slots=True)
 class MixedJourneyConversationFactsV1:
     """One immutable, body-free conversation-organ result."""
@@ -219,7 +228,7 @@ def build_mixed_journey_conversation_facts(
                     selected,
                     None,
                     None,
-                    MixedJourneyConversationFactsReason(raw.get("reason", "no_facts")),
+                    _reason(raw.get("reason", "no_facts")),
                 )
             conversation_id = cast(str | None, raw.get("conversation_id", raw.get("id")))
             authenticated_turn_id = cast(str | None, raw.get("authenticated_turn_id", raw.get("turn_id")))

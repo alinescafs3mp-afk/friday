@@ -68,6 +68,8 @@ def _russian_inspect_reply(report: CodingInspectReportV1, *, execute_claimed: bo
     inspection = report.inspection
     hazards = report.hazards
     hint = report.toolchain_hint
+    if inspection is None:
+        return "Режим Coding: осмотр заблокирован. Имена и состав исходников не раскрываю. " + refused
     parts = [
         "Режим Coding: статический осмотр завершён.",
         f"Файлов: {inspection.file_count}, каталогов: {inspection.directory_count}.",

@@ -82,6 +82,15 @@ def _dimension(value: object, *, field: str) -> int:
     return cast(int, value)
 
 
+def _reason(value: object) -> MixedJourneyTableFactsReason:
+    if isinstance(value, MixedJourneyTableFactsReason):
+        return value
+    try:
+        return MixedJourneyTableFactsReason(str(value).strip().casefold())
+    except (TypeError, ValueError) as exc:
+        raise MixedJourneyTableFactsError("reason_closed") from exc
+
+
 @dataclass(frozen=True, slots=True)
 class MixedJourneyTableFactsV1:
     """One immutable table-organ result."""
@@ -239,7 +248,7 @@ def build_mixed_journey_table_facts(
                     None,
                     None,
                     None,
-                    MixedJourneyTableFactsReason(raw.get("reason", "no_facts")),
+                    _reason(raw.get("reason", "no_facts")),
                 )
             if any(value is not _MISSING for value in (sha256, row_count, column_count, digest)):
                 _fail("facts", "duplicate")

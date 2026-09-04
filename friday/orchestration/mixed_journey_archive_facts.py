@@ -81,6 +81,15 @@ def _members(value: object) -> int:
     return cast(int, value)
 
 
+def _reason(value: object) -> MixedJourneyArchiveFactsReason:
+    if isinstance(value, MixedJourneyArchiveFactsReason):
+        return value
+    try:
+        return MixedJourneyArchiveFactsReason(str(value).strip().casefold())
+    except (TypeError, ValueError) as exc:
+        raise MixedJourneyArchiveFactsError("reason_closed") from exc
+
+
 @dataclass(frozen=True, slots=True)
 class MixedJourneyArchiveFactsV1:
     """One immutable archive-organ result."""
@@ -225,7 +234,7 @@ def build_mixed_journey_archive_facts(
                     selected,
                     None,
                     None,
-                    MixedJourneyArchiveFactsReason(raw.get("reason", "no_facts")),
+                    _reason(raw.get("reason", "no_facts")),
                 )
             if sha256 is not _MISSING or member_count is not _MISSING or digest is not _MISSING:
                 _fail("facts", "duplicate")

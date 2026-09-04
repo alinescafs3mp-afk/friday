@@ -34,6 +34,7 @@ from friday.orchestration.mixed_journey_file_facts import (
 from friday.orchestration.mixed_journey_identity import build_mixed_journey_identity
 from friday.orchestration.mixed_journey_organs import (
     MixedJourneyOrgansFactsV1,
+    MixedJourneyOrgansV1,
     build_mixed_journey_organs,
 )
 from friday.orchestration.mixed_journey_restart import build_mixed_journey_restart
@@ -308,7 +309,7 @@ def _derived_organs(
     conversation_value: MixedJourneyConversationFactsV1,
     web_value: MixedJourneyWebFactsV1,
     table_value: MixedJourneyTableFactsV1,
-) -> object:
+) -> MixedJourneyOrgansV1:
     return build_mixed_journey_organs(
         key,
         turn,
