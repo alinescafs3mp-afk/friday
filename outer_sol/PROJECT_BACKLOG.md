@@ -1,6 +1,6 @@
 # Friday: canonical project backlog
 
-Updated: 2026-09-04 (live `0.208.16`; N1 modules on `main`, wiring remains)
+Updated: 2026-09-04 (live `0.208.16`; Engineer status renderer on `main`; N2 Luna slices in flight)
 
 This is the project's only backlog and mutable status register. It owns the
 current production identity, execution order, acceptance gaps and owner actions.
@@ -41,8 +41,8 @@ Trusted-CA health reports `version=0.208.16`. S3 assist-controller:
 `requested_mode=assist`, `effective_mode=off`, `promotion_admitted=false`,
 `activation.reason=material_loaded_not_accepted`,
 `source_revision_loaded=true`. Do not rebase assist→assist. `origin/main` is
-ahead of live at `fc85f596` (N1 files/archive/web and engineer progress
-modules, not wired, not released).
+ahead of live (N1 builders on `main`; Engineer Telegram status renderer uses
+the shared projection on `origin/main` and is not yet live).
 
 - Production: immutable activation `phase=clear`; backend and Telegram bridge
   active; writer target `candidate`. Retention admission remains honestly
@@ -73,9 +73,10 @@ and S6 recovery/browse paths stay live.
 
 The live product queue is N1–N5. The shared operation-progress contract is
 live. Production `0.208.16` renders ordinary Telegram `/chat` status through
-that projection. Files/archive/web and Engineer projection modules are on
-`origin/main` and not yet wired into live Telegram paths. N2 deep research,
-N3 Coding Mode, N4 whole-organism journeys and N5 maintainability follow that
+that projection. Engineer Telegram status rendering on `origin/main` now uses
+the same projection (not live). Files/archive/web builders remain unwired.
+N2 currentness and `WebEvidenceBundleV1` slices are in Luna worktrees. N3
+Coding Mode, N4 whole-organism journeys and N5 maintainability follow that
 order. Physical Android, P0H deletion, off-machine mirror and
 provider-credential rotation remain owner-parked.
 
@@ -791,12 +792,13 @@ stays in Owner/external and must not block N1.
 ### N1 — Universal Operation Progress and Two-Message UX
 
 Status: contract live; ordinary `/chat` status uses the projection in
-`0.208.16`. Files/archive/web and Engineer builders are on `origin/main`
-(`_journey_status.py`, `_engineer_progress.py`) and are not wired. Remaining:
-live wiring, one final carrier, and Telegram message-count proofs. Mandatory
-owner contract: one user message → one editable Friday status → one final
-result carrier. Reuse `TelegramStatusMessageManager`. Do not add a second
-execution engine.
+`0.208.16`. Engineer Telegram status on `origin/main` now renders through the
+same projection (not live). Files/archive/web builders are on `origin/main`
+and are not wired. Remaining: files/archive/web live wiring, Engineer final
+carrier (empty/one-file ZIP / internals), and Telegram message-count proofs.
+Mandatory owner contract: one user message → one editable Friday status →
+one final result carrier. Reuse `TelegramStatusMessageManager`. Do not add a
+second execution engine.
 
 - [x] Shared `OperationProgressProjectionV1` and code-owned Russian renderer
       (`friday/orchestration/operation_progress.py`). Truthful measured
@@ -806,10 +808,11 @@ execution engine.
       with one status created at the start of an interactive operation.
       Ordinary `/chat` status rendering is on the projection; file/archive/web
       builders exist and still need live Telegram wiring.
-- [ ] Migrate `/engineer`: builders and carrier policy are on `main`; live
-      path still floods. Wire: no separate progress/terminal-status flood; no
-      empty archive; no ZIP for one ordinary output file; no internal
-      receipts/logs in the user archive by default.
+- [ ] Migrate `/engineer`: builders and carrier policy are on `main`; Telegram
+      status already coalesces to one editable message and now uses the shared
+      renderer on `origin/main`. Remaining: no empty archive; no ZIP for one
+      ordinary output file; no internal receipts/logs in the user archive by
+      default.
 - [ ] One final carrier: text, one file with caption, or one deterministic
       archive. Delivery uncertainty edits status and never duplicates.
 - [ ] Restart, edit-reject, send-fence and cancel/timeout/`UNKNOWN` proof
@@ -937,9 +940,8 @@ checklist elsewhere. The Ctrl+T view is a compact projection of this list.
 ### Open and implementable
 
 - [ ] N1 two-message Telegram UX: `/chat` status uses the live projection
-      in `0.208.16`; files/archive/web and `/engineer` builders are on
-      `main` and still need live wiring, one final carrier, and
-      message-count proofs
+      in `0.208.16`; Engineer status renderer is on `main`; files/archive/web
+      still need live wiring, one final carrier, and message-count proofs
 - [ ] N2 automatic currentness policy, multi-query `WebEvidenceBundleV1`
       and downstream consumption
 - [ ] N3 Coding Mode MVP behind an isolated worker
