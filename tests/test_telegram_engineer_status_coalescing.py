@@ -10,6 +10,7 @@ import pytest
 
 from friday.telegram_bridge import TelegramBridge, TelegramConfig
 from friday.telegram_bridge import _transport as bridge_transport
+from friday.telegram_bridge._status import render_engineer_status
 
 
 def _bridge(tmp_path) -> TelegramBridge:  # noqa: ANN001
@@ -140,14 +141,13 @@ async def test_progress_and_no_file_terminal_share_one_status_without_body_leaka
         "editMessageText",
     ]
     running = telegram.calls[0][1]["text"]
-    assert "Контрольный замер: 1 мин 15 с" in running
+    assert running == render_engineer_status(items[0]["status_update"])
+    assert "Прошло: 1 мин 15 с" in running
     assert "stdout 2.0 КиБ" in running and "stderr 17 Б" in running
-    assert "оставалось 3 мин 45 с" in running
+    assert "Тайм-аут: осталось 3 мин 45 с" in running
     assert "99%" not in running and "secret model output" not in running
     assert telegram.calls[1][1]["text"] == "Engineer result with bounded stdout"
-    assert telegram.calls[2][1]["text"] == (
-        f"✅ Engineer-задача завершена. Результат отправлен.\nJob: {job_id}."
-    )
+    assert telegram.calls[2][1]["text"] == render_engineer_status(items[1]["status_update"])
     assert final_messages == ["Engineer result with bounded stdout"]
     assert acknowledgements == [(["notif_progress_1", "notif_terminal_text_1"], [])]
     assert snapshot == {
@@ -191,9 +191,7 @@ async def test_unknown_terminally_replaces_the_prior_running_status(tmp_path, mo
         "editMessageText",
     ]
     assert telegram.calls[1][1]["text"] == "Engineer state is truthfully unknown"
-    assert telegram.calls[2][1]["text"] == (
-        f"⚠️ Состояние Engineer-задачи неизвестно. Ни успех, ни ошибка не подтверждены.\nJob: {job_id}."
-    )
+    assert telegram.calls[2][1]["text"] == render_engineer_status(items[1]["status_update"])
     assert snapshot == {
         "message_id": 701,
         "revision": (1 << 63) - 1,

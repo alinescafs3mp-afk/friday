@@ -11,6 +11,7 @@ from typing import Any
 import httpx
 
 from friday.orchestration.operation_progress import (
+    MAX_REVISION,
     OperationMode,
     OperationProgressProjection,
     OperationStepState,
@@ -19,6 +20,7 @@ from friday.orchestration.operation_progress import (
     render_operation_progress,
 )
 from friday.telegram_bridge._base import LOGGER, TELEGRAM_TEXT_LIMIT, split_for_telegram
+from friday.telegram_bridge._engineer_progress import build_engineer_operation_progress
 
 _OPERATION_ID_RE = re.compile(r"[A-Za-z0-9_.:-]{1,128}")
 _RATE_LIMIT_RETRIES = 3
@@ -259,42 +261,15 @@ def render_chat_status(
 
 
 def render_engineer_status(update: dict[str, Any]) -> str:
-    """Render a validated, content-free Engineer status carrier."""
+    """Render Engineer status through the shared operation-progress contract."""
 
-    stage = str(update["stage"])
-    job_id = str(update["operation_id"]).removeprefix("engineer:")
-    if bool(update["terminal"]):
-        terminal_text = {
-            "completed": "✅ Engineer-задача завершена. Результат отправлен.",
-            "failed": "❌ Engineer-задача завершилась с ошибкой. Итог отправлен.",
-            "cancelled": "⏹ Engineer-задача отменена. Итог отправлен.",
-            "timeout": "⏱ Engineer-задача остановлена по тайм-ауту. Итог отправлен.",
-            "unknown": "⚠️ Состояние Engineer-задачи неизвестно. Ни успех, ни ошибка не подтверждены.",
-            "delivery_uncertain": ("⚠️ Engineer-задача завершена; доставка результата не подтверждена."),
-        }[stage]
-        return f"{terminal_text}\nJob: {job_id}."
-    elapsed = _elapsed_label(float(update["elapsed_sec"]))
-    stdout_bytes = int(update["stdout_bytes"])
-    stderr_bytes = int(update["stderr_bytes"])
-    output = (
-        f"Вывод на контрольном замере: stdout {_bytes_label(stdout_bytes)}, "
-        f"stderr {_bytes_label(stderr_bytes)}."
-        if bool(update["output_activity"])
-        else "Текстового вывода на контрольном замере ещё не было."
+    raw_revision = update.get("revision", 1)
+    revision = (
+        min(raw_revision, MAX_REVISION)
+        if isinstance(raw_revision, int) and not isinstance(raw_revision, bool) and raw_revision >= 1
+        else 1
     )
-    timeout_sec = int(update["timeout_sec"])
-    if timeout_sec:
-        deadline = (
-            f"Настроенный тайм-аут: {_elapsed_label(timeout_sec)}; "
-            f"на момент замера оставалось {_elapsed_label(int(update['remaining_sec']))}."
-        )
-    else:
-        deadline = "Жёсткий тайм-аут не задан."
-    return (
-        f"⏳ Engineer-задача выполняется. Контрольный замер: {elapsed}.\n"
-        f"Job: {job_id}. "
-        f"Этап: выполняется команда. {output} {deadline}"
-    )
+    return render_operation_progress(build_engineer_operation_progress(update, revision=revision))
 
 
 def _validated_operation_id(value: object) -> str:

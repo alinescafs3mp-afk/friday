@@ -14,6 +14,7 @@ from starlette.requests import Request
 from friday.api import notifications as notifications_api
 from friday.telegram_bridge import TelegramBridge, TelegramConfig, _UpdateInbox
 from friday.telegram_bridge import _transport as bridge_transport
+from friday.telegram_bridge._status import render_engineer_status
 
 
 class _HardCrash(BaseException):
@@ -456,7 +457,7 @@ async def test_local_text_outcome_waits_for_visible_carrier_and_terminal_status_
         await bridge._drain_outbound(telegram, backend)  # noqa: SLF001
         assert telegram.messages == [
             item["body"],
-            f"✅ Engineer-задача завершена. Результат отправлен.\nJob: {job_id}.",
+            render_engineer_status(item["status_update"]),
         ]
         assert backend.status == "sent"
         assert bridge._inbox.notification_delivery_ids() == set()  # noqa: SLF001
