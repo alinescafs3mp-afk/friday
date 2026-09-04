@@ -1,6 +1,6 @@
 # Friday: canonical project backlog
 
-Updated: 2026-09-04 (live `0.208.18`; N1 one-final-carrier live; remaining N2 observation-bound; N3–N4 source contracts on `origin/main` and unwired)
+Updated: 2026-09-04 (live `0.208.18`; N1 one-final-carrier live; remaining N2 observation-bound; N3 result-archive-pack and N4 mixed-journey view on `origin/main` and unwired)
 
 This is the project's only backlog and mutable status register. It owns the
 current production identity, execution order, acceptance gaps and owner actions.
@@ -107,10 +107,11 @@ invalid provider facts; `_web_search` and `_web_fetch` refuse
 contracts stay observation-bound; do not fabricate witnesses. N3
 project identity, archive extract admission,
 bare-source inspection, extract-plan family, prompt-to-small-project,
-isolated-worker contracts, one-final source-archive plan and
-upload-modification admission are on `origin/main` and are not wired.
-Live `/coding` remains. N4 shared operation/situation view contracts are
-on `origin/main` and are not wired to stores or mixed journeys. N5
+isolated-worker contracts, one-final source-archive plan,
+result-archive-pack family and upload-modification admission are on
+`origin/main` and are not wired. Live `/coding` remains. N4 shared
+operation/situation view and mixed-journey view contracts are on
+`origin/main` and are not wired to stores or Telegram. N5
 extracted the kernel web-consumption seam; maintainability follows. Physical Android, P0H deletion, off-machine
 mirror and provider-credential rotation remain owner-parked.
 
@@ -991,10 +992,17 @@ inspect/edit only; do not claim safe build/test of untrusted uploads.
       destinations, supplied SHA-256 facts, project-root
       isolation and overwrite/collision. No archive is opened.
       Not wired.
-- [ ] One final source archive; restart, rollback and adversarial proof.
-      TEXT/FILE/ARCHIVE plan is on `origin/main`
-      (`coding_result_archive_plan.py`); no archive is packed or
-      opened. Not wired.
+- [x] One final source archive; restart, rollback and adversarial proof.
+      TEXT/FILE/ARCHIVE plan, manifest, pack admission, publication,
+      restart, rollback and uncertainty contracts are on `origin/main`
+      (`coding_result_archive_plan.py`,
+      `coding_result_archive_manifest.py`,
+      `coding_result_archive_pack_admission.py`,
+      `coding_result_publication_admission.py`,
+      `coding_result_restart_admission.py`,
+      `coding_result_rollback_admission.py`,
+      `coding_result_uncertainty.py`); no archive is packed or opened.
+      Not wired.
 
 Do not prebuild a compiler catalogue. Do not weaken Engineer Mode or
 primary release certification to create the worker.
@@ -1008,8 +1016,16 @@ must share one operation identity. New modes compose existing primitives.
 - [x] Read-only `SharedOperationViewV1` / `AgentSituationProjectionV1`
       on `origin/main` from already-supplied facts. No new execution
       owner. Not wired to stores or Telegram.
-- [ ] Mixed journeys: file+archive+conversation+web+table; Engineer+advisories;
-      Coding+current docs; restart during status+execution; revoke-before-publish.
+- [x] Mixed-journey view contracts on `origin/main`
+      (`mixed_journey_identity.py`, `mixed_journey_organs.py`,
+      `mixed_journey_coverage.py`, `mixed_journey_revoke.py`,
+      `mixed_journey_restart.py`, `mixed_journey_view.py`). EMPTY /
+      PROJECTED / BLOCKED from already-supplied facts. No store or
+      Telegram mix. Not wired.
+- [ ] Mixed journeys live: file+archive+conversation+web+table;
+      Engineer+advisories; Coding+current docs; restart during
+      status+execution; revoke-before-publish. Contracts exist; live
+      mix is not derived from stores.
 - [ ] One turn, one operation, one status, one result, one effect owner,
       one publisher. Honest `UNKNOWN`. Primary-only when secondary is absent.
 
@@ -1104,9 +1120,12 @@ checklist elsewhere. The Ctrl+T view is a compact projection of this list.
       without fabricated witnesses
 - [ ] N3 Coding Mode MVP behind an isolated worker; project identity,
       extract admission, bare-source inspection, extract-plan family,
-      prompt-to-small-project, isolated-worker, source-archive plan and
-      upload-modification admission are on `main` and unwired
-- [ ] N4 shared operation/situation projection and mixed-organ journeys
+      prompt-to-small-project, isolated-worker, source-archive plan,
+      result-archive-pack family and upload-modification admission are
+      on `main` and unwired. Live `/coding` remains.
+- [ ] N4 shared operation/situation and mixed-journey view contracts
+      are on `main` and unwired; live mixed-organ journeys are not
+      derived from stores
 - [ ] N5 extract only touched seams from giant runtime modules;
       kernel web-consumption helpers live on `0.208.18` in
       `friday/execution_kernel/web_consumption.py`

@@ -301,40 +301,38 @@ def _shared(value: object, *, key: str, turn: str) -> SharedOperationViewV1:
 
 
 def _component(value: object, *, key: str, turn: str, kind: str) -> object:
-    builders = {
-        "identity": build_mixed_journey_identity,
-        "organs": build_mixed_journey_organs,
-        "coverage": build_mixed_journey_coverage,
-        "revoke": build_mixed_journey_revoke,
-        "restart": build_mixed_journey_restart,
-    }
-    classes = {
-        "identity": MixedJourneyIdentityV1,
-        "organs": MixedJourneyOrgansV1,
-        "coverage": MixedJourneyCoverageV1,
-        "revoke": MixedJourneyRevokeV1,
-        "restart": MixedJourneyRestartV1,
-    }
-    expected = classes[kind]
-    if isinstance(value, expected):
+    builder: Any
+    cls: type[Any]
+    facts_cls: type[Any]
+    if kind == "identity":
+        builder = build_mixed_journey_identity
+        cls = MixedJourneyIdentityV1
+        facts_cls = MixedJourneyIdentityFactsV1
+    elif kind == "organs":
+        builder = build_mixed_journey_organs
+        cls = MixedJourneyOrgansV1
+        facts_cls = MixedJourneyOrgansFactsV1
+    elif kind == "coverage":
+        builder = build_mixed_journey_coverage
+        cls = MixedJourneyCoverageV1
+        facts_cls = MixedJourneyCoverageFactsV1
+    elif kind == "revoke":
+        builder = build_mixed_journey_revoke
+        cls = MixedJourneyRevokeV1
+        facts_cls = MixedJourneyRevokeFactsV1
+    else:
+        builder = build_mixed_journey_restart
+        cls = MixedJourneyRestartV1
+        facts_cls = MixedJourneyRestartFactsV1
+    if isinstance(value, cls):
         value.__post_init__()
-        identity_key = value.identity_id if kind == "identity" else value.journey_id
-        if identity_key != key or value.authenticated_turn_id != turn:
+        if value.journey_id != key or value.authenticated_turn_id != turn:
             _fail(kind, "identity")
         return value
-    if isinstance(
-        value,
-        (
-            MixedJourneyIdentityFactsV1,
-            MixedJourneyOrgansFactsV1,
-            MixedJourneyCoverageFactsV1,
-            MixedJourneyRevokeFactsV1,
-            MixedJourneyRestartFactsV1,
-        ),
-    ):
-        return builders[kind](key, turn, facts=value)
+    if isinstance(value, facts_cls):
+        return builder(key, turn, facts=value)
     if isinstance(value, Mapping):
-        return builders[kind](value) if value.get("schema") else builders[kind](key, turn, facts=value)
+        return builder(value) if value.get("schema") else builder(key, turn, facts=value)
     _fail(kind, "type")
 
 
