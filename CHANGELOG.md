@@ -1,3 +1,12 @@
+## 0.208.13 — 2026-09-04
+
+### Semantic supervisor assist to shadow
+
+- Distinct sealed candidate for `semantic_supervisor_assist_to_shadow` after
+  live `0.208.12`. Rebinds the supervisor ENV off the stale `0.208.11`
+  `SOURCE_REVISION`. SQLite remains at schema 50; exact `0.208.12` is the
+  predecessor and `0.207.90` the fallback.
+
 ## 0.208.12 — 2026-09-04
 
 ### Operation progress contract
