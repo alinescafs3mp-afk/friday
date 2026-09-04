@@ -1,6 +1,6 @@
 # Friday: canonical project backlog
 
-Updated: 2026-09-04 (live `0.208.16`; file-album status + N2 provider policy on `main`)
+Updated: 2026-09-04 (live `0.208.16`; N2 mission + provider policy on `main`)
 
 This is the project's only backlog and mutable status register. It owns the
 current production identity, execution order, acceptance gaps and owner actions.
@@ -43,8 +43,9 @@ Trusted-CA health reports `version=0.208.16`. S3 assist-controller:
 `source_revision_loaded=true`. Do not rebase assist→assist. `origin/main` is
 ahead of live (N1 builders and file-album status wiring on `main`; Engineer
 Telegram status renderer uses the shared projection on `origin/main` and is
-not yet live). N2 currentness policy, `WebEvidenceBundleV1` and provider
-fallback policy are on `origin/main` and are not wired into live retrieval.
+not yet live). N2 currentness policy, `WebEvidenceBundleV1`, multi-query
+mission planner and provider fallback policy are on `origin/main` and are
+not wired into live retrieval.
 
 - Production: immutable activation `phase=clear`; backend and Telegram bridge
   active; writer target `candidate`. Retention admission remains honestly
@@ -78,9 +79,9 @@ live. Production `0.208.16` renders ordinary Telegram `/chat` status through
 that projection. Engineer Telegram status rendering on `origin/main` now uses
 the same projection (not live). File-album Telegram status on `origin/main`
 now uses the DOCUMENT files projection (not live). Archive and web journeys
-still need live wiring. N2 currentness policy, `WebEvidenceBundleV1` and
-provider fallback policy are on `origin/main` and are not consumed by live
-retrieval. N3 Coding Mode, N4
+still need live wiring. N2 currentness, evidence bundle, multi-query mission
+planner and provider fallback policy are on `origin/main` and are not
+consumed by live retrieval. N3 Coding Mode, N4
 whole-organism journeys and N5 maintainability follow that order. Physical
 Android, P0H deletion, off-machine mirror and provider-credential rotation
 remain owner-parked.
@@ -828,15 +829,17 @@ second execution engine.
 
 Status: modules started on `origin/main`. Today is still a strong
 single-query 27s/3-source (max 8) live pipeline. Code-owned currentness
-policy, frozen `WebEvidenceBundleV1` and provider fallback policy exist
-and are not wired. Remaining: multi-query mission, consumption.
+policy, frozen `WebEvidenceBundleV1`, multi-query mission planner and
+provider fallback policy exist and are not wired. Remaining: consumption.
 
 - [x] Automatic currentness / knowledge-gap policy module on `origin/main`
       (`friday/orchestration/web_currentness_policy.py`). Not wired into
       live `web_surfer` or Telegram. Private filenames, paths and deictics
       stay local.
-- [ ] Multi-query research mission (2–8 complementary public queries) with
-      source diversity.
+- [x] Multi-query research mission planner on `origin/main`
+      (`friday/orchestration/web_research_mission.py`). Emits 2–8
+      complementary public queries; `SEARCH_BLOCKED_PRIVATE` never becomes a
+      query plan. Not wired.
 - [x] Provider selection and honest degraded-fallback policy on
       `origin/main` (`friday/orchestration/web_provider_policy.py`). Not
       wired into live `web_surfer`. PRIMARY_OK / FALLBACK_USED /
@@ -956,8 +959,8 @@ checklist elsewhere. The Ctrl+T view is a compact projection of this list.
       in `0.208.16`; Engineer status renderer and file-album DOCUMENT status
       are on `main`; archive/web still need live wiring, one final carrier,
       and message-count proofs
-- [ ] N2 currentness, `WebEvidenceBundleV1` and provider fallback policy
-      are on `main` and unwired; remaining multi-query mission, consumption
+- [ ] N2 currentness, evidence bundle, multi-query mission and provider
+      fallback policy are on `main` and unwired; remaining consumption
 - [ ] N3 Coding Mode MVP behind an isolated worker
 - [ ] N4 shared operation/situation projection and mixed-organ journeys
 - [ ] N5 extract only touched seams from giant runtime modules
