@@ -1,6 +1,6 @@
 # Friday: canonical project backlog
 
-Updated: 2026-09-04 (live `0.208.17`; N3 upload-modification and N5 kernel web consumption extract on `origin/main`, not live)
+Updated: 2026-09-04 (live `0.208.17`; remaining N2 contracts observation-bound; N1 carrier packing and N3–N5 source contracts on `origin/main`, not live)
 
 This is the project's only backlog and mutable status register. It owns the
 current production identity, execution order, acceptance gaps and owner actions.
@@ -51,8 +51,10 @@ empty-after-outbound, and invalid provider facts; `_web_search` and
 observe chain names as `WebProviderId` and the kernel consumes
 `select_web_provider` when `selected_provider_id` is present. File+web
 comparison and `POST /api/ingest/url` refuse observed private URLs via
-the same consumption gate. Other N2 contracts are not consumed by the
-requesting workflow. N3
+the same consumption gate. Other N2 contracts stay observation-bound:
+live requesting workflows do not observe claims, dates, passages or
+missions, and `/coding` does not exist. Do not fabricate those
+witnesses. N3
 inspect, extract-plan, prompt-to-small-project, isolated-worker,
 result-archive-plan and upload-modification-admission families are live
 as source and unwired. N4 shared
@@ -101,7 +103,7 @@ invalid provider facts; `_web_search` and `_web_fetch` refuse
 `BLOCKED_PRIVATE`; observed chain names are consumed when
 `selected_provider_id` is present. File+web comparison and
 `POST /api/ingest/url` consume `BLOCKED_PRIVATE`. Other N2
-contracts are not consumed by the requesting workflow. N3
+contracts stay observation-bound; do not fabricate witnesses. N3
 project identity, archive extract admission,
 bare-source inspection, extract-plan family, prompt-to-small-project,
 isolated-worker contracts, one-final source-archive plan and
@@ -870,9 +872,11 @@ Live `_web_research` refuses private observed URLs, empty-after-outbound
 (`no_admitted_sources`) and invalid provider facts; empty success is not
 completeness. `_web_search` and `_web_fetch` refuse `BLOCKED_PRIVATE`.
 File+web comparison and `POST /api/ingest/url` consume `BLOCKED_PRIVATE`
-the same way. Remaining: consume the other landed contracts on table and
-Coding paths; do not wire mission/answer-gate into live single-query
-`_web_research`.
+the same way. Remaining N2 contracts stay observation-bound: live
+requesting workflows do not observe claims, dates, passages or missions.
+Table CSV/spreadsheet URLs already go through file+web consumption.
+Coding `/coding` does not exist. Do not wire mission/answer-gate into
+live single-query `_web_research`. Do not fabricate those facts.
 
 - [x] Automatic currentness / knowledge-gap policy module on `origin/main`
       (`friday/orchestration/web_currentness_policy.py`). Not wired into
@@ -938,10 +942,11 @@ Coding paths; do not wire mission/answer-gate into live single-query
       (`friday/orchestration/web_passage_reference_coverage.py`). EMPTY /
       REFERENCED / PARTIAL / BARE / BLOCKED. Title, digest and `retrieved_at`
       are not references. Not wired.
-- [ ] Integrate remaining contracts into table and later Coding journeys.
-      Document ingest and Engineer/chat kernel tools consume
-      `BLOCKED_PRIVATE`. Mission/readiness/answer-gate stay unwired on
-      the live single-query pipeline.
+- [ ] Remaining N2 contracts stay observation-bound until a live workflow
+      observes claims, dates, passages or missions. Table file+web and
+      kernel/ingest paths already consume `BLOCKED_PRIVATE`. Do not wire
+      mission/answer-gate into live single-query `_web_research`. Do not
+      fabricate witnesses.
 - [ ] Private representative benchmark and body-free public summary. Do not
       claim Gemini parity without a paired scored set.
 
@@ -1093,8 +1098,8 @@ checklist elsewhere. The Ctrl+T view is a compact projection of this list.
       evidence grounding, source date coverage, claim currentness and
       passage-reference coverage are on `main` and live as source; live
       `_web_research` refuses private URLs, empty-after-outbound and
-      invalid provider facts; remaining live consumption of the other
-      contracts
+      invalid provider facts; remaining contracts stay observation-bound
+      without fabricated witnesses
 - [ ] N3 Coding Mode MVP behind an isolated worker; project identity,
       extract admission, bare-source inspection, extract-plan family,
       prompt-to-small-project, isolated-worker, source-archive plan and
