@@ -1,3 +1,14 @@
+## 0.208.17 — 2026-09-04
+
+### N1 Telegram surfaces and live web provider facts
+
+- Distinct sealed candidate for `semantic_supervisor_assist_to_shadow` after
+  live 0.208.16 `shadow_to_assist`. Lands Engineer/file-album/observed
+  web-archive Telegram status, live `_web_research` private/empty/provider
+  consumption, and unwired N3 inspect plus extract-plan contracts.
+  SQLite remains at schema 50; exact `0.208.16` is the predecessor and
+  `0.207.90` the fallback.
+
 ## 0.208.16 — 2026-09-04
 
 ### Semantic supervisor shadow to assist
