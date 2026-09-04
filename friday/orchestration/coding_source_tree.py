@@ -89,9 +89,22 @@ def _canonical_path(value: str) -> str:
 
 def _member_values(value: object) -> tuple[CodingSourceMemberV1, ...]:
     if isinstance(value, Mapping):
-        allowed = {"members", "source_members", "member_facts"}
+        allowed = {
+            "members",
+            "source_members",
+            "member_facts",
+            "tree_id",
+            "authenticated_turn_id",
+            "tree",
+            "state",
+            "member_count",
+            "reason",
+        }
         if set(value) - allowed:
             raise CodingSourceTreeError("tree contains unknown fields")
+        state = value.get("tree", value.get("state"))
+        if isinstance(state, str) and state.strip().casefold() == "blocked":
+            raise CodingSourceTreeError("tree is blocked")
         value = value.get("members", value.get("source_members", value.get("member_facts", ())))
     if isinstance(value, (str, bytes, bytearray)) or not isinstance(value, Sequence):
         raise CodingSourceTreeError("members must be a sequence")

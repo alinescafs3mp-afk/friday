@@ -295,8 +295,7 @@ def build_coding_inspect_hazards(
     for member in tree.members:
         components = member.relative_path.split("/")
         names = [component for component in components if component]
-        basename = names[-1]
-        if _SECRET_NAME_RE.search(basename):
+        if any(_SECRET_NAME_RE.search(name) for name in names):
             secret_count += 1
             if CodingInspectHazardKind.SECRET_LOOKING_NAME not in kinds:
                 kinds.append(CodingInspectHazardKind.SECRET_LOOKING_NAME)
