@@ -24,9 +24,11 @@ from friday.telegram_bridge._engineer_progress import build_engineer_operation_p
 from friday.telegram_bridge._journey_status import (
     ArchiveStatusStage,
     FilesStatusStage,
+    MixedStatusStage,
     WebStatusStage,
     build_archive_operation_progress,
     build_files_operation_progress,
+    build_mixed_operation_progress,
     build_web_operation_progress,
 )
 
@@ -286,6 +288,11 @@ _CHAT_TO_ARCHIVE_STAGE = {
     TelegramStatusStage.COMPLETE: ArchiveStatusStage.COMPLETE,
     TelegramStatusStage.STOPPED: ArchiveStatusStage.STOPPED,
 }
+_CHAT_TO_MIXED_STAGE = {
+    TelegramStatusStage.DELIVERING_RESULT: MixedStatusStage.DELIVERING_RESULT,
+    TelegramStatusStage.COMPLETE: MixedStatusStage.COMPLETE,
+    TelegramStatusStage.STOPPED: MixedStatusStage.STOPPED,
+}
 _RESULT_STAGES = {
     TelegramStatusStage.DELIVERING_RESULT,
     TelegramStatusStage.COMPLETE,
@@ -308,12 +315,16 @@ def render_interactive_turn_status(
     operation_id: str = "chat:status",
     authenticated_turn_id: str = "chat:status",
     revision: int = 1,
+    mixed_projection: object = None,
 ) -> str:
     """Render inbound files, observed web sources, or observed generated files.
 
     Backend wait stays on the CHAT projection. Web and archive/file result
     journeys are admitted only after the backend returns observed counters.
-    Inbound album counts keep DOCUMENT mode for the whole turn.
+    Inbound album counts keep DOCUMENT mode for the whole turn. MIXED mode is
+    opt-in: only a supplied PROJECTED mixed store projection with two content
+    organs, or a flagged Engineer/Coding organ, may replace the exclusive
+    heuristic, and never during inbound-album DOCUMENT.
     """
 
     if item_total > 0:
@@ -329,6 +340,26 @@ def render_interactive_turn_status(
                 revision=revision,
             )
         )
+    mixed_stage = _CHAT_TO_MIXED_STAGE.get(stage)
+    if mixed_projection is not None and mixed_stage is not None:
+        from friday.organs.mixed_journey.admit import mixed_status_admitted
+
+        if mixed_status_admitted(mixed_projection):
+            view = getattr(mixed_projection, "view", None)
+            organs = getattr(view, "organs", None)
+            present = tuple(getattr(organs, "present_organs", ()) or ())
+            return render_operation_progress(
+                build_mixed_operation_progress(
+                    mixed_stage,
+                    elapsed_sec,
+                    organ_total=len(present),
+                    gathered_organs=len(present),
+                    composed_organs=len(present),
+                    operation_id=operation_id,
+                    authenticated_turn_id=authenticated_turn_id,
+                    revision=revision,
+                )
+            )
     web_total = max(0, int(web_source_total))
     web_stage = _CHAT_TO_WEB_STAGE.get(stage)
     if web_total > 0 and web_stage is not None:

@@ -13,6 +13,7 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import Any, TypeVar
 
+from friday.orchestration.mixed_journey_progress import MixedStatusStage, build_mixed_operation_progress
 from friday.orchestration.operation_progress import (
     OperationMode,
     OperationProgressProjection,
@@ -348,10 +349,12 @@ def build_web_operation_progress(
 __all__ = [
     "ArchiveStatusStage",
     "FilesStatusStage",
+    "MixedStatusStage",
     "OperationProgressProjectionV1",
     "WebStatusStage",
     "build_archive_operation_progress",
     "build_files_operation_progress",
+    "build_mixed_operation_progress",
     "build_web_operation_progress",
     "render_operation_progress",
 ]

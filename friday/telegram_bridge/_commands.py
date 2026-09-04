@@ -112,6 +112,7 @@ class _ChatProgressState:
         "web_source_total",
         "generated_file_total",
         "generated_archive_total",
+        "mixed_projection",
     )
 
     def __init__(
@@ -146,6 +147,7 @@ class _ChatProgressState:
         self.web_source_total = 0
         self.generated_file_total = 0
         self.generated_archive_total = 0
+        self.mixed_projection = None
 
 
 def _generated_file_is_archive(item: dict[str, Any]) -> bool:
@@ -156,6 +158,8 @@ def _generated_file_is_archive(item: dict[str, Any]) -> bool:
 
 def _observe_chat_result(state: _ChatProgressState, response: dict[str, Any]) -> None:
     """Admit only backend-returned web sources and generated files into status."""
+
+    from friday.organs.mixed_journey import mixed_status_admitted, observe_mixed_journey
 
     state.web_source_total = len(_web_source_chat_lines(response.get("web_sources")))
     files = response.get("files")
@@ -170,6 +174,13 @@ def _observe_chat_result(state: _ChatProgressState, response: dict[str, Any]) ->
                 archive_total += 1
     state.generated_file_total = file_total
     state.generated_archive_total = archive_total
+    projection = observe_mixed_journey(
+        state.operation_id,
+        state.operation_id,
+        response=response,
+        revision=max(1, int(state.revision) or 1),
+    )
+    state.mixed_projection = projection if mixed_status_admitted(projection) else None
 
 
 def _queue_chat_progress(
@@ -202,6 +213,7 @@ def _queue_chat_progress(
         operation_id=state.operation_id,
         authenticated_turn_id=state.operation_id,
         revision=revision,
+        mixed_projection=state.mixed_projection,
     )
     if create:
         # Mark before the network await. A stage transition that happens while

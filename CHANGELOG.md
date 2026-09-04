@@ -1,3 +1,15 @@
+## 0.208.21 — 2026-09-05
+
+### N4 live store-backed mixed journeys
+
+- Distinct sealed candidate for `semantic_supervisor_shadow_to_assist` after
+  live 0.208.20. Lands the I/O observer that maps durable store identities and
+  already-observed turn facts through landed mixed-journey adapters into one
+  operation, one status, one result, one effect owner, and one publisher.
+  Telegram MIXED status is opt-in from a PROJECTED mix; exclusive
+  DOCUMENT/ARCHIVE/RESEARCH heuristics remain otherwise. SQLite remains at
+  schema 50; exact `0.208.20` is the predecessor and `0.207.90` the fallback.
+
 ## 0.208.20 — 2026-09-05
 
 ### N3 isolated Coding worker boundary

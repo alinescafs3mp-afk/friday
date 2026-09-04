@@ -10,9 +10,11 @@ from friday.orchestration.operation_progress import OperationMode, OperationStep
 from friday.telegram_bridge._journey_status import (
     ArchiveStatusStage,
     FilesStatusStage,
+    MixedStatusStage,
     WebStatusStage,
     build_archive_operation_progress,
     build_files_operation_progress,
+    build_mixed_operation_progress,
     build_web_operation_progress,
     render_operation_progress,
 )
@@ -45,6 +47,14 @@ from friday.telegram_bridge._status import TelegramStatusStage, render_interacti
             OperationMode.RESEARCH,
             "source_review",
             id="web",
+        ),
+        pytest.param(
+            build_mixed_operation_progress,
+            MixedStatusStage.COMPOSING_RESULT,
+            {"organ_total": 3, "gathered_organs": 3, "composed_organs": 1},
+            OperationMode.MIXED,
+            "mixed_compose",
+            id="mixed",
         ),
     ],
 )
@@ -107,6 +117,7 @@ def test_journey_step_ids_are_distinct_from_chat_stage_ids_and_each_other() -> N
         build_files_operation_progress(FilesStatusStage.RECEIVING_FILES, 1),
         build_archive_operation_progress(ArchiveStatusStage.SELECTING_FILES, 1),
         build_web_operation_progress(WebStatusStage.SEARCHING_SOURCES, 1),
+        build_mixed_operation_progress(MixedStatusStage.GATHERING_FACTS, 1),
     )
     chat_step_ids = {
         "receiving_media",
@@ -126,6 +137,7 @@ def test_journey_step_ids_are_distinct_from_chat_stage_ids_and_each_other() -> N
         (build_files_operation_progress, FilesStatusStage.COMPLETE),
         (build_archive_operation_progress, ArchiveStatusStage.COMPLETE),
         (build_web_operation_progress, WebStatusStage.COMPLETE),
+        (build_mixed_operation_progress, MixedStatusStage.COMPLETE),
     ],
 )
 def test_complete_journey_has_no_running_focus_and_no_eta(builder, stage) -> None:
