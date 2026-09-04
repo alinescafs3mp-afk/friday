@@ -1,6 +1,6 @@
 # Friday: canonical project backlog
 
-Updated: 2026-09-04 (live `0.208.17`; N1 Telegram surfaces and N2 empty-research/provider observation live)
+Updated: 2026-09-04 (live `0.208.17`; N3 worker and N4 view contracts on `origin/main`, not live)
 
 This is the project's only backlog and mutable status register. It owns the
 current production identity, execution order, acceptance gaps and owner actions.
@@ -48,9 +48,12 @@ restart/edit-reject/send-fence/cancel counts, observed web/archive chat
 status) are live. N2 live `_web_research` refuses private observed URLs,
 empty-after-outbound, and invalid provider facts; `search`/`research`
 observe chain names as `WebProviderId` and the kernel consumes
-`select_web_provider` when `selected_provider_id` is present. Other N2
-contracts are not consumed by the requesting workflow. N3 inspect and
-extract-plan family are live as source and unwired.
+`select_web_provider` when `selected_provider_id` is present. File+web
+comparison refuses observed private URLs via the same consumption gate.
+Other N2 contracts are not consumed by the requesting workflow. N3
+inspect, extract-plan, prompt-to-small-project, isolated-worker and
+result-archive-plan families are live as source and unwired. N4 shared
+operation/situation view contracts are on `origin/main` and unwired.
 
 - Production: immutable activation `phase=clear`; backend and Telegram bridge
   active; writer target `candidate`. Retention admission remains honestly
@@ -92,15 +95,16 @@ grounding, source date coverage, claim currentness and
 passage-reference coverage are on `origin/main` and live as source.
 Live `_web_research` refuses private URLs, empty-after-outbound and
 invalid provider facts; observed chain names are consumed when
-`selected_provider_id` is present. Other N2 contracts are not consumed
-by the requesting workflow. N3 project identity, archive extract
-admission, bare-source inspection, and archive extract-plan family
-(catalog, relative plan, digest facts, project isolation,
-overwrite/collision) are on `origin/main` and are not wired. Isolated
-coding worker, prompt-to-small-project, one final source archive and
-live `/coding` remain. N4 shared operation/situation view is not
-started. N5 maintainability follows. Physical Android, P0H deletion,
-off-machine mirror and provider-credential rotation remain owner-parked.
+`selected_provider_id` is present. File+web comparison consumes
+`BLOCKED_PRIVATE`. Other N2 contracts are not consumed by the
+requesting workflow. N3 project identity, archive extract admission,
+bare-source inspection, extract-plan family, prompt-to-small-project,
+isolated-worker contracts and one-final source-archive plan are on
+`origin/main` and are not wired. Live `/coding` and uploaded-project
+modification remain. N4 shared operation/situation view contracts are
+on `origin/main` and are not wired to stores or mixed journeys. N5
+maintainability follows. Physical Android, P0H deletion, off-machine
+mirror and provider-credential rotation remain owner-parked.
 
 ## Operating rules
 
@@ -859,8 +863,9 @@ evidence grounding, source date coverage, claim currentness and
 passage-reference coverage exist and are not wired into document, table,
 Engineer or Coding journeys. Live `_web_research` refuses private
 observed URLs, empty-after-outbound (`no_admitted_sources`) and invalid
-provider facts; empty success is not completeness. Remaining: consume
-the other landed contracts on document/table/Engineer/Coding paths.
+provider facts; empty success is not completeness. File+web comparison
+consumes `BLOCKED_PRIVATE` the same way. Remaining: consume the other
+landed contracts on document/table/Engineer/Coding paths.
 
 - [x] Automatic currentness / knowledge-gap policy module on `origin/main`
       (`friday/orchestration/web_currentness_policy.py`). Not wired into
@@ -883,8 +888,9 @@ the other landed contracts on document/table/Engineer/Coding paths.
 - [x] Research consumption gate on `origin/main`
       (`friday/orchestration/web_research_consumption.py`). CONSUMABLE /
       CONSUMABLE_DEGRADED / BLOCKED_PRIVATE / UNAVAILABLE. Live kernel
-      refuses `BLOCKED_PRIVATE` and empty-after-outbound; other states
-      are not yet consumed by the requesting workflow.
+      and file+web comparison refuse `BLOCKED_PRIVATE`; kernel also
+      refuses empty-after-outbound. Other states are not yet consumed
+      by the requesting workflow.
 - [x] Research readiness composition on `origin/main`
       (`friday/orchestration/web_research_readiness.py`). READY /
       READY_DEGRADED / NOT_READY from mission, diversity and consumption.
@@ -931,9 +937,9 @@ the other landed contracts on document/table/Engineer/Coding paths.
 ### N3 — Coding Mode
 
 Status: modules started on `origin/main`. `/coding` does not exist.
-Engineer bubblewrap is not a Coding Worker. Prompt-to-small-project
-contracts (normalize, plan, scaffold, create admission) are on
-`origin/main` and unwired. Until an isolated worker exists, static
+Engineer bubblewrap is not a Coding Worker. Prompt-to-small-project,
+isolated-worker and one-final source-archive plan contracts are on
+`origin/main` and unwired. Until a live isolated worker exists, static
 inspect/edit only; do not claim safe build/test of untrusted uploads.
 
 - [x] Bare-source inspection contracts on `origin/main`
@@ -950,7 +956,9 @@ inspect/edit only; do not claim safe build/test of untrusted uploads.
       IDENTIFIED / BLOCKED. Exact revision only; `latest`/`HEAD`/
       `newest`/`current` fail closed. Not wired to git or a worker.
 - [ ] Isolated coding worker: no host secrets, no Docker socket, no
-      production database, bounded network.
+      production database, bounded network. Frozen identity, isolation,
+      network, workspace, limits and admission contracts are on
+      `origin/main` (not wired; no process, Docker, or `/coding`).
 - [x] Safe archive extract admission on `origin/main`
       (`friday/orchestration/coding_archive_extract_admission.py`).
       EMPTY / ADMITTED / BLOCKED from member metadata. Traversal,
@@ -967,18 +975,22 @@ inspect/edit only; do not claim safe build/test of untrusted uploads.
       isolation and overwrite/collision. No archive is opened.
       Not wired.
 - [ ] One final source archive; restart, rollback and adversarial proof.
+      TEXT/FILE/ARCHIVE plan is on `origin/main`
+      (`coding_result_archive_plan.py`); no archive is packed or
+      opened. Not wired.
 
 Do not prebuild a compiler catalogue. Do not weaken Engineer Mode or
 primary release certification to create the worker.
 
 ### N4 — Whole-Organism Coherence
 
-Status: not started. Durable organs exist; there is no shared operation
-view. Primary and secondary must share one operation identity. New modes
-compose existing primitives.
+Status: contracts started on `origin/main`. Durable organs exist; the
+shared view is not yet derived from live stores. Primary and secondary
+must share one operation identity. New modes compose existing primitives.
 
-- [ ] Read-only `SharedOperationViewV1` / `AgentSituationProjectionV1`
-      derived from existing stores. No new execution owner.
+- [x] Read-only `SharedOperationViewV1` / `AgentSituationProjectionV1`
+      on `origin/main` from already-supplied facts. No new execution
+      owner. Not wired to stores or Telegram.
 - [ ] Mixed journeys: file+archive+conversation+web+table; Engineer+advisories;
       Coding+current docs; restart during status+execution; revoke-before-publish.
 - [ ] One turn, one operation, one status, one result, one effect owner,
