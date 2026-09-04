@@ -1,6 +1,6 @@
 # Friday: canonical project backlog
 
-Updated: 2026-09-04 (live `0.208.16`; N1 Telegram method-count proofs and live empty-research refusal on `main`)
+Updated: 2026-09-04 (live `0.208.17`; N1 Telegram surfaces and N2 empty-research/provider observation live)
 
 This is the project's only backlog and mutable status register. It owns the
 current production identity, execution order, acceptance gaps and owner actions.
@@ -32,28 +32,25 @@ Do not copy that snapshot's release claims forward.
 - Database schema: 50 in deployed production and the fallback.
 
 Golden-journey receipts stay bound to that `0.208.1` root until rebound. The
-running sealed sibling is Friday `0.208.16` at
-`706510d06ec0bd7c2b7a2898103b3cfd9cddd5ea` (tree-file
-`bc36ee455707807536d323ee34b6f6e627fd53da4e84a83dc49e6e5625a6e8d9`, wheel
-`c952de699a7c909a28cc7fc03c43797e13be32c10382456e096e46187898be9d`, journal
-`clear`, predecessor `0.208.15` / `594c654fe0e370d48beeceffe2837923a07269a7`).
-Trusted-CA health reports `version=0.208.16`. S3 assist-controller:
-`requested_mode=assist`, `effective_mode=off`, `promotion_admitted=false`,
-`activation.reason=material_loaded_not_accepted`,
-`source_revision_loaded=true`. Do not rebase assist→assist. `origin/main` is
-ahead of live (N1 builders, file-album DOCUMENT status, Engineer renderer,
-Engineer FILE/ARCHIVE carrier, and observed web/archive chat status on
-`main`; none of those Telegram surfaces are live yet). N2 currentness policy, `WebEvidenceBundleV1`, multi-query
-mission planner, provider fallback policy, source diversity, research
-consumption, readiness composition, citation coverage, claim support,
-answer admission, contradiction coverage, exact mission coverage,
-evidence grounding, source date coverage, claim currentness and
-passage-reference coverage are on `origin/main`. Live `_web_research`
-refuses private observed URLs, empty-after-outbound, and invalid
-provider facts; `search`/`research` observe chain names as
-`WebProviderId` and the kernel consumes `select_web_provider` when
-`selected_provider_id` is present. Other N2 contracts are not consumed
-by the requesting workflow.
+running sealed sibling is Friday `0.208.17` at
+`426729dc6dc0dc6839eeb537d09432dcbdb551f9` (tree-file
+`217b02555026176a3970c60903259ebcc68ad086c16cd7392011b94d853d20e2`, wheel
+`f8d8375b4c4d34ad3aa13f444dd22b029bcb0eb09fe61b2753d2458aedb6716e`, journal
+`clear`, predecessor `0.208.16` /
+`706510d06ec0bd7c2b7a2898103b3cfd9cddd5ea`). Trusted-CA health reports
+`version=0.208.17`. S3: `requested_mode=shadow`, `effective_mode=shadow`,
+`promotion_admitted=false`, `activation.reason=default_off`. Do not
+extra-hop to assist without a product sibling. Next product sibling that
+changes friday sources is `shadow_to_assist`. `origin/main` is the live
+sibling. N1 Telegram surfaces (ordinary `/chat` status, Engineer status
+renderer, file-album DOCUMENT status, Engineer FILE/ARCHIVE carrier,
+restart/edit-reject/send-fence/cancel counts, observed web/archive chat
+status) are live. N2 live `_web_research` refuses private observed URLs,
+empty-after-outbound, and invalid provider facts; `search`/`research`
+observe chain names as `WebProviderId` and the kernel consumes
+`select_web_provider` when `selected_provider_id` is present. Other N2
+contracts are not consumed by the requesting workflow. N3 inspect and
+extract-plan family are live as source and unwired.
 
 - Production: immutable activation `phase=clear`; backend and Telegram bridge
   active; writer target `candidate`. Retention admission remains honestly
@@ -83,26 +80,26 @@ deployed; advice remains off until the observation-bound witness. S5 40k lease
 and S6 recovery/browse paths stay live.
 
 The live product queue is N1–N5. The shared operation-progress contract is
-live. Production `0.208.16` renders ordinary Telegram `/chat` status through
-that projection. Engineer Telegram status rendering on `origin/main` now uses
-the same projection (not live). File-album Telegram status on `origin/main`
-now uses the DOCUMENT files projection (not live). Archive and web journeys
-still need live wiring. N2 currentness, evidence bundle, multi-query mission
-planner, provider fallback, source diversity, consumption, readiness and
-citation coverage, claim support, answer admission, contradiction
-coverage, exact mission coverage, evidence grounding, source date
-coverage, claim currentness and passage-reference coverage are on
-`origin/main`. Live `_web_research` refuses private URLs,
-empty-after-outbound and invalid provider facts; observed chain names
-are consumed when `selected_provider_id` is present. Other N2
-contracts are not consumed by the requesting workflow.
-N3 project identity, archive extract admission, bare-source
-inspection, and archive extract-plan family (catalog, relative
-plan, digest facts, project isolation, overwrite/collision) are
-on `origin/main` and are not wired. N3 Coding Mode, N4
-whole-organism journeys and N5 maintainability follow that order. Physical
-Android, P0H deletion, off-machine mirror and provider-credential rotation
-remain owner-parked.
+live. Production `0.208.17` renders ordinary Telegram `/chat` status,
+Engineer status, file-album DOCUMENT status, Engineer FILE/ARCHIVE
+carrier, and observed web/archive chat status through that projection.
+N1 remaining gap is one final carrier. N2 currentness, evidence bundle,
+multi-query mission planner, provider fallback, source diversity,
+consumption, readiness and citation coverage, claim support, answer
+admission, contradiction coverage, exact mission coverage, evidence
+grounding, source date coverage, claim currentness and
+passage-reference coverage are on `origin/main` and live as source.
+Live `_web_research` refuses private URLs, empty-after-outbound and
+invalid provider facts; observed chain names are consumed when
+`selected_provider_id` is present. Other N2 contracts are not consumed
+by the requesting workflow. N3 project identity, archive extract
+admission, bare-source inspection, and archive extract-plan family
+(catalog, relative plan, digest facts, project isolation,
+overwrite/collision) are on `origin/main` and are not wired. Isolated
+coding worker, prompt-to-small-project, one final source archive and
+live `/coding` remain. N4 shared operation/situation view is not
+started. N5 maintainability follows. Physical Android, P0H deletion,
+off-machine mirror and provider-credential rotation remain owner-parked.
 
 ## Operating rules
 
@@ -815,19 +812,15 @@ stays in Owner/external and must not block N1.
 
 ### N1 — Universal Operation Progress and Two-Message UX
 
-Status: contract live; ordinary `/chat` status uses the projection in
-`0.208.16`. Engineer Telegram status on `origin/main` now renders through the
-same projection (not live). Files/archive/web builders are on `origin/main`.
-Ordinary `/chat` on `origin/main` now edits the existing status from observed
-`web_sources` and generated files after `/api/chat` returns; backend wait
-stays CHAT and does not mint SEARCHING_SOURCES. File-album DOCUMENT status
-and Engineer user FILE/ARCHIVE carrier are on `origin/main` (not live).
-Restart, edit-reject, send-fence, cancel and permanent-backend STOPPED
-now have Telegram `sendMessage`/`editMessageText` counts on `origin/main`.
-Remaining: live cutover.
-Mandatory owner contract: one user message → one editable Friday status →
-one final result carrier. Reuse `TelegramStatusMessageManager`. Do not add a
-second execution engine.
+Status: contract live on `0.208.17`. Ordinary `/chat` status, Engineer
+Telegram status, file-album DOCUMENT status, Engineer FILE/ARCHIVE
+carrier, observed web/archive chat status after `/api/chat`, and
+restart/edit-reject/send-fence/cancel Telegram method counts are live.
+Backend wait stays CHAT and does not mint SEARCHING_SOURCES. Remaining:
+one final carrier (text / one file with caption / one deterministic
+archive). Mandatory owner contract: one user message → one editable
+Friday status → one final result carrier. Reuse
+`TelegramStatusMessageManager`. Do not add a second execution engine.
 
 - [x] Shared `OperationProgressProjectionV1` and code-owned Russian renderer
       (`friday/orchestration/operation_progress.py`). Truthful measured
@@ -836,34 +829,35 @@ second execution engine.
 - [x] Migrate ordinary `/chat`, files, archive and web onto that projection
       with one status created at the start of an interactive operation.
       Ordinary `/chat` status rendering is on the projection; file-album
-      status on `origin/main` uses the DOCUMENT files projection (not live).
-      After `/api/chat` returns, observed web sources use FORMULATING_ANSWER
-      and generated archives/files use archive or DOCUMENT delivering.
-      Backend wait stays CHAT. Not live.
-- [x] Migrate `/engineer` user carrier on `origin/main`: policy lives in
+      status uses the DOCUMENT files projection. After `/api/chat` returns,
+      observed web sources use FORMULATING_ANSWER and generated
+      archives/files use archive or DOCUMENT delivering. Backend wait
+      stays CHAT. Live on `0.208.17`.
+- [x] Migrate `/engineer` user carrier: policy lives in
       `friday/orchestration/engineer_result_carrier.py`; Telegram publication
       sends TEXT, one ordinary FILE, or a user ARCHIVE without receipts/logs.
-      Status() diagnostic ZIP is unchanged. Not live.
-- [x] Migrate `/engineer` Telegram status: already coalesces to one editable
-      message and uses the shared renderer on `origin/main` (not live).
+      Status() diagnostic ZIP is unchanged. Live on `0.208.17`.
+- [x] Migrate `/engineer` Telegram status: coalesces to one editable
+      message and uses the shared renderer. Live on `0.208.17`.
 - [ ] One final carrier: text, one file with caption, or one deterministic
       archive. Delivery uncertainty edits status and never duplicates.
 - [x] Restart, edit-reject, send-fence and cancel/timeout/`UNKNOWN` proof
-      with actual Telegram message counts on `origin/main` (not live).
+      with actual Telegram message counts. Live on `0.208.17`.
 
 ### N2 — Deep Web Research and Automatic Knowledge-Gap Search
 
-Status: modules started on `origin/main`. Today is still a strong
-single-query 27s/3-source (max 8) live pipeline. Code-owned currentness
-policy, frozen `WebEvidenceBundleV1`, multi-query mission planner, provider
-fallback policy, source diversity, research consumption, readiness
-composition, citation coverage, claim support, answer admission,
-contradiction coverage, exact mission coverage, evidence grounding,
-source date coverage, claim currentness and passage-reference coverage
-exist and are not wired. Live `_web_research` refuses private observed
-URLs and empty-after-outbound (`no_admitted_sources`); empty success is
-not completeness. Remaining: consume the other landed contracts on
-`web_surfer` / Telegram / organ paths.
+Status: modules started on `origin/main` and live as source in `0.208.17`.
+Today is still a strong single-query 27s/3-source (max 8) live pipeline.
+Code-owned currentness policy, frozen `WebEvidenceBundleV1`, multi-query
+mission planner, provider fallback policy, source diversity, research
+consumption, readiness composition, citation coverage, claim support,
+answer admission, contradiction coverage, exact mission coverage,
+evidence grounding, source date coverage, claim currentness and
+passage-reference coverage exist and are not wired into document, table,
+Engineer or Coding journeys. Live `_web_research` refuses private
+observed URLs, empty-after-outbound (`no_admitted_sources`) and invalid
+provider facts; empty success is not completeness. Remaining: consume
+the other landed contracts on document/table/Engineer/Coding paths.
 
 - [x] Automatic currentness / knowledge-gap policy module on `origin/main`
       (`friday/orchestration/web_currentness_policy.py`). Not wired into
@@ -1057,17 +1051,17 @@ checklist elsewhere. The Ctrl+T view is a compact projection of this list.
 
 ### Open and implementable
 
-- [ ] N1 two-message Telegram UX: `/chat` status uses the live projection
-      in `0.208.16`; Engineer status renderer, file-album DOCUMENT status,
-      Engineer FILE/ARCHIVE carrier, and observed web/archive chat status
-      are on `main`; remaining live cutover
+- [ ] N1 two-message Telegram UX: `/chat`, Engineer, file-album,
+      FILE/ARCHIVE carrier and observed web/archive status live on
+      `0.208.17`; remaining one final carrier
 - [ ] N2 currentness, evidence bundle, mission, provider fallback, source
       diversity, consumption, readiness, citation coverage, claim support,
       answer admission, contradiction coverage, exact mission coverage,
       evidence grounding, source date coverage, claim currentness and
-      passage-reference coverage are on `main`; live `_web_research`
-      refuses private URLs and empty-after-outbound; remaining live
-      consumption of the other contracts
+      passage-reference coverage are on `main` and live as source; live
+      `_web_research` refuses private URLs, empty-after-outbound and
+      invalid provider facts; remaining live consumption of the other
+      contracts
 - [ ] N3 Coding Mode MVP behind an isolated worker; project identity,
       extract admission, bare-source inspection and extract-plan
       family are on `main` and unwired
