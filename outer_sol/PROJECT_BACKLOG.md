@@ -1,6 +1,6 @@
 # Friday: canonical project backlog
 
-Updated: 2026-09-04 (live `0.208.16`; N3 project identity and archive extract admission on `main`)
+Updated: 2026-09-04 (live `0.208.16`; N1 observed web/archive Telegram status on `main`)
 
 This is the project's only backlog and mutable status register. It owns the
 current production identity, execution order, acceptance gaps and owner actions.
@@ -41,9 +41,9 @@ Trusted-CA health reports `version=0.208.16`. S3 assist-controller:
 `requested_mode=assist`, `effective_mode=off`, `promotion_admitted=false`,
 `activation.reason=material_loaded_not_accepted`,
 `source_revision_loaded=true`. Do not rebase assist→assist. `origin/main` is
-ahead of live (N1 builders and file-album status wiring on `main`; Engineer
-Telegram status renderer uses the shared projection on `origin/main` and is
-not yet live). N2 currentness policy, `WebEvidenceBundleV1`, multi-query
+ahead of live (N1 builders, file-album DOCUMENT status, Engineer renderer,
+Engineer FILE/ARCHIVE carrier, and observed web/archive chat status on
+`main`; none of those Telegram surfaces are live yet). N2 currentness policy, `WebEvidenceBundleV1`, multi-query
 mission planner, provider fallback policy, source diversity, research
 consumption, readiness composition, citation coverage, claim support,
 answer admission, contradiction coverage, exact mission coverage,
@@ -808,11 +808,12 @@ stays in Owner/external and must not block N1.
 
 Status: contract live; ordinary `/chat` status uses the projection in
 `0.208.16`. Engineer Telegram status on `origin/main` now renders through the
-same projection (not live). Files/archive/web builders are on `origin/main`
-and are not wired. Remaining: files/archive/web live wiring and Telegram
-message-count proofs. Engineer user FILE/ARCHIVE carrier is on `origin/main`
-(not live): one ordinary file is sent as itself, internals stay out of the
-user archive, status() keeps the diagnostic evidence ZIP.
+same projection (not live). Files/archive/web builders are on `origin/main`.
+Ordinary `/chat` on `origin/main` now edits the existing status from observed
+`web_sources` and generated files after `/api/chat` returns; backend wait
+stays CHAT and does not mint SEARCHING_SOURCES. File-album DOCUMENT status
+and Engineer user FILE/ARCHIVE carrier are on `origin/main` (not live).
+Remaining: live cutover.
 Mandatory owner contract: one user message → one editable Friday status →
 one final result carrier. Reuse `TelegramStatusMessageManager`. Do not add a
 second execution engine.
@@ -821,11 +822,13 @@ second execution engine.
       (`friday/orchestration/operation_progress.py`). Truthful measured
       progress only; at most one current-focus step; no fabricated percent
       or ETA.
-- [ ] Migrate ordinary `/chat`, files, archive and web onto that projection
+- [x] Migrate ordinary `/chat`, files, archive and web onto that projection
       with one status created at the start of an interactive operation.
       Ordinary `/chat` status rendering is on the projection; file-album
       status on `origin/main` uses the DOCUMENT files projection (not live).
-      Archive and web builders exist and still need live Telegram wiring.
+      After `/api/chat` returns, observed web sources use FORMULATING_ANSWER
+      and generated archives/files use archive or DOCUMENT delivering.
+      Backend wait stays CHAT. Not live.
 - [x] Migrate `/engineer` user carrier on `origin/main`: policy lives in
       `friday/orchestration/engineer_result_carrier.py`; Telegram publication
       sends TEXT, one ordinary FILE, or a user ARCHIVE without receipts/logs.
@@ -1026,9 +1029,9 @@ checklist elsewhere. The Ctrl+T view is a compact projection of this list.
 ### Open and implementable
 
 - [ ] N1 two-message Telegram UX: `/chat` status uses the live projection
-      in `0.208.16`; Engineer status renderer, file-album DOCUMENT status and
-      Engineer user FILE/ARCHIVE carrier are on `main`; archive/web still
-      need live wiring and message-count proofs
+      in `0.208.16`; Engineer status renderer, file-album DOCUMENT status,
+      Engineer FILE/ARCHIVE carrier, and observed web/archive chat status
+      are on `main`; remaining live cutover
 - [ ] N2 currentness, evidence bundle, mission, provider fallback, source
       diversity, consumption, readiness, citation coverage, claim support,
       answer admission, contradiction coverage, exact mission coverage,
