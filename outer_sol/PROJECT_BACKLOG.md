@@ -800,8 +800,10 @@ stays in Owner/external and must not block N1.
 Status: contract live; ordinary `/chat` status uses the projection in
 `0.208.16`. Engineer Telegram status on `origin/main` now renders through the
 same projection (not live). Files/archive/web builders are on `origin/main`
-and are not wired. Remaining: files/archive/web live wiring, Engineer final
-carrier (empty/one-file ZIP / internals), and Telegram message-count proofs.
+and are not wired. Remaining: files/archive/web live wiring and Telegram
+message-count proofs. Engineer user FILE/ARCHIVE carrier is on `origin/main`
+(not live): one ordinary file is sent as itself, internals stay out of the
+user archive, status() keeps the diagnostic evidence ZIP.
 Mandatory owner contract: one user message → one editable Friday status →
 one final result carrier. Reuse `TelegramStatusMessageManager`. Do not add a
 second execution engine.
@@ -815,11 +817,12 @@ second execution engine.
       Ordinary `/chat` status rendering is on the projection; file-album
       status on `origin/main` uses the DOCUMENT files projection (not live).
       Archive and web builders exist and still need live Telegram wiring.
-- [ ] Migrate `/engineer`: builders and carrier policy are on `main`; Telegram
-      status already coalesces to one editable message and now uses the shared
-      renderer on `origin/main`. Remaining: no empty archive; no ZIP for one
-      ordinary output file; no internal receipts/logs in the user archive by
-      default.
+- [x] Migrate `/engineer` user carrier on `origin/main`: policy lives in
+      `friday/orchestration/engineer_result_carrier.py`; Telegram publication
+      sends TEXT, one ordinary FILE, or a user ARCHIVE without receipts/logs.
+      Status() diagnostic ZIP is unchanged. Not live.
+- [ ] Migrate `/engineer` Telegram status: already coalesces to one editable
+      message and uses the shared renderer on `origin/main` (not live).
 - [ ] One final carrier: text, one file with caption, or one deterministic
       archive. Delivery uncertainty edits status and never duplicates.
 - [ ] Restart, edit-reject, send-fence and cancel/timeout/`UNKNOWN` proof
@@ -963,9 +966,9 @@ checklist elsewhere. The Ctrl+T view is a compact projection of this list.
 ### Open and implementable
 
 - [ ] N1 two-message Telegram UX: `/chat` status uses the live projection
-      in `0.208.16`; Engineer status renderer and file-album DOCUMENT status
-      are on `main`; archive/web still need live wiring, one final carrier,
-      and message-count proofs
+      in `0.208.16`; Engineer status renderer, file-album DOCUMENT status and
+      Engineer user FILE/ARCHIVE carrier are on `main`; archive/web still
+      need live wiring and message-count proofs
 - [ ] N2 currentness, evidence bundle, mission, provider fallback, source
       diversity and consumption are on `main` and unwired; remaining live
       retrieval consumption
