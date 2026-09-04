@@ -7,7 +7,6 @@ before and nothing outside the package moved.
 
 from __future__ import annotations
 
-import binascii
 import hashlib
 import ipaddress
 import re
@@ -15,6 +14,10 @@ import unicodedata
 from contextlib import suppress
 from urllib.parse import parse_qs, urlunsplit
 
+from friday.orchestration.operation_result_carrier import (
+    OperationResultCarrierError,
+    plan_generated_file_documents,
+)
 from friday.telegram_bridge._base import (
     CALLBACK_TARGET_RE,
     LOGGER,
@@ -1603,11 +1606,11 @@ class CallbacksMixin(BridgeShared):
         resume_key: int | None = None,
         after_part: int = 0,
     ) -> int:
-        """Отправить файлы, собранные инструментом `make_file`, после текста.
+        """Отправить итоговый носитель `make_file`: один файл или один архив.
 
-        Требование владельца: «сделай отчёт» должно заканчиваться файлом. Файл
-        уходит документом, а не голосом и не текстом: у `sendDocument` есть имя и
-        расширение, по которым человек его откроет.
+        Требование владельца: один финальный носитель. Один обычный файл уходит
+        документом; несколько файлов — одним ZIP. Не голосом и не пачкой
+        отдельных sendDocument.
 
         Доставка возобновляемая: успешный sendDocument сразу получает локальный
         checkpoint, а transient-сбой оставляет update в очереди. Повтор поэтому
@@ -1617,27 +1620,15 @@ class CallbacksMixin(BridgeShared):
         files = response.get("files")
         if not isinstance(files, list):
             return part
-        for item in files:
-            if not isinstance(item, dict):
-                continue
-            encoded = str(item.get("content_base64") or "")
-            if not encoded:
-                continue
-            try:
-                payload = base64.b64decode(encoded, validate=True)
-            except (ValueError, TypeError, binascii.Error):
-                LOGGER.warning("make_file: вложение не разобралось")
-                continue
-            filename = str(item.get("filename") or "report.bin")
-            artifact_id = str(item.get("id") or "").strip()
-            if not artifact_id:
-                artifact_id = hashlib.sha256(
-                    payload
-                    + b"\0"
-                    + filename.encode("utf-8", errors="replace")
-                    + b"\0"
-                    + str(item.get("mime_type") or "").encode("ascii", errors="replace")
-                ).hexdigest()
+        try:
+            _plan, documents = plan_generated_file_documents(files)
+        except OperationResultCarrierError:
+            LOGGER.warning("make_file: итоговый носитель отклонён")
+            return part
+        for document in documents:
+            payload = document.payload
+            filename = document.filename
+            artifact_id = document.artifact_id
             delivery_key = hashlib.sha256(
                 f"{int(chat_id)}:{artifact_id}".encode("utf-8", errors="strict")
             ).hexdigest()
@@ -1652,7 +1643,7 @@ class CallbacksMixin(BridgeShared):
                         chat_id,
                         filename,
                         payload,
-                        mime_type=str(item.get("mime_type") or "application/octet-stream"),
+                        mime_type=document.mime_type,
                     )
                 except Exception as exc:
                     LOGGER.warning("make_file: sendDocument не удался (%s)", type(exc).__name__)
@@ -1689,7 +1680,7 @@ class CallbacksMixin(BridgeShared):
                     chat_id,
                     filename,
                     payload,
-                    mime_type=str(item.get("mime_type") or "application/octet-stream"),
+                    mime_type=document.mime_type,
                 )
             except Exception as exc:
                 LOGGER.warning("make_file: sendDocument не удался (%s)", type(exc).__name__)

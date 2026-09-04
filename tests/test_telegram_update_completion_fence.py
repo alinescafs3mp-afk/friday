@@ -696,9 +696,11 @@ async def test_retry_command_caches_one_response_and_resumes_its_file_suffix(
 
 
 @pytest.mark.asyncio
-async def test_multi_file_cursor_preserves_order_and_absorbs_second_file_timeout(
+async def test_multi_file_cursor_packs_one_archive_and_absorbs_timeout(
     tmp_path: Path,
 ) -> None:
+    from friday.orchestration.operation_result_carrier import OPERATION_RESULT_ARCHIVE_FILENAME
+
     path = tmp_path / "telegram.sqlite3"
     response = {
         "message": ANSWER,
@@ -720,12 +722,12 @@ async def test_multi_file_cursor_preserves_order_and_absorbs_second_file_timeout
     inbox = _opened(first)
     assert inbox.store(_message_update("Верни два файла")) is True
     inbox.cache_backend_response(UPDATE_ID, response)
-    faulted = _Telegram(target="sendDocument", mode="timeout", target_ordinal=2)
+    faulted = _Telegram(target="sendDocument", mode="timeout", target_ordinal=1)
     try:
         assert await _run_pending(first, faulted) is True
         durable = _row(inbox)
         assert durable is not None
-        assert (int(durable["chunks_sent"]), int(durable["delivery_uncertainty"])) == (3, 1)
+        assert (int(durable["chunks_sent"]), int(durable["delivery_uncertainty"])) == (2, 1)
     finally:
         first._inbox.close()  # noqa: SLF001
 
@@ -740,12 +742,12 @@ async def test_multi_file_cursor_preserves_order_and_absorbs_second_file_timeout
             )
             .fetchone()
         )
-        assert marker_count is not None and int(marker_count["count"]) == 2
+        assert marker_count is not None and int(marker_count["count"]) == 1
     finally:
         restarted._inbox.close()  # noqa: SLF001
 
     documents = _accepted([faulted], "sendDocument")
-    assert [item["filename"] for item in documents] == ["first.bin", "second.bin"]
+    assert [item["filename"] for item in documents] == [OPERATION_RESULT_ARCHIVE_FILENAME]
     assert _accepted([healed], "sendDocument") == []
     healed_texts = [str(item.get("text") or "") for item in _accepted([healed], "sendMessage")]
     assert healed_texts == [DELIVERY_UNKNOWN]

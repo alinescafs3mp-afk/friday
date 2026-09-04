@@ -1161,6 +1161,50 @@ async def test_generated_file_delivery_keeps_exact_multipart_bytes_and_checkpoin
 
 
 @pytest.mark.asyncio
+async def test_several_generated_files_are_one_archive_document(tmp_path):
+    """Two make_file outputs become one ZIP sendDocument, not two carriers."""
+
+    import zipfile
+    from io import BytesIO
+
+    from friday.orchestration.operation_result_carrier import OPERATION_RESULT_ARCHIVE_FILENAME
+
+    bridge = _media_bridge(tmp_path)
+    telegram = _FakeTelegramClient()
+    response = {
+        "message": "Готово.",
+        "files": [
+            {
+                "id": "a1",
+                "filename": "a.txt",
+                "mime_type": "text/plain",
+                "content_base64": base64.b64encode(b"aaa").decode("ascii"),
+            },
+            {
+                "id": "b1",
+                "filename": "b.txt",
+                "mime_type": "text/plain",
+                "content_base64": base64.b64encode(b"bbb").decode("ascii"),
+            },
+        ],
+    }
+    try:
+        await bridge._deliver_generated_files(telegram, 5001, response)
+        document_calls = [payload for url, payload in telegram.calls if url.endswith("/sendDocument")]
+        assert len(document_calls) == 1
+        filename, delivered, delivered_mime = document_calls[0]["files"]["document"]
+        assert filename == OPERATION_RESULT_ARCHIVE_FILENAME
+        assert delivered_mime == "application/zip"
+        with zipfile.ZipFile(BytesIO(delivered)) as archive:
+            assert set(archive.namelist()) == {"a.txt", "b.txt"}
+            assert archive.read("a.txt") == b"aaa"
+        await bridge._deliver_generated_files(telegram, 5001, response)
+        assert len([url for url, _ in telegram.calls if url.endswith("/sendDocument")]) == 1
+    finally:
+        bridge._inbox.close()
+
+
+@pytest.mark.asyncio
 async def test_search_command_lists_knowledge_without_llm(tmp_path):
     bridge = _media_bridge(tmp_path)
     telegram = _FakeTelegramClient()
