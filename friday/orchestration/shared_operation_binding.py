@@ -135,6 +135,10 @@ class SharedOperationBindingV1:
         return self.binding
 
     @property
+    def binding_state(self) -> SharedOperationBindingState:
+        return self.binding
+
+    @property
     def closed_binding(self) -> SharedOperationBindingState:
         return self.binding
 
@@ -151,7 +155,15 @@ class SharedOperationBindingV1:
         return self.owner_digest
 
     @property
+    def owner(self) -> str | None:
+        return self.owner_digest
+
+    @property
     def conversation_binding_digest(self) -> str | None:
+        return self.conversation_digest
+
+    @property
+    def conversation(self) -> str | None:
         return self.conversation_digest
 
     @property

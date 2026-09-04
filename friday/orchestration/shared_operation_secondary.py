@@ -114,6 +114,10 @@ class SharedOperationSecondaryV1:
         return self.secondary
 
     @property
+    def secondary_state(self) -> SharedOperationSecondaryState:
+        return self.secondary
+
+    @property
     def availability(self) -> SharedOperationSecondaryState:
         return self.secondary
 
@@ -132,6 +136,10 @@ class SharedOperationSecondaryV1:
     @property
     def is_present(self) -> bool:
         return self.secondary is SharedOperationSecondaryState.PRESENT
+
+    @property
+    def available(self) -> bool | None:
+        return self.present
 
     @property
     def can_own_tools(self) -> bool:

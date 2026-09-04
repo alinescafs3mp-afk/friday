@@ -153,6 +153,10 @@ class SharedOperationArtifactsV1:
         return self.artifacts
 
     @property
+    def artifacts_state(self) -> SharedOperationArtifactsState:
+        return self.artifacts
+
+    @property
     def summary(self) -> SharedOperationArtifactsState:
         return self.artifacts
 

@@ -113,6 +113,10 @@ class SharedOperationCapabilityV1:
         return self.capability
 
     @property
+    def capability_state(self) -> SharedOperationCapabilityState:
+        return self.capability
+
+    @property
     def availability(self) -> SharedOperationCapabilityState:
         return self.capability
 
