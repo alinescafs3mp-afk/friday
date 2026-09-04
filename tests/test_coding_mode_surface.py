@@ -102,9 +102,7 @@ def test_blocked_inspect_does_not_expose_names() -> None:
     assert "escape" not in result["message"]
 
 
-def test_execute_claim_is_refused_and_does_not_execute(
-    tmp_path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_execute_claim_is_refused_and_does_not_execute(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
     from friday.organs.coding.worker_boundary import default_coding_worker_boundary
 
     def _boom(*_args: object, **_kwargs: object) -> None:

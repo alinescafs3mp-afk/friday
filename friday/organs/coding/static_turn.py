@@ -192,9 +192,7 @@ def handle_coding_static_turn(
     if execute_claimed and admission.admission is CodingWorkerAdmissionState.ADMITTED:
         spawn = spawn_coding_worker(admission, boundary, runner=spawn_runner)
     worker_admitted = admission.admission is CodingWorkerAdmissionState.ADMITTED
-    text = _russian_inspect_reply(
-        report, execute_claimed=execute_claimed, worker_admitted=worker_admitted
-    )
+    text = _russian_inspect_reply(report, execute_claimed=execute_claimed, worker_admitted=worker_admitted)
     persisted_id = _ensure_conversation(
         storage,
         person_id=person_id,

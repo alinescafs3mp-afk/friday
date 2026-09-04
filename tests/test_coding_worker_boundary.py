@@ -16,9 +16,7 @@ def _homes(tmp_path: Path) -> dict[str, str]:
 
 def test_dedicated_root_hides_host_hazards(tmp_path: Path) -> None:
     homes = _homes(tmp_path)
-    boundary = default_coding_worker_boundary(
-        **homes, worker_root=str(tmp_path / "friday-coding-worker")
-    )
+    boundary = default_coding_worker_boundary(**homes, worker_root=str(tmp_path / "friday-coding-worker"))
 
     facts = observe_coding_worker_isolation(boundary)
 
@@ -32,9 +30,7 @@ def test_dedicated_root_hides_host_hazards(tmp_path: Path) -> None:
 
 def test_host_home_as_visible_path_blocks(tmp_path: Path) -> None:
     homes = _homes(tmp_path)
-    boundary = default_coding_worker_boundary(
-        **homes, worker_root=str(tmp_path / "friday-coding-worker")
-    )
+    boundary = default_coding_worker_boundary(**homes, worker_root=str(tmp_path / "friday-coding-worker"))
     exposed = default_coding_worker_boundary(
         **homes,
         worker_root=str(tmp_path / "friday-coding-worker"),
@@ -67,9 +63,7 @@ def test_friday_home_as_worker_root_is_unsafe(tmp_path: Path) -> None:
 
 def test_docker_socket_bind_is_present(tmp_path: Path) -> None:
     homes = _homes(tmp_path)
-    boundary = default_coding_worker_boundary(
-        **homes, worker_root=str(tmp_path / "friday-coding-worker")
-    )
+    boundary = default_coding_worker_boundary(**homes, worker_root=str(tmp_path / "friday-coding-worker"))
     exposed = type(boundary)(
         worker_root=boundary.worker_root,
         visible_paths=("/var/run/docker.sock",),
