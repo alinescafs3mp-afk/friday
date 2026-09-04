@@ -1168,14 +1168,6 @@ checklist elsewhere. The Ctrl+T view is a compact projection of this list.
 
 ### Open and implementable
 
-- [ ] N2 currentness, evidence bundle, mission, provider fallback, source
-      diversity, consumption, readiness, citation coverage, claim support,
-      answer admission, contradiction coverage, exact mission coverage,
-      evidence grounding, source date coverage, claim currentness and
-      passage-reference coverage are on `main` and live as source; live
-      `_web_research` refuses private URLs, empty-after-outbound and
-      invalid provider facts; remaining contracts stay observation-bound
-      without fabricated witnesses
 - [ ] N3 Coding Mode MVP implement/build/test loop of untrusted
       uploads; `/coding` static inspect and isolated-worker boundary
       remain live through `0.208.21`. Untrusted execute remains
@@ -1189,6 +1181,14 @@ checklist elsewhere. The Ctrl+T view is a compact projection of this list.
 
 ### Open and blocked
 
+- [ ] N2 remaining contracts stay observation-bound until a live workflow
+      observes claims, dates, passages or missions. Live `_web_research`
+      already refuses private URLs, empty-after-outbound and invalid
+      provider facts; `_web_search`/`_web_fetch`, file+web and
+      `POST /api/ingest/url` consume `BLOCKED_PRIVATE`. Do not wire
+      mission/answer-gate into live single-query `_web_research`. Do not
+      fabricate witnesses. Private representative benchmark / Gemini
+      parity needs a paired scored set.
 - [ ] S3 Supervisor advice on live turns — observation-bound. Need a genuine
       eligible current-file-plus-public-web consumed witness. Do not
       fabricate traffic.
