@@ -1,6 +1,6 @@
 # Friday: canonical project backlog
 
-Updated: 2026-09-04 (live `0.208.18`; N1 one-final-carrier live; remaining N2 observation-bound; N3 result-archive-pack and N4 mixed-journey view on `origin/main` and unwired)
+Updated: 2026-09-04 (live `0.208.18`; N1 one-final-carrier live; remaining N2 observation-bound; N3 `/coding` static inspect on `origin/main` not live; isolated worker remaining; N4 mixed-journey view on `origin/main` and unwired)
 
 This is the project's only backlog and mutable status register. It owns the
 current production identity, execution order, acceptance gaps and owner actions.
@@ -55,11 +55,11 @@ observe chain names as `WebProviderId` and the kernel consumes
 comparison and `POST /api/ingest/url` refuse observed private URLs via
 the same consumption gate. Other N2 contracts stay observation-bound:
 live requesting workflows do not observe claims, dates, passages or
-missions, and `/coding` does not exist. Do not fabricate those
-witnesses. N3
+missions. Do not fabricate those witnesses. N3 `/coding` static inspect
+is on `origin/main` and is not live. Isolated worker remains. Other N3
 inspect, extract-plan, prompt-to-small-project, isolated-worker,
-result-archive-plan and upload-modification-admission families are live
-as source and unwired. N4 shared
+result-archive-plan and upload-modification-admission families stay
+source-only. N4 shared
 operation/situation view contracts are on `origin/main` and unwired.
 
 - Production: immutable activation `phase=clear`; backend and Telegram bridge
@@ -105,11 +105,12 @@ invalid provider facts; `_web_search` and `_web_fetch` refuse
 `selected_provider_id` is present. File+web comparison and
 `POST /api/ingest/url` consume `BLOCKED_PRIVATE`. Other N2
 contracts stay observation-bound; do not fabricate witnesses. N3
-project identity, archive extract admission,
-bare-source inspection, extract-plan family, prompt-to-small-project,
+`/coding` static inspect is on `origin/main` and is not live; execute
+claims fail closed. Isolated worker remains. Project identity, archive
+extract admission, extract-plan family, prompt-to-small-project,
 isolated-worker contracts, one-final source-archive plan,
-result-archive-pack family and upload-modification admission are on
-`origin/main` and are not wired. Live `/coding` remains. N4 shared
+result-archive-pack family and upload-modification admission stay
+source-only. N4 shared
 operation/situation view and mixed-journey view contracts are on
 `origin/main` and are not wired to stores or Telegram. N5
 extracted the kernel web-consumption seam; maintainability follows. Physical Android, P0H deletion, off-machine
@@ -876,8 +877,9 @@ File+web comparison and `POST /api/ingest/url` consume `BLOCKED_PRIVATE`
 the same way. Remaining N2 contracts stay observation-bound: live
 requesting workflows do not observe claims, dates, passages or missions.
 Table CSV/spreadsheet URLs already go through file+web consumption.
-Coding `/coding` does not exist. Do not wire mission/answer-gate into
-live single-query `_web_research`. Do not fabricate those facts.
+Coding `/coding` static inspect is on `origin/main` and is not live.
+Do not wire mission/answer-gate into live single-query `_web_research`.
+Do not fabricate those facts.
 
 - [x] Automatic currentness / knowledge-gap policy module on `origin/main`
       (`friday/orchestration/web_currentness_policy.py`). Not wired into
@@ -953,22 +955,24 @@ live single-query `_web_research`. Do not fabricate those facts.
 
 ### N3 — Coding Mode
 
-Status: modules started on `origin/main`. `/coding` does not exist.
-Engineer bubblewrap is not a Coding Worker. Prompt-to-small-project,
-isolated-worker and one-final source-archive plan contracts are on
-`origin/main` and unwired. Until a live isolated worker exists, static
-inspect/edit only; do not claim safe build/test of untrusted uploads.
+Status: `/coding` static inspect is on `origin/main` and is not live.
+Owner private Telegram only; execute claims fail closed. Engineer
+bubblewrap is not a Coding Worker. Isolated worker remains the open
+MVP checkbox. Prompt-to-small-project and one-final source-archive
+plan contracts stay unwired. Do not claim safe build/test of untrusted
+uploads.
 
 - [x] Bare-source inspection contracts on `origin/main`
       (`coding_source_member.py`, `coding_source_tree.py`,
       `coding_source_inspect.py`, `coding_inspect_hazards.py`,
       `coding_toolchain_hint.py`, `coding_inspect_report.py`).
       EMPTY / MAPPED|INSPECTED|HINTED / BLOCKED. No execute, no
-      rebuild, no file I/O, filename-suffix hints only. Not wired.
+      rebuild, no file I/O, filename-suffix hints only. Wired as
+      `/coding` static inspect on `origin/main`; not live.
 - [x] Prompt-to-small-project and uploaded-project modification.
       Prompt normalization, implementation plan, scaffold, create
       admission and upload-modification admission are on `origin/main`
-      (not wired; no execute, no `/coding`).
+      (not wired; no execute).
 - [x] Persistent project identity contract on `origin/main`
       (`friday/orchestration/coding_project_identity.py`). EMPTY /
       IDENTIFIED / BLOCKED. Exact revision only; `latest`/`HEAD`/
@@ -976,7 +980,8 @@ inspect/edit only; do not claim safe build/test of untrusted uploads.
 - [ ] Isolated coding worker: no host secrets, no Docker socket, no
       production database, bounded network. Frozen identity, isolation,
       network, workspace, limits and admission contracts are on
-      `origin/main` (not wired; no process, Docker, or `/coding`).
+      `origin/main` (not wired; no process or Docker). `/coding`
+      static inspect does not satisfy this checkbox.
 - [x] Safe archive extract admission on `origin/main`
       (`friday/orchestration/coding_archive_extract_admission.py`).
       EMPTY / ADMITTED / BLOCKED from member metadata. Traversal,
@@ -1118,11 +1123,12 @@ checklist elsewhere. The Ctrl+T view is a compact projection of this list.
       `_web_research` refuses private URLs, empty-after-outbound and
       invalid provider facts; remaining contracts stay observation-bound
       without fabricated witnesses
-- [ ] N3 Coding Mode MVP behind an isolated worker; project identity,
-      extract admission, bare-source inspection, extract-plan family,
+- [ ] N3 Coding Mode MVP behind an isolated worker; `/coding` static
+      inspect is on `main` and is not live. Isolated worker remains.
+      Project identity, extract admission, extract-plan family,
       prompt-to-small-project, isolated-worker, source-archive plan,
-      result-archive-pack family and upload-modification admission are
-      on `main` and unwired. Live `/coding` remains.
+      result-archive-pack family and upload-modification admission stay
+      source-only.
 - [ ] N4 shared operation/situation and mixed-journey view contracts
       are on `main` and unwired; live mixed-organ journeys are not
       derived from stores
