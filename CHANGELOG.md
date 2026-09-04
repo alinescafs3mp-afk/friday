@@ -1,3 +1,12 @@
+## 0.208.14 — 2026-09-04
+
+### Semantic supervisor shadow to assist
+
+- Distinct sealed candidate for evidence-gated `shadow→assist` after live
+  0.208.13 `assist_to_shadow`. Rebinds `SOURCE_REVISION` to this sibling.
+  SQLite remains at schema 50; exact `0.208.13` is the predecessor and
+  `0.207.90` the fallback.
+
 ## 0.208.13 — 2026-09-04
 
 ### Semantic supervisor assist to shadow
