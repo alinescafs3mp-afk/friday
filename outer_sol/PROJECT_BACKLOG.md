@@ -1,7 +1,6 @@
 # Friday: canonical project backlog
 
-Updated: 2026-09-04 (independent post-backlog re-audit; live `0.208.11`;
-N0–N5 opened)
+Updated: 2026-09-04 (live `0.208.16`; N1 modules on `main`, wiring remains)
 
 This is the project's only backlog and mutable status register. It owns the
 current production identity, execution order, acceptance gaps and owner actions.
@@ -33,15 +32,17 @@ Do not copy that snapshot's release claims forward.
 - Database schema: 50 in deployed production and the fallback.
 
 Golden-journey receipts stay bound to that `0.208.1` root until rebound. The
-running sealed sibling after the S3 assist-controller cutover is Friday
-0.208.11 at `6b61987afd4deccd6450ccd26ba5ceb4f4b2fa84` (tree-file
-`c0628d5178d0215e9c5db35a6d17d36f741130a97722052e68497f49cf27117b`, wheel
-`eac108b9c8aab70093c08e8fb2923f3170f8b48fe71ccba47db640bbf98a97b4`, journal
-`clear`, predecessor `0.208.10` / `feee87e95ed2c31a7cccc32c79034f02c838d20b`).
-Trusted-CA health reports `version=0.208.11`. S3 assist-controller:
+running sealed sibling is Friday `0.208.16` at
+`706510d06ec0bd7c2b7a2898103b3cfd9cddd5ea` (tree-file
+`bc36ee455707807536d323ee34b6f6e627fd53da4e84a83dc49e6e5625a6e8d9`, wheel
+`c952de699a7c909a28cc7fc03c43797e13be32c10382456e096e46187898be9d`, journal
+`clear`, predecessor `0.208.15` / `594c654fe0e370d48beeceffe2837923a07269a7`).
+Trusted-CA health reports `version=0.208.16`. S3 assist-controller:
 `requested_mode=assist`, `effective_mode=off`, `promotion_admitted=false`,
-`activation.reason=material_loaded_not_accepted`. Candidate chain
-`0.208.2`–`0.208.10` is superseded. Do not rebase assist→assist.
+`activation.reason=material_loaded_not_accepted`,
+`source_revision_loaded=true`. Do not rebase assist→assist. `origin/main` is
+ahead of live at `fc85f596` (N1 files/archive/web and engineer progress
+modules, not wired, not released).
 
 - Production: immutable activation `phase=clear`; backend and Telegram bridge
   active; writer target `candidate`. Retention admission remains honestly
@@ -71,11 +72,12 @@ deployed; advice remains off until the observation-bound witness. S5 40k lease
 and S6 recovery/browse paths stay live.
 
 The live product queue is N1–N5. The shared operation-progress contract is
-live. Candidate `0.208.15` renders ordinary Telegram `/chat` status through
-that projection. Engineer, files, archive and web journeys still follow.
-N2 deep research, N3 Coding Mode, N4 whole-organism journeys and N5
-maintainability follow that order. Physical Android, P0H deletion, off-machine
-mirror and provider-credential rotation remain owner-parked.
+live. Production `0.208.16` renders ordinary Telegram `/chat` status through
+that projection. Files/archive/web and Engineer projection modules are on
+`origin/main` and not yet wired into live Telegram paths. N2 deep research,
+N3 Coding Mode, N4 whole-organism journeys and N5 maintainability follow that
+order. Physical Android, P0H deletion, off-machine mirror and
+provider-credential rotation remain owner-parked.
 
 ## Operating rules
 
@@ -789,10 +791,12 @@ stays in Owner/external and must not block N1.
 ### N1 — Universal Operation Progress and Two-Message UX
 
 Status: contract live; ordinary `/chat` status uses the projection in
-`0.208.15`. Remaining: Engineer, files/archive/web journeys, one final
-carrier, and Telegram message-count proofs. Mandatory owner contract: one
-user message → one editable Friday status → one final result carrier.
-Reuse `TelegramStatusMessageManager`. Do not add a second execution engine.
+`0.208.16`. Files/archive/web and Engineer builders are on `origin/main`
+(`_journey_status.py`, `_engineer_progress.py`) and are not wired. Remaining:
+live wiring, one final carrier, and Telegram message-count proofs. Mandatory
+owner contract: one user message → one editable Friday status → one final
+result carrier. Reuse `TelegramStatusMessageManager`. Do not add a second
+execution engine.
 
 - [x] Shared `OperationProgressProjectionV1` and code-owned Russian renderer
       (`friday/orchestration/operation_progress.py`). Truthful measured
@@ -800,9 +804,10 @@ Reuse `TelegramStatusMessageManager`. Do not add a second execution engine.
       or ETA.
 - [ ] Migrate ordinary `/chat`, files, archive and web onto that projection
       with one status created at the start of an interactive operation.
-      Ordinary `/chat` status rendering is on the projection; richer
-      file/archive/web plans and Engineer still remain.
-- [ ] Migrate `/engineer`: no separate progress/terminal-status flood; no
+      Ordinary `/chat` status rendering is on the projection; file/archive/web
+      builders exist and still need live Telegram wiring.
+- [ ] Migrate `/engineer`: builders and carrier policy are on `main`; live
+      path still floods. Wire: no separate progress/terminal-status flood; no
       empty archive; no ZIP for one ordinary output file; no internal
       receipts/logs in the user archive by default.
 - [ ] One final carrier: text, one file with caption, or one deterministic
@@ -932,7 +937,9 @@ checklist elsewhere. The Ctrl+T view is a compact projection of this list.
 ### Open and implementable
 
 - [ ] N1 two-message Telegram UX: `/chat` status uses the live projection
-      in `0.208.15`; files, archive, web and `/engineer` still remain
+      in `0.208.16`; files/archive/web and `/engineer` builders are on
+      `main` and still need live wiring, one final carrier, and
+      message-count proofs
 - [ ] N2 automatic currentness policy, multi-query `WebEvidenceBundleV1`
       and downstream consumption
 - [ ] N3 Coding Mode MVP behind an isolated worker
