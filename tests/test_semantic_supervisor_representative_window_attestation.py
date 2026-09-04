@@ -37,6 +37,7 @@ from friday.orchestration.supervisor_representative_window_attestation import (
     REPRESENTATIVE_WINDOW_ISSUE_REQUEST_SCHEMA,
     AcceptedRepresentativeWindowAttestation,
     RepresentativeWindowAttestationError,
+    _server_identity_matches,
     consume_representative_window_attestation,
     is_accepted_representative_window_attestation,
     issue_representative_window_attestation,
@@ -779,6 +780,21 @@ async def test_admin_identity_refresh_runs_before_live_identity(
     )
     assert identity == {"requested_mode": "shadow"}
     assert order == ["refresh", "identity"]
+
+
+def test_after_restart_identity_match_allows_distinct_backend_version() -> None:
+    predecessor = _predecessor_identity(SupervisorMode.ASSIST)
+    restart = _restart_identity(SupervisorMode.ASSIST)
+    attestation = {
+        **predecessor,
+        "target_mode": SupervisorMode.ASSIST.value,
+        "source_revision_sha256": SOURCE,
+        "registry_binding_sha256": REGISTRY,
+        "primary_backend_version": "0.208.6",
+    }
+    assert restart["primary_backend_version"] == __version__
+    assert attestation["primary_backend_version"] != restart["primary_backend_version"]
+    assert _server_identity_matches(attestation, restart, after_restart=True) is True
 
 
 def test_owner_trust_root_routes_are_exactly_registered() -> None:

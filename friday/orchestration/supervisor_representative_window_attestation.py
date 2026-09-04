@@ -715,7 +715,10 @@ def _server_identity_matches(
         predecessor_mode
     )
     target_policy = semantic_supervisor_policy.supervisor_product_policy_identity_for_mode(target_mode)
+    # Distinct sealed candidates bump friday.__version__.  Issue ran on the
+    # predecessor process; consume-after-restart must not treat that as drift.
     stable_keys = _STABLE_SERVER_IDENTITY_KEYS - {
+        "primary_backend_version",
         "supervisor_policy_id",
         "supervisor_policy_sha256",
     }

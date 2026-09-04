@@ -1,3 +1,14 @@
+## 0.208.8 — 2026-09-04
+
+### Representative-window after restart
+
+- After-restart identity no longer requires `primary_backend_version` to
+  match the predecessor that issued the window. Distinct sealed candidates
+  may bump `friday.__version__`.
+- Distinct sealed candidate for `semantic_supervisor_assist_to_shadow`.
+  SQLite remains at schema 50; exact `0.208.7` is the predecessor and
+  `0.207.90` the fallback.
+
 ## 0.208.7 — 2026-09-04
 
 ### Semantic supervisor assist candidate
