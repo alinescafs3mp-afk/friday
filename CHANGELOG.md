@@ -1,3 +1,12 @@
+## 0.208.16 — 2026-09-04
+
+### Semantic supervisor shadow to assist
+
+- Distinct sealed candidate for evidence-gated `shadow→assist` after live
+  0.208.15 `assist_to_shadow`. Rebinds `SOURCE_REVISION` to this sibling.
+  SQLite remains at schema 50; exact `0.208.15` is the predecessor and
+  `0.207.90` the fallback.
+
 ## 0.208.15 — 2026-09-04
 
 ### N1 chat status through operation-progress
