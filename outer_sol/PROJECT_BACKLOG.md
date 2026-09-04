@@ -1,6 +1,6 @@
 # Friday: canonical project backlog
 
-Updated: 2026-09-04 (live `0.208.18`; N1 one-final-carrier live; remaining N2 observation-bound; N3 `/coding` static inspect + mode-view on `origin/main` not live; isolated worker remaining; N4 mixed-journey store projection on `origin/main` and unwired)
+Updated: 2026-09-05 (live `0.208.19`; N1 one-final-carrier live; remaining N2 observation-bound; N3 `/coding` static inspect live; isolated worker remaining; N4 mixed-journey store projection on `origin/main` and unwired)
 
 This is the project's only backlog and mutable status register. It owns the
 current production identity, execution order, acceptance gaps and owner actions.
@@ -32,15 +32,15 @@ Do not copy that snapshot's release claims forward.
 - Database schema: 50 in deployed production and the fallback.
 
 Golden-journey receipts stay bound to that `0.208.1` root until rebound. The
-running sealed sibling is Friday `0.208.18` at
-`19d1b89cbe5ebb9763b95c97dae6d8ebb03ad669` (tree-file
-`013f76d0e502a1b03e673ef87c32118a26c9acec1df36b7b4f81348b4acda483`, wheel
-`b520a5d117106b0acb654fa8cafa18ee2775d09b81db2075a57962bedcffbac1`, journal
-`clear`, predecessor `0.208.17` /
-`426729dc6dc0dc6839eeb537d09432dcbdb551f9`). Trusted-CA health reports
-`version=0.208.18`. S3: `requested_mode=assist`, `effective_mode=off`,
+running sealed sibling is Friday `0.208.19` at
+`56022365ff6f748239d12e5e41ca184b81b29e04` (tree-file
+`1b8771acffacf0c3482100e42b6d0f1c41887d8902502f5f4d331125d66306cc`, wheel
+`5b76b4df6837db94ff972a47ba0953d9ed5309d1e83ed143faa41bf1f662f688`, journal
+`clear`, predecessor `0.208.18` /
+`19d1b89cbe5ebb9763b95c97dae6d8ebb03ad669`). Trusted-CA health reports
+`version=0.208.19`. S3: `requested_mode=assist`, `effective_mode=shadow`,
 `promotion_admitted=false`,
-`activation.reason=material_loaded_not_accepted`. Advice stays off until
+`activation.reason=source_revision_mismatch`. Advice stays off until
 a genuine eligible witness; do not fabricate traffic. Next product
 sibling that changes friday sources is `assist_to_shadow`. `origin/main`
 is the live sibling. N1 Telegram surfaces (ordinary `/chat` status,
@@ -56,11 +56,12 @@ comparison and `POST /api/ingest/url` refuse observed private URLs via
 the same consumption gate. Other N2 contracts stay observation-bound:
 live requesting workflows do not observe claims, dates, passages or
 missions. Do not fabricate those witnesses. N3 `/coding` static inspect
-is on `origin/main` and is not live. Isolated worker remains. Other N3
-inspect, extract-plan, prompt-to-small-project, isolated-worker,
-result-archive-plan and upload-modification-admission families stay
-source-only. N4 shared
-operation/situation view contracts are on `origin/main` and unwired.
+is live on `0.208.19`; execute claims fail closed. Isolated worker
+remains. Other N3 inspect, extract-plan, prompt-to-small-project,
+isolated-worker, result-archive-plan, upload-modification-admission
+and Coding Mode view/carrier/plan-gate families stay source-only.
+N4 shared operation/situation view contracts are on `origin/main`
+and unwired.
 
 - Production: immutable activation `phase=clear`; backend and Telegram bridge
   active; writer target `candidate`. Retention admission remains honestly
@@ -90,10 +91,11 @@ deployed; advice remains off until the observation-bound witness. S5 40k lease
 and S6 recovery/browse paths stay live.
 
 The live product queue is N1–N5. The shared operation-progress contract is
-live. Production `0.208.18` renders ordinary Telegram `/chat` status,
+live. Production `0.208.19` keeps ordinary Telegram `/chat` status,
 Engineer status, file-album DOCUMENT status, Engineer FILE/ARCHIVE
 carrier, observed web/archive chat status, and one-final-carrier packing
-through that projection. N2 currentness, evidence bundle,
+through that projection, and adds owner-private `/coding` static inspect.
+N2 currentness, evidence bundle,
 multi-query mission planner, provider fallback, source diversity,
 consumption, readiness and citation coverage, claim support, answer
 admission, contradiction coverage, exact mission coverage, evidence
@@ -105,9 +107,9 @@ invalid provider facts; `_web_search` and `_web_fetch` refuse
 `selected_provider_id` is present. File+web comparison and
 `POST /api/ingest/url` consume `BLOCKED_PRIVATE`. Other N2
 contracts stay observation-bound; do not fabricate witnesses. N3
-`/coding` static inspect is on `origin/main` and is not live; execute
-claims fail closed. Isolated worker remains. Coding Mode intent,
-snapshot, execute-claim, plan-gate, carrier and view contracts are on
+`/coding` static inspect is live on `0.208.19`; execute claims fail
+closed. Isolated worker remains. Coding Mode intent, snapshot,
+execute-claim, plan-gate, carrier and view contracts are on
 `origin/main` and unwired. Project identity, archive extract admission,
 extract-plan family, prompt-to-small-project, isolated-worker
 contracts, one-final source-archive plan, result-archive-pack family
@@ -879,7 +881,7 @@ File+web comparison and `POST /api/ingest/url` consume `BLOCKED_PRIVATE`
 the same way. Remaining N2 contracts stay observation-bound: live
 requesting workflows do not observe claims, dates, passages or missions.
 Table CSV/spreadsheet URLs already go through file+web consumption.
-Coding `/coding` static inspect is on `origin/main` and is not live.
+Coding `/coding` static inspect is live on `0.208.19`.
 Do not wire mission/answer-gate into live single-query `_web_research`.
 Do not fabricate those facts.
 
@@ -957,7 +959,7 @@ Do not fabricate those facts.
 
 ### N3 — Coding Mode
 
-Status: `/coding` static inspect is on `origin/main` and is not live.
+Status: `/coding` static inspect is live on `0.208.19`.
 Owner private Telegram only; execute claims fail closed. Engineer
 bubblewrap is not a Coding Worker. Isolated worker remains the open
 MVP checkbox. Prompt-to-small-project and one-final source-archive
@@ -969,8 +971,8 @@ uploads.
       `coding_source_inspect.py`, `coding_inspect_hazards.py`,
       `coding_toolchain_hint.py`, `coding_inspect_report.py`).
       EMPTY / MAPPED|INSPECTED|HINTED / BLOCKED. No execute, no
-      rebuild, no file I/O, filename-suffix hints only. Wired as
-      `/coding` static inspect on `origin/main`; not live.
+      rebuild, no file I/O, filename-suffix hints only. Live as
+      `/coding` static inspect on `0.208.19`. Isolated worker remains.
 - [x] Prompt-to-small-project and uploaded-project modification.
       Prompt normalization, implementation plan, scaffold, create
       admission and upload-modification admission are on `origin/main`
@@ -1132,6 +1134,12 @@ checklist elsewhere. The Ctrl+T view is a compact projection of this list.
       FILE/ARCHIVE carrier, observed web/archive status and one-final-carrier
       packing live on `0.208.18`
 
+### Closed on production `0.208.19`
+
+- [x] N3 `/coding` static inspect live on `0.208.19` (owner-private
+      Telegram; execute fail-closed). Isolated worker remains the
+      open N3 MVP checkbox.
+
 ### Open and implementable
 
 - [ ] N2 currentness, evidence bundle, mission, provider fallback, source
@@ -1143,7 +1151,7 @@ checklist elsewhere. The Ctrl+T view is a compact projection of this list.
       invalid provider facts; remaining contracts stay observation-bound
       without fabricated witnesses
 - [ ] N3 Coding Mode MVP behind an isolated worker; `/coding` static
-      inspect is on `main` and is not live. Isolated worker remains.
+      inspect is live on `0.208.19`. Isolated worker remains.
       Coding Mode view composition, project identity, extract
       admission, extract-plan family, prompt-to-small-project,
       isolated-worker, source-archive plan, result-archive-pack family
