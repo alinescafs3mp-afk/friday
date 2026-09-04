@@ -22,8 +22,12 @@ from friday.orchestration.operation_progress import (
 from friday.telegram_bridge._base import LOGGER, TELEGRAM_TEXT_LIMIT, split_for_telegram
 from friday.telegram_bridge._engineer_progress import build_engineer_operation_progress
 from friday.telegram_bridge._journey_status import (
+    ArchiveStatusStage,
     FilesStatusStage,
+    WebStatusStage,
+    build_archive_operation_progress,
     build_files_operation_progress,
+    build_web_operation_progress,
 )
 
 _OPERATION_ID_RE = re.compile(r"[A-Za-z0-9_.:-]{1,128}")
@@ -272,6 +276,21 @@ _CHAT_TO_FILES_STAGE = {
     TelegramStatusStage.COMPLETE: FilesStatusStage.COMPLETE,
     TelegramStatusStage.STOPPED: FilesStatusStage.STOPPED,
 }
+_CHAT_TO_WEB_STAGE = {
+    TelegramStatusStage.DELIVERING_RESULT: WebStatusStage.FORMULATING_ANSWER,
+    TelegramStatusStage.COMPLETE: WebStatusStage.COMPLETE,
+    TelegramStatusStage.STOPPED: WebStatusStage.STOPPED,
+}
+_CHAT_TO_ARCHIVE_STAGE = {
+    TelegramStatusStage.DELIVERING_RESULT: ArchiveStatusStage.DELIVERING_RESULT,
+    TelegramStatusStage.COMPLETE: ArchiveStatusStage.COMPLETE,
+    TelegramStatusStage.STOPPED: ArchiveStatusStage.STOPPED,
+}
+_RESULT_STAGES = {
+    TelegramStatusStage.DELIVERING_RESULT,
+    TelegramStatusStage.COMPLETE,
+    TelegramStatusStage.STOPPED,
+}
 
 
 def render_interactive_turn_status(
@@ -283,11 +302,19 @@ def render_interactive_turn_status(
     received_bytes: int = 0,
     staged_items: int = 0,
     staged_bytes: int = 0,
+    web_source_total: int = 0,
+    generated_file_total: int = 0,
+    generated_archive_total: int = 0,
     operation_id: str = "chat:status",
     authenticated_turn_id: str = "chat:status",
     revision: int = 1,
 ) -> str:
-    """Render chat text through CHAT mode and file turns through DOCUMENT mode."""
+    """Render inbound files, observed web sources, or observed generated files.
+
+    Backend wait stays on the CHAT projection. Web and archive/file result
+    journeys are admitted only after the backend returns observed counters.
+    Inbound album counts keep DOCUMENT mode for the whole turn.
+    """
 
     if item_total > 0:
         return render_operation_progress(
@@ -297,6 +324,50 @@ def render_interactive_turn_status(
                 file_total=item_total,
                 received_files=received_items,
                 processed_files=staged_items,
+                operation_id=operation_id,
+                authenticated_turn_id=authenticated_turn_id,
+                revision=revision,
+            )
+        )
+    web_total = max(0, int(web_source_total))
+    web_stage = _CHAT_TO_WEB_STAGE.get(stage)
+    if web_total > 0 and web_stage is not None:
+        return render_operation_progress(
+            build_web_operation_progress(
+                web_stage,
+                elapsed_sec,
+                source_total=web_total,
+                discovered_sources=web_total,
+                reviewed_sources=web_total,
+                operation_id=operation_id,
+                authenticated_turn_id=authenticated_turn_id,
+                revision=revision,
+            )
+        )
+    generated_total = max(0, int(generated_file_total))
+    archive_total = max(0, int(generated_archive_total))
+    archive_stage = _CHAT_TO_ARCHIVE_STAGE.get(stage)
+    if generated_total > 0 and archive_total == generated_total and archive_stage is not None:
+        return render_operation_progress(
+            build_archive_operation_progress(
+                archive_stage,
+                elapsed_sec,
+                file_total=generated_total,
+                selected_files=generated_total,
+                archived_files=generated_total,
+                operation_id=operation_id,
+                authenticated_turn_id=authenticated_turn_id,
+                revision=revision,
+            )
+        )
+    if generated_total > 0 and stage in _RESULT_STAGES:
+        return render_operation_progress(
+            build_files_operation_progress(
+                _CHAT_TO_FILES_STAGE[stage],
+                elapsed_sec,
+                file_total=generated_total,
+                received_files=generated_total,
+                processed_files=generated_total,
                 operation_id=operation_id,
                 authenticated_turn_id=authenticated_turn_id,
                 revision=revision,

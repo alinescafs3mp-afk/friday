@@ -538,6 +538,159 @@ async def test_album_status_observes_download_staging_backend_and_delivery_in_or
     assert "✅ обрабатываю документы - 100%" in joined
 
 
+@pytest.mark.asyncio
+async def test_web_sources_edit_existing_status_after_backend_without_searching_stage(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    bridge = _bridge(tmp_path)
+    statuses: list[dict[str, Any]] = []
+    final_messages: list[str] = []
+    checkpoints_seen = asyncio.Event()
+
+    async def immediate_progress_delay(_delay: float) -> None:
+        return None
+
+    async def backend_json(*_args: Any, **_kwargs: Any) -> dict[str, Any]:
+        await checkpoints_seen.wait()
+        return {
+            "message": "Ответ по источникам",
+            "message_format": "plain",
+            "web_sources": [
+                {"url": "https://docs.python.org/3/"},
+                {"url": "https://www.python.org/"},
+                {"url": "https://peps.python.org/"},
+            ],
+        }
+
+    async def publish(
+        _client: object,
+        chat_id: int,
+        operation_id: str,
+        revision: int,
+        text: str,
+        **kwargs: Any,
+    ) -> str:
+        statuses.append(
+            {
+                "chat_id": chat_id,
+                "operation_id": operation_id,
+                "revision": revision,
+                "text": text,
+                **kwargs,
+            }
+        )
+        if len([item for item in statuses if item["create"]]) == 1:
+            checkpoints_seen.set()
+        return "sent" if len(statuses) == 1 else "edited"
+
+    async def send(_client: object, _chat_id: int, text: str, **_kwargs: Any) -> None:
+        final_messages.append(text)
+
+    monkeypatch.setattr(commands, "_progress_sleep", immediate_progress_delay)
+    monkeypatch.setattr(bridge, "_backend_json", backend_json)
+    monkeypatch.setattr(bridge, "_typing_loop", _never_typing)
+    monkeypatch.setattr(bridge, "_send_message", send)
+    monkeypatch.setattr(bridge._status_messages, "publish", publish)  # noqa: SLF001
+    try:
+        await bridge._process_update(  # noqa: SLF001
+            _client_stub(),
+            _client_stub(),
+            _update("Проверь этот документ", update_id=8820),
+            cached_response=None,
+        )
+    finally:
+        bridge._inbox.close()  # noqa: SLF001
+
+    joined = "\n".join(item["text"] for item in statuses)
+    wait_texts = [item["text"] for item in statuses if "Выполняю задачу" in item["text"]]
+    web_texts = [item["text"] for item in statuses if "Исследую вопрос" in item["text"]]
+    assert wait_texts
+    assert all("ищу источники" not in text for text in wait_texts)
+    assert all("Исследую вопрос" not in text for text in wait_texts)
+    assert web_texts
+    assert any("формирую ответ" in text for text in web_texts)
+    assert joined.index("ядро обрабатывает запрос") < joined.index("Исследую вопрос")
+    assert statuses[-1]["terminal"] is True
+    assert {item["operation_id"] for item in statuses} == {"chat:8820"}
+    assert [item["revision"] for item in statuses] == list(range(1, len(statuses) + 1))
+    assert len([item for item in statuses if item["create"]]) == 1
+    assert "Источники:" in final_messages[0]
+    assert all("ETA" not in item["text"] for item in statuses)
+
+
+@pytest.mark.asyncio
+async def test_generated_archive_edits_existing_status_from_observed_file_list(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    bridge = _bridge(tmp_path)
+    statuses: list[dict[str, Any]] = []
+    checkpoints_seen = asyncio.Event()
+
+    async def immediate_progress_delay(_delay: float) -> None:
+        return None
+
+    async def backend_json(*_args: Any, **_kwargs: Any) -> dict[str, Any]:
+        await checkpoints_seen.wait()
+        return {
+            "message": "Архив готов",
+            "message_format": "plain",
+            "files": [
+                {
+                    "filename": "report.zip",
+                    "mime_type": "application/zip",
+                    "content_base64": base64.b64encode(b"PK").decode(),
+                }
+            ],
+        }
+
+    async def publish(
+        _client: object,
+        _chat_id: int,
+        operation_id: str,
+        revision: int,
+        text: str,
+        **kwargs: Any,
+    ) -> str:
+        statuses.append({"operation_id": operation_id, "revision": revision, "text": text, **kwargs})
+        if len([item for item in statuses if item["create"]]) == 1:
+            checkpoints_seen.set()
+        return "sent" if len(statuses) == 1 else "edited"
+
+    async def send(*_args: Any, **_kwargs: Any) -> None:
+        return None
+
+    async def files(*_args: Any, **_kwargs: Any) -> int:
+        return 0
+
+    monkeypatch.setattr(commands, "_progress_sleep", immediate_progress_delay)
+    monkeypatch.setattr(bridge, "_backend_json", backend_json)
+    monkeypatch.setattr(bridge, "_typing_loop", _never_typing)
+    monkeypatch.setattr(bridge, "_send_message", send)
+    monkeypatch.setattr(bridge, "_deliver_generated_files", files)
+    monkeypatch.setattr(bridge._status_messages, "publish", publish)  # noqa: SLF001
+    try:
+        await bridge._process_update(  # noqa: SLF001
+            _client_stub(),
+            _client_stub(),
+            _update("Проверь этот документ", update_id=8821),
+            cached_response=None,
+        )
+    finally:
+        bridge._inbox.close()  # noqa: SLF001
+
+    wait_texts = [item["text"] for item in statuses if "Выполняю задачу" in item["text"]]
+    archive_texts = [item["text"] for item in statuses if "Собираю архив" in item["text"]]
+    assert wait_texts
+    assert all("Собираю архив" not in text for text in wait_texts)
+    assert archive_texts
+    assert any("отправляю готовый архив" in text for text in archive_texts)
+    assert statuses[-1]["terminal"] is True
+    assert len([item for item in statuses if item["create"]]) == 1
+    assert {item["operation_id"] for item in statuses} == {"chat:8821"}
+
+
 def test_recurring_schedule_stays_strictly_below_configured_bridge_ceiling() -> None:
     state = commands._ChatProgressState("opaque", ceiling_sec=300)
 

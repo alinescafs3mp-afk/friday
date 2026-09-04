@@ -16,6 +16,7 @@ from friday.telegram_bridge._journey_status import (
     build_web_operation_progress,
     render_operation_progress,
 )
+from friday.telegram_bridge._status import TelegramStatusStage, render_interactive_turn_status
 
 
 @pytest.mark.parametrize(
@@ -137,3 +138,62 @@ def test_complete_journey_has_no_running_focus_and_no_eta(builder, stage) -> Non
     assert sum(step.state is OperationStepState.RUNNING for step in projection.ordered_steps) == 0
     assert "ETA" not in text
     assert "Тайм-аут" not in text
+
+
+def test_backend_wait_does_not_mint_web_or_archive_stages() -> None:
+    text = render_interactive_turn_status(
+        TelegramStatusStage.BACKEND_WAIT,
+        12,
+        web_source_total=3,
+        generated_file_total=2,
+        generated_archive_total=2,
+    )
+
+    assert "ядро обрабатывает запрос" in text
+    assert "Выполняю задачу" in text
+    assert "ищу источники" not in text
+    assert "Исследую вопрос" not in text
+    assert "Собираю архив" not in text
+
+
+def test_delivering_uses_observed_web_source_counts() -> None:
+    text = render_interactive_turn_status(
+        TelegramStatusStage.DELIVERING_RESULT,
+        20,
+        web_source_total=3,
+    )
+
+    assert text.startswith("⏳ Исследую вопрос")
+    assert "формирую ответ" in text
+    assert "ядро обрабатывает запрос" not in text
+    assert all(token in {"0%", "100%"} for token in re.findall(r"\d+%", text))
+
+
+def test_delivering_uses_observed_generated_archive_counts() -> None:
+    text = render_interactive_turn_status(
+        TelegramStatusStage.DELIVERING_RESULT,
+        8,
+        generated_file_total=2,
+        generated_archive_total=2,
+    )
+
+    assert text.startswith("⏳ Собираю архив")
+    assert "отправляю готовый архив" in text
+    assert "ядро обрабатывает запрос" not in text
+
+
+def test_inbound_album_keeps_document_mode_even_with_web_sources() -> None:
+    text = render_interactive_turn_status(
+        TelegramStatusStage.DELIVERING_RESULT,
+        8,
+        item_total=2,
+        received_items=2,
+        staged_items=2,
+        web_source_total=3,
+        generated_file_total=1,
+        generated_archive_total=1,
+    )
+
+    assert text.startswith("⏳ Обрабатываю файлы")
+    assert "Исследую вопрос" not in text
+    assert "Собираю архив" not in text

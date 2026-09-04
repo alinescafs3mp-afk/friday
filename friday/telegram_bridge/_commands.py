@@ -30,10 +30,20 @@ from friday.telegram_bridge._base import (
     refusal_notice,
     split_for_telegram,
 )
+from friday.telegram_bridge._callbacks import _web_source_chat_lines
 from friday.telegram_bridge._media import _reply_document_file_unique_id
 from friday.telegram_bridge._obsidian import obsidian_panel
 from friday.telegram_bridge._status import TelegramStatusStage, render_interactive_turn_status
 from friday.telegram_bridge._views import _TIMELINE_SHOWN
+
+_ARCHIVE_FILENAME_SUFFIXES = (".zip", ".tar", ".tgz", ".tar.gz")
+_ARCHIVE_MIME_TYPES = {
+    "application/zip",
+    "application/x-zip-compressed",
+    "application/x-tar",
+    "application/gzip",
+    "application/x-gtar",
+}
 
 
 def _split_rename(argument: str) -> tuple[str, str]:
@@ -99,6 +109,9 @@ class _ChatProgressState:
         "started_at",
         "terminal",
         "item_total",
+        "web_source_total",
+        "generated_file_total",
+        "generated_archive_total",
     )
 
     def __init__(
@@ -130,6 +143,33 @@ class _ChatProgressState:
         self.received_bytes = 0
         self.staged_items = 0
         self.staged_bytes = 0
+        self.web_source_total = 0
+        self.generated_file_total = 0
+        self.generated_archive_total = 0
+
+
+def _generated_file_is_archive(item: dict[str, Any]) -> bool:
+    name = str(item.get("filename") or "").strip().casefold()
+    mime = str(item.get("mime_type") or "").strip().casefold()
+    return mime in _ARCHIVE_MIME_TYPES or name.endswith(_ARCHIVE_FILENAME_SUFFIXES)
+
+
+def _observe_chat_result(state: _ChatProgressState, response: dict[str, Any]) -> None:
+    """Admit only backend-returned web sources and generated files into status."""
+
+    state.web_source_total = len(_web_source_chat_lines(response.get("web_sources")))
+    files = response.get("files")
+    file_total = 0
+    archive_total = 0
+    if isinstance(files, list):
+        for item in files:
+            if not isinstance(item, dict) or not str(item.get("content_base64") or "").strip():
+                continue
+            file_total += 1
+            if _generated_file_is_archive(item):
+                archive_total += 1
+    state.generated_file_total = file_total
+    state.generated_archive_total = archive_total
 
 
 def _queue_chat_progress(
@@ -156,6 +196,9 @@ def _queue_chat_progress(
         received_bytes=state.received_bytes,
         staged_items=state.staged_items,
         staged_bytes=state.staged_bytes,
+        web_source_total=state.web_source_total,
+        generated_file_total=state.generated_file_total,
+        generated_archive_total=state.generated_archive_total,
         operation_id=state.operation_id,
         authenticated_turn_id=state.operation_id,
         revision=revision,
@@ -2040,6 +2083,7 @@ class CommandsMixin(BridgeShared):
                     )
                 response_to_send = dict(cached_response)
                 response_to_send.pop(_ALBUM_CACHE_MESSAGE_IDS, None)
+            _observe_chat_result(progress_state, response_to_send)
             _set_chat_progress_stage(
                 self,
                 telegram,
@@ -2550,6 +2594,7 @@ class CommandsMixin(BridgeShared):
                     int(item.get("message_id") or 0) for item in album_messages
                 ]
             self._inbox.cache_backend_response(int(update["update_id"]), response_to_cache)
+            _observe_chat_result(progress_state, response)
             _set_chat_progress_stage(
                 self,
                 telegram,
