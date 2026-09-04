@@ -122,11 +122,7 @@ async def test_long_turn_uses_one_revision_stream_without_fake_phase_percent_or_
     assert statuses[-1]["terminal"] is True
     assert statuses[-1]["text"].startswith("✅")
     assert all("ETA" not in item["text"] for item in statuses)
-    assert all(
-        token in {"0%", "100%"}
-        for item in statuses
-        for token in re.findall(r"\d+%", item["text"])
-    )
+    assert all(token in {"0%", "100%"} for item in statuses for token in re.findall(r"\d+%", item["text"]))
     assert all("javac" not in item["text"].casefold() for item in statuses)
     assert all("четырьмя минутами" not in item["text"].casefold() for item in statuses)
     assert all(speech not in item["text"] for item in statuses)

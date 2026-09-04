@@ -355,11 +355,7 @@ def test_status_renderer_contains_only_closed_stage_and_exact_elapsed_time() -> 
 
     assert all(prompt not in text and model_output not in text for text in texts)
     assert all("ETA" not in text for text in texts)
-    assert all(
-        token in {"0%", "100%"}
-        for text in texts
-        for token in re.findall(r"\d+%", text)
-    )
+    assert all(token in {"0%", "100%"} for text in texts for token in re.findall(r"\d+%", text))
     assert "Прошло: 1 мин 15 с" in texts[0]
     backend = render_chat_status(TelegramStatusStage.BACKEND_WAIT, 75)
     assert "ядро обрабатывает запрос" in backend
