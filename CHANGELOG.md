@@ -1,3 +1,12 @@
+## 0.208.19 — 2026-09-04
+
+### N3 /coding static inspect
+
+- Distinct sealed candidate after live 0.208.18. Lands owner-only Telegram
+  `/coding` static inspect on landed inspect contracts. Execute claims fail
+  closed. Isolated worker remains a later hop. SQLite remains at schema 50;
+  exact `0.208.18` is the predecessor and `0.207.90` the fallback.
+
 ## 0.208.18 — 2026-09-04
 
 ### N1 carrier packing and N2–N5 source contracts
