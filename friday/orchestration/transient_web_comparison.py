@@ -33,6 +33,18 @@ from friday.orchestration.current_file_web_query import (
     extract_compare_current_file_public_web_query,
 )
 from friday.orchestration.supervisor_contracts import SupervisorContractError, parse_query_intent
+from friday.orchestration.turn_context_runtime import current_primary_authenticated_turn_context
+from friday.orchestration.web_currentness_policy import WebCurrentnessDecision
+from friday.orchestration.web_provider_policy import (
+    ProviderObservation,
+    WebProviderPolicyError,
+    WebProviderStatus,
+    select_web_provider,
+)
+from friday.orchestration.web_research_consumption import (
+    WebResearchConsumptionState,
+    build_web_research_consumption,
+)
 from friday.permissions import ActorContext, AuthorizationService
 
 TRANSIENT_WEB_SECURITY_ID = "web.compare.transient"
@@ -57,6 +69,9 @@ _PUBLIC_CLAUSE_RE = re.compile(
 )
 _PROCESS_AUTHORITY = object()
 _SEAL_KEY = secrets.token_bytes(32)
+_CONSUMPTION_ID = "transient.web.comparison"
+_CONSUMPTION_TURN_ID = "transient.web.comparison"
+_CONSUMPTION_IDENTITY_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}\Z")
 
 
 class TransientWebComparisonError(ValueError):
@@ -579,6 +594,82 @@ def _evidence(
     )
 
 
+def _consumption_turn_id() -> str:
+    context = current_primary_authenticated_turn_context()
+    token = str(getattr(context, "turn_id", "") or "") if context is not None else ""
+    if _CONSUMPTION_IDENTITY_RE.fullmatch(token):
+        return token
+    return _CONSUMPTION_TURN_ID
+
+
+def _report_source_urls(raw_sources: object) -> tuple[str, ...]:
+    if type(raw_sources) is not list:
+        return ()
+    urls: list[str] = []
+    for item in raw_sources:
+        if not isinstance(item, Mapping):
+            continue
+        url = item.get("url")
+        if isinstance(url, str) and url.strip():
+            urls.append(url)
+    return tuple(urls)
+
+
+def _report_blocked_private(report: Mapping[str, Any], raw_sources: object) -> bool:
+    """Refuse observed private URLs; do not treat them as grounded comparison sources."""
+
+    urls = _report_source_urls(raw_sources)
+    if not urls:
+        return False
+    selected_id = report.get("selected_provider_id")
+    try:
+        if isinstance(selected_id, str) and selected_id.strip():
+            admitted = len(urls)
+            search_count = min(admitted, _MAX_SOURCES)
+            selected = ProviderObservation(
+                provider_id=selected_id,
+                status=WebProviderStatus.COMPLETED,
+                source_count=search_count,
+                direct_source_count=admitted - search_count,
+                source_urls=urls,
+            )
+            primary_id = report.get("provider_primary_id")
+            used_fallback = report.get("provider_used_fallback") is True
+            if (
+                used_fallback
+                and isinstance(primary_id, str)
+                and primary_id.strip()
+                and primary_id.strip().casefold() != selected_id.strip().casefold()
+            ):
+                primary = ProviderObservation(provider_id=primary_id, status=WebProviderStatus.REFUSED)
+                selection = select_web_provider(primary, selected)
+            else:
+                selection = select_web_provider(selected)
+            consumption = build_web_research_consumption(
+                _CONSUMPTION_ID,
+                _consumption_turn_id(),
+                WebCurrentnessDecision.SEARCH_REQUIRED,
+                selection,
+                source_urls=urls,
+                topic="",
+            )
+            return consumption.usability not in {
+                WebResearchConsumptionState.CONSUMABLE,
+                WebResearchConsumptionState.CONSUMABLE_DEGRADED,
+            }
+        consumption = build_web_research_consumption(
+            _CONSUMPTION_ID,
+            _consumption_turn_id(),
+            WebCurrentnessDecision.SEARCH_REQUIRED,
+            None,
+            source_urls=urls,
+            topic="",
+        )
+    except (TypeError, ValueError, WebProviderPolicyError):
+        return isinstance(selected_id, str) and bool(selected_id.strip())
+    return consumption.usability is WebResearchConsumptionState.BLOCKED_PRIVATE
+
+
 def _project_report(
     plan: SealedPublicWebQuery,
     report: object,
@@ -609,6 +700,17 @@ def _project_report(
         and raw_sources
     ):
         raise TransientWebComparisonError("web report counters or failure flags are contradictory")
+    if _report_blocked_private(report, raw_sources):
+        return _evidence(
+            plan,
+            status=TransientWebEvidenceStatus.UNAVAILABLE,
+            reason=TransientWebUnavailableReason.SEARCH_FAILED,
+            requested=requested,
+            completed=completed,
+            failed=failed,
+            timed_out=timed_out,
+            search_timed_out=False,
+        )
 
     if search_timed_out:
         return _evidence(

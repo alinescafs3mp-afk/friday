@@ -59,7 +59,7 @@ class _RecordingWeb:
 def _source(index: int, *, text: str | None = None) -> dict[str, object]:
     body = text if text is not None else f"Current public fact from source {index}."
     return {
-        "url": f"https://public-{index}.example/report",
+        "url": f"https://public-{index}.example.com/report",
         "title": f"Public source {index}",
         "text": body,
         "text_length": len(body),
@@ -286,7 +286,7 @@ async def test_public_citation_projection_never_materializes_source_text(storage
     assert [citation.payload() for citation in citations] == [
         {
             "label": "W1",
-            "url": "https://public-1.example/report",
+            "url": "https://public-1.example.com/report",
             "title": "Public source 1",
         }
     ]
@@ -372,6 +372,33 @@ async def test_provider_failure_is_closed_unavailable_evidence(storage) -> None:
     assert evidence.unavailable_reason is TransientWebUnavailableReason.PROVIDER_ERROR
     assert evidence.sources == ()
     assert "secret" not in repr(evidence)
+
+
+@pytest.mark.anyio
+async def test_private_observed_urls_are_not_grounded(storage) -> None:
+    actor = _actor(storage)
+    authorization = _grant(storage, actor)
+    message = _message()
+    plan = seal_explicit_public_web_query(
+        current_user_message=message,
+        actor=actor,
+        conversation_id="conversation-1",
+    )
+    private = _source(1)
+    private["url"] = "https://localhost/private"
+    web = _RecordingWeb(_report(private))
+
+    evidence = await TransientWebComparisonAdapter(authorization, web).research(
+        plan=plan,
+        actor=actor,
+        conversation_id="conversation-1",
+        current_user_message=message,
+    )
+
+    assert evidence.status is TransientWebEvidenceStatus.UNAVAILABLE
+    assert evidence.unavailable_reason is TransientWebUnavailableReason.SEARCH_FAILED
+    assert evidence.sources == ()
+    assert "localhost" not in repr(evidence)
 
 
 @pytest.mark.anyio

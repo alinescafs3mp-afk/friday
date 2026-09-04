@@ -172,7 +172,7 @@ def _web_evidence(
         is_truncated = index in truncated
         rows.append(
             {
-                "url": (urls[index - 1] if urls is not None else f"https://public-{index}.example/current"),
+                "url": (urls[index - 1] if urls is not None else f"https://s{index}.example.com/current"),
                 "title": f"Public source {index}",
                 "text": text,
                 "text_length": len(text) + (1 if is_truncated else 0),
@@ -444,7 +444,7 @@ async def test_complete_comparison_is_two_call_tools_disabled_and_body_free() ->
     for private_body in (
         result.answer,
         prepared.bundle.parts[0].text,
-        "https://public-1.example/current",
+        "https://s1.example.com/current",
         "Первый публичный источник",
     ):
         assert private_body not in identity
@@ -584,7 +584,7 @@ async def test_tool_call_from_synthesis_or_verifier_is_rejected(
 
 @pytest.mark.asyncio
 async def test_irreducible_oversized_projection_is_rejected_before_model_dispatch() -> None:
-    urls = tuple(f"https://public-{index}.example/{'a' * 1_760}{index}" for index in range(1, 4))
+    urls = tuple(f"https://public-{index}.example.com/{'a' * 1_760}{index}" for index in range(1, 4))
     model = _ComparisonModel()
     with pytest.raises(CurrentFileWebComparisonError) as captured:
         await compare_current_file_with_web(
