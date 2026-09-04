@@ -1059,7 +1059,8 @@ checklist elsewhere. The Ctrl+T view is a compact projection of this list.
 
 - [ ] N1 two-message Telegram UX: `/chat`, Engineer, file-album,
       FILE/ARCHIVE carrier and observed web/archive status live on
-      `0.208.17`; remaining one final carrier
+      `0.208.17`; remaining live one-final-carrier cutover (packing on
+      `main`)
 - [ ] N2 currentness, evidence bundle, mission, provider fallback, source
       diversity, consumption, readiness, citation coverage, claim support,
       answer admission, contradiction coverage, exact mission coverage,
