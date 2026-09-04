@@ -1,6 +1,7 @@
 # Friday: canonical project backlog
 
-Updated: 2026-09-03 (R8I remainder on `main` `a914944f`; owner-parked rows moved out of the live queue)
+Updated: 2026-09-04 (independent post-backlog re-audit; live `0.208.11`;
+N0–N5 opened)
 
 This is the project's only backlog and mutable status register. It owns the
 current production identity, execution order, acceptance gaps and owner actions.
@@ -11,38 +12,45 @@ Old agent task files, handoffs, dated reports and superseded status registers ar
 kept in Git history, not in the working tree. A task discovered anywhere else is
 either merged here or discarded before that source is removed.
 
+The 2026-09-03 post-backlog audit snapshot (`main` `43a16c8b`, source
+`0.208.4`, recorded production `0.208.1`) is expired. Independent re-audit of
+the live host and current `origin/main` is the source of the identity below.
+Do not copy that snapshot's release claims forward.
+
 ## Current production identity
 
 - Branch: `main`
-- Deployed implementation head: `8b6a8c13ce54b8b07192cb6f5b820953da4efcb5`.
-- Live: Friday `0.208.1` / `8b6a8c13ce54b8b07192cb6f5b820953da4efcb5`;
-  tree `5587e4c3dd45e2b85191b8d39dd0268dc7fbf046526761af6d485297d2be8f82`;
-  wheel `1cadf5769b87f9cdc152729183ddf3a1d6ef4a8ff3192d48d1a5b538e856872f`.
-- Immediate runtime predecessor: Friday `0.208.0` /
-  `75b165a23809dfcc7445311e2dc896c98ce3df00`; tree
-  `9d1c49da576e58e73ec1570d3e4c7e1ea7ebca2d44cc1e7482ef418c9ec89315`.
-  Schema-capable fallback: Friday `0.207.90` /
-  `7abb3c5e3fb29bdc7c53bf923f8b218fa26f07e9`; tree
-  `c1c29331db489ad1c56080d70a8c37d4051b4752f1309dba9c0a012099ebcae5`.
+- Deployed implementation head: `6b61987afd4deccd6450ccd26ba5ceb4f4b2fa84`.
+- Live: Friday `0.208.11` / `6b61987afd4deccd6450ccd26ba5ceb4f4b2fa84`;
+  tree `c0628d5178d0215e9c5db35a6d17d36f741130a97722052e68497f49cf27117b`;
+  wheel `eac108b9c8aab70093c08e8fb2923f3170f8b48fe71ccba47db640bbf98a97b4`.
+  `HEAD`, `origin/main`, activation candidate and `current-release` match.
+- Immediate runtime predecessor and journal fallback: Friday `0.208.10` /
+  `feee87e95ed2c31a7cccc32c79034f02c838d20b`. Historical schema-50 sibling
+  `0.207.90` / `7abb3c5e3fb29bdc7c53bf923f8b218fa26f07e9` remains a recovered
+  older identity, not the live journal fallback.
 - Database schema: 50 in deployed production and the fallback.
-- Production: immutable activation `clear`; backend and Telegram bridge active;
-  trusted-CA health `200` / `version=0.208.1`. Writer target `candidate`.
-  Retention admission remains honestly `review_required` and grants no
-  apply/delete authority. A terminal-activation DR candidate is pending
-  independent rehearsal; do not treat enrollment as a published generation.
-  V12
-  `canary_ready` with verified, installation and effective context all exactly
-  `40960`; complete S2 authenticated turn
-  authority is active across scalar, file, attachment and V12 paths without
-  changing current user-visible routing. The S3 bounded-advisor code and its
-  storage-backed restart verifier are live.
-- Secondary: accepted/live GPT-OSS profile `gptoss20b-2335df…`; bounded
-  document-map/current-document assist and `plan_candidate` Supervisor shadow
-  are installed. Supervisor promotion remains honestly off until a genuine
-  eligible current-file-plus-public-web observation produces the exact consumed
-  release-bound witness; no traffic is fabricated to cross that gate. The
-  primary remains sole tool, effect and final-publication owner; secondary
-  absence preserves primary-only behavior.
+- Production: immutable activation `phase=clear`; backend and Telegram bridge
+  active; trusted-CA health `200` / `version=0.208.11`. Writer target
+  `candidate`. Retention admission remains honestly `review_required` and
+  grants no apply/delete authority. V12 `canary_ready` with verified,
+  installation and effective context all exactly `40960`. Complete S2
+  authenticated turn authority is active. S3 assist-controller identity is
+  live: `requested_mode=assist`, `effective_mode=off`,
+  `promotion_admitted=false`, `activation.reason=material_loaded_not_accepted`,
+  `source_revision_loaded=true`, `representative_window_verified=true`,
+  `evidence_accepted=false`. Tools and effects remain disallowed; publication
+  owner is the primary.
+- Secondary: accepted/live GPT-OSS profile `gptoss20b-2335df…`; `state=healthy`,
+  `mode=assist`, `available=false`, `enabled=true`, `configured=true`,
+  `role=optional_advisory`. Nested supervisor `closed_reason=admitted`,
+  requested assist, effective shadow. Supervisor advice stays off until a
+  genuine eligible current-file-plus-public-web observation produces the exact
+  consumed release-bound witness; no traffic is fabricated. Primary-only
+  behavior is preserved when the laptop is absent.
+- Candidate chain `0.208.2`–`0.208.10` is superseded by live `0.208.11`.
+  Abandoned assist siblings were recovered, cleared, and replaced; do not
+  rebase assist→assist or reuse a failed assist candidate.
 - The reader-first body-free document-passage contour is fully converged: 1,720
   current parents and 16,359 child passages, with no pending v3 backfill. The two
   formerly invalid sparse-text v2 sources were repaired by the released v3
@@ -54,38 +62,19 @@ either merged here or discarded before that source is removed.
 
 ## Active package
 
-S4-R6 bounded conversation lexical refill, R7 five-contour document recall,
-fail-soft dense document passage recall, R8A model-control compatibility, the
-R8B internal retrieval foundation, R8C exact focused-source parity and R8D
-authenticated exact-message windows are live.
-The inbox-advice worker now
-selects eligible privacy-safe rows before
-its finite page, so current, exhausted or excluded rows cannot starve later
-work. S6-R4 exact journey fault and production-observation evidence is live;
-P0G Gate Diet is included in the
-current release. P0H reader, pair-bearing writer and safe no-delete continuation
-remain live through `0.207.98`; the permanent `io_uring_disabled=2` R3 proposal
-is rejected, so P0H remains open only for a one-shot maintenance authority and
-reviewed bounded deletion that preserves the ordinary Engineer environment. S4-R8
-formal cutover is code-owned `accepted` on `origin/main`: independent R8E
-review of `f44c4e7c` is `accepted`, thirteen contours are `parity` or
-`preserved`, and `cutover_ready` is true. Production `0.208.1` /
-`8b6a8c13` now serves that catalogue: dialogue offers `archive_search`;
-`memory_search` / `source_search` / `message_search` remain internal.
-Keep the released S3 path in shadow
-until its genuine production witness exists; then promote only the
-current-file-plus-current-public-web journey through the already released
-fail-closed activation gate. The secondary runtime admission is now refreshed
-on genuine eligible assist demand, after every static/code-owned promotion gate
-and before model traffic. S5 measured cognition and exact 40k lease adoption
-are live. S6 mission, reminder and Telegram recovery plus Telegram
-browse-to-full-document closure are live. S4-R8I runtime activation is not a
-second exact owner: live dialogue already dispatches exact window, temporal and
-graph through `archive_search` on `0.208.1`. The parked competing invocation
-patch is discarded. `main` `a914944f` additionally refuses to start those exact
-lanes on a generic continuation; production still runs `8b6a8c13` until the
-next accepted release. Physical Android, P0H deletion, off-machine mirror and
-provider-credential rotation are owner-parked and are not in the live queue.
+The old S0–S6 implementation queue has converged on production `0.208.11`.
+S4-R8 formal cutover is code-owned `accepted`: dialogue offers `archive_search`;
+`memory_search` / `source_search` / `message_search` remain internal. Exact
+window, temporal and graph lanes dispatch through that facade; a generic
+continuation cannot mint a fresh exact selector. S3 assist-controller is
+deployed; advice remains off until the observation-bound witness. S5 40k lease
+and S6 recovery/browse paths stay live.
+
+The live product queue is N1–N5. First implementable slice is N1: the shared
+operation-progress contract and renderer, then two-message Telegram UX.
+N2 deep research, N3 Coding Mode, N4 whole-organism journeys and N5
+maintainability follow that order. Physical Android, P0H deletion, off-machine
+mirror and provider-credential rotation remain owner-parked.
 
 ## Operating rules
 
@@ -371,8 +360,9 @@ attachment traffic was inserted into the live owner conversation.
 ### S3 — bounded second hemisphere
 
 Status: readiness and authenticated bounded-advisor path deployed in `0.207.71`;
-on-demand runtime admission refresh deployed in `0.207.82`; promotion remains
-evidence-gated in shadow.
+on-demand runtime admission refresh deployed in `0.207.82`; assist-controller
+cutover deployed in `0.208.11`. Advice remains observation-bound: requested
+assist, effective off, `promotion_admitted=false`.
 
 - Keep the primary as sole tool caller, effect owner and publisher. Secondary
   and Semantic Supervisor receive the shared turn contract and return bounded
@@ -394,13 +384,18 @@ witness is still absent, so assist correctly remains off instead of trusting a
 file, prompt claim or fabricated observation.
 
 Remaining promotion work is observation-bound, not implementation-bound.
+The `0.208.11` controller consume is done; `promotion_admitted` still requires
+a genuine eligible current-file-plus-public-web consumed witness. Do not
+fabricate traffic. Assist still does not change the sealed query, does not
+own synthesis, and does not expand into coding or research until this
+journey demonstrates non-regressive value.
 
 The primary keeps files local and sends only an independent sealed public-web
 topic. Current files (one or several), a restored prior file, and an unused
 current upload no longer veto an independent public-web clause. Same-sentence
 summarize without a sealable public topic stays local and skips web instead of
 refusing the whole turn. File-as-query and leftover file nouns still fail
-closed for the outbound query. Assist stays off until a genuine consumed
+closed for the outbound query. Advice stays off until a genuine consumed
 representative-window witness exists.
 
 Demand-refresh acceptance: every static eligibility, evidence, actor and
@@ -776,6 +771,96 @@ activation ended `clear`; the DR lifecycle published revision 36 with
 health reports `0.207.97`/`ok`, and signed private-owner smoke passed all 11
 checks.
 
+### N0 — Post-backlog baseline reconciliation
+
+Status: live identity reconciled 2026-09-04. Production, `main` and the
+sealed sibling are `0.208.11` / `6b61987a`. S3 assist-controller consume is
+done. Remaining N0 row is the observation-bound promotion witness, which
+stays in Owner/external and must not block N1.
+
+- [x] Reconcile source candidate, production, fallback, journals and evidence.
+- [x] Deploy or explicitly supersede the `0.208.2`–`0.208.10` candidate chain.
+- [x] Record exact live identity in this register (`0.208.11`, schema 50,
+      predecessor `0.208.10`, activation `clear`).
+- [ ] S3 advice on a genuine eligible turn — observation-bound, not an
+      implementation package. Do not fabricate traffic.
+
+### N1 — Universal Operation Progress and Two-Message UX
+
+Status: contract slice in source; not yet a production UX. Mandatory owner
+contract: one user message → one editable Friday status → one final result
+carrier. Reuse `TelegramStatusMessageManager`. Do not add a second execution
+engine.
+
+- [ ] Shared `OperationProgressProjectionV1` and code-owned Russian renderer
+      (`friday/orchestration/operation_progress.py`). Truthful measured
+      progress only; at most one current-focus step; no fabricated percent
+      or ETA.
+- [ ] Migrate ordinary `/chat`, files, archive and web onto that projection
+      with one status created at the start of an interactive operation.
+- [ ] Migrate `/engineer`: no separate progress/terminal-status flood; no
+      empty archive; no ZIP for one ordinary output file; no internal
+      receipts/logs in the user archive by default.
+- [ ] One final carrier: text, one file with caption, or one deterministic
+      archive. Delivery uncertainty edits status and never duplicates.
+- [ ] Restart, edit-reject, send-fence and cancel/timeout/`UNKNOWN` proof
+      with actual Telegram message counts.
+
+### N2 — Deep Web Research and Automatic Knowledge-Gap Search
+
+Status: not started. Today is a strong single-query 27s/3-source (max 8)
+pipeline with keyed providers. Missing: code-owned currentness policy,
+multi-query mission, claim ledger, `WebEvidenceBundleV1`.
+
+- [ ] Automatic currentness / knowledge-gap policy (not every timeless
+      question). Private filenames, paths and deictics stay local.
+- [ ] Multi-query research mission (2–8 complementary public queries) with
+      source diversity and one reliable provider plus honest degraded
+      fallback.
+- [ ] `WebEvidenceBundleV1` (queries, sources, claims, contradictions,
+      missing evidence, coverage) consumed by the requesting workflow.
+- [ ] Integrate into document, table, Engineer and later Coding journeys.
+- [ ] Private representative benchmark and body-free public summary. Do not
+      claim Gemini parity without a paired scored set.
+
+### N3 — Coding Mode
+
+Status: not started. `/coding` does not exist. Engineer bubblewrap is not a
+Coding Worker. Until an isolated worker exists, static inspect/edit only;
+do not claim safe build/test of untrusted uploads.
+
+- [ ] Bare-source inspection (no execute, no rebuild unless asked).
+- [ ] Prompt-to-small-project and uploaded-project modification.
+- [ ] Persistent project identity, Git or equivalent snapshots, exact
+      revision selector (never recency-only).
+- [ ] Isolated coding worker: no host secrets, no Docker socket, no
+      production database, bounded network.
+- [ ] Safe archive extract (traversal, bombs, symlink/hardlink, size).
+- [ ] One final source archive; restart, rollback and adversarial proof.
+
+Do not prebuild a compiler catalogue. Do not weaken Engineer Mode or
+primary release certification to create the worker.
+
+### N4 — Whole-Organism Coherence
+
+Status: not started. Durable organs exist; there is no shared operation
+view. Primary and secondary must share one operation identity. New modes
+compose existing primitives.
+
+- [ ] Read-only `SharedOperationViewV1` / `AgentSituationProjectionV1`
+      derived from existing stores. No new execution owner.
+- [ ] Mixed journeys: file+archive+conversation+web+table; Engineer+advisories;
+      Coding+current docs; restart during status+execution; revoke-before-publish.
+- [ ] One turn, one operation, one status, one result, one effect owner,
+      one publisher. Honest `UNKNOWN`. Primary-only when secondary is absent.
+
+### N5 — Maintainability Ratchet
+
+Status: standing rule, not a rewrite. `friday/agent_runtime/__init__.py` is
+~76k lines / 3.81 MiB. No new product logic in that module unless no narrow
+seam exists. Extract only a touched seam with exact parity tests. Do not
+begin a clean-architecture rewrite.
+
 ### Removed from the active queue
 
 - Supervisor effect observation and heuristic retirement, Package 6 trusted
@@ -820,9 +905,9 @@ checks.
 
 This is the live remaining-work register. Owner/external and observation-bound
 rows stay open until their named evidence exists. Do not invent a second
-checklist elsewhere.
+checklist elsewhere. The Ctrl+T view is a compact projection of this list.
 
-### Closed on production `0.208.1`
+### Closed on production `0.208.11`
 
 - [x] P0G Gate Diet
 - [x] P0 production message stability
@@ -830,44 +915,44 @@ checklist elsewhere.
 - [x] S0 constructor freeze
 - [x] S1 Engineer continuation
 - [x] S2 one-turn nervous system
-- [x] S4-R0..R8D recall, passages, facade parity, exact message windows
-- [x] S4-R8E exact bitemporal/graph internal lane + open-handle provenance
-      (reviewed SHA `f44c4e7c`, status `accepted`)
-- [x] S4-R8H composite seam and exact archive dispatch
-- [x] S4-R8F dialogue cutover: `archive_search` sole ordinary facade;
-      `memory_search` / `source_search` / `message_search` internal
+- [x] S4-R0..R8F sole `archive_search` facade, exact windows, bitemporal/graph
+- [x] S4-R8I unique remainder: generic continuation cannot start a fresh
+      exact selector (on `main` since `a914944f`, live since `0.208.11`)
 - [x] S5 measured cognition and exact 40k lease
 - [x] S6-R0..R4 mission/reminder/Telegram recovery, browse-to-document, journey evidence
-- [x] Inbox-advice fairness selection
-- [x] Full exact-release gate + immutable activation of `8b6a8c13` /
-      `0.208.1` (25569 non-UI + 32 UI, zero failed/error/skipped;
-      activation `phase=clear`; trusted-CA health `200` / `0.208.1`)
-- [x] Golden-journey clean-artifact and restart receipts rebound to
-      `0.208.1` / `8b6a8c13` / tree `5587e4c3` / wheel `1cadf576` /
-      schema 50. Production observation for scheduled work stays honestly
-      `STALE` on the `0.208.0` / `75b165a2` artifact.
-- [x] S4-R8I: competing invocation-local runtime discarded. Exact lanes
-      already dispatch through landed `archive_search` on `0.208.1`. Unique
-      remainder — generic continuation must not start a fresh exact selector —
-      is on `main` `a914944f`. Not a production deploy.
+- [x] S3 assist-controller cutover on `0.208.11` (`requested=assist`,
+      `effective=off` until the consumed witness)
+- [x] N0 identity reconciliation: `main` = production = `6b61987a` /
+      `0.208.11`; candidate chain `0.208.2`–`0.208.10` superseded
 
 ### Open and implementable
 
-None.
+- [ ] N1 shared operation-progress contract and renderer, then two-message
+      Telegram UX for `/chat`, files, archive, web and `/engineer`
+- [ ] N2 automatic currentness policy, multi-query `WebEvidenceBundleV1`
+      and downstream consumption
+- [ ] N3 Coding Mode MVP behind an isolated worker
+- [ ] N4 shared operation/situation projection and mixed-organ journeys
+- [ ] N5 extract only touched seams from giant runtime modules
 
 ### Open and blocked
 
-- [ ] S3 Supervisor promotion — observation-bound. Need a genuine eligible
-      current-file-plus-public-web consumed witness. Do not fabricate traffic.
+- [ ] S3 Supervisor advice on live turns — observation-bound. Need a genuine
+      eligible current-file-plus-public-web consumed witness. Do not
+      fabricate traffic.
 
 ### Operating invariants (never "done", always in force)
 
 - Keep deployed P0/P1 paths green; do not expand `EngineerWorkItem v1`.
-- Keep S3 in shadow until the exact production witness exists.
+- Keep S3 advice off until the exact production witness exists. The
+  assist-controller may already be requested; that is not promotion.
 - Primary-only path when the laptop/secondary is absent.
+- One turn / one effect owner / one final publisher. No new orchestrator.
 - Do not use Docker to certify primary Friday.
 - Do not touch the Obsidian companion without a separate owner request.
 - Do not merge old feature branches wholesale.
+- No new product logic in `friday/agent_runtime/__init__.py` unless no
+  narrow seam exists.
 - During implementation: focused tests. Full exact-release gate only at a
   clean release boundary.
 - Never overlap our full native/UI gate with SolGoodman's full gate.
