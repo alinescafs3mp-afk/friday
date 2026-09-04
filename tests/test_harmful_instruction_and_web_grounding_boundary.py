@@ -681,7 +681,7 @@ _UNACCEPTED_WEB_REPORTS = [
             "completed_sources": 0,
             "summary": "No synthetic result matched.",
         },
-        "empty",
+        "failed",
         id="no-results",
     ),
     pytest.param(
