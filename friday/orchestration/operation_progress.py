@@ -86,23 +86,28 @@ def _require(condition: object, code: str) -> None:
 
 
 def _safe_text(value: object, *, field: str, maximum: int) -> str:
-    _require(isinstance(value, str), f"{field}_invalid")
-    _require(bool(value) and value == value.strip(), f"{field}_invalid")
-    text = value
-    _require(len(text) <= maximum, f"{field}_too_long")
-    _require(not _contains_control(text), f"{field}_control")
-    _require(_ABSOLUTE_PATH_RE.search(text) is None, f"{field}_path")
-    _require(_TRAVERSAL_RE.search(text) is None, f"{field}_path")
-    _require(_URL_RE.search(text) is None, f"{field}_url")
-    _require(_SECRETISH_RE.search(text) is None, f"{field}_secret")
-    return text
+    if not isinstance(value, str) or not value or value != value.strip():
+        raise OperationProgressError(f"{field}_invalid")
+    if len(value) > maximum:
+        raise OperationProgressError(f"{field}_too_long")
+    if _contains_control(value):
+        raise OperationProgressError(f"{field}_control")
+    if _ABSOLUTE_PATH_RE.search(value) is not None or _TRAVERSAL_RE.search(value) is not None:
+        raise OperationProgressError(f"{field}_path")
+    if _URL_RE.search(value) is not None:
+        raise OperationProgressError(f"{field}_url")
+    if _SECRETISH_RE.search(value) is not None:
+        raise OperationProgressError(f"{field}_secret")
+    return value
 
 
 def _optional_int(value: object, *, field: str, maximum: int) -> int | None:
     if value is None:
         return None
-    _require(isinstance(value, int) and not isinstance(value, bool), f"{field}_invalid")
-    _require(0 <= value <= maximum, f"{field}_out_of_range")
+    if not isinstance(value, int) or isinstance(value, bool):
+        raise OperationProgressError(f"{field}_invalid")
+    if not 0 <= value <= maximum:
+        raise OperationProgressError(f"{field}_out_of_range")
     return value
 
 
@@ -180,16 +185,15 @@ class OperationProgressProjection:
 def _parse_step(raw: Mapping[str, Any]) -> OperationStep:
     _require(isinstance(raw, Mapping), "step_invalid")
     step_id = raw.get("step_id")
-    _require(isinstance(step_id, str) and _STEP_ID_RE.fullmatch(step_id) is not None, "step_id_invalid")
+    if not isinstance(step_id, str) or _STEP_ID_RE.fullmatch(step_id) is None:
+        raise OperationProgressError("step_id_invalid")
     try:
         state = OperationStepState(str(raw.get("state") or ""))
     except ValueError as exc:
         raise OperationProgressError("step_state_invalid") from exc
     evidence_class = raw.get("evidence_class")
-    _require(
-        isinstance(evidence_class, str) and _EVIDENCE_CLASS_RE.fullmatch(evidence_class) is not None,
-        "evidence_class_invalid",
-    )
+    if not isinstance(evidence_class, str) or _EVIDENCE_CLASS_RE.fullmatch(evidence_class) is None:
+        raise OperationProgressError("evidence_class_invalid")
     completed = _optional_int(raw.get("completed_units"), field="completed_units", maximum=MAX_UNITS)
     total = _optional_int(raw.get("total_units"), field="total_units", maximum=MAX_UNITS)
     percentage = _optional_int(raw.get("percentage"), field="percentage", maximum=100)
@@ -237,17 +241,19 @@ def build_operation_progress(raw: Mapping[str, Any]) -> OperationProgressProject
     schema = raw.get("schema", OPERATION_PROGRESS_SCHEMA)
     _require(schema == OPERATION_PROGRESS_SCHEMA, "schema_invalid")
     operation_id = raw.get("operation_id")
-    _require(
-        isinstance(operation_id, str) and _OPERATION_ID_RE.fullmatch(operation_id) is not None,
-        "operation_id_invalid",
-    )
+    if not isinstance(operation_id, str) or _OPERATION_ID_RE.fullmatch(operation_id) is None:
+        raise OperationProgressError("operation_id_invalid")
     turn_id = raw.get("authenticated_turn_id")
-    _require(isinstance(turn_id, str) and _TURN_ID_RE.fullmatch(turn_id) is not None, "turn_id_invalid")
+    if not isinstance(turn_id, str) or _TURN_ID_RE.fullmatch(turn_id) is None:
+        raise OperationProgressError("turn_id_invalid")
     revision = raw.get("revision")
-    _require(isinstance(revision, int) and not isinstance(revision, bool), "revision_invalid")
-    _require(1 <= revision <= MAX_REVISION, "revision_out_of_range")
+    if not isinstance(revision, int) or isinstance(revision, bool):
+        raise OperationProgressError("revision_invalid")
+    if not 1 <= revision <= MAX_REVISION:
+        raise OperationProgressError("revision_out_of_range")
     terminal = raw.get("terminal")
-    _require(isinstance(terminal, bool), "terminal_invalid")
+    if not isinstance(terminal, bool):
+        raise OperationProgressError("terminal_invalid")
     try:
         mode = OperationMode(str(raw.get("mode") or ""))
     except ValueError as exc:
@@ -257,22 +263,25 @@ def build_operation_progress(raw: Mapping[str, Any]) -> OperationProgressProject
     except ValueError as exc:
         raise OperationProgressError("delivery_state_invalid") from exc
     elapsed = raw.get("elapsed_sec")
-    _require(isinstance(elapsed, int) and not isinstance(elapsed, bool), "elapsed_invalid")
-    _require(0 <= elapsed <= MAX_ELAPSED_SEC, "elapsed_out_of_range")
+    if not isinstance(elapsed, int) or isinstance(elapsed, bool):
+        raise OperationProgressError("elapsed_invalid")
+    if not 0 <= elapsed <= MAX_ELAPSED_SEC:
+        raise OperationProgressError("elapsed_out_of_range")
     remaining = _optional_int(
         raw.get("hard_deadline_remaining_sec"),
         field="hard_deadline_remaining_sec",
         maximum=MAX_ELAPSED_SEC,
     )
     plan_generation = raw.get("plan_generation", 1)
-    _require(
-        isinstance(plan_generation, int) and not isinstance(plan_generation, bool),
-        "plan_generation_invalid",
-    )
-    _require(1 <= plan_generation <= MAX_REVISION, "plan_generation_out_of_range")
+    if not isinstance(plan_generation, int) or isinstance(plan_generation, bool):
+        raise OperationProgressError("plan_generation_invalid")
+    if not 1 <= plan_generation <= MAX_REVISION:
+        raise OperationProgressError("plan_generation_out_of_range")
     steps_raw = raw.get("ordered_steps")
-    _require(isinstance(steps_raw, Sequence) and not isinstance(steps_raw, (str, bytes)), "steps_invalid")
-    _require(1 <= len(steps_raw) <= MAX_STEPS, "steps_count_invalid")
+    if not isinstance(steps_raw, Sequence) or isinstance(steps_raw, (str, bytes)):
+        raise OperationProgressError("steps_invalid")
+    if not 1 <= len(steps_raw) <= MAX_STEPS:
+        raise OperationProgressError("steps_count_invalid")
     steps = tuple(_parse_step(item) for item in steps_raw)
     seen: set[str] = set()
     running: list[str] = []
