@@ -41,6 +41,11 @@ from friday.interaction_control_plane.engineer_work_item import (
 from friday.interaction_control_plane.engineer_work_item_schema import (
     ENGINEER_WORK_ITEM_MAX_TTL_SECONDS,
 )
+from friday.orchestration.engineer_result_carrier import (
+    EngineerResultCarrierKind,
+    EngineerResultPolicyError,
+    select_engineer_result_carrier,
+)
 from friday.orchestration.engineer_work_item_coordinator import (
     EngineerAdmissionOutcome,
     EngineerCommandLedgerDisposition,
@@ -62,6 +67,7 @@ from .command import (
     CommandReceipt,
     CommandRequest,
     CommandStatus,
+    GeneratedFile,
     IsolationProfile,
     OwnerConfirmationAuthority,
     OwnerSourceAuthority,
@@ -86,6 +92,7 @@ from .command.publication import (
     CommandOutputArchive,
     CommandOutputPublicationError,
     build_command_output_archive,
+    build_user_result_carrier,
 )
 from .command.store import CommandJobStore, EngineerCommandAccountInventory
 from .publication import ExactGeneratedFilePublicationError, exact_generated_file_batch
@@ -154,6 +161,10 @@ _PERMANENT_PUBLICATION_ERRORS = frozenset(
         "command_output_receipt_invalid",
         "command_output_size_limit",
         "command_output_size_mismatch",
+        "command_output_user_carrier_invalid",
+        "command_output_user_file_empty",
+        "command_output_user_file_missing",
+        "user_carrier_not_attachable",
         "generated_batch_changed",
         "generated_batch_count_invalid",
         "generated_batch_filename_collision",
@@ -451,6 +462,14 @@ class EngineerCommandService:
                 tuple[str, str],
                 CommandOutputArchive,
                 dict[str, str],
+            ]
+            | None
+        ) = None
+        self._outputs_cache: (
+            tuple[
+                tuple[str, str],
+                CommandReceipt,
+                tuple[tuple[GeneratedFile, bytes], ...],
             ]
             | None
         ) = None
@@ -1117,6 +1136,56 @@ class EngineerCommandService:
                     ),
                 )
 
+    def _output_lock(self) -> threading.Lock:
+        lock = getattr(self, "_archive_lock", None)
+        if lock is None:
+            lock = threading.Lock()
+            self._archive_lock = lock
+            self._archive_cache = None
+            self._outputs_cache = None
+        return lock
+
+    def _load_sealed_outputs(
+        self,
+        receipt: CommandReceipt,
+        *,
+        actor_id: str,
+        conversation_id: str,
+    ) -> tuple[CommandReceipt, tuple[tuple[GeneratedFile, bytes], ...]]:
+        """Return sealed outputs. Caller must hold ``_archive_lock``."""
+
+        key = (receipt.job_id, receipt.receipt_mac)
+        cached = getattr(self, "_outputs_cache", None)
+        if cached is not None and cached[0] == key:
+            return cached[1], cached[2]
+        frozen_receipt, outputs = self.kernel.terminal_result(
+            receipt.job_id,
+            actor_id=actor_id,
+            conversation_id=conversation_id,
+            timeout_sec=0.1,
+        )
+        if frozen_receipt != receipt:
+            raise CommandOutputPublicationError("command_output_receipt_changed")
+        admitted = tuple(outputs)
+        self._outputs_cache = (key, frozen_receipt, admitted)
+        return frozen_receipt, admitted
+
+    def _sealed_outputs_for_receipt(
+        self,
+        receipt: CommandReceipt,
+        *,
+        actor_id: str,
+        conversation_id: str,
+    ) -> tuple[CommandReceipt, tuple[tuple[GeneratedFile, bytes], ...]]:
+        """Return one sealed inventory per receipt identity."""
+
+        with self._output_lock():
+            return self._load_sealed_outputs(
+                receipt,
+                actor_id=actor_id,
+                conversation_id=conversation_id,
+            )
+
     def _archive_for_receipt(
         self,
         receipt: CommandReceipt,
@@ -1126,26 +1195,19 @@ class EngineerCommandService:
     ) -> tuple[CommandOutputArchive, dict[str, str]]:
         """Build one exact archive per receipt identity, with bounded single-flight caching."""
 
-        lock = getattr(self, "_archive_lock", None)
-        if lock is None:
-            lock = threading.Lock()
-            self._archive_lock = lock
-            self._archive_cache = None
+        lock = self._output_lock()
         key = (receipt.job_id, receipt.receipt_mac)
         with lock:
             cached = self._archive_cache
             if cached is not None and cached[0] == key:
                 return cached[1], dict(cached[2])
-            frozen_receipt, outputs = self.kernel.terminal_result(
-                receipt.job_id,
+            frozen_receipt, outputs = self._load_sealed_outputs(
+                receipt,
                 actor_id=actor_id,
                 conversation_id=conversation_id,
-                timeout_sec=0.1,
             )
-            if frozen_receipt != receipt:
-                raise CommandOutputPublicationError("command_output_receipt_changed")
             archive = build_command_output_archive(
-                receipt,
+                frozen_receipt,
                 outputs,
                 max_archive_bytes=self.max_upload_bytes,
             )
@@ -2384,15 +2446,44 @@ class EngineerCommandService:
                     actor = self._fresh_terminal_actor(job)
                     if actor is None:
                         raise TerminalDeliveryError("terminal_authorization_changed")
-                    archive, attachment = self._archive_for_receipt(
+                    plan = select_engineer_result_carrier(
+                        [item.relative_path for item in receipt.generated_files]
+                    )
+                    if plan.carrier is EngineerResultCarrierKind.TEXT:
+                        publication = stage_terminal_text(
+                            self.storage,
+                            actor_id=actor.own_id,
+                            tenant_id=actor.user_id,
+                            conversation_id=str(job.get("conversation_id") or ""),
+                            source_message_id=str(job.get("source_row_id") or ""),
+                            delivery_chat_id=str(job.get("delivery_chat_id") or ""),
+                            receipt=receipt,
+                        )
+                        self.kernel.store.stage_publication(
+                            job_id,
+                            notification_id=publication.notification_id,
+                            dedup_key=publication.dedup_key,
+                            envelope_sha256=publication.envelope_sha256,
+                        )
+                        staged += 1
+                        continue
+                    frozen_receipt, outputs = self._sealed_outputs_for_receipt(
                         receipt,
                         actor_id=actor.own_id,
                         conversation_id=str(job.get("conversation_id") or ""),
                     )
+                    user_carrier = build_user_result_carrier(
+                        frozen_receipt,
+                        outputs,
+                        plan,
+                        max_archive_bytes=self.max_upload_bytes,
+                    )
+                    attachment = user_carrier.attachment()
                     batch = exact_generated_file_batch(
                         [attachment],
                         max_bytes=self.max_upload_bytes,
                     )
+                    caption_kind = "file" if plan.carrier is EngineerResultCarrierKind.FILE else "archive"
                     publication = stage_terminal_archive(
                         self.storage,
                         self.files_root,
@@ -2407,8 +2498,9 @@ class EngineerCommandService:
                         attachment=attachment,
                         batch=batch,
                         max_bytes=self.max_upload_bytes,
+                        caption_kind=caption_kind,
                     )
-                    if archive.sha256 != batch.files[0].content_sha256:
+                    if user_carrier.sha256 != batch.files[0].content_sha256:
                         raise TerminalDeliveryError("terminal_archive_identity_changed")
                     self.kernel.store.stage_publication(
                         job_id,
@@ -2434,7 +2526,10 @@ class EngineerCommandService:
                         self.kernel.store.record_publication_attempt(
                             job_id,
                             str(error_code),
-                            permanent=str(error_code) in _PERMANENT_PUBLICATION_ERRORS,
+                            permanent=(
+                                str(error_code) in _PERMANENT_PUBLICATION_ERRORS
+                                or isinstance(exc, EngineerResultPolicyError)
+                            ),
                         )
                     failed += 1
             reconciled += self._reconcile_staged_publications()
@@ -2563,6 +2658,9 @@ class EngineerCommandService:
             cached = self._archive_cache
             if cached is not None and cached[0][0] == job_id:
                 self._archive_cache = None
+            outputs = getattr(self, "_outputs_cache", None)
+            if outputs is not None and outputs[0][0] == job_id:
+                self._outputs_cache = None
 
     def retain_terminal_jobs(
         self,

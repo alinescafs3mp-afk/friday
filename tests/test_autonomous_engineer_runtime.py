@@ -1849,6 +1849,11 @@ def test_autonomous_engineer_history_excludes_operational_and_fabricated_termina
             ),
             "metadata_json": "{}",
         },
+        {
+            "role": "assistant",
+            "content": ("Engineer-задание 180521363782558983 завершено. Файл результата приложен."),
+            "metadata_json": "{}",
+        },
         {"role": "assistant", "content": "Обычный проверенный ответ.", "metadata_json": "{}"},
     ]
 

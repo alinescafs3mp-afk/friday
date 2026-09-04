@@ -1,10 +1,11 @@
-"""Deterministic delivery archive for verified Engineer command outputs.
+"""Deterministic delivery archives for verified Engineer command outputs.
 
 This module is deliberately downstream of the command workspace reader.  It
 does not open paths and it never trusts the live ``output`` tree; callers pass
 the exact bytes re-read from ``sealed`` together with the terminal receipt
-which inventoried them.  The builder then closes the final carrier shape: one
-bounded, uncompressed ZIP whose metadata and member order are byte-stable.
+which inventoried them.  Two closed carriers are built here: the diagnostic
+evidence ZIP used by status(), and the user-facing FILE or ARCHIVE chosen by
+``EngineerResultCarrierPlan``.
 """
 
 from __future__ import annotations
@@ -22,6 +23,11 @@ import zipfile
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any
+
+from friday.orchestration.engineer_result_carrier import (
+    EngineerResultCarrierKind,
+    EngineerResultCarrierPlan,
+)
 
 from .contracts import (
     MAX_OUTPUT_DEPTH,
@@ -41,6 +47,7 @@ from .contracts import (
 COMMAND_OUTPUT_MANIFEST_SCHEMA = "friday.engineer.command-output-manifest.v1"
 COMMAND_OUTPUT_RECEIPT_SCHEMA = "friday.engineer.command-output-receipt.v1"
 COMMAND_OUTPUT_MIME_TYPE = "application/zip"
+USER_RESULT_FILE_MIME_TYPE = "application/octet-stream"
 MAX_COMMAND_OUTPUT_ARCHIVE_BYTES = 36 * 1024 * 1024
 MAX_COMMAND_OUTPUT_METADATA_BYTES = 128 * 1024
 
@@ -410,6 +417,100 @@ def build_command_output_archive(
     )
 
 
+@dataclass(frozen=True, slots=True)
+class UserResultCarrier:
+    """One user-facing FILE or ARCHIVE; never command evidence."""
+
+    kind: str
+    filename: str
+    mime_type: str
+    payload: bytes = field(repr=False)
+    sha256: str
+
+    def attachment(self) -> dict[str, str]:
+        """Return the exact existing generated-file carrier shape."""
+
+        return {
+            "kind": "document",
+            "filename": self.filename,
+            "mime_type": self.mime_type,
+            "content_base64": base64.b64encode(self.payload).decode("ascii"),
+        }
+
+
+def build_user_result_carrier(
+    receipt: CommandReceipt,
+    outputs: Sequence[tuple[GeneratedFile, bytes]],
+    plan: EngineerResultCarrierPlan,
+    *,
+    max_archive_bytes: int = MAX_COMMAND_OUTPUT_ARCHIVE_BYTES,
+) -> UserResultCarrier:
+    """Build the user Telegram document from a sealed inventory and carrier plan."""
+
+    if type(plan) is not EngineerResultCarrierPlan:
+        raise CommandOutputPublicationError("command_output_user_carrier_invalid")
+    if plan.carrier not in {
+        EngineerResultCarrierKind.FILE,
+        EngineerResultCarrierKind.ARCHIVE,
+    }:
+        raise CommandOutputPublicationError("user_carrier_not_attachable")
+    checked_receipt = _validated_receipt(receipt)
+    ordered = _validated_inventory(checked_receipt, outputs)
+    by_path = {descriptor.relative_path: payload for descriptor, payload in ordered}
+    selected_paths = tuple(item.relative_path for item in plan.files)
+    if not selected_paths:
+        raise CommandOutputPublicationError("command_output_user_carrier_invalid")
+    try:
+        selected = tuple((path, by_path[path]) for path in selected_paths)
+    except KeyError as exc:
+        raise CommandOutputPublicationError("command_output_user_file_missing") from exc
+    if isinstance(max_archive_bytes, bool) or not isinstance(max_archive_bytes, int):
+        raise CommandOutputPublicationError("command_output_archive_limit_invalid")
+    archive_limit = min(max_archive_bytes, MAX_COMMAND_OUTPUT_ARCHIVE_BYTES)
+    if archive_limit <= 0:
+        raise CommandOutputPublicationError("command_output_archive_limit_invalid")
+    if plan.carrier is EngineerResultCarrierKind.FILE:
+        if len(selected) != 1:
+            raise CommandOutputPublicationError("command_output_user_carrier_invalid")
+        path, payload = selected[0]
+        if not payload:
+            raise CommandOutputPublicationError("command_output_user_file_empty")
+        if len(payload) > archive_limit:
+            raise CommandOutputPublicationError("command_output_archive_size_limit")
+        filename = path.rsplit("/", 1)[-1]
+        return UserResultCarrier(
+            kind=plan.carrier.value,
+            filename=filename,
+            mime_type=USER_RESULT_FILE_MIME_TYPE,
+            payload=payload,
+            sha256=_digest(payload),
+        )
+    buffer = io.BytesIO()
+    try:
+        with zipfile.ZipFile(
+            buffer,
+            mode="w",
+            compression=zipfile.ZIP_STORED,
+            allowZip64=False,
+            strict_timestamps=True,
+        ) as archive:
+            archive.comment = b""
+            for path, payload in selected:
+                _write_entry(archive, path, payload)
+    except (OSError, OverflowError, ValueError, zipfile.BadZipFile, zipfile.LargeZipFile) as exc:
+        raise CommandOutputPublicationError("command_output_archive_write_failed") from exc
+    payload = buffer.getvalue()
+    if not payload or len(payload) > archive_limit:
+        raise CommandOutputPublicationError("command_output_archive_size_limit")
+    return UserResultCarrier(
+        kind=plan.carrier.value,
+        filename=f"engineer-command-{checked_receipt.job_id}.zip",
+        mime_type=COMMAND_OUTPUT_MIME_TYPE,
+        payload=payload,
+        sha256=_digest(payload),
+    )
+
+
 __all__ = [
     "COMMAND_OUTPUT_MANIFEST_SCHEMA",
     "COMMAND_OUTPUT_MIME_TYPE",
@@ -418,5 +519,8 @@ __all__ = [
     "CommandOutputPublicationError",
     "MAX_COMMAND_OUTPUT_ARCHIVE_BYTES",
     "MAX_COMMAND_OUTPUT_METADATA_BYTES",
+    "USER_RESULT_FILE_MIME_TYPE",
+    "UserResultCarrier",
     "build_command_output_archive",
+    "build_user_result_carrier",
 ]

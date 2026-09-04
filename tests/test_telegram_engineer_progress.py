@@ -143,6 +143,14 @@ def test_internal_command_evidence_is_hidden_unless_explicitly_requested() -> No
     )
 
 
+def test_carrier_policy_is_owned_by_orchestration() -> None:
+    from friday.orchestration import engineer_result_carrier as orchestration
+    from friday.telegram_bridge import _engineer_progress as seam
+
+    assert seam.select_engineer_result_carrier is orchestration.select_engineer_result_carrier
+    assert seam.EngineerResultCarrierKind is orchestration.EngineerResultCarrierKind
+
+
 def test_result_path_and_duplicates_fail_closed() -> None:
     with pytest.raises(EngineerResultPolicyError, match="result_path_invalid"):
         select_user_result_files(["../escape.txt"])

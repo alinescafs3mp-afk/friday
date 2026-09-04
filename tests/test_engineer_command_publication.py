@@ -11,6 +11,7 @@ from typing import Any
 
 import pytest
 
+from friday.orchestration.engineer_result_carrier import select_engineer_result_carrier
 from friday.organs.engineer.command.contracts import (
     MAX_OUTPUT_FILE_BYTES,
     MAX_OUTPUT_FILES,
@@ -26,8 +27,10 @@ from friday.organs.engineer.command.publication import (
     COMMAND_OUTPUT_MANIFEST_SCHEMA,
     COMMAND_OUTPUT_MIME_TYPE,
     COMMAND_OUTPUT_RECEIPT_SCHEMA,
+    USER_RESULT_FILE_MIME_TYPE,
     CommandOutputPublicationError,
     build_command_output_archive,
+    build_user_result_carrier,
 )
 
 
@@ -280,3 +283,58 @@ def test_command_output_archive_requires_an_exact_terminal_receipt(
             _receipt((descriptor,), job_id=job_id, status=status),
             ((descriptor, payload),),
         )
+
+
+def test_user_file_carrier_sends_basename_bytes_not_a_zip() -> None:
+    payload = b"exact output bytes\n"
+    descriptor = _descriptor("reports/result.txt", payload)
+    receipt = _receipt((descriptor,))
+    plan = select_engineer_result_carrier(["reports/result.txt"])
+
+    carrier = build_user_result_carrier(receipt, ((descriptor, payload),), plan)
+
+    assert carrier.kind == "file"
+    assert carrier.filename == "result.txt"
+    assert carrier.mime_type == USER_RESULT_FILE_MIME_TYPE
+    assert carrier.payload == payload
+    assert not carrier.payload.startswith(b"PK")
+    assert base64.b64decode(carrier.attachment()["content_base64"], validate=True) == payload
+
+
+def test_user_archive_carrier_is_user_paths_without_receipt() -> None:
+    alpha = b"alpha\n"
+    nested = b"nested payload\x00"
+    alpha_descriptor = _descriptor("a.txt", alpha)
+    nested_descriptor = _descriptor("reports/z.bin", nested)
+    receipt = _receipt((nested_descriptor, alpha_descriptor))
+    plan = select_engineer_result_carrier(["reports/z.bin", "a.txt"])
+
+    carrier = build_user_result_carrier(
+        receipt,
+        ((nested_descriptor, nested), (alpha_descriptor, alpha)),
+        plan,
+    )
+
+    assert carrier.kind == "archive"
+    assert carrier.filename == f"engineer-command-{receipt.job_id}.zip"
+    assert carrier.mime_type == COMMAND_OUTPUT_MIME_TYPE
+    with zipfile.ZipFile(io.BytesIO(carrier.payload)) as archive:
+        assert archive.namelist() == ["a.txt", "reports/z.bin"]
+        assert archive.read("a.txt") == alpha
+        assert archive.read("reports/z.bin") == nested
+        assert "RECEIPT.json" not in archive.namelist()
+        assert "MANIFEST.json" not in archive.namelist()
+        assert "stdout.bin" not in archive.namelist()
+
+
+def test_empty_user_file_is_refused() -> None:
+    descriptor = GeneratedFile(
+        relative_path="empty.bin",
+        size_bytes=0,
+        sha256=hashlib.sha256(b"").hexdigest(),
+        mode=0o600,
+    )
+    receipt = _receipt((descriptor,))
+    plan = select_engineer_result_carrier(["empty.bin"])
+    with pytest.raises(CommandOutputPublicationError, match="command_output_user_file_empty"):
+        build_user_result_carrier(receipt, ((descriptor, b""),), plan)

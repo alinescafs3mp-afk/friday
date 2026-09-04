@@ -124,7 +124,13 @@ def _canonical_json(value: Mapping[str, Any]) -> str:
     return encoded
 
 
-def _safe_caption(job_id: str, status: str, *, has_artifact: bool) -> str:
+def _safe_caption(
+    job_id: str,
+    status: str,
+    *,
+    has_artifact: bool,
+    caption_kind: str = "archive",
+) -> str:
     status_text = {
         "completed": "завершено",
         "failed": "завершилось с ошибкой",
@@ -133,7 +139,16 @@ def _safe_caption(job_id: str, status: str, *, has_artifact: bool) -> str:
     }.get(status)
     if status_text is None or _JOB_ID.fullmatch(job_id) is None:
         raise TerminalDeliveryError("terminal_identity_invalid")
-    suffix = " Проверенный архив результата приложен." if has_artifact else ""
+    if has_artifact:
+        suffix_by_kind = {
+            "file": " Файл результата приложен.",
+            "archive": " Проверенный архив результата приложен.",
+        }
+        suffix = suffix_by_kind.get(caption_kind)
+        if suffix is None:
+            raise TerminalDeliveryError("terminal_caption_invalid")
+    else:
+        suffix = ""
     value = f"Engineer-задание {job_id} {status_text}.{suffix}"
     if not value or len(value) > _CAPTION_MAX_CHARS:
         raise TerminalDeliveryError("terminal_caption_invalid")
@@ -1017,8 +1032,9 @@ def stage_terminal_archive(
     attachment: Mapping[str, Any],
     batch: ExactGeneratedFileBatch,
     max_bytes: int,
+    caption_kind: str = "archive",
 ) -> StagedTerminalNotification:
-    """Atomically freeze ZIP, assistant receipt and content-free queue pointer."""
+    """Atomically freeze one document, assistant receipt and content-free queue pointer."""
 
     if type(batch) is not ExactGeneratedFileBatch or len(batch.files) != 1:
         raise TerminalDeliveryError("terminal_artifact_batch_invalid")
@@ -1051,7 +1067,7 @@ def stage_terminal_archive(
         return staged
 
     notification_id = new_id("notif")
-    caption = _safe_caption(job_id, status, has_artifact=True)
+    caption = _safe_caption(job_id, status, has_artifact=True, caption_kind=caption_kind)
     guard = GeneratedFilesPersistenceRollbackGuard(Path(files_root))
     try:
         with generated_files_publication_transaction(storage, guard) as conn:

@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import base64
 import hashlib
+import io
 import threading
+import zipfile
 from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
@@ -743,6 +745,24 @@ def test_worker_stages_without_model_and_reconciles_sent(storage, tmp_path: Path
     assert result == {"staged": 1, "reconciled": 0, "failed": 0}
     queued = storage.list_pending_notifications()
     assert len(queued) == 1 and queued[0]["kind"] == TERMINAL_NOTIFICATION_KIND
+    envelope = parse_terminal_envelope(queued[0]["body"])
+    assert envelope["caption"] == (f"Engineer-задание {receipt.job_id} завершено. Файл результата приложен.")
+    assert envelope["artifact"]["filename"] == "result.bin"
+    assert envelope["artifact"]["mime_type"] == "application/octet-stream"
+    row = storage.execute(
+        "SELECT id,user_id,chat_id,kind,dedup_key,body,status FROM outbound_notifications WHERE id=?",
+        (queued[0]["id"],),
+    ).fetchone()
+    stored = read_terminal_notification_artifact(
+        storage,
+        tmp_path / "files",
+        dict(row),
+        tenant_id=LEGACY_OWNER_USER_ID,
+        actor_id=LEGACY_OWNER_USER_ID,
+        max_bytes=4 * 1024 * 1024,
+    )
+    assert stored.content == payload
+    assert not stored.content.startswith(b"PK")
     publication = command_store.list_staged_publications()
     assert len(publication) == 1
     storage.mark_notifications(sent_ids=[queued[0]["id"]])
@@ -753,6 +773,100 @@ def test_worker_stages_without_model_and_reconciles_sent(storage, tmp_path: Path
         (receipt.job_id,),
     ).fetchone()
     assert state is not None and state["state"] == "sent"
+    command_store.close()
+
+
+def test_worker_publishes_two_user_files_as_zip_without_receipt(storage, tmp_path: Path) -> None:
+    conversation_id, source_message_id = _main_scope(storage)
+    command_store = CommandJobStore(tmp_path / "commands")
+    _insert_terminal_job(
+        command_store,
+        conversation_id=conversation_id,
+        source_message_id=source_message_id,
+    )
+    alpha = b"alpha\n"
+    nested = b"nested"
+    files = (
+        GeneratedFile(
+            relative_path="a.txt",
+            size_bytes=len(alpha),
+            sha256=sha256_bytes(alpha),
+            mode=0o600,
+        ),
+        GeneratedFile(
+            relative_path="reports/z.bin",
+            size_bytes=len(nested),
+            sha256=sha256_bytes(nested),
+            mode=0o600,
+        ),
+    )
+    receipt = replace(_receipt(b"unused", generated=False), generated_files=files)
+    service = _worker_service(
+        storage,
+        tmp_path,
+        command_store,
+        receipt,
+        ((files[0], alpha), (files[1], nested)),
+    )
+
+    assert service.publish_terminal_jobs() == {"staged": 1, "reconciled": 0, "failed": 0}
+    queued = storage.list_pending_notifications()
+    envelope = parse_terminal_envelope(queued[0]["body"])
+    assert envelope["caption"] == (
+        f"Engineer-задание {receipt.job_id} завершено. Проверенный архив результата приложен."
+    )
+    assert envelope["artifact"]["filename"] == f"engineer-command-{receipt.job_id}.zip"
+    row = storage.execute(
+        "SELECT id,user_id,chat_id,kind,dedup_key,body,status FROM outbound_notifications WHERE id=?",
+        (queued[0]["id"],),
+    ).fetchone()
+    stored = read_terminal_notification_artifact(
+        storage,
+        tmp_path / "files",
+        dict(row),
+        tenant_id=LEGACY_OWNER_USER_ID,
+        actor_id=LEGACY_OWNER_USER_ID,
+        max_bytes=4 * 1024 * 1024,
+    )
+    with zipfile.ZipFile(io.BytesIO(stored.content)) as archive:
+        assert archive.namelist() == ["a.txt", "reports/z.bin"]
+        assert "RECEIPT.json" not in archive.namelist()
+        assert archive.read("a.txt") == alpha
+    command_store.close()
+
+
+def test_worker_hides_internal_only_outputs_as_text(storage, tmp_path: Path) -> None:
+    conversation_id, source_message_id = _main_scope(storage)
+    command_store = CommandJobStore(tmp_path / "commands")
+    _insert_terminal_job(
+        command_store,
+        conversation_id=conversation_id,
+        source_message_id=source_message_id,
+    )
+    payload = b"{}"
+    files = (
+        GeneratedFile(
+            relative_path="RECEIPT.json",
+            size_bytes=len(payload),
+            sha256=sha256_bytes(payload),
+            mode=0o600,
+        ),
+    )
+    receipt = replace(
+        _receipt(b"", generated=False, stdout=b"done\n"),
+        generated_files=files,
+    )
+    service = _worker_service(
+        storage,
+        tmp_path,
+        command_store,
+        receipt,
+        ((files[0], payload),),
+    )
+
+    assert service.publish_terminal_jobs() == {"staged": 1, "reconciled": 0, "failed": 0}
+    queued = storage.list_pending_notifications()
+    assert len(queued) == 1 and queued[0]["kind"] == TERMINAL_TEXT_NOTIFICATION_KIND
     command_store.close()
 
 
