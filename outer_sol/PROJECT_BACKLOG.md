@@ -20,37 +20,37 @@ Do not copy that snapshot's release claims forward.
 ## Current production identity
 
 - Branch: `main`
-- Deployed implementation head: `6b61987afd4deccd6450ccd26ba5ceb4f4b2fa84`.
-- Live: Friday `0.208.11` / `6b61987afd4deccd6450ccd26ba5ceb4f4b2fa84`;
-  tree `c0628d5178d0215e9c5db35a6d17d36f741130a97722052e68497f49cf27117b`;
-  wheel `eac108b9c8aab70093c08e8fb2923f3170f8b48fe71ccba47db640bbf98a97b4`.
-  `HEAD`, `origin/main`, activation candidate and `current-release` match.
-- Immediate runtime predecessor and journal fallback: Friday `0.208.10` /
-  `feee87e95ed2c31a7cccc32c79034f02c838d20b`. Historical schema-50 sibling
-  `0.207.90` / `7abb3c5e3fb29bdc7c53bf923f8b218fa26f07e9` remains a recovered
-  older identity, not the live journal fallback.
+- Deployed implementation head: `8b6a8c13ce54b8b07192cb6f5b820953da4efcb5`.
+- Live: Friday `0.208.1` / `8b6a8c13ce54b8b07192cb6f5b820953da4efcb5`;
+  tree `5587e4c3dd45e2b85191b8d39dd0268dc7fbf046526761af6d485297d2be8f82`;
+  wheel `1cadf5769b87f9cdc152729183ddf3a1d6ef4a8ff3192d48d1a5b538e856872f`.
+- Immediate runtime predecessor: Friday `0.208.0` /
+  `75b165a23809dfcc7445311e2dc896c98ce3df00`; tree
+  `9d1c49da576e58e73ec1570d3e4c7e1ea7ebca2d44cc1e7482ef418c9ec89315`.
+  Schema-capable fallback: Friday `0.207.90` /
+  `7abb3c5e3fb29bdc7c53bf923f8b218fa26f07e9`; tree
+  `c1c29331db489ad1c56080d70a8c37d4051b4752f1309dba9c0a012099ebcae5`.
 - Database schema: 50 in deployed production and the fallback.
+
+Golden-journey receipts stay bound to that `0.208.1` root until rebound. The
+running sealed sibling after the S3 assist-controller cutover is Friday
+0.208.11 at `6b61987afd4deccd6450ccd26ba5ceb4f4b2fa84` (tree-file
+`c0628d5178d0215e9c5db35a6d17d36f741130a97722052e68497f49cf27117b`, wheel
+`eac108b9c8aab70093c08e8fb2923f3170f8b48fe71ccba47db640bbf98a97b4`, journal
+`clear`, predecessor `0.208.10` / `feee87e95ed2c31a7cccc32c79034f02c838d20b`).
+Trusted-CA health reports `version=0.208.11`. S3 assist-controller:
+`requested_mode=assist`, `effective_mode=off`, `promotion_admitted=false`,
+`activation.reason=material_loaded_not_accepted`. Candidate chain
+`0.208.2`–`0.208.10` is superseded. Do not rebase assist→assist.
+
 - Production: immutable activation `phase=clear`; backend and Telegram bridge
-  active; trusted-CA health `200` / `version=0.208.11`. Writer target
-  `candidate`. Retention admission remains honestly `review_required` and
-  grants no apply/delete authority. V12 `canary_ready` with verified,
-  installation and effective context all exactly `40960`. Complete S2
-  authenticated turn authority is active. S3 assist-controller identity is
-  live: `requested_mode=assist`, `effective_mode=off`,
-  `promotion_admitted=false`, `activation.reason=material_loaded_not_accepted`,
-  `source_revision_loaded=true`, `representative_window_verified=true`,
-  `evidence_accepted=false`. Tools and effects remain disallowed; publication
-  owner is the primary.
+  active; writer target `candidate`. Retention admission remains honestly
+  `review_required` and grants no apply/delete authority. V12 `canary_ready`
+  with verified, installation and effective context all exactly `40960`.
 - Secondary: accepted/live GPT-OSS profile `gptoss20b-2335df…`; `state=healthy`,
-  `mode=assist`, `available=false`, `enabled=true`, `configured=true`,
-  `role=optional_advisory`. Nested supervisor `closed_reason=admitted`,
-  requested assist, effective shadow. Supervisor advice stays off until a
-  genuine eligible current-file-plus-public-web observation produces the exact
-  consumed release-bound witness; no traffic is fabricated. Primary-only
-  behavior is preserved when the laptop is absent.
-- Candidate chain `0.208.2`–`0.208.10` is superseded by live `0.208.11`.
-  Abandoned assist siblings were recovered, cleared, and replaced; do not
-  rebase assist→assist or reuse a failed assist candidate.
+  `mode=assist`, `available=false`. Supervisor advice stays off until a genuine
+  eligible current-file-plus-public-web consumed witness; no traffic is
+  fabricated. Primary-only behavior is preserved when the laptop is absent.
 - The reader-first body-free document-passage contour is fully converged: 1,720
   current parents and 16,359 child passages, with no pending v3 backfill. The two
   formerly invalid sparse-text v2 sources were repaired by the released v3
