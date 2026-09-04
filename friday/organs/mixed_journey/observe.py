@@ -45,6 +45,7 @@ from friday.orchestration.mixed_journey_web_facts import (
     build_mixed_journey_web_facts,
 )
 from friday.orchestration.shared_operation_view import build_shared_operation_view
+from friday.orchestration.web_research_consumption import WebResearchConsumptionV1
 
 _ID_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}\Z")
 _SHA256_RE = re.compile(r"[0-9a-f]{64}\Z")
@@ -127,12 +128,12 @@ def _blocked_file() -> dict[str, object]:
     return {"file_id": "blocked", "sha256": "not-a-digest"}
 
 
-def _first_present(values: Sequence[object], *, blocked: dict[str, object]) -> object:
-    found: object = None
+def _first_present(values: Sequence[object], *, blocked: dict[str, object]) -> dict[str, object] | None:
+    found: dict[str, object] | None = None
     for item in values:
         if item is _BLOCKED:
             return blocked
-        if item is not None and found is None:
+        if found is None and isinstance(item, dict):
             found = item
     return found
 
@@ -422,10 +423,10 @@ def observe_mixed_journey(
         (*observed_tables, *stored_tables),
         blocked={"table_id": "blocked", "sha256": "not-a-digest"},
     )
-    conversation_fact: object
+    conversation_fact: dict[str, object] | None
     if stored_conversation is _BLOCKED:
         conversation_fact = {"conversation_id": "blocked", "authenticated_turn_id": authenticated_turn_id}
-    elif stored_conversation is not None:
+    elif isinstance(stored_conversation, dict):
         conversation_fact = stored_conversation
     elif conversation_id is not None:
         opaque = _opaque_id(conversation_id)
@@ -436,11 +437,16 @@ def observe_mixed_journey(
         )
     else:
         conversation_fact = None
+    web_fact: WebResearchConsumptionV1 | Mapping[str, object] | None
+    if web is None or isinstance(web, (WebResearchConsumptionV1, Mapping)):
+        web_fact = web
+    else:
+        web_fact = {"usability": "blocked"}
 
     file_value = build_mixed_journey_file_facts(file_fact)
     archive_value = build_mixed_journey_archive_facts(archive_fact)
     conversation_value = build_mixed_journey_conversation_facts(conversation_fact)
-    web_value = build_mixed_journey_web_facts(web)
+    web_value = build_mixed_journey_web_facts(web_fact)
     table_value = build_mixed_journey_table_facts(table_fact)
     if any(
         component.state.value == "blocked"
@@ -452,7 +458,7 @@ def observe_mixed_journey(
             file=file_fact,
             archive=archive_fact,
             conversation=conversation_fact,
-            web=web,
+            web=web_fact,
             table=table_fact,
         )
 
@@ -508,19 +514,14 @@ def observe_mixed_journey(
         organ_total=len(tuple(name for name in ORGAN_NAMES if organs.is_present(name))),
         gathered_organs=len(summaries),
     )
-    shared_kwargs: dict[str, object] = {
-        "secondary": {"present": False},
-        "pending_work_owner": "primary",
-    }
-    if effect_owners is not None:
-        shared_kwargs["effect_owners"] = effect_owners
-    if publishers is not None:
-        shared_kwargs["publishers"] = publishers
     shared = build_shared_operation_view(
         projection_id,
         authenticated_turn_id,
         progress,
-        **shared_kwargs,
+        secondary={"present": False},
+        pending_work_owner="primary",
+        effect_owners=effect_owners,
+        publishers=publishers,
     )
     return build_mixed_journey_store_projection(
         projection_id,
@@ -528,7 +529,7 @@ def observe_mixed_journey(
         file=file_fact,
         archive=archive_fact,
         conversation=conversation_fact,
-        web=web,
+        web=web_fact,
         table=table_fact,
         shared_operation_view=shared,
         organs=organs,
