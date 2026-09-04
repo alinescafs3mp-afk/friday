@@ -21,6 +21,7 @@ from friday.web_surfer import (
     SEARCH_DOMAIN_LIST_MAX,
     SEARCH_FRESHNESS_VALUES,
     AllProvidersRefusedError,
+    FetchResult,
     FreshnessUnavailableError,
     ProviderRefusedError,
     SearchFilterUnavailableError,
@@ -1581,6 +1582,229 @@ async def test_kernel_empty_research_after_outbound_is_not_completeness(
     )
 
     assert report["error"] == "no_admitted_sources"
+    assert report["sources"] == []
+    assert report["outbound_attempted"] is True
+    assert report["search_failed"] is True
+    assert storage.list_inbox("operator") == []
+
+
+def _public_search_hit(*, source: str) -> SearchResult:
+    return SearchResult("Observed", "https://docs.python.org/3/", "public body", source)
+
+
+@pytest.mark.asyncio
+async def test_search_records_the_answering_chain_name_as_selected_provider(settings) -> None:
+    surfer = WebSurfer(settings)
+
+    async def yandex() -> list[SearchResult]:
+        return [_public_search_hit(source="yandex")]
+
+    async def must_not_run() -> list[SearchResult]:
+        raise AssertionError("fallback ran after the primary answered")
+
+    def chain(*_args, **_kwargs):
+        return [("yandex", yandex), ("brave", must_not_run)]
+
+    surfer._provider_chain = chain  # type: ignore[assignment]  # noqa: SLF001
+    results = await surfer.search("needle")
+
+    assert [item.url for item in results] == ["https://docs.python.org/3/"]
+    assert results.provider_primary_id == "yandex"
+    assert results.selected_provider_id == "yandex"
+    assert results.provider_used_fallback is False
+
+
+@pytest.mark.asyncio
+async def test_search_records_fallback_when_the_primary_chain_name_refuses(settings) -> None:
+    surfer = WebSurfer(settings)
+
+    async def yandex() -> list[SearchResult]:
+        raise ProviderRefusedError("synthetic primary refusal")
+
+    async def brave() -> list[SearchResult]:
+        return [_public_search_hit(source="brave")]
+
+    def chain(*_args, **_kwargs):
+        return [("yandex", yandex), ("brave", brave)]
+
+    surfer._provider_chain = chain  # type: ignore[assignment]  # noqa: SLF001
+    results = await surfer.search("needle")
+
+    assert [item.url for item in results] == ["https://docs.python.org/3/"]
+    assert results.provider_primary_id == "yandex"
+    assert results.selected_provider_id == "brave"
+    assert results.provider_used_fallback is True
+
+
+@pytest.mark.asyncio
+async def test_search_does_not_emit_wikipedia_language_label_as_provider_id(settings) -> None:
+    surfer = WebSurfer(settings)
+
+    async def wikipedia() -> list[SearchResult]:
+        return [_public_search_hit(source="wikipedia-ru")]
+
+    def chain(*_args, **_kwargs):
+        return [("wikipedia", wikipedia)]
+
+    surfer._provider_chain = chain  # type: ignore[assignment]  # noqa: SLF001
+    results = await surfer.search("needle")
+
+    assert results[0].source == "wikipedia-ru"
+    assert results.selected_provider_id == "wikipedia"
+    assert results.provider_primary_id == "wikipedia"
+    assert results.provider_used_fallback is False
+
+
+@pytest.mark.asyncio
+async def test_search_does_not_invent_a_provider_id_from_a_stub_chain_name(settings) -> None:
+    surfer = WebSurfer(settings)
+
+    async def stub() -> list[SearchResult]:
+        return [_public_search_hit(source="one")]
+
+    def chain(*_args, **_kwargs):
+        return [("one", stub)]
+
+    surfer._provider_chain = chain  # type: ignore[assignment]  # noqa: SLF001
+    results = await surfer.search("needle")
+
+    assert [item.url for item in results] == ["https://docs.python.org/3/"]
+    assert results.provider_primary_id is None
+    assert results.selected_provider_id is None
+    assert results.provider_used_fallback is False
+
+
+@pytest.mark.asyncio
+async def test_research_copies_observed_search_provider_facts(settings) -> None:
+    surfer = WebSurfer(settings)
+    text = "Public web fact-bearing source body. " * 20
+
+    @declares_search_filter_support("freshness")
+    async def filtered_search(query: str, **options: object) -> list[SearchResult]:
+        del query
+        return attested_search_results(
+            [_public_search_hit(source="wikipedia-ru")],
+            freshness=str(options.get("freshness") or ""),
+            provider_primary_id="brave",
+            selected_provider_id="wikipedia",
+            provider_used_fallback=True,
+        )
+
+    async def complete_fetch(url: str, *, max_length: int = 20_000) -> FetchResult:
+        del max_length
+        return FetchResult(
+            url=url,
+            title="Observed source",
+            text=text,
+            text_length=len(text),
+            status_code=200,
+            error="",
+            truncated=False,
+        )
+
+    surfer.search = filtered_search  # type: ignore[method-assign]
+    surfer.fetch = complete_fetch  # type: ignore[method-assign]
+    report = await surfer.research("needle", max_sources=3, freshness="week")
+
+    assert report["selected_provider_id"] == "wikipedia"
+    assert report["provider_primary_id"] == "brave"
+    assert report["provider_used_fallback"] is True
+    assert [item["url"] for item in report["sources"]] == ["https://docs.python.org/3/"]
+    assert report["applied_search_filters"] == {"freshness": "week"}
+
+
+@pytest.mark.asyncio
+async def test_kernel_does_not_treat_a_result_source_label_as_a_provider_id(
+    settings,
+    storage,
+) -> None:
+    class LabelOnlyResearch:
+        async def research(self, query: str, **options: object) -> dict[str, object]:
+            del options
+            report = _complete_research_report(query, "https://docs.python.org/3/")
+            sources = report["sources"]
+            assert isinstance(sources, list)
+            row = sources[0]
+            assert isinstance(row, dict)
+            row["source"] = "wikipedia-ru"
+            return report
+
+    kernel, actor = _research_kernel(settings, storage, LabelOnlyResearch())
+
+    report = await kernel._web_research(  # noqa: SLF001
+        actor=actor,
+        query="needle",
+        max_sources=3,
+    )
+
+    assert report.get("error") != "provider_facts_invalid"
+    assert report.get("error") != "source_fact_private"
+    assert report["outbound_attempted"] is True
+    assert [item["url"] for item in report["sources"]] == ["https://docs.python.org/3/"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("primary", "selected", "used_fallback"),
+    [
+        ("yandex", "yandex", False),
+        ("yandex", "brave", True),
+    ],
+)
+async def test_kernel_consumes_observed_provider_facts(
+    settings,
+    storage,
+    primary: str,
+    selected: str,
+    used_fallback: bool,
+) -> None:
+    class ObservedProviderResearch:
+        async def research(self, query: str, **options: object) -> dict[str, object]:
+            del options
+            report = _complete_research_report(query, "https://docs.python.org/3/")
+            report["provider_primary_id"] = primary
+            report["selected_provider_id"] = selected
+            report["provider_used_fallback"] = used_fallback
+            return report
+
+    kernel, actor = _research_kernel(settings, storage, ObservedProviderResearch())
+
+    report = await kernel._web_research(  # noqa: SLF001
+        actor=actor,
+        query="needle",
+        max_sources=3,
+    )
+
+    assert "error" not in report
+    assert report["outbound_attempted"] is True
+    assert report.get("search_failed") is not True
+    assert [item["url"] for item in report["sources"]] == ["https://docs.python.org/3/"]
+    assert report["selected_provider_id"] == selected
+    assert report["provider_primary_id"] == primary
+    assert report["provider_used_fallback"] is used_fallback
+
+
+@pytest.mark.asyncio
+async def test_kernel_refuses_a_language_source_label_as_selected_provider(
+    settings,
+    storage,
+) -> None:
+    class LanguageLabelProviderResearch:
+        async def research(self, query: str, **options: object) -> dict[str, object]:
+            del options
+            report = _complete_research_report(query, "https://docs.python.org/3/")
+            report["selected_provider_id"] = "wikipedia-ru"
+            return report
+
+    kernel, actor = _research_kernel(settings, storage, LanguageLabelProviderResearch())
+
+    report = await kernel._web_research(  # noqa: SLF001
+        actor=actor,
+        query="needle",
+        max_sources=3,
+    )
+
+    assert report["error"] == "provider_facts_invalid"
     assert report["sources"] == []
     assert report["outbound_attempted"] is True
     assert report["search_failed"] is True

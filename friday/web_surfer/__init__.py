@@ -233,6 +233,20 @@ SEARCH_DOMAIN_LIST_MAX = 10
 SEARCH_SOURCE_CLASS_VALUES = ("", "foreign")
 SEARCH_FILTER_ATTESTATION_KEY = "applied_search_filters"
 _SEARCH_FILTER_CAPABILITIES_ATTR = "__friday_search_filter_capabilities__"
+# Closed chain names from `_provider_chain`.  `SearchResult.source` is a
+# label (`wikipedia-ru`) and is not a provider id.
+_ADMITTED_WEB_PROVIDER_IDS = frozenset(
+    {"yandex", "brave", "tavily", "serper", "brave-html", "duckduckgo", "wikipedia"}
+)
+
+
+def _admitted_web_provider_id(value: object) -> str | None:
+    if type(value) is not str:
+        return None
+    token = value.strip().casefold()
+    if token in _ADMITTED_WEB_PROVIDER_IDS:
+        return token
+    return None
 
 
 def declares_search_filter_support(*filter_names: str):  # noqa: ANN201
@@ -813,6 +827,9 @@ class AttestedSearchResults(list[SearchResult]):
         values: Sequence[SearchResult] = (),
         *,
         applied_search_filters: Mapping[str, str] | None = None,
+        provider_primary_id: str | None = None,
+        selected_provider_id: str | None = None,
+        provider_used_fallback: bool = False,
     ) -> None:
         super().__init__(values)
         setattr(
@@ -820,18 +837,38 @@ class AttestedSearchResults(list[SearchResult]):
             SEARCH_FILTER_ATTESTATION_KEY,
             dict(applied_search_filters or {}),
         )
+        primary = _admitted_web_provider_id(provider_primary_id)
+        selected = _admitted_web_provider_id(selected_provider_id)
+        self.provider_primary_id = primary
+        self.selected_provider_id = selected
+        self.provider_used_fallback = (
+            type(provider_used_fallback) is bool
+            and provider_used_fallback
+            and primary is not None
+            and selected is not None
+            and primary != selected
+        )
 
 
 def attested_search_results(
     values: Sequence[SearchResult],
     *,
     freshness: str = "",
+    provider_primary_id: str | None = None,
+    selected_provider_id: str | None = None,
+    provider_used_fallback: bool = False,
 ) -> AttestedSearchResults:
     """Build a list-compatible result with an exact freshness attestation."""
 
     freshness = normalize_search_freshness(freshness)
     applied = {"freshness": freshness} if freshness else {}
-    return AttestedSearchResults(values, applied_search_filters=applied)
+    return AttestedSearchResults(
+        values,
+        applied_search_filters=applied,
+        provider_primary_id=provider_primary_id,
+        selected_provider_id=selected_provider_id,
+        provider_used_fallback=provider_used_fallback,
+    )
 
 
 @dataclass(frozen=True)
@@ -1254,6 +1291,8 @@ class WebSurfer:
         refused: list[str] = []
         unsupported: dict[str, list[str]] = {}
         answered = False
+        primary_name: str | None = None
+        selected_name: str | None = None
         chain_options: dict[str, Any] = {"site": site, "freshness": freshness}
         # Preserve the exact legacy internal call when new filters are absent;
         # deployments can carry small local provider-chain wrappers.
@@ -1268,6 +1307,8 @@ class WebSurfer:
         if source_class:
             chain_options["source_class"] = source_class
         for name, provider in self._provider_chain(query, provider_limit, **chain_options):
+            if primary_name is None:
+                primary_name = name
             try:
                 batch = await provider()
             except UnsupportedSearchFilterError as capability_miss:
@@ -1322,6 +1363,7 @@ class WebSurfer:
                 LOGGER.info("Wikipedia fallback had no web-wide answer")
                 continue
             answered = True
+            selected_name = name
             results.extend(batch)
             if results:
                 break
@@ -1362,7 +1404,15 @@ class WebSurfer:
             # значило бы выдать чужой отказ за факт об интернете.
             raise AllProvidersRefusedError("поисковые провайдеры не ответили: " + ", ".join(refused))
 
-        return attested_search_results(_diversify(results, limit), freshness=freshness)
+        primary_id = _admitted_web_provider_id(primary_name)
+        selected_id = _admitted_web_provider_id(selected_name)
+        return attested_search_results(
+            _diversify(results, limit),
+            freshness=freshness,
+            provider_primary_id=primary_id,
+            selected_provider_id=selected_id,
+            provider_used_fallback=bool(primary_id and selected_id and primary_id != selected_id),
+        )
 
     async def _search_duckduckgo_html(
         self,
@@ -2298,6 +2348,21 @@ class WebSurfer:
                 report[SEARCH_FILTER_ATTESTATION_KEY] = {"freshness": freshness}
             return report
 
+        def report_with_search_providers(report: dict[str, Any], batch: object) -> dict[str, Any]:
+            selected = _admitted_web_provider_id(getattr(batch, "selected_provider_id", None))
+            if selected is None:
+                return attested_report(report)
+            report["selected_provider_id"] = selected
+            primary = _admitted_web_provider_id(getattr(batch, "provider_primary_id", None))
+            if primary is not None:
+                report["provider_primary_id"] = primary
+            report["provider_used_fallback"] = (
+                getattr(batch, "provider_used_fallback", False) is True
+                and primary is not None
+                and primary != selected
+            )
+            return attested_report(report)
+
         source_limit = max(1, min(int(max_sources), 8))
         loop = asyncio.get_running_loop()
         started_at = loop.time()
@@ -2368,7 +2433,7 @@ class WebSurfer:
                 }
             )
         if not results:
-            return attested_report(
+            return report_with_search_providers(
                 {
                     "query": query,
                     "sources": [],
@@ -2379,7 +2444,8 @@ class WebSurfer:
                     "failed_sources": 0,
                     "search_timed_out": False,
                     "summary": "No search results found.",
-                }
+                },
+                results,
             )
 
         # Прямые источники — впереди страниц. Котировка и прогноз на обычных
@@ -2604,7 +2670,7 @@ class WebSurfer:
                 f"{'es' if timed_out_sources != 1 else ''} did not finish before the research deadline."
             )
 
-        return attested_report(
+        return report_with_search_providers(
             {
                 "query": query,
                 "sources": sources,
@@ -2615,7 +2681,8 @@ class WebSurfer:
                 "failed_sources": failed_sources,
                 "search_timed_out": False,
                 "summary": summary,
-            }
+            },
+            results,
         )
 
     @staticmethod

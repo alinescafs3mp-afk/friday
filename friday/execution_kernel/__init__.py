@@ -55,6 +55,12 @@ from friday.orchestration.message_window_outcome import (
 from friday.orchestration.turn_context import AuthenticatedTurnContext, TurnContextError
 from friday.orchestration.turn_context_runtime import current_primary_authenticated_turn_context
 from friday.orchestration.web_currentness_policy import WebCurrentnessDecision
+from friday.orchestration.web_provider_policy import (
+    ProviderObservation,
+    WebProviderPolicyError,
+    WebProviderStatus,
+    select_web_provider,
+)
 from friday.orchestration.web_research_consumption import (
     WebResearchConsumptionState,
     build_web_research_consumption,
@@ -131,6 +137,7 @@ from friday.web_research_contract import (
     MAX_RESEARCH_DECLARED_TEXT_CHARS,
     MAX_RESEARCH_SOURCE_ROWS,
     MAX_RESEARCH_SOURCE_TEXT_CHARS,
+    MAX_RESEARCH_SOURCES,
     normalize_outbound_web_query,
     research_attempt_counters_are_conserved,
     target_research_report_is_valid,
@@ -294,6 +301,65 @@ def _web_research_empty_source_refusal(report: Mapping[str, Any], query: str) ->
     if report.get("outbound_attempted") is not True:
         return None
     return _web_research_consumption_failure(query, report, error="no_admitted_sources")
+
+
+def _web_research_provider_consumption_refusal(
+    report: Mapping[str, Any], query: str
+) -> dict[str, Any] | None:
+    """Consume observed provider facts when the adapter named a selected provider.
+
+    A missing ``selected_provider_id`` is a legacy adapter: do not invent a
+    provider and do not refuse public sources.  ``SearchResult.source`` is not
+    a provider id.
+    """
+
+    selected_id = report.get("selected_provider_id")
+    if not isinstance(selected_id, str) or not selected_id.strip():
+        return None
+    urls = _web_research_source_urls(report)
+    try:
+        admitted = len(urls)
+        search_count = min(admitted, MAX_RESEARCH_SOURCES)
+        selected = ProviderObservation(
+            provider_id=selected_id,
+            status=WebProviderStatus.COMPLETED,
+            source_count=search_count,
+            direct_source_count=admitted - search_count,
+            source_urls=urls,
+        )
+        primary_id = report.get("provider_primary_id")
+        used_fallback = report.get("provider_used_fallback") is True
+        if (
+            used_fallback
+            and isinstance(primary_id, str)
+            and primary_id.strip()
+            and primary_id.strip().casefold() != selected_id.strip().casefold()
+        ):
+            primary = ProviderObservation(
+                provider_id=primary_id,
+                status=WebProviderStatus.REFUSED,
+            )
+            selection = select_web_provider(primary, selected)
+        else:
+            selection = select_web_provider(selected)
+    except (TypeError, ValueError, WebProviderPolicyError):
+        return _web_research_consumption_failure(query, report, error="provider_facts_invalid")
+    consumption = build_web_research_consumption(
+        _KERNEL_WEB_RESEARCH_CONSUMPTION_ID,
+        _kernel_web_research_turn_id(),
+        WebCurrentnessDecision.SEARCH_REQUIRED,
+        selection,
+        source_urls=urls,
+        topic="",
+    )
+    if consumption.usability in {
+        WebResearchConsumptionState.CONSUMABLE,
+        WebResearchConsumptionState.CONSUMABLE_DEGRADED,
+    }:
+        return None
+    if consumption.usability is WebResearchConsumptionState.BLOCKED_PRIVATE:
+        return _web_research_consumption_failure(query, report, error="source_fact_private")
+    return _web_research_consumption_failure(query, report, error=consumption.reason.value)
 
 
 def _web_research_consumption_failure(
@@ -7993,6 +8059,9 @@ class ExecutionKernel:
             empty_refusal = _web_research_empty_source_refusal(report, query)
             if empty_refusal is not None:
                 return empty_refusal
+            provider_refusal = _web_research_provider_consumption_refusal(report, query)
+            if provider_refusal is not None:
+                return provider_refusal
             contract_valid = target_research_report_is_valid(
                 report,
                 configured_max_sources=bounded_sources,
