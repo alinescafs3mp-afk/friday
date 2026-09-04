@@ -1038,6 +1038,7 @@ class CommandsMixin(BridgeShared):
                 "/work — работа с личными знаниями\n"
                 "/research — многошаговое исследование\n"
                 f"{engineer_help}"
+                "/coding — статический осмотр исходников, без запуска\n"
                 "/mission цель — многошаговая миссия в фоне\n"
                 "/missions — список миссий и управление\n"
                 "/inbox — разобрать ближайшие предложения\n"
@@ -1238,13 +1239,14 @@ class CommandsMixin(BridgeShared):
                 "Пожелание снято." if not clean else f"Принято: {clean}",
             )
             return
-        if command in {"/chat", "/work", "/research", "/engineer", "/engeneer"}:
+        if command in {"/chat", "/work", "/research", "/engineer", "/engeneer", "/coding"}:
             mode = {
                 "/chat": "dialogue",
                 "/work": "knowledge_work",
                 "/research": "research",
                 "/engineer": "engineer",
                 "/engeneer": "engineer",
+                "/coding": "coding",
             }[command]
             if mode == "engineer" and not self.config.engineer_mode_enabled:
                 await self._send_message(
@@ -1275,18 +1277,31 @@ class CommandsMixin(BridgeShared):
                         "Инженерный режим доступен только владельцу.",
                     )
                     return
+                if mode == "coding" and getattr(error, "status_code", None) == 403:
+                    await self._send_message(
+                        telegram,
+                        chat_id,
+                        "Режим Coding доступен только владельцу в личном чате.",
+                    )
+                    return
                 raise
             labels = {
                 "dialogue": "Обычный диалог",
                 "knowledge_work": "Работа со знаниями",
                 "research": "Исследование",
                 "engineer": "Инженерный разбор",
+                "coding": "Статический осмотр исходников",
             }
             extra = ""
             if str(data.get("mode")) == "engineer":
                 extra = (
                     " Назовите хост, URL или киньте exe/apk — пойду сразу. "
                     "Координаты берёт из чата. Эксплойт-пейлоадов нет."
+                )
+            if str(data.get("mode")) == "coding":
+                extra = (
+                    " Статический осмотр исходников. "
+                    "Сборка, тесты и запуск не допущены — нет выделенной границы выполнения."
                 )
             await self._send_message(
                 telegram,
@@ -2025,6 +2040,7 @@ class CommandsMixin(BridgeShared):
                 "knowledge_work": "работа со знаниями",
                 "research": "исследование",
                 "engineer": "инженерный разбор",
+                "coding": "статический осмотр исходников",
             }.get(str(data.get("interaction_mode") or "dialogue"), "обычный диалог")
             await self._send_message(
                 telegram,

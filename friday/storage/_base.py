@@ -315,7 +315,7 @@ _ACCOUNT_RUNTIME_EXACT_USER_PREFIXES = (
 )
 _ACCOUNT_RUNTIME_LENGTH_NAMESPACES = ("candidate", "present", "validation", "winner")
 _ACCOUNT_RUNTIME_QUOTA_NAMES = ("web",)
-CONVERSATION_MODES = {"dialogue", "knowledge_work", "research", "engineer"}
+CONVERSATION_MODES = {"dialogue", "knowledge_work", "research", "engineer", "coding"}
 
 
 def normalize_identity_source(source: str) -> str:
@@ -415,7 +415,7 @@ def normalize_conversation_mode(mode: str | None) -> str:
     }
     value = aliases.get(value, value)
     if value not in CONVERSATION_MODES:
-        raise ValueError("mode must be dialogue, knowledge_work, research, or engineer")
+        raise ValueError("mode must be dialogue, knowledge_work, research, engineer, or coding")
     return value
 
 

@@ -215,6 +215,15 @@ async def set_channel_mode(request: Request) -> dict[str, Any]:
         if not actor.is_owner:
             raise AuthorizationError("Engineer mode is available only to the installation owner")
         _require(request, "engineer.use")
+    elif mode == "coding":
+        if (
+            not actor.is_private_telegram_chat
+            or channel != "telegram"
+            or channel_id != str(actor.telegram_chat_id or "")
+        ):
+            raise AuthorizationError("Coding mode requires the owner's private Telegram chat")
+        if not actor.is_owner:
+            raise AuthorizationError("Coding mode is available only to the installation owner")
     session = request.app.state.storage.get_channel_session(actor.own_id, channel, channel_id)
     if session:
         updated = request.app.state.storage.set_channel_mode(

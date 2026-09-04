@@ -108,7 +108,7 @@ _PREPARED_TURN_BINDING_KEY = secrets.token_bytes(32)
 _CONVERSATION_ID_RE = re.compile(r"conv_[0-9a-f]{16}\Z")
 _RAW_ID_RE = re.compile(r"raw_[0-9a-f]{16}\Z")
 _SHA256_RE = re.compile(r"[0-9a-f]{64}\Z")
-_INTERACTION_MODES = frozenset({"dialogue", "knowledge_work", "research", "engineer"})
+_INTERACTION_MODES = frozenset({"dialogue", "knowledge_work", "research", "engineer", "coding"})
 _PREPARED_FILE_ROUTES = frozenset({RouteClass.FILE_READ, RouteClass.ARCHIVE_READ})
 LOGGER = logging.getLogger(__name__)
 

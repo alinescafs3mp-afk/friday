@@ -43,6 +43,7 @@ from friday.orchestration.turn_context_runtime import (
     current_primary_authenticated_turn_context,
     reserve_authenticated_advisory_call,
 )
+from friday.organs.coding.static_turn import handle_coding_static_turn
 from friday.pending_durable_turn import (
     PendingDurableAdmissionState,
     PendingDurableTurnAdmission,
@@ -876,6 +877,18 @@ class OrchestrationRouter:
         if turn_policy is not None:
             legacy_kwargs["turn_policy"] = turn_policy
 
+        requested_mode = str(mode or "").strip().casefold().replace("-", "_")
+        if requested_mode == "coding":
+            return handle_coding_static_turn(
+                storage=getattr(self._legacy, "storage", None),
+                user_id=user_id,
+                actor=actor,
+                message=message,
+                conversation_id=conversation_id,
+                attachments=attachments,
+                enable_tools=False,
+            )
+
         async def call_legacy() -> dict[str, Any]:
             # Recheck body-bearing carriers and transient ingestion immediately
             # adjacent to the nested primary entrypoint.  A planner await or a
@@ -917,7 +930,6 @@ class OrchestrationRouter:
         if turn_policy is not None and turn_policy.handled:
             _observe_legacy_capability_owner()
             return await call_legacy()
-        requested_mode = str(mode or "").strip().casefold().replace("-", "_")
         if requested_mode in {"engineer", "engeneer"}:
             # Owner workbench: never a V12 file/archive judge, never a shadow plan.
             _observe_legacy_capability_owner()

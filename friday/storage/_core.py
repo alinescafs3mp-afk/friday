@@ -3898,7 +3898,7 @@ class CoreMixin(StorageShared):
         if "conversations" in table_names:
             conn.execute(
                 """UPDATE conversations SET mode=CASE
-                       WHEN mode IN ('dialogue', 'knowledge_work', 'research', 'engineer') THEN mode
+                       WHEN mode IN ('dialogue', 'knowledge_work', 'research', 'engineer', 'coding') THEN mode
                        ELSE 'dialogue'
                    END"""
             )
@@ -3906,7 +3906,7 @@ class CoreMixin(StorageShared):
         if "channel_sessions" in table_names:
             conn.execute(
                 """UPDATE channel_sessions SET mode=CASE
-                       WHEN mode IN ('dialogue', 'knowledge_work', 'research', 'engineer') THEN mode
+                       WHEN mode IN ('dialogue', 'knowledge_work', 'research', 'engineer', 'coding') THEN mode
                        ELSE 'dialogue'
                    END"""
             )

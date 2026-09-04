@@ -101,6 +101,7 @@ class TurnMode(StrEnum):
     KNOWLEDGE_WORK = "knowledge_work"
     RESEARCH = "research"
     ENGINEER = "engineer"
+    CODING = "coding"
 
 
 _ACTOR_CONTEXT_FIELDS = (

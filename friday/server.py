@@ -2092,6 +2092,21 @@ def _require_fresh_engineer_chat_actor(state: Any, actor: ActorContext) -> Actor
     return fresh_actor
 
 
+def _require_fresh_coding_chat_actor(state: Any, actor: ActorContext) -> ActorContext:
+    """Owner private Telegram only. No engineer flag or engineer.use grant."""
+
+    if not actor.is_private_telegram_chat:
+        raise AuthorizationError("Coding mode requires the owner's private Telegram chat")
+    principal = str(actor.own_id or "").strip()
+    user = state.storage.get_user(principal)
+    if not user or str(user.get("status") or "") != "active":
+        raise AuthorizationError("Coding mode is unavailable for this account")
+    fresh_actor = replace(actor, preset_key=str(user.get("preset_key") or "user"))
+    if not fresh_actor.is_owner:
+        raise AuthorizationError("Coding mode is available only to the installation owner")
+    return fresh_actor
+
+
 def _chat_request_fingerprint(
     *,
     actor_source: str,
@@ -3765,6 +3780,9 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
         if persisted_mode == "engineer":
             actor = _require_fresh_engineer_chat_actor(state, actor)
             request.state.actor = actor
+        elif persisted_mode == "coding":
+            actor = _require_fresh_coding_chat_actor(state, actor)
+            request.state.actor = actor
         # Хвост из 4: обычно user+assistant (+ещё пара). Берём ПОСЛЕДНЕЕ user —
         # не «первое в окне», иначе два user подряд без ответа дали бы старый вопрос.
         recent = state.storage.get_conversation_messages(
@@ -3812,11 +3830,21 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
                     "Engineer regenerate requires a source turn that was originally executed in Engineer mode"
                 ),
             )
-        replay_enable_tools = (
-            last_meta.get("tools_enabled") is True
-            if "tools_enabled" in last_meta
-            else persisted_mode != "engineer"
-        )
+        if persisted_mode == "coding" and source_mode != "coding":
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    "Coding regenerate requires a source turn that was originally executed in Coding mode"
+                ),
+            )
+        if persisted_mode == "coding":
+            replay_enable_tools = False
+        else:
+            replay_enable_tools = (
+                last_meta.get("tools_enabled") is True
+                if "tools_enabled" in last_meta
+                else persisted_mode != "engineer"
+            )
         # A replay row points to the request which appended it.  When that
         # parent's durable outcome is uncertain we keep its key; after a normal
         # completion the tail gets a fresh key so another deliberate click can
@@ -3906,7 +3934,7 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
                     # на повторе получал бы графовое расширение, которого первый ход
                     # не получал, — при одном и том же тексте.
                     synthetic_document_notice=bool(last_meta.get("synthetic_document_notice")),
-                    mode=persisted_mode if persisted_mode == "engineer" else None,
+                    mode=persisted_mode if persisted_mode in {"engineer", "coding"} else None,
                     # Exact immutable source, not caption equality. Repeated plain
                     # text such as «сделай сводку» must never bind itself to an old
                     # or newer private file merely because the words match.
@@ -4396,6 +4424,9 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
             # actor; a revoked preset/override must win on every request.
             actor = _require_fresh_engineer_chat_actor(state, actor)
             request.state.actor = actor
+        elif requested_mode == "coding":
+            actor = _require_fresh_coding_chat_actor(state, actor)
+            request.state.actor = actor
         message = str(body.get("message") or body.get("caption") or "").strip()
         # «Текст сочинил backend» и «файл уже принят отдельно» — разные факты; см.
         # разбор ниже, где они расходятся у голосового вопроса.
@@ -4648,6 +4679,10 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
             # no per-turn opt-out contract, so a stale/lexical ``enable_tools``
             # hint must not silently demote the turn back onto dialogue rails.
             enable_tools = True
+        elif effective_mode == "coding":
+            actor = _require_fresh_coding_chat_actor(state, actor)
+            request.state.actor = actor
+            enable_tools = False
         autonomous_engineer = bool(
             effective_mode == "engineer"
             and getattr(state.settings, "engineer_mode_enabled", False) is True
@@ -6190,7 +6225,7 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
                     synthetic_document_notice=synthetic_document_notice,
                     mode=(
                         effective_mode
-                        if effective_mode == "engineer"
+                        if effective_mode in {"engineer", "coding"}
                         else None
                         if authenticated_turn_context is not None
                         else requested_mode

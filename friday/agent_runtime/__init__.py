@@ -49878,6 +49878,20 @@ class AgentRuntime:
             if isinstance(configured_budget, (int, float)) and configured_budget > 0:
                 turn_deadline = turn_started + float(configured_budget)
         clean_message = (message or "").strip()
+        if str(mode or "").strip().casefold().replace("-", "_") == "coding":
+            from friday.organs.coding.static_turn import handle_coding_static_turn
+
+            if not actor.shared_tenant and actor.user_id != user_id and not actor.is_owner:
+                raise PermissionError("actor cannot chat as another user")
+            return handle_coding_static_turn(
+                storage=self.storage,
+                user_id=(actor.own_id if actor.shared_tenant else user_id),
+                actor=actor,
+                message=clean_message,
+                conversation_id=conversation_id,
+                attachments=attachments,
+                enable_tools=False,
+            )
         trusted_telegram_update_id = str(telegram_update_id or "").strip()
         if trusted_telegram_update_id and (
             actor.source != "telegram-bridge"
@@ -50010,6 +50024,18 @@ class AgentRuntime:
             if conversation
             else "dialogue"
         )
+        if (requested_mode or persisted_mode) == "coding":
+            from friday.organs.coding.static_turn import handle_coding_static_turn
+
+            return handle_coding_static_turn(
+                storage=self.storage,
+                user_id=user_id,
+                actor=actor,
+                message=clean_message,
+                conversation_id=conversation_id or (str(conversation["id"]) if conversation else None),
+                attachments=attachments,
+                enable_tools=False,
+            )
         # Check the explicit request before it can create/update a conversation,
         # then check the effective persisted mode independently.  The second
         # boundary matters when /api/chat omits ``mode`` and resumes an existing

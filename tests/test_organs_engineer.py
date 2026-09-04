@@ -98,6 +98,7 @@ def _zip_with(name: str, payload: bytes) -> bytes:
 def test_conversation_mode_accepts_the_operator_spelling():
     assert normalize_conversation_mode("engineer") == "engineer"
     assert normalize_conversation_mode("engeneer") == "engineer"
+    assert normalize_conversation_mode("coding") == "coding"
     with pytest.raises(ValueError):
         normalize_conversation_mode("unsafe-autonomy")
 
