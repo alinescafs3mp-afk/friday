@@ -1,6 +1,6 @@
 # Friday: canonical project backlog
 
-Updated: 2026-09-04 (live `0.208.17`; N3 worker and N4 view contracts on `origin/main`, not live)
+Updated: 2026-09-04 (live `0.208.17`; N3 upload-modification and N5 kernel web consumption extract on `origin/main`, not live)
 
 This is the project's only backlog and mutable status register. It owns the
 current production identity, execution order, acceptance gaps and owner actions.
@@ -53,8 +53,9 @@ observe chain names as `WebProviderId` and the kernel consumes
 comparison and `POST /api/ingest/url` refuse observed private URLs via
 the same consumption gate. Other N2 contracts are not consumed by the
 requesting workflow. N3
-inspect, extract-plan, prompt-to-small-project, isolated-worker and
-result-archive-plan families are live as source and unwired. N4 shared
+inspect, extract-plan, prompt-to-small-project, isolated-worker,
+result-archive-plan and upload-modification-admission families are live
+as source and unwired. N4 shared
 operation/situation view contracts are on `origin/main` and unwired.
 
 - Production: immutable activation `phase=clear`; backend and Telegram bridge
@@ -103,11 +104,11 @@ invalid provider facts; `_web_search` and `_web_fetch` refuse
 contracts are not consumed by the requesting workflow. N3
 project identity, archive extract admission,
 bare-source inspection, extract-plan family, prompt-to-small-project,
-isolated-worker contracts and one-final source-archive plan are on
-`origin/main` and are not wired. Live `/coding` and uploaded-project
-modification remain. N4 shared operation/situation view contracts are
+isolated-worker contracts, one-final source-archive plan and
+upload-modification admission are on `origin/main` and are not wired.
+Live `/coding` remains. N4 shared operation/situation view contracts are
 on `origin/main` and are not wired to stores or mixed journeys. N5
-maintainability follows. Physical Android, P0H deletion, off-machine
+extracted the kernel web-consumption seam; maintainability follows. Physical Android, P0H deletion, off-machine
 mirror and provider-credential rotation remain owner-parked.
 
 ## Operating rules
@@ -958,9 +959,10 @@ inspect/edit only; do not claim safe build/test of untrusted uploads.
       `coding_toolchain_hint.py`, `coding_inspect_report.py`).
       EMPTY / MAPPED|INSPECTED|HINTED / BLOCKED. No execute, no
       rebuild, no file I/O, filename-suffix hints only. Not wired.
-- [ ] Prompt-to-small-project and uploaded-project modification.
-      Prompt normalization, implementation plan, scaffold and create
-      admission are on `origin/main` (not wired; no execute).
+- [x] Prompt-to-small-project and uploaded-project modification.
+      Prompt normalization, implementation plan, scaffold, create
+      admission and upload-modification admission are on `origin/main`
+      (not wired; no execute, no `/coding`).
 - [x] Persistent project identity contract on `origin/main`
       (`friday/orchestration/coding_project_identity.py`). EMPTY /
       IDENTIFIED / BLOCKED. Exact revision only; `latest`/`HEAD`/
@@ -1011,7 +1013,9 @@ must share one operation identity. New modes compose existing primitives.
 Status: standing rule, not a rewrite. `friday/agent_runtime/__init__.py` is
 ~76k lines / 3.81 MiB. No new product logic in that module unless no narrow
 seam exists. Extract only a touched seam with exact parity tests. Do not
-begin a clean-architecture rewrite.
+begin a clean-architecture rewrite. Kernel web-consumption helpers now live
+in `friday/execution_kernel/web_consumption.py`; `_web_search`/`_web_fetch`/
+`_web_research` still own quota and adapter I/O.
 
 ### Removed from the active queue
 
@@ -1092,10 +1096,13 @@ checklist elsewhere. The Ctrl+T view is a compact projection of this list.
       invalid provider facts; remaining live consumption of the other
       contracts
 - [ ] N3 Coding Mode MVP behind an isolated worker; project identity,
-      extract admission, bare-source inspection and extract-plan
-      family are on `main` and unwired
+      extract admission, bare-source inspection, extract-plan family,
+      prompt-to-small-project, isolated-worker, source-archive plan and
+      upload-modification admission are on `main` and unwired
 - [ ] N4 shared operation/situation projection and mixed-organ journeys
-- [ ] N5 extract only touched seams from giant runtime modules
+- [ ] N5 extract only touched seams from giant runtime modules;
+      kernel web-consumption helpers extracted from
+      `friday/execution_kernel/__init__.py`
 
 ### Open and blocked
 
