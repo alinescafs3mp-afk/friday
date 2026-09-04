@@ -5,14 +5,16 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from enum import StrEnum
-from typing import Any
+from typing import Any, cast
 
 from friday.orchestration.coding_inspect_hazards import (
+    CodingInspectHazardsReason,
     CodingInspectHazardsState,
     CodingInspectHazardsV1,
     build_coding_inspect_hazards,
 )
 from friday.orchestration.coding_source_inspect import (
+    CodingSourceInspectReason,
     CodingSourceInspectState,
     CodingSourceInspectV1,
     build_coding_source_inspect,
@@ -24,6 +26,7 @@ from friday.orchestration.coding_source_tree import (
     build_coding_source_tree,
 )
 from friday.orchestration.coding_toolchain_hint import (
+    CodingToolchainHintReason,
     CodingToolchainHintState,
     CodingToolchainHintV1,
     build_coding_toolchain_hint,
@@ -135,25 +138,21 @@ class CodingInspectReportV1:
         object.__setattr__(self, "report", report)
         object.__setattr__(self, "reason", reason)
         member_count = _count(self.member_count, field="member_count")
-        components = (self.tree, self.inspection, self.hazards, self.toolchain_hint)
         if report is CodingInspectReportState.BLOCKED:
             if member_count:
                 raise CodingInspectReportError("blocked report cannot expose member count")
             return
-        if any(component is None for component in components):
+        tree = self.tree
+        inspection = self.inspection
+        hazards = self.hazards
+        toolchain_hint = self.toolchain_hint
+        if tree is None or inspection is None or hazards is None or toolchain_hint is None:
             raise CodingInspectReportError("non-blocked report needs all components")
-        assert self.tree is not None
-        assert self.inspection is not None
-        assert self.hazards is not None
-        assert self.toolchain_hint is not None
-        if any(
-            component.authenticated_turn_id != self.authenticated_turn_id
-            for component in components
-            if component is not None
-        ):
+        components = (tree, inspection, hazards, toolchain_hint)
+        if any(component.authenticated_turn_id != self.authenticated_turn_id for component in components):
             raise CodingInspectReportError("component identity disagrees")
         if report is CodingInspectReportState.EMPTY:
-            if member_count or self.tree.member_count:
+            if member_count or tree.member_count:
                 raise CodingInspectReportError("empty report cannot expose members")
             if any(
                 component.state
@@ -167,13 +166,13 @@ class CodingInspectReportV1:
             ):
                 raise CodingInspectReportError("empty report has non-empty component")
         if report is CodingInspectReportState.INSPECTED:
-            if member_count == 0 or self.tree.tree is not CodingSourceTreeState.MAPPED:
+            if member_count == 0 or tree.tree is not CodingSourceTreeState.MAPPED:
                 raise CodingInspectReportError("inspected report needs a mapped tree")
-            if self.inspection.member_count != member_count:
+            if inspection.member_count != member_count:
                 raise CodingInspectReportError("inspection count disagrees")
-            if self.hazards.member_count != member_count:
+            if hazards.member_count != member_count:
                 raise CodingInspectReportError("hazard count disagrees")
-            if self.toolchain_hint.member_count != member_count:
+            if toolchain_hint.member_count != member_count:
                 raise CodingInspectReportError("hint count disagrees")
 
     def to_mapping(self) -> dict[str, Any]:
@@ -236,14 +235,14 @@ def _inspection_component(
     if not isinstance(value, Mapping):
         raise CodingInspectReportError("inspection component is invalid")
     return CodingSourceInspectV1(
-        inspect_id=value.get("inspect_id", report_id),
-        authenticated_turn_id=value.get("authenticated_turn_id", authenticated_turn_id),
-        inspection=value.get("inspection", value.get("state")),
-        member_count=value.get("member_count"),
-        file_count=value.get("file_count"),
-        directory_count=value.get("directory_count"),
-        executable_member_count=value.get("executable_member_count", 0),
-        reason=value.get("reason"),
+        inspect_id=cast(str, value.get("inspect_id", report_id)),
+        authenticated_turn_id=cast(str, value.get("authenticated_turn_id", authenticated_turn_id)),
+        inspection=cast(CodingSourceInspectState, value.get("inspection", value.get("state"))),
+        member_count=cast(int, value.get("member_count")),
+        file_count=cast(int, value.get("file_count")),
+        directory_count=cast(int, value.get("directory_count")),
+        executable_member_count=cast(int, value.get("executable_member_count", 0)),
+        reason=cast(CodingSourceInspectReason, value.get("reason")),
     )
 
 
@@ -261,16 +260,16 @@ def _hazards_component(
     if isinstance(hazard_kinds, (str, bytes, bytearray)) or not isinstance(hazard_kinds, Sequence):
         raise CodingInspectReportError("hazard_kinds component is invalid")
     return CodingInspectHazardsV1(
-        hazard_id=value.get("hazard_id", report_id),
-        authenticated_turn_id=value.get("authenticated_turn_id", authenticated_turn_id),
-        hazards=value.get("hazards", value.get("state")),
-        member_count=value.get("member_count"),
-        hazard_count=value.get("hazard_count"),
-        secret_name_count=value.get("secret_name_count"),
-        executable_member_count=value.get("executable_member_count"),
-        nested_vcs_dir_count=value.get("nested_vcs_dir_count"),
+        hazard_id=cast(str, value.get("hazard_id", report_id)),
+        authenticated_turn_id=cast(str, value.get("authenticated_turn_id", authenticated_turn_id)),
+        hazards=cast(CodingInspectHazardsState, value.get("hazards", value.get("state"))),
+        member_count=cast(int, value.get("member_count")),
+        hazard_count=cast(int, value.get("hazard_count")),
+        secret_name_count=cast(int, value.get("secret_name_count")),
+        executable_member_count=cast(int, value.get("executable_member_count")),
+        nested_vcs_dir_count=cast(int, value.get("nested_vcs_dir_count")),
         hazard_kinds=tuple(hazard_kinds),
-        reason=value.get("reason"),
+        reason=cast(CodingInspectHazardsReason, value.get("reason")),
     )
 
 
@@ -291,13 +290,13 @@ def _hint_component(
     if isinstance(languages, (str, bytes, bytearray)) or not isinstance(languages, Sequence):
         raise CodingInspectReportError("language hints component is invalid")
     return CodingToolchainHintV1(
-        hint_id=value.get("hint_id", report_id),
-        authenticated_turn_id=value.get("authenticated_turn_id", authenticated_turn_id),
-        hint=value.get("hint", value.get("state")),
-        member_count=value.get("member_count"),
+        hint_id=cast(str, value.get("hint_id", report_id)),
+        authenticated_turn_id=cast(str, value.get("authenticated_turn_id", authenticated_turn_id)),
+        hint=cast(CodingToolchainHintState, value.get("hint", value.get("state"))),
+        member_count=cast(int, value.get("member_count")),
         detected_suffixes=tuple(suffixes),
         language_hints=tuple(languages),
-        reason=value.get("reason"),
+        reason=cast(CodingToolchainHintReason, value.get("reason")),
     )
 
 
