@@ -1,6 +1,6 @@
 # Friday: canonical project backlog
 
-Updated: 2026-09-05 (live `0.208.20`; N1 one-final-carrier live; remaining N2 observation-bound; N3 `/coding` static inspect + isolated-worker boundary live; untrusted execute fail-closed; N4 mixed-journey store projection on `origin/main` and unwired)
+Updated: 2026-09-05 (live `0.208.21`; N1 one-final-carrier live; remaining N2 observation-bound; N3 `/coding` static inspect + isolated-worker boundary live; untrusted execute fail-closed; N4 store-backed mixed journeys live)
 
 This is the project's only backlog and mutable status register. It owns the
 current production identity, execution order, acceptance gaps and owner actions.
@@ -32,37 +32,39 @@ Do not copy that snapshot's release claims forward.
 - Database schema: 50 in deployed production and the fallback.
 
 Golden-journey receipts stay bound to that `0.208.1` root until rebound. The
-running sealed sibling is Friday `0.208.20` at
-`bcc0b2daf567ba366801bee9d22ade76649f1d6f` (tree-file
-`156f15f97f6ebb3aba5c76bf9ec4572f26ade7e7ae7a55f0269d46088fb644b1`, wheel
-`c3a2da69a3e3dd862a31300db3b881162d0a29da86742d9c75b15b45105b76d9`, journal
-`clear`, predecessor `0.208.19` /
-`56022365ff6f748239d12e5e41ca184b81b29e04`). Trusted-CA health reports
-`version=0.208.20`. S3: `requested_mode=shadow`, `effective_mode=shadow`,
+running sealed sibling is Friday `0.208.21` at
+`1d57fca555cf98537a679aa398afb0df5ba2603f` (tree-file
+`77c16feb52b4dac3fd1d7b482b4df18e5bef58f7312ae2af98b946eb9a5759c5`, wheel
+`756b7fde7c74ba2160181dc1ac9ae59697978e588b4f547174e32bb35c647fc9`, journal
+`clear`, predecessor `0.208.20` /
+`bcc0b2daf567ba366801bee9d22ade76649f1d6f`). Trusted-CA health reports
+`version=0.208.21`. S3: `requested_mode=assist`, `effective_mode=off`,
 `promotion_admitted=false`,
-`activation.reason=default_off`. Advice stays off until
+`activation.reason=material_loaded_not_accepted`. Advice stays off until
 a genuine eligible witness; do not fabricate traffic. Next product
-sibling that changes friday sources is `shadow_to_assist`. `origin/main`
-is the live sibling. N1 Telegram surfaces (ordinary `/chat` status,
-Engineer status renderer, file-album DOCUMENT status, Engineer
-FILE/ARCHIVE carrier, restart/edit-reject/send-fence/cancel counts,
-observed web/archive chat status) and one-final-carrier packing are
-live. N2 live `_web_research` refuses private observed URLs,
-empty-after-outbound, and invalid provider facts; `_web_search` and
-`_web_fetch` refuse `BLOCKED_PRIVATE` the same way. `search`/`research`
-observe chain names as `WebProviderId` and the kernel consumes
-`select_web_provider` when `selected_provider_id` is present. File+web
-comparison and `POST /api/ingest/url` refuse observed private URLs via
-the same consumption gate. Other N2 contracts stay observation-bound:
-live requesting workflows do not observe claims, dates, passages or
+sibling that changes friday sources is `assist_to_shadow`. N1 Telegram
+surfaces (ordinary `/chat` status, Engineer status renderer, file-album
+DOCUMENT status, Engineer FILE/ARCHIVE carrier,
+restart/edit-reject/send-fence/cancel counts, observed web/archive chat
+status) and one-final-carrier packing are live. N2 live `_web_research`
+refuses private observed URLs, empty-after-outbound, and invalid
+provider facts; `_web_search` and `_web_fetch` refuse `BLOCKED_PRIVATE`
+the same way. `search`/`research` observe chain names as `WebProviderId`
+and the kernel consumes `select_web_provider` when
+`selected_provider_id` is present. File+web comparison and
+`POST /api/ingest/url` refuse observed private URLs via the same
+consumption gate. Other N2 contracts stay observation-bound: live
+requesting workflows do not observe claims, dates, passages or
 missions. Do not fabricate those witnesses. N3 `/coding` static inspect
-and the dedicated isolated-worker boundary are live on `0.208.20`;
-execute claims fail closed; untrusted build/test of uploads remains
-fail-closed. Other N3 inspect, extract-plan, prompt-to-small-project,
-result-archive-plan, upload-modification-admission
-and Coding Mode view/carrier/plan-gate families stay source-only.
-N4 shared operation/situation view contracts are on `origin/main`
-and unwired.
+and the dedicated isolated-worker boundary are live on `0.208.20` and
+remain live through `0.208.21`; execute claims fail closed; untrusted
+build/test of uploads remains fail-closed. Other N3 inspect,
+extract-plan, prompt-to-small-project, result-archive-plan,
+upload-modification-admission and Coding Mode view/carrier/plan-gate
+families stay source-only. N4 store-backed mixed journeys are live on
+`0.208.21`: file+archive+conversation+web+table identities project into
+Telegram MIXED when PROJECTED; exclusive DOCUMENT/ARCHIVE/RESEARCH
+remain otherwise.
 
 - Production: immutable activation `phase=clear`; backend and Telegram bridge
   active; writer target `candidate`. Retention admission remains honestly
@@ -92,11 +94,12 @@ deployed; advice remains off until the observation-bound witness. S5 40k lease
 and S6 recovery/browse paths stay live.
 
 The live product queue is N1–N5. The shared operation-progress contract is
-live. Production `0.208.20` keeps ordinary Telegram `/chat` status,
+live. Production `0.208.21` keeps ordinary Telegram `/chat` status,
 Engineer status, file-album DOCUMENT status, Engineer FILE/ARCHIVE
-carrier, observed web/archive chat status, one-final-carrier packing
-and owner-private `/coding` static inspect through that projection,
-and adds the dedicated `/coding` isolated-worker boundary.
+carrier, observed web/archive chat status, one-final-carrier packing,
+owner-private `/coding` static inspect and the dedicated `/coding`
+isolated-worker boundary through that projection, and adds store-backed
+mixed journeys (Telegram MIXED when PROJECTED).
 N2 currentness, evidence bundle,
 multi-query mission planner, provider fallback, source diversity,
 consumption, readiness and citation coverage, claim support, answer
@@ -109,17 +112,16 @@ invalid provider facts; `_web_search` and `_web_fetch` refuse
 `selected_provider_id` is present. File+web comparison and
 `POST /api/ingest/url` consume `BLOCKED_PRIVATE`. Other N2
 contracts stay observation-bound; do not fabricate witnesses. N3
-`/coding` static inspect and isolated-worker boundary are live on
-`0.208.20`; execute claims fail closed; untrusted build/test of
+`/coding` static inspect and isolated-worker boundary remain live
+through `0.208.21`; execute claims fail closed; untrusted build/test of
 uploads remains fail-closed. Coding Mode intent, snapshot,
 execute-claim, plan-gate, carrier and view contracts are on
 `origin/main` and unwired. Project identity, archive extract admission,
 extract-plan family, prompt-to-small-project,
 one-final source-archive plan, result-archive-pack family
 and upload-modification admission stay source-only. N4 shared
-operation/situation view, mixed-journey view and store-shaped
-projection contracts are on `origin/main` and are not wired to stores
-or Telegram. N5
+operation/situation view, mixed-journey view, store-shaped projection
+and the live store observer are on `0.208.21`. N5
 extracted the kernel web-consumption seam; maintainability follows. Physical Android, P0H deletion, off-machine
 mirror and provider-credential rotation remain owner-parked.
 
@@ -1031,20 +1033,20 @@ primary release certification to create the worker.
 
 ### N4 — Whole-Organism Coherence
 
-Status: contracts started on `origin/main`. Durable organs exist; the
-shared view and store-shaped projection are not yet derived from live
-stores. Primary and secondary must share one operation identity. New
-modes compose existing primitives.
+Status: live on `0.208.21`. Durable organs, the shared view, the
+store-shaped projection and the store observer derive mixed journeys
+from already-durable identities. Telegram MIXED is PROJECTED-only.
+Primary and secondary share one operation identity. New modes compose
+existing primitives. Mixed-journey is not a registered organ.
 
 - [x] Read-only `SharedOperationViewV1` / `AgentSituationProjectionV1`
       on `origin/main` from already-supplied facts. No new execution
-      owner. Not wired to stores or Telegram.
+      owner.
 - [x] Mixed-journey view contracts on `origin/main`
       (`mixed_journey_identity.py`, `mixed_journey_organs.py`,
       `mixed_journey_coverage.py`, `mixed_journey_revoke.py`,
       `mixed_journey_restart.py`, `mixed_journey_view.py`). EMPTY /
-      PROJECTED / BLOCKED from already-supplied facts. No store or
-      Telegram mix. Not wired.
+      PROJECTED / BLOCKED from already-supplied facts.
 - [x] Mixed-journey store-shaped projection on `origin/main`
       (`mixed_journey_file_facts.py`,
       `mixed_journey_archive_facts.py`,
@@ -1052,13 +1054,16 @@ modes compose existing primitives.
       `mixed_journey_web_facts.py`,
       `mixed_journey_table_facts.py`,
       `mixed_journey_store_projection.py`). Maps already-supplied
-      organ facts into MixedJourneyViewV1. No sqlite, path, archive
-      or network I/O. Not wired to stores or Telegram.
-- [ ] Mixed journeys live: file+archive+conversation+web+table;
-      Engineer+advisories; Coding+current docs; restart during
-      status+execution; revoke-before-publish. Contracts exist; live
-      mix is not derived from stores.
-- [ ] One turn, one operation, one status, one result, one effect owner,
+      organ facts into MixedJourneyViewV1.
+- [x] Mixed journeys live on `0.208.21`: file+archive+conversation+web+table
+      identities project through `friday/organs/mixed_journey/observe.py`;
+      Telegram MIXED when PROJECTED (`admit.py`,
+      `mixed_journey_progress.py`, `_status.py`). Exclusive
+      DOCUMENT/ARCHIVE/RESEARCH remain otherwise. Inbound album keeps
+      DOCUMENT. Filenames without ids stay EMPTY. Private
+      paths/filenames BLOCK without payload. Restart, revoke-before-publish
+      and secondary-absent primary-only are observed, not invented.
+- [x] One turn, one operation, one status, one result, one effect owner,
       one publisher. Honest `UNKNOWN`. Primary-only when secondary is absent.
 
 ### N5 — Maintainability Ratchet
@@ -1153,6 +1158,14 @@ checklist elsewhere. The Ctrl+T view is a compact projection of this list.
       DB). Untrusted execute remains fail-closed. N3 MVP
       implement/build/test loop of untrusted uploads remains open.
 
+### Closed on production `0.208.21`
+
+- [x] N4 store-backed mixed journeys live on `0.208.21` (Telegram
+      MIXED when PROJECTED; exclusive DOCUMENT/ARCHIVE/RESEARCH
+      otherwise). One turn / one operation / one status / one result /
+      one effect owner / one publisher; honest `UNKNOWN`; primary-only
+      when secondary is absent. Mixed-journey is not a registered organ.
+
 ### Open and implementable
 
 - [ ] N2 currentness, evidence bundle, mission, provider fallback, source
@@ -1165,14 +1178,11 @@ checklist elsewhere. The Ctrl+T view is a compact projection of this list.
       without fabricated witnesses
 - [ ] N3 Coding Mode MVP implement/build/test loop of untrusted
       uploads; `/coding` static inspect and isolated-worker boundary
-      are live on `0.208.20`. Untrusted execute remains fail-closed.
-      Coding Mode view composition, project identity, extract
-      admission, extract-plan family, prompt-to-small-project,
+      remain live through `0.208.21`. Untrusted execute remains
+      fail-closed. Coding Mode view composition, project identity,
+      extract admission, extract-plan family, prompt-to-small-project,
       source-archive plan, result-archive-pack family
       and upload-modification admission stay source-only.
-- [ ] N4 shared operation/situation, mixed-journey view and
-      store-shaped projection contracts are on `main` and unwired;
-      live mixed-organ journeys are not derived from stores
 - [ ] N5 extract only touched seams from giant runtime modules;
       kernel web-consumption helpers live on `0.208.18` in
       `friday/execution_kernel/web_consumption.py`
