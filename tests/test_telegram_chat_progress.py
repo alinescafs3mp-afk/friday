@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import hashlib
+import json
 import re
 from typing import Any, cast
 
@@ -13,6 +14,7 @@ import pytest
 
 from friday.telegram_bridge import TelegramBridge, TelegramConfig
 from friday.telegram_bridge import _commands as commands
+from friday.telegram_bridge._base import PermanentUpdateError
 
 
 def _bridge(tmp_path) -> TelegramBridge:  # noqa: ANN001
@@ -689,6 +691,286 @@ async def test_generated_archive_edits_existing_status_from_observed_file_list(
     assert statuses[-1]["terminal"] is True
     assert len([item for item in statuses if item["create"]]) == 1
     assert {item["operation_id"] for item in statuses} == {"chat:8821"}
+
+
+def _status_ok(message_id: int) -> httpx.Response:
+    return httpx.Response(200, json={"ok": True, "result": {"message_id": message_id}})
+
+
+@pytest.mark.asyncio
+async def test_observed_web_sources_use_one_send_then_only_edits(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    bridge = _bridge(tmp_path)
+    status_calls: list[str] = []
+    created = asyncio.Event()
+    final_messages: list[str] = []
+    message_id = 771
+
+    async def immediate_progress_delay(_delay: float) -> None:
+        return None
+
+    def telegram_status(request: httpx.Request) -> httpx.Response:
+        method = request.url.path.rsplit("/", 1)[-1]
+        status_calls.append(method)
+        if method == "sendMessage":
+            created.set()
+            return _status_ok(message_id)
+        payload = json.loads(request.content.decode("utf-8"))
+        return _status_ok(int(payload["message_id"]))
+
+    async def backend_json(*_args: Any, **_kwargs: Any) -> dict[str, Any]:
+        await created.wait()
+        return {
+            "message": "Ответ по источникам",
+            "message_format": "plain",
+            "web_sources": [
+                {"url": "https://docs.python.org/3/"},
+                {"url": "https://www.python.org/"},
+            ],
+        }
+
+    async def send(_client: object, _chat_id: int, text: str, **_kwargs: Any) -> None:
+        final_messages.append(text)
+
+    async def no_side_effect(*_args: Any, **_kwargs: Any) -> None:
+        return None
+
+    monkeypatch.setattr(commands, "_progress_sleep", immediate_progress_delay)
+    monkeypatch.setattr(bridge, "_backend_json", backend_json)
+    monkeypatch.setattr(bridge, "_typing_loop", _never_typing)
+    monkeypatch.setattr(bridge, "_send_message", send)
+    monkeypatch.setattr(bridge, "_deliver_voice_reply", no_side_effect)
+    monkeypatch.setattr(bridge, "_deliver_generated_files", no_side_effect)
+    async with httpx.AsyncClient(transport=httpx.MockTransport(telegram_status)) as telegram:
+        try:
+            await bridge._process_update(  # noqa: SLF001
+                telegram,
+                _client_stub(),
+                _update("Проверь этот документ", update_id=8830),
+                cached_response=None,
+            )
+            snapshot = bridge._inbox.telegram_status_message(5001, "chat:8830")  # noqa: SLF001
+        finally:
+            bridge._inbox.close()  # noqa: SLF001
+
+    assert status_calls[0] == "sendMessage"
+    assert status_calls.count("sendMessage") == 1
+    assert status_calls[1:]
+    assert all(method == "editMessageText" for method in status_calls[1:])
+    assert snapshot == {"message_id": message_id, "revision": len(status_calls), "terminal": True}
+    assert len(final_messages) == 1
+    assert "Источники:" in final_messages[0]
+
+
+@pytest.mark.asyncio
+async def test_edit_reject_replaces_status_without_duplicate_web_answer(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    bridge = _bridge(tmp_path)
+    status_calls: list[str] = []
+    created = asyncio.Event()
+    final_messages: list[str] = []
+    send_ids = iter((611, 612))
+    current_id = 611
+    backend_calls = 0
+
+    async def immediate_progress_delay(_delay: float) -> None:
+        return None
+
+    def telegram_status(request: httpx.Request) -> httpx.Response:
+        nonlocal current_id
+        method = request.url.path.rsplit("/", 1)[-1]
+        status_calls.append(method)
+        if method == "editMessageText":
+            if status_calls.count("editMessageText") == 1:
+                return httpx.Response(
+                    400,
+                    json={
+                        "ok": False,
+                        "error_code": 400,
+                        "description": "message to edit not found",
+                    },
+                )
+            payload = json.loads(request.content.decode("utf-8"))
+            return _status_ok(int(payload["message_id"]))
+        current_id = next(send_ids)
+        created.set()
+        return _status_ok(current_id)
+
+    async def backend_json(*_args: Any, **_kwargs: Any) -> dict[str, Any]:
+        nonlocal backend_calls
+        backend_calls += 1
+        await created.wait()
+        return {
+            "message": "Ответ по источникам",
+            "message_format": "plain",
+            "web_sources": [{"url": "https://docs.python.org/3/"}],
+        }
+
+    async def send(_client: object, _chat_id: int, text: str, **_kwargs: Any) -> None:
+        final_messages.append(text)
+
+    async def no_side_effect(*_args: Any, **_kwargs: Any) -> None:
+        return None
+
+    monkeypatch.setattr(commands, "_progress_sleep", immediate_progress_delay)
+    monkeypatch.setattr(bridge, "_backend_json", backend_json)
+    monkeypatch.setattr(bridge, "_typing_loop", _never_typing)
+    monkeypatch.setattr(bridge, "_send_message", send)
+    monkeypatch.setattr(bridge, "_deliver_voice_reply", no_side_effect)
+    monkeypatch.setattr(bridge, "_deliver_generated_files", no_side_effect)
+    async with httpx.AsyncClient(transport=httpx.MockTransport(telegram_status)) as telegram:
+        try:
+            await bridge._process_update(  # noqa: SLF001
+                telegram,
+                _client_stub(),
+                _update("Проверь этот документ", update_id=8831),
+                cached_response=None,
+            )
+            snapshot = bridge._inbox.telegram_status_message(5001, "chat:8831")  # noqa: SLF001
+        finally:
+            bridge._inbox.close()  # noqa: SLF001
+
+    assert status_calls[0] == "sendMessage"
+    assert "editMessageText" in status_calls
+    assert status_calls.count("sendMessage") == 2
+    assert backend_calls == 1
+    assert final_messages == [final_messages[0]]
+    assert len(final_messages) == 1
+    assert snapshot is not None
+    assert snapshot["message_id"] == 612
+    assert snapshot["terminal"] is True
+
+
+@pytest.mark.asyncio
+async def test_restart_edits_the_persisted_status_for_observed_web_sources(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    bridge = _bridge(tmp_path)
+    status_calls: list[str] = []
+    created = asyncio.Event()
+    final_messages: list[str] = []
+
+    async def immediate_progress_delay(_delay: float) -> None:
+        return None
+
+    def telegram_status(request: httpx.Request) -> httpx.Response:
+        method = request.url.path.rsplit("/", 1)[-1]
+        status_calls.append(method)
+        if method == "sendMessage":
+            created.set()
+            return _status_ok(771)
+        payload = json.loads(request.content.decode("utf-8"))
+        return _status_ok(int(payload["message_id"]))
+
+    async def backend_json(*_args: Any, **_kwargs: Any) -> dict[str, Any]:
+        await created.wait()
+        return {
+            "message": "Ответ по источникам",
+            "message_format": "plain",
+            "web_sources": [{"url": "https://docs.python.org/3/"}],
+        }
+
+    async def send(_client: object, _chat_id: int, text: str, **_kwargs: Any) -> None:
+        final_messages.append(text)
+
+    async def no_side_effect(*_args: Any, **_kwargs: Any) -> None:
+        return None
+
+    monkeypatch.setattr(commands, "_progress_sleep", immediate_progress_delay)
+    monkeypatch.setattr(bridge, "_backend_json", backend_json)
+    monkeypatch.setattr(bridge, "_typing_loop", _never_typing)
+    monkeypatch.setattr(bridge, "_send_message", send)
+    monkeypatch.setattr(bridge, "_deliver_voice_reply", no_side_effect)
+    monkeypatch.setattr(bridge, "_deliver_generated_files", no_side_effect)
+    async with httpx.AsyncClient(transport=httpx.MockTransport(telegram_status)) as telegram:
+        try:
+            assert (
+                await bridge._status_messages.publish(  # noqa: SLF001
+                    telegram,
+                    5001,
+                    "chat:8832",
+                    1,
+                    "⏳ Выполняю задачу",
+                    reply_to_message_id=91,
+                )
+                == "sent"
+            )
+            await bridge._process_update(  # noqa: SLF001
+                telegram,
+                _client_stub(),
+                _update("Проверь этот документ", update_id=8832),
+                cached_response=None,
+            )
+            snapshot = bridge._inbox.telegram_status_message(5001, "chat:8832")  # noqa: SLF001
+        finally:
+            bridge._inbox.close()  # noqa: SLF001
+
+    assert status_calls[0] == "sendMessage"
+    assert status_calls.count("sendMessage") == 1
+    assert status_calls[1:]
+    assert all(method == "editMessageText" for method in status_calls[1:])
+    assert snapshot is not None
+    assert snapshot["message_id"] == 771
+    assert snapshot["terminal"] is True
+    assert len(final_messages) == 1
+
+
+@pytest.mark.asyncio
+async def test_permanent_backend_failure_stops_existing_status_without_a_second_create(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    bridge = _bridge(tmp_path)
+    status_calls: list[str] = []
+    created = asyncio.Event()
+
+    async def immediate_progress_delay(_delay: float) -> None:
+        return None
+
+    def telegram_status(request: httpx.Request) -> httpx.Response:
+        method = request.url.path.rsplit("/", 1)[-1]
+        status_calls.append(method)
+        if method == "sendMessage":
+            created.set()
+            return _status_ok(771)
+        payload = json.loads(request.content.decode("utf-8"))
+        return _status_ok(int(payload["message_id"]))
+
+    async def backend_json(*_args: Any, **_kwargs: Any) -> dict[str, Any]:
+        await created.wait()
+        raise PermanentUpdateError("synthetic closed backend refusal")
+
+    async def send(*_args: Any, **_kwargs: Any) -> None:
+        raise AssertionError("final answer must not be sent after a permanent backend refusal")
+
+    monkeypatch.setattr(commands, "_progress_sleep", immediate_progress_delay)
+    monkeypatch.setattr(bridge, "_backend_json", backend_json)
+    monkeypatch.setattr(bridge, "_typing_loop", _never_typing)
+    monkeypatch.setattr(bridge, "_send_message", send)
+    async with httpx.AsyncClient(transport=httpx.MockTransport(telegram_status)) as telegram:
+        try:
+            with pytest.raises(PermanentUpdateError, match="synthetic closed backend refusal"):
+                await bridge._process_update(  # noqa: SLF001
+                    telegram,
+                    _client_stub(),
+                    _update("Проверь этот документ", update_id=8833),
+                    cached_response=None,
+                )
+            snapshot = bridge._inbox.telegram_status_message(5001, "chat:8833")  # noqa: SLF001
+        finally:
+            bridge._inbox.close()  # noqa: SLF001
+
+    assert status_calls[0] == "sendMessage"
+    assert status_calls.count("sendMessage") == 1
+    assert "editMessageText" in status_calls
+    assert snapshot is not None
+    assert snapshot["message_id"] == 771
+    assert snapshot["terminal"] is True
 
 
 def test_recurring_schedule_stays_strictly_below_configured_bridge_ceiling() -> None:

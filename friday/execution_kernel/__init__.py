@@ -283,7 +283,26 @@ def _web_research_private_source_refusal(report: Mapping[str, Any], query: str) 
     )
     if consumption.usability is not WebResearchConsumptionState.BLOCKED_PRIVATE:
         return None
-    return {
+    return _web_research_consumption_failure(query, report, error="source_fact_private")
+
+
+def _web_research_empty_source_refusal(report: Mapping[str, Any], query: str) -> dict[str, Any] | None:
+    """Empty observed sources after outbound are a failed search, not completeness."""
+
+    if _web_research_source_urls(report):
+        return None
+    if report.get("outbound_attempted") is not True:
+        return None
+    return _web_research_consumption_failure(query, report, error="no_admitted_sources")
+
+
+def _web_research_consumption_failure(
+    query: str,
+    report: Mapping[str, Any],
+    *,
+    error: str,
+) -> dict[str, Any]:
+    refusal: dict[str, Any] = {
         "query": query,
         "sources": [],
         "requested_sources": 0,
@@ -293,8 +312,13 @@ def _web_research_private_source_refusal(report: Mapping[str, Any], query: str) 
         "search_timed_out": False,
         "outbound_attempted": True,
         "search_failed": True,
-        "error": "source_fact_private",
+        "error": error,
     }
+    for field in ("freshness", "source_class", "topic_class"):
+        value = report.get(field)
+        if isinstance(value, str) and value:
+            refusal[field] = value
+    return refusal
 
 
 def _canonical_capturable_web_url_key(url: str) -> str:
@@ -7966,6 +7990,9 @@ class ExecutionKernel:
             private_refusal = _web_research_private_source_refusal(report, query)
             if private_refusal is not None:
                 return private_refusal
+            empty_refusal = _web_research_empty_source_refusal(report, query)
+            if empty_refusal is not None:
+                return empty_refusal
             contract_valid = target_research_report_is_valid(
                 report,
                 configured_max_sources=bounded_sources,

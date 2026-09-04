@@ -1552,3 +1552,36 @@ async def test_kernel_does_not_treat_a_public_research_source_as_private(
 
     assert report.get("error") != "source_fact_private"
     assert report["outbound_attempted"] is True
+
+
+@pytest.mark.asyncio
+async def test_kernel_empty_research_after_outbound_is_not_completeness(
+    settings,
+    storage,
+) -> None:
+    class EmptySourceResearch:
+        async def research(self, query: str, **options: object) -> dict[str, object]:
+            del options
+            return {
+                "query": query,
+                "sources": [],
+                "requested_sources": 3,
+                "completed_sources": 0,
+                "timed_out_sources": 0,
+                "failed_sources": 3,
+                "search_timed_out": False,
+            }
+
+    kernel, actor = _research_kernel(settings, storage, EmptySourceResearch())
+
+    report = await kernel._web_research(  # noqa: SLF001
+        actor=actor,
+        query="needle",
+        max_sources=3,
+    )
+
+    assert report["error"] == "no_admitted_sources"
+    assert report["sources"] == []
+    assert report["outbound_attempted"] is True
+    assert report["search_failed"] is True
+    assert storage.list_inbox("operator") == []
