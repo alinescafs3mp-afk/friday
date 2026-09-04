@@ -51,19 +51,19 @@
       "paraphrase": {"denominator": 6, "numerator": 6, "ppm": 1000000},
       "synonym": {"denominator": 5, "numerator": 5, "ppm": 1000000}
     },
-    "release_sha256": "b122a28e4229de0a50446529350e86b57bbd1cfa2acaceba6de91c73b89baf71",
+    "release_sha256": "e671c58bc045be3d8125816ff02703531442d5a363003245176c802758b16ce1",
     "repeat_output_sha256": "79cf8ee51edc54cbfd815b54499490ab4390f9408dae7d5e534cddd8c3f70840",
     "result_sha256": "66e943fda982457e47e06eabc6ab977936646e2cecce8d78e089a7c00cd276a8",
-    "source_commit": "b43435dbc3d820178270795e982f6eb28cdfd2df",
+    "source_commit": "cb35475ca94893efe51668e62e280a7ec24197bf",
     "source_guard": {
       "instrument_sha256_end": "fd489c05b86f680b5cb29b150284add6f025099f59deb048ad1aa0bd8a2c08ec",
       "instrument_sha256_start": "fd489c05b86f680b5cb29b150284add6f025099f59deb048ad1aa0bd8a2c08ec",
-      "release_sha256_end": "b122a28e4229de0a50446529350e86b57bbd1cfa2acaceba6de91c73b89baf71",
-      "release_sha256_start": "b122a28e4229de0a50446529350e86b57bbd1cfa2acaceba6de91c73b89baf71"
+      "release_sha256_end": "e671c58bc045be3d8125816ff02703531442d5a363003245176c802758b16ce1",
+      "release_sha256_start": "e671c58bc045be3d8125816ff02703531442d5a363003245176c802758b16ce1"
     },
     "source_worktree_clean": true,
     "source_worktree_status_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-    "stable_envelope_sha256": "dac4ed728e9ae2a3e2750081b8f8111ce7f7e409a5b369ddb42fb38fd3ccca01"
+    "stable_envelope_sha256": "5d8b78b27db36e4e8923770ab6107fb8dd8d549df49e5d9a63736bdb2cc6ecfe"
   },
   "claim": {
     "corpus": "current_code_owned_synthetic_long_form_projection",
