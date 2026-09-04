@@ -1,3 +1,14 @@
+## 0.208.10 — 2026-09-04
+
+### Representative-window after-restart attestation
+
+- After-restart verification no longer treats the predecessor attestation as
+  a live server identity of the new process. `primary_backend_version` on
+  the issued window may differ from the candidate `__version__`.
+- Distinct sealed candidate for `semantic_supervisor_assist_to_shadow`.
+  SQLite remains at schema 50; exact `0.208.9` is the predecessor and
+  `0.207.90` the fallback.
+
 ## 0.208.9 — 2026-09-04
 
 ### Semantic supervisor assist candidate

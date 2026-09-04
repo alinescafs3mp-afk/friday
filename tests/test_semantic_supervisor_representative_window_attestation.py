@@ -782,6 +782,40 @@ async def test_admin_identity_refresh_runs_before_live_identity(
     assert order == ["refresh", "identity"]
 
 
+def test_after_restart_consume_accepts_predecessor_backend_version(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    storage = _Storage()
+    _seed_shadow(storage)
+    target = SupervisorMode.ASSIST
+    request = _issue_request(storage, target)
+    issue = issue_representative_window_attestation(
+        storage,
+        user_id="usr_owner",
+        request_value=request,
+        current_server_identity=_predecessor_identity(target),
+        now=NOW,
+    )
+    consume_representative_window_attestation(
+        storage,
+        user_id="usr_owner",
+        request_value=_consume_request(issue),
+        current_server_identity=_predecessor_identity(target),
+        now=NOW + 1,
+    )
+    monkeypatch.setattr(window_module, "__version__", "0.209.0")
+    restart = _restart_identity(target)
+    restart["primary_backend_version"] = "0.209.0"
+    retry = consume_representative_window_attestation(
+        storage,
+        user_id="usr_owner",
+        request_value=_consume_request(issue),
+        current_server_identity=restart,
+        now=NOW + 2,
+    )
+    assert retry["status"] == "consumed"
+
+
 def test_after_restart_identity_match_allows_distinct_backend_version() -> None:
     predecessor = _predecessor_identity(SupervisorMode.ASSIST)
     restart = _restart_identity(SupervisorMode.ASSIST)

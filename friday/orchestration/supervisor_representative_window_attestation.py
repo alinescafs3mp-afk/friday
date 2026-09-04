@@ -891,7 +891,10 @@ def validate_representative_window_attestation(
             label="representative-window attestation",
         )
         _validate_server_identity(current_server_identity)
-        _validate_server_identity({name: item[name] for name in REPRESENTATIVE_WINDOW_SERVER_IDENTITY_KEYS})
+        if not after_restart:
+            _validate_server_identity(
+                {name: item[name] for name in REPRESENTATIVE_WINDOW_SERVER_IDENTITY_KEYS}
+            )
         signature = item["signature"]
         try:
             target_mode = SupervisorMode(item["target_mode"])
