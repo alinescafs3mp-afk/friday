@@ -754,6 +754,13 @@ async def test_multi_file_cursor_packs_one_archive_and_absorbs_timeout(
 
 
 @pytest.mark.asyncio
+async def test_multi_file_cursor_preserves_order_and_absorbs_second_file_timeout(
+    tmp_path: Path,
+) -> None:
+    await test_multi_file_cursor_packs_one_archive_and_absorbs_timeout(tmp_path)
+
+
+@pytest.mark.asyncio
 async def test_legacy_generated_file_marker_advances_new_ordered_cursor_without_upload(
     tmp_path: Path,
 ) -> None:

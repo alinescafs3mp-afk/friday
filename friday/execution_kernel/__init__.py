@@ -274,6 +274,57 @@ def _web_research_source_urls(report: Mapping[str, Any]) -> tuple[str, ...]:
     return tuple(urls)
 
 
+def _web_search_result_urls(raw_results: object) -> tuple[str, ...]:
+    if not isinstance(raw_results, list):
+        return ()
+    urls: list[str] = []
+    for item in raw_results:
+        if not isinstance(item, Mapping):
+            continue
+        url = item.get("url")
+        if isinstance(url, str) and url.strip():
+            urls.append(url)
+    return tuple(urls)
+
+
+def _web_requested_url_blocked_private(url: str) -> bool:
+    """Refuse a requested fetch URL that is not a public web source."""
+
+    if not url.strip():
+        return False
+    consumption = build_web_research_consumption(
+        _KERNEL_WEB_RESEARCH_CONSUMPTION_ID,
+        _kernel_web_research_turn_id(),
+        WebCurrentnessDecision.SEARCH_REQUIRED,
+        None,
+        source_urls=(url,),
+        topic="",
+    )
+    return consumption.usability is WebResearchConsumptionState.BLOCKED_PRIVATE
+
+
+def _web_search_consumption_failure(
+    query: str,
+    response: Mapping[str, Any],
+    *,
+    error: str,
+) -> dict[str, Any]:
+    refusal: dict[str, Any] = {
+        "query": query,
+        "results": [],
+        "outbound_attempted": True,
+        "search_failed": True,
+        "error": error,
+    }
+    freshness = response.get("freshness")
+    if isinstance(freshness, str) and freshness:
+        refusal["freshness"] = freshness
+        attestation = response.get(SEARCH_FILTER_ATTESTATION_KEY)
+        if isinstance(attestation, Mapping):
+            refusal[SEARCH_FILTER_ATTESTATION_KEY] = dict(attestation)
+    return refusal
+
+
 def _web_research_private_source_refusal(report: Mapping[str, Any], query: str) -> dict[str, Any] | None:
     """Refuse a live research report whose observed source URLs are private."""
 
@@ -7918,6 +7969,35 @@ class ExecutionKernel:
                 "search_failed": True,
                 "error": "Web provider returned a malformed result after outbound attempt.",
             }
+        observed_urls = _web_search_result_urls(response.get("results"))
+        if observed_urls:
+            observed_report: dict[str, Any] = {
+                "query": query,
+                "sources": [{"url": url} for url in observed_urls],
+                "outbound_attempted": True,
+            }
+            private_refusal = _web_research_private_source_refusal(observed_report, query)
+            if private_refusal is not None:
+                return _web_search_consumption_failure(
+                    query, response, error="source_fact_private"
+                )
+            selected_id = getattr(results, "selected_provider_id", None)
+            if isinstance(selected_id, str) and selected_id.strip():
+                observed_report["selected_provider_id"] = selected_id
+                primary_id = getattr(results, "provider_primary_id", None)
+                if isinstance(primary_id, str) and primary_id.strip():
+                    observed_report["provider_primary_id"] = primary_id
+                observed_report["provider_used_fallback"] = (
+                    getattr(results, "provider_used_fallback", False) is True
+                )
+                provider_refusal = _web_research_provider_consumption_refusal(
+                    observed_report, query
+                )
+                if provider_refusal is not None:
+                    provider_error = provider_refusal.get("error") or "provider_facts_invalid"
+                    return _web_search_consumption_failure(
+                        query, response, error=str(provider_error)
+                    )
         if site or include_domains or exclude_domains:
             requested_results = int(search_options["max_results"])
             returned_results = len(results)
@@ -7944,6 +8024,14 @@ class ExecutionKernel:
                 "text": "",
                 "text_length": 0,
                 "outbound_attempted": False,
+            }
+        if _web_requested_url_blocked_private(url):
+            return {
+                "url": "",
+                "text": "",
+                "text_length": 0,
+                "outbound_attempted": False,
+                "error": "source_fact_private",
             }
         # `query` необязателен и означает «что искать на странице»: с ним модель
         # получает кусок вокруг совпадения, без него — начало страницы.

@@ -46,11 +46,13 @@ sibling. N1 Telegram surfaces (ordinary `/chat` status, Engineer status
 renderer, file-album DOCUMENT status, Engineer FILE/ARCHIVE carrier,
 restart/edit-reject/send-fence/cancel counts, observed web/archive chat
 status) are live. N2 live `_web_research` refuses private observed URLs,
-empty-after-outbound, and invalid provider facts; `search`/`research`
+empty-after-outbound, and invalid provider facts; `_web_search` and
+`_web_fetch` refuse `BLOCKED_PRIVATE` the same way. `search`/`research`
 observe chain names as `WebProviderId` and the kernel consumes
 `select_web_provider` when `selected_provider_id` is present. File+web
-comparison refuses observed private URLs via the same consumption gate.
-Other N2 contracts are not consumed by the requesting workflow. N3
+comparison and `POST /api/ingest/url` refuse observed private URLs via
+the same consumption gate. Other N2 contracts are not consumed by the
+requesting workflow. N3
 inspect, extract-plan, prompt-to-small-project, isolated-worker and
 result-archive-plan families are live as source and unwired. N4 shared
 operation/situation view contracts are on `origin/main` and unwired.
@@ -94,10 +96,12 @@ admission, contradiction coverage, exact mission coverage, evidence
 grounding, source date coverage, claim currentness and
 passage-reference coverage are on `origin/main` and live as source.
 Live `_web_research` refuses private URLs, empty-after-outbound and
-invalid provider facts; observed chain names are consumed when
-`selected_provider_id` is present. File+web comparison consumes
-`BLOCKED_PRIVATE`. Other N2 contracts are not consumed by the
-requesting workflow. N3 project identity, archive extract admission,
+invalid provider facts; `_web_search` and `_web_fetch` refuse
+`BLOCKED_PRIVATE`; observed chain names are consumed when
+`selected_provider_id` is present. File+web comparison and
+`POST /api/ingest/url` consume `BLOCKED_PRIVATE`. Other N2
+contracts are not consumed by the requesting workflow. N3
+project identity, archive extract admission,
 bare-source inspection, extract-plan family, prompt-to-small-project,
 isolated-worker contracts and one-final source-archive plan are on
 `origin/main` and are not wired. Live `/coding` and uploaded-project
@@ -860,12 +864,14 @@ mission planner, provider fallback policy, source diversity, research
 consumption, readiness composition, citation coverage, claim support,
 answer admission, contradiction coverage, exact mission coverage,
 evidence grounding, source date coverage, claim currentness and
-passage-reference coverage exist and are not wired into document, table,
-Engineer or Coding journeys. Live `_web_research` refuses private
-observed URLs, empty-after-outbound (`no_admitted_sources`) and invalid
-provider facts; empty success is not completeness. File+web comparison
-consumes `BLOCKED_PRIVATE` the same way. Remaining: consume the other
-landed contracts on document/table/Engineer/Coding paths.
+passage-reference coverage exist and are not wired into Coding journeys.
+Live `_web_research` refuses private observed URLs, empty-after-outbound
+(`no_admitted_sources`) and invalid provider facts; empty success is not
+completeness. `_web_search` and `_web_fetch` refuse `BLOCKED_PRIVATE`.
+File+web comparison and `POST /api/ingest/url` consume `BLOCKED_PRIVATE`
+the same way. Remaining: consume the other landed contracts on table and
+Coding paths; do not wire mission/answer-gate into live single-query
+`_web_research`.
 
 - [x] Automatic currentness / knowledge-gap policy module on `origin/main`
       (`friday/orchestration/web_currentness_policy.py`). Not wired into
@@ -888,7 +894,8 @@ landed contracts on document/table/Engineer/Coding paths.
 - [x] Research consumption gate on `origin/main`
       (`friday/orchestration/web_research_consumption.py`). CONSUMABLE /
       CONSUMABLE_DEGRADED / BLOCKED_PRIVATE / UNAVAILABLE. Live kernel
-      and file+web comparison refuse `BLOCKED_PRIVATE`; kernel also
+      `_web_research`/`_web_search`/`_web_fetch`, file+web comparison and
+      `POST /api/ingest/url` refuse `BLOCKED_PRIVATE`; kernel research also
       refuses empty-after-outbound. Other states are not yet consumed
       by the requesting workflow.
 - [x] Research readiness composition on `origin/main`
@@ -930,7 +937,10 @@ landed contracts on document/table/Engineer/Coding paths.
       (`friday/orchestration/web_passage_reference_coverage.py`). EMPTY /
       REFERENCED / PARTIAL / BARE / BLOCKED. Title, digest and `retrieved_at`
       are not references. Not wired.
-- [ ] Integrate into document, table, Engineer and later Coding journeys.
+- [ ] Integrate remaining contracts into table and later Coding journeys.
+      Document ingest and Engineer/chat kernel tools consume
+      `BLOCKED_PRIVATE`. Mission/readiness/answer-gate stay unwired on
+      the live single-query pipeline.
 - [ ] Private representative benchmark and body-free public summary. Do not
       claim Gemini parity without a paired scored set.
 

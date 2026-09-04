@@ -91,7 +91,7 @@ def test_ingest_url_creates_review_gated_raw_object(settings):
 
 def test_ingest_url_audit_keeps_an_opaque_host_ref_but_not_the_private_url(settings):
     private = "URL-AUDIT-SENTINEL-37ad91"
-    url = f"https://user:{private}@example.test/private/{private}?token={private}"
+    url = f"https://example.com/item/{private}"
     result = FetchResult(
         url=url,
         title="Синтетическая страница",
@@ -126,8 +126,8 @@ def test_ingest_url_audit_keeps_an_opaque_host_ref_but_not_the_private_url(setti
 @pytest.mark.parametrize(
     "result",
     [
-        FetchResult("https://blocked.example", "", "", 0, error="Blocked URL: private"),
-        FetchResult("https://empty.example", "Пусто", "   ", 0, status_code=200),
+        FetchResult("https://example.com/blocked", "", "", 0, error="Blocked URL: private"),
+        FetchResult("https://example.com/empty", "Пусто", "   ", 0, status_code=200),
     ],
 )
 def test_ingest_url_refuses_unfetchable_or_empty(settings, result):
@@ -137,6 +137,27 @@ def test_ingest_url_refuses_unfetchable_or_empty(settings, result):
         response = client.post("/api/ingest/url", json={"url": result.url}, headers=owner)
         assert response.status_code == 422
         # Nothing was stored.
+        count = app.state.storage.execute("SELECT COUNT(*) AS c FROM raw_objects").fetchone()["c"]
+        assert count == 0
+    finally:
+        client.__exit__(None, None, None)
+
+
+def test_ingest_url_refuses_a_private_observed_url(settings):
+    result = FetchResult(
+        url="http://127.0.0.1/internal",
+        title="internal",
+        text="must not be stored",
+        text_length=18,
+        status_code=200,
+    )
+    app, client, surfer = _client_with_surfer(settings, result)
+    try:
+        owner = {"Authorization": f"Bearer {settings.api_token}"}
+        response = client.post("/api/ingest/url", json={"url": "http://127.0.0.1/internal"}, headers=owner)
+        assert response.status_code == 422, response.text
+        assert "source_fact_private" in response.json()["detail"]
+        assert surfer.calls == []
         count = app.state.storage.execute("SELECT COUNT(*) AS c FROM raw_objects").fetchone()["c"]
         assert count == 0
     finally:

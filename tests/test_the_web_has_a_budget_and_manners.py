@@ -94,14 +94,14 @@ async def test_every_road_outward_is_counted(kernel) -> None:
 
     actor = _actor()
     assert not (await kernel._web_search(actor=actor, query="а")).get("quota_exhausted")  # noqa: SLF001
-    assert not (await kernel._web_fetch(actor=actor, url="https://ok.example/1")).get(  # noqa: SLF001
+    assert not (await kernel._web_fetch(actor=actor, url="https://example.com/1")).get(  # noqa: SLF001
         "quota_exhausted"
     )
     assert not (await kernel._web_research(actor=actor, query="в")).get("quota_exhausted")  # noqa: SLF001
 
     for call in (
         kernel._web_search(actor=actor, query="г"),  # noqa: SLF001
-        kernel._web_fetch(actor=actor, url="https://ok.example/2"),  # noqa: SLF001
+        kernel._web_fetch(actor=actor, url="https://example.com/2"),  # noqa: SLF001
         kernel._web_research(actor=actor, query="д"),  # noqa: SLF001
     ):
         assert (await call).get("quota_exhausted") is True

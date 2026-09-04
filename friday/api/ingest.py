@@ -14,6 +14,11 @@ from fastapi import APIRouter, HTTPException, Request
 from friday.api.deps import _audit, _parse_json_bool, _request_json, _require
 from friday.api.projections import public_ingestion_receipt
 from friday.diagnostics.runtime_lease import ProcessLease, RuntimeLeaseError
+from friday.orchestration.web_currentness_policy import WebCurrentnessDecision
+from friday.orchestration.web_research_consumption import (
+    WebResearchConsumptionState,
+    build_web_research_consumption,
+)
 from friday.secondary_product_witness import (
     SECONDARY_PRODUCT_BACKUP_LEASE_FILENAME,
     SECONDARY_PRODUCT_BACKUP_LEASE_PROTOCOL,
@@ -134,6 +139,19 @@ async def ingest_url(request: Request) -> dict[str, Any]:
     url = str(body.get("url") or "").strip()
     if not url:
         raise HTTPException(status_code=400, detail="Нужен url")
+    consumption = build_web_research_consumption(
+        "ingest.url",
+        "ingest.url",
+        WebCurrentnessDecision.SEARCH_REQUIRED,
+        None,
+        source_urls=(url,),
+        topic="",
+    )
+    if consumption.usability is WebResearchConsumptionState.BLOCKED_PRIVATE:
+        raise HTTPException(
+            status_code=422,
+            detail="Не удалось получить читаемую страницу: source_fact_private",
+        )
     result = await request.app.state.web_surfer.fetch(url)
     if result.error or not result.text.strip():
         # fetch() never raises — SSRF blocks, non-2xx and empty pages all

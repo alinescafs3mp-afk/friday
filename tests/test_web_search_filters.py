@@ -1012,8 +1012,8 @@ async def test_kernel_reports_domain_filter_underfill_without_weakening_it(setti
                 "exclude_domains": ["ads.example.test"],
             }
             return [
-                SearchResult("one", "https://docs.example.test/a", "", "stub"),
-                SearchResult("two", "https://news.example.test/b", "", "stub"),
+                SearchResult("one", "https://docs.python.org/a", "", "stub"),
+                SearchResult("two", "https://news.python.org/b", "", "stub"),
             ]
 
     storage.ensure_user("operator", preset_key="owner")
@@ -1506,6 +1506,84 @@ def _complete_research_report(query: str, url: str) -> dict[str, object]:
         "failed_sources": 0,
         "search_timed_out": False,
     }
+
+
+@pytest.mark.asyncio
+async def test_kernel_refuses_private_search_result_urls_after_the_adapter(
+    settings,
+    storage,
+) -> None:
+    class PrivateSourceSearch:
+        async def search(self, query: str, **options: object) -> list[SearchResult]:
+            del options
+            return [SearchResult("internal", "http://127.0.0.1/internal", "", "stub")]
+
+    kernel, actor = _research_kernel(settings, storage, PrivateSourceSearch())
+
+    report = await kernel._web_search(  # noqa: SLF001
+        actor=actor,
+        query="needle",
+        max_results=5,
+    )
+
+    assert report["error"] == "source_fact_private"
+    assert report["results"] == []
+    assert report["outbound_attempted"] is True
+    assert report["search_failed"] is True
+    assert storage.list_inbox("operator") == []
+
+
+@pytest.mark.asyncio
+async def test_kernel_does_not_treat_a_public_search_result_as_private(
+    settings,
+    storage,
+) -> None:
+    class PublicSourceSearch:
+        async def search(self, query: str, **options: object) -> list[SearchResult]:
+            del options
+            return [SearchResult("Observed", "https://docs.python.org/3/", "public body", "stub")]
+
+    kernel, actor = _research_kernel(settings, storage, PublicSourceSearch())
+
+    report = await kernel._web_search(  # noqa: SLF001
+        actor=actor,
+        query="needle",
+        max_results=5,
+    )
+
+    assert report.get("error") != "source_fact_private"
+    assert report["outbound_attempted"] is True
+    assert [item["url"] for item in report["results"]] == ["https://docs.python.org/3/"]
+
+
+@pytest.mark.asyncio
+async def test_kernel_refuses_private_fetch_url_before_outbound(
+    settings,
+    storage,
+) -> None:
+    class CountingFetch:
+        def __init__(self) -> None:
+            self.calls: list[str] = []
+
+        async def fetch(self, url: str, **options: object) -> object:
+            del options
+            self.calls.append(url)
+            raise AssertionError("private fetch must not reach the adapter")
+
+    web = CountingFetch()
+    kernel, actor = _research_kernel(settings, storage, web)
+
+    report = await kernel._web_fetch(  # noqa: SLF001
+        actor=actor,
+        url="http://127.0.0.1/internal",
+    )
+
+    assert report["error"] == "source_fact_private"
+    assert report["url"] == ""
+    assert report["text"] == ""
+    assert report["outbound_attempted"] is False
+    assert web.calls == []
+    assert storage.list_inbox("operator") == []
 
 
 @pytest.mark.asyncio
