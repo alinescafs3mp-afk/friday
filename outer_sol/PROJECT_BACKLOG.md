@@ -1,6 +1,6 @@
 # Friday: canonical project backlog
 
-Updated: 2026-09-04 (live `0.208.16`; N2 readiness + citation coverage on `main`)
+Updated: 2026-09-04 (live `0.208.16`; N2 claim-support on `main`)
 
 This is the project's only backlog and mutable status register. It owns the
 current production identity, execution order, acceptance gaps and owner actions.
@@ -45,8 +45,8 @@ ahead of live (N1 builders and file-album status wiring on `main`; Engineer
 Telegram status renderer uses the shared projection on `origin/main` and is
 not yet live). N2 currentness policy, `WebEvidenceBundleV1`, multi-query
 mission planner, provider fallback policy, source diversity, research
-consumption, readiness composition and citation coverage are on
-`origin/main` and are not wired into live retrieval.
+consumption, readiness composition, citation coverage and claim support
+are on `origin/main` and are not wired into live retrieval.
 
 - Production: immutable activation `phase=clear`; backend and Telegram bridge
   active; writer target `candidate`. Retention admission remains honestly
@@ -82,8 +82,8 @@ the same projection (not live). File-album Telegram status on `origin/main`
 now uses the DOCUMENT files projection (not live). Archive and web journeys
 still need live wiring. N2 currentness, evidence bundle, multi-query mission
 planner, provider fallback, source diversity, consumption, readiness and
-citation coverage are on `origin/main` and are not consumed by live
-retrieval. N3 Coding Mode, N4
+citation coverage and claim support are on `origin/main` and are not
+consumed by live retrieval. N3 Coding Mode, N4
 whole-organism journeys and N5 maintainability follow that order. Physical
 Android, P0H deletion, off-machine mirror and provider-credential rotation
 remain owner-parked.
@@ -836,8 +836,8 @@ Status: modules started on `origin/main`. Today is still a strong
 single-query 27s/3-source (max 8) live pipeline. Code-owned currentness
 policy, frozen `WebEvidenceBundleV1`, multi-query mission planner, provider
 fallback policy, source diversity, research consumption, readiness
-composition and citation coverage exist and are not wired. Remaining:
-live `web_surfer` / Telegram / organ consumption.
+composition, citation coverage and claim support exist and are not
+wired. Remaining: live `web_surfer` / Telegram / organ consumption.
 
 - [x] Automatic currentness / knowledge-gap policy module on `origin/main`
       (`friday/orchestration/web_currentness_policy.py`). Not wired into
@@ -867,6 +867,10 @@ live `web_surfer` / Telegram / organ consumption.
 - [x] Citation host coverage on `origin/main`
       (`friday/orchestration/web_citation_coverage.py`). COMPLETE / PARTIAL /
       EMPTY / BLOCKED_PRIVATE; lexical hostname only. Not wired.
+- [x] Claim-support contract on `origin/main`
+      (`friday/orchestration/web_claim_support.py`). COMPLETE / PARTIAL /
+      EMPTY / UNSUPPORTED / BLOCKED. Contradicting-only and unknown source
+      ids are not support. Not wired.
 - [ ] Integrate into document, table, Engineer and later Coding journeys.
 - [ ] Private representative benchmark and body-free public summary. Do not
       claim Gemini parity without a paired scored set.
@@ -980,8 +984,9 @@ checklist elsewhere. The Ctrl+T view is a compact projection of this list.
       Engineer user FILE/ARCHIVE carrier are on `main`; archive/web still
       need live wiring and message-count proofs
 - [ ] N2 currentness, evidence bundle, mission, provider fallback, source
-      diversity, consumption, readiness and citation coverage are on `main`
-      and unwired; remaining live retrieval consumption
+      diversity, consumption, readiness, citation coverage and claim
+      support are on `main` and unwired; remaining live retrieval
+      consumption
 - [ ] N3 Coding Mode MVP behind an isolated worker
 - [ ] N4 shared operation/situation projection and mixed-organ journeys
 - [ ] N5 extract only touched seams from giant runtime modules
