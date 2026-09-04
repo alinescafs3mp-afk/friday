@@ -54,6 +54,11 @@ from friday.orchestration.message_window_outcome import (
 )
 from friday.orchestration.turn_context import AuthenticatedTurnContext, TurnContextError
 from friday.orchestration.turn_context_runtime import current_primary_authenticated_turn_context
+from friday.orchestration.web_currentness_policy import WebCurrentnessDecision
+from friday.orchestration.web_research_consumption import (
+    WebResearchConsumptionState,
+    build_web_research_consumption,
+)
 from friday.organs import local_now
 from friday.oversight_scope import hierarchy_is_configured, may_oversee
 from friday.people import resolve_person, unambiguous
@@ -229,10 +234,67 @@ def _web_research_source_matches_topic(item: Mapping[str, Any], topic_class: str
     return bool(evidence.search(surface))
 
 
+_KERNEL_WEB_RESEARCH_CONSUMPTION_ID = "kernel.web_research"
+_KERNEL_WEB_RESEARCH_TURN_ID = "kernel.web_research"
+_CONSUMPTION_IDENTITY_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}\Z")
+
+
 def _capturable_public_web_url(value: Any) -> str:
     """One safe public URL for durable Raw/Inbox provenance, without DNS."""
 
     return sanitize_public_web_url(value) if isinstance(value, str) else ""
+
+
+def _kernel_web_research_turn_id() -> str:
+    context = current_primary_authenticated_turn_context()
+    token = str(getattr(context, "turn_id", "") or "") if context is not None else ""
+    if _CONSUMPTION_IDENTITY_RE.fullmatch(token):
+        return token
+    return _KERNEL_WEB_RESEARCH_TURN_ID
+
+
+def _web_research_source_urls(report: Mapping[str, Any]) -> tuple[str, ...]:
+    raw_sources = report.get("sources")
+    if not isinstance(raw_sources, list):
+        return ()
+    urls: list[str] = []
+    for item in raw_sources:
+        if not isinstance(item, Mapping):
+            continue
+        url = item.get("url")
+        if isinstance(url, str) and url.strip():
+            urls.append(url)
+    return tuple(urls)
+
+
+def _web_research_private_source_refusal(report: Mapping[str, Any], query: str) -> dict[str, Any] | None:
+    """Refuse a live research report whose observed source URLs are private."""
+
+    urls = _web_research_source_urls(report)
+    if not urls:
+        return None
+    consumption = build_web_research_consumption(
+        _KERNEL_WEB_RESEARCH_CONSUMPTION_ID,
+        _kernel_web_research_turn_id(),
+        WebCurrentnessDecision.SEARCH_REQUIRED,
+        None,
+        source_urls=urls,
+        topic="",
+    )
+    if consumption.usability is not WebResearchConsumptionState.BLOCKED_PRIVATE:
+        return None
+    return {
+        "query": query,
+        "sources": [],
+        "requested_sources": 0,
+        "completed_sources": 0,
+        "timed_out_sources": 0,
+        "failed_sources": 0,
+        "search_timed_out": False,
+        "outbound_attempted": True,
+        "search_failed": True,
+        "error": "source_fact_private",
+    }
 
 
 def _canonical_capturable_web_url_key(url: str) -> str:
@@ -7901,6 +7963,9 @@ class ExecutionKernel:
                 report["source_class"] = source_class
             if topic_class:
                 report["topic_class"] = topic_class
+            private_refusal = _web_research_private_source_refusal(report, query)
+            if private_refusal is not None:
+                return private_refusal
             contract_valid = target_research_report_is_valid(
                 report,
                 configured_max_sources=bounded_sources,

@@ -1482,3 +1482,73 @@ async def test_kernel_rejects_a_declared_research_adapter_without_returned_attes
     assert report["unsupported_filters"] == ["freshness"]
     assert report["outbound_attempted"] is True
     assert storage.list_inbox("operator") == []
+
+
+def _complete_research_report(query: str, url: str) -> dict[str, object]:
+    text = "Public web fact-bearing source body. " * 20
+    return {
+        "query": query,
+        "sources": [
+            {
+                "url": url,
+                "title": "Observed source",
+                "text": text,
+                "text_length": len(text),
+                "status_code": 200,
+                "error": "",
+                "truncated": False,
+            }
+        ],
+        "requested_sources": 1,
+        "completed_sources": 1,
+        "timed_out_sources": 0,
+        "failed_sources": 0,
+        "search_timed_out": False,
+    }
+
+
+@pytest.mark.asyncio
+async def test_kernel_refuses_private_research_source_urls_after_the_adapter(
+    settings,
+    storage,
+) -> None:
+    class PrivateSourceResearch:
+        async def research(self, query: str, **options: object) -> dict[str, object]:
+            del options
+            return _complete_research_report(query, "http://127.0.0.1/internal")
+
+    kernel, actor = _research_kernel(settings, storage, PrivateSourceResearch())
+
+    report = await kernel._web_research(  # noqa: SLF001
+        actor=actor,
+        query="needle",
+        max_sources=3,
+    )
+
+    assert report["error"] == "source_fact_private"
+    assert report["sources"] == []
+    assert report["outbound_attempted"] is True
+    assert report["search_failed"] is True
+    assert storage.list_inbox("operator") == []
+
+
+@pytest.mark.asyncio
+async def test_kernel_does_not_treat_a_public_research_source_as_private(
+    settings,
+    storage,
+) -> None:
+    class PublicSourceResearch:
+        async def research(self, query: str, **options: object) -> dict[str, object]:
+            del options
+            return _complete_research_report(query, "https://docs.python.org/3/")
+
+    kernel, actor = _research_kernel(settings, storage, PublicSourceResearch())
+
+    report = await kernel._web_research(  # noqa: SLF001
+        actor=actor,
+        query="needle",
+        max_sources=3,
+    )
+
+    assert report.get("error") != "source_fact_private"
+    assert report["outbound_attempted"] is True
