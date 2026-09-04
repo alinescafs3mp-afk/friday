@@ -1,6 +1,6 @@
 # Friday: canonical project backlog
 
-Updated: 2026-09-05 (live `0.208.19`; N1 one-final-carrier live; remaining N2 observation-bound; N3 `/coding` static inspect live; isolated worker remaining; N4 mixed-journey store projection on `origin/main` and unwired)
+Updated: 2026-09-05 (live `0.208.20`; N1 one-final-carrier live; remaining N2 observation-bound; N3 `/coding` static inspect + isolated-worker boundary live; untrusted execute fail-closed; N4 mixed-journey store projection on `origin/main` and unwired)
 
 This is the project's only backlog and mutable status register. It owns the
 current production identity, execution order, acceptance gaps and owner actions.
@@ -32,17 +32,17 @@ Do not copy that snapshot's release claims forward.
 - Database schema: 50 in deployed production and the fallback.
 
 Golden-journey receipts stay bound to that `0.208.1` root until rebound. The
-running sealed sibling is Friday `0.208.19` at
-`56022365ff6f748239d12e5e41ca184b81b29e04` (tree-file
-`1b8771acffacf0c3482100e42b6d0f1c41887d8902502f5f4d331125d66306cc`, wheel
-`5b76b4df6837db94ff972a47ba0953d9ed5309d1e83ed143faa41bf1f662f688`, journal
-`clear`, predecessor `0.208.18` /
-`19d1b89cbe5ebb9763b95c97dae6d8ebb03ad669`). Trusted-CA health reports
-`version=0.208.19`. S3: `requested_mode=assist`, `effective_mode=shadow`,
+running sealed sibling is Friday `0.208.20` at
+`bcc0b2daf567ba366801bee9d22ade76649f1d6f` (tree-file
+`156f15f97f6ebb3aba5c76bf9ec4572f26ade7e7ae7a55f0269d46088fb644b1`, wheel
+`c3a2da69a3e3dd862a31300db3b881162d0a29da86742d9c75b15b45105b76d9`, journal
+`clear`, predecessor `0.208.19` /
+`56022365ff6f748239d12e5e41ca184b81b29e04`). Trusted-CA health reports
+`version=0.208.20`. S3: `requested_mode=shadow`, `effective_mode=shadow`,
 `promotion_admitted=false`,
-`activation.reason=source_revision_mismatch`. Advice stays off until
+`activation.reason=default_off`. Advice stays off until
 a genuine eligible witness; do not fabricate traffic. Next product
-sibling that changes friday sources is `assist_to_shadow`. `origin/main`
+sibling that changes friday sources is `shadow_to_assist`. `origin/main`
 is the live sibling. N1 Telegram surfaces (ordinary `/chat` status,
 Engineer status renderer, file-album DOCUMENT status, Engineer
 FILE/ARCHIVE carrier, restart/edit-reject/send-fence/cancel counts,
@@ -56,9 +56,10 @@ comparison and `POST /api/ingest/url` refuse observed private URLs via
 the same consumption gate. Other N2 contracts stay observation-bound:
 live requesting workflows do not observe claims, dates, passages or
 missions. Do not fabricate those witnesses. N3 `/coding` static inspect
-is live on `0.208.19`; execute claims fail closed. Isolated worker
-remains. Other N3 inspect, extract-plan, prompt-to-small-project,
-isolated-worker, result-archive-plan, upload-modification-admission
+and the dedicated isolated-worker boundary are live on `0.208.20`;
+execute claims fail closed; untrusted build/test of uploads remains
+fail-closed. Other N3 inspect, extract-plan, prompt-to-small-project,
+result-archive-plan, upload-modification-admission
 and Coding Mode view/carrier/plan-gate families stay source-only.
 N4 shared operation/situation view contracts are on `origin/main`
 and unwired.
@@ -91,10 +92,11 @@ deployed; advice remains off until the observation-bound witness. S5 40k lease
 and S6 recovery/browse paths stay live.
 
 The live product queue is N1–N5. The shared operation-progress contract is
-live. Production `0.208.19` keeps ordinary Telegram `/chat` status,
+live. Production `0.208.20` keeps ordinary Telegram `/chat` status,
 Engineer status, file-album DOCUMENT status, Engineer FILE/ARCHIVE
-carrier, observed web/archive chat status, and one-final-carrier packing
-through that projection, and adds owner-private `/coding` static inspect.
+carrier, observed web/archive chat status, one-final-carrier packing
+and owner-private `/coding` static inspect through that projection,
+and adds the dedicated `/coding` isolated-worker boundary.
 N2 currentness, evidence bundle,
 multi-query mission planner, provider fallback, source diversity,
 consumption, readiness and citation coverage, claim support, answer
@@ -107,12 +109,13 @@ invalid provider facts; `_web_search` and `_web_fetch` refuse
 `selected_provider_id` is present. File+web comparison and
 `POST /api/ingest/url` consume `BLOCKED_PRIVATE`. Other N2
 contracts stay observation-bound; do not fabricate witnesses. N3
-`/coding` static inspect is live on `0.208.19`; execute claims fail
-closed. Isolated worker remains. Coding Mode intent, snapshot,
+`/coding` static inspect and isolated-worker boundary are live on
+`0.208.20`; execute claims fail closed; untrusted build/test of
+uploads remains fail-closed. Coding Mode intent, snapshot,
 execute-claim, plan-gate, carrier and view contracts are on
 `origin/main` and unwired. Project identity, archive extract admission,
-extract-plan family, prompt-to-small-project, isolated-worker
-contracts, one-final source-archive plan, result-archive-pack family
+extract-plan family, prompt-to-small-project,
+one-final source-archive plan, result-archive-pack family
 and upload-modification admission stay source-only. N4 shared
 operation/situation view, mixed-journey view and store-shaped
 projection contracts are on `origin/main` and are not wired to stores
@@ -881,7 +884,8 @@ File+web comparison and `POST /api/ingest/url` consume `BLOCKED_PRIVATE`
 the same way. Remaining N2 contracts stay observation-bound: live
 requesting workflows do not observe claims, dates, passages or missions.
 Table CSV/spreadsheet URLs already go through file+web consumption.
-Coding `/coding` static inspect is live on `0.208.19`.
+Coding `/coding` static inspect and isolated-worker boundary are live
+on `0.208.20`.
 Do not wire mission/answer-gate into live single-query `_web_research`.
 Do not fabricate those facts.
 
@@ -959,12 +963,13 @@ Do not fabricate those facts.
 
 ### N3 — Coding Mode
 
-Status: `/coding` static inspect is live on `0.208.19`.
-Owner private Telegram only; execute claims fail closed. Engineer
-bubblewrap is not a Coding Worker. Isolated worker remains the open
-MVP checkbox. Prompt-to-small-project and one-final source-archive
-plan contracts stay unwired. Do not claim safe build/test of untrusted
-uploads.
+Status: `/coding` static inspect and the dedicated isolated-worker
+boundary are live on `0.208.20`. Owner private Telegram only; execute
+claims fail closed. Engineer bubblewrap is not a Coding Worker.
+Untrusted build/test of uploads remains fail-closed; that implement
+loop is the remaining N3 MVP checkbox. Prompt-to-small-project and
+one-final source-archive plan contracts stay unwired. Do not claim
+safe build/test of untrusted uploads.
 
 - [x] Bare-source inspection contracts on `origin/main`
       (`coding_source_member.py`, `coding_source_tree.py`,
@@ -972,7 +977,8 @@ uploads.
       `coding_toolchain_hint.py`, `coding_inspect_report.py`).
       EMPTY / MAPPED|INSPECTED|HINTED / BLOCKED. No execute, no
       rebuild, no file I/O, filename-suffix hints only. Live as
-      `/coding` static inspect on `0.208.19`. Isolated worker remains.
+      `/coding` static inspect on `0.208.19`. Isolated-worker boundary
+      live on `0.208.20`.
 - [x] Prompt-to-small-project and uploaded-project modification.
       Prompt normalization, implementation plan, scaffold, create
       admission and upload-modification admission are on `origin/main`
@@ -981,11 +987,11 @@ uploads.
       (`friday/orchestration/coding_project_identity.py`). EMPTY /
       IDENTIFIED / BLOCKED. Exact revision only; `latest`/`HEAD`/
       `newest`/`current` fail closed. Not wired to git or a worker.
-- [ ] Isolated coding worker: no host secrets, no Docker socket, no
-      production database, bounded network. Frozen identity, isolation,
-      network, workspace, limits and admission contracts are on
-      `origin/main` (not wired; no process or Docker). `/coding`
-      static inspect does not satisfy this checkbox.
+- [x] Isolated coding worker boundary live on `0.208.20`: dedicated
+      Coding bwrap profile, no host secrets, no Docker socket, no
+      production database, bounded network. Spawn only after
+      admission; probe-only, never executes uploaded project code.
+      Untrusted build/test of uploads remains fail-closed.
 - [x] Safe archive extract admission on `origin/main`
       (`friday/orchestration/coding_archive_extract_admission.py`).
       EMPTY / ADMITTED / BLOCKED from member metadata. Traversal,
@@ -1140,6 +1146,13 @@ checklist elsewhere. The Ctrl+T view is a compact projection of this list.
       Telegram; execute fail-closed). Isolated worker remains the
       open N3 MVP checkbox.
 
+### Closed on production `0.208.20`
+
+- [x] N3 isolated `/coding` worker boundary live on `0.208.20`
+      (dedicated bwrap probe, no Docker, no host secrets, no prod
+      DB). Untrusted execute remains fail-closed. N3 MVP
+      implement/build/test loop of untrusted uploads remains open.
+
 ### Open and implementable
 
 - [ ] N2 currentness, evidence bundle, mission, provider fallback, source
@@ -1150,11 +1163,12 @@ checklist elsewhere. The Ctrl+T view is a compact projection of this list.
       `_web_research` refuses private URLs, empty-after-outbound and
       invalid provider facts; remaining contracts stay observation-bound
       without fabricated witnesses
-- [ ] N3 Coding Mode MVP behind an isolated worker; `/coding` static
-      inspect is live on `0.208.19`. Isolated worker remains.
+- [ ] N3 Coding Mode MVP implement/build/test loop of untrusted
+      uploads; `/coding` static inspect and isolated-worker boundary
+      are live on `0.208.20`. Untrusted execute remains fail-closed.
       Coding Mode view composition, project identity, extract
       admission, extract-plan family, prompt-to-small-project,
-      isolated-worker, source-archive plan, result-archive-pack family
+      source-archive plan, result-archive-pack family
       and upload-modification admission stay source-only.
 - [ ] N4 shared operation/situation, mixed-journey view and
       store-shaped projection contracts are on `main` and unwired;
