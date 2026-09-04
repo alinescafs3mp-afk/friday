@@ -48,8 +48,12 @@ mission planner, provider fallback policy, source diversity, research
 consumption, readiness composition, citation coverage, claim support,
 answer admission, contradiction coverage, exact mission coverage,
 evidence grounding, source date coverage, claim currentness and
-passage-reference coverage are on `origin/main` and are not wired into
-live retrieval.
+passage-reference coverage are on `origin/main`. Live `_web_research`
+refuses private observed URLs, empty-after-outbound, and invalid
+provider facts; `search`/`research` observe chain names as
+`WebProviderId` and the kernel consumes `select_web_provider` when
+`selected_provider_id` is present. Other N2 contracts are not consumed
+by the requesting workflow.
 
 - Production: immutable activation `phase=clear`; backend and Telegram bridge
   active; writer target `candidate`. Retention admission remains honestly
@@ -88,7 +92,10 @@ planner, provider fallback, source diversity, consumption, readiness and
 citation coverage, claim support, answer admission, contradiction
 coverage, exact mission coverage, evidence grounding, source date
 coverage, claim currentness and passage-reference coverage are on
-`origin/main` and are not consumed by live retrieval.
+`origin/main`. Live `_web_research` refuses private URLs,
+empty-after-outbound and invalid provider facts; observed chain names
+are consumed when `selected_provider_id` is present. Other N2
+contracts are not consumed by the requesting workflow.
 N3 project identity, archive extract admission, bare-source
 inspection, and archive extract-plan family (catalog, relative
 plan, digest facts, project isolation, overwrite/collision) are
