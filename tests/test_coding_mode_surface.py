@@ -102,12 +102,29 @@ def test_blocked_inspect_does_not_expose_names() -> None:
     assert "escape" not in result["message"]
 
 
-def test_execute_claim_is_refused_and_does_not_execute(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_execute_claim_is_refused_and_does_not_execute(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from friday.organs.coding.worker_boundary import default_coding_worker_boundary
+
     def _boom(*_args: object, **_kwargs: object) -> None:
         raise AssertionError("coding turn spawned a process")
 
+    spawned: list[tuple[str, ...]] = []
+
+    def _runner(argv: tuple[str, ...], timeout_sec: int) -> int:
+        spawned.append(argv)
+        del timeout_sec
+        return 0
+
     monkeypatch.setattr("subprocess.Popen", _boom, raising=False)
     monkeypatch.setattr("subprocess.run", _boom, raising=False)
+    boundary = default_coding_worker_boundary(
+        friday_home=str(tmp_path / "friday-home"),
+        owner_home=str(tmp_path / "owner"),
+        database_path=str(tmp_path / "friday-home" / "data" / "state"),
+        worker_root=str(tmp_path / "friday-coding-worker"),
+    )
     result = handle_coding_static_turn(
         storage=None,
         user_id=LEGACY_OWNER_USER_ID,
@@ -115,10 +132,48 @@ def test_execute_claim_is_refused_and_does_not_execute(monkeypatch: pytest.Monke
         message="запусти pytest",
         conversation_id=None,
         attachments=[{"filename": "test_app.py", "size": 8, "content_b64": "cHJpbnQoMSk="}],
+        worker_boundary=boundary,
+        spawn_runner=_runner,
     )
     assert result["context"]["coding_execution_attempted"] is False
+    assert result["context"]["coding_worker_admission"] == "admitted"
+    assert result["context"]["coding_worker_spawned"] is True
+    assert result["context"]["coding_worker_probe"] == "confirmed"
     assert "запрос на выполнение отклонён" in result["message"].casefold()
     assert result["context"]["coding_inspect_report"] == CodingInspectReportState.INSPECTED.value
+    assert len(spawned) == 1
+    assert spawned[0][0] == "/usr/bin/bwrap"
+    assert "--unshare-all" in spawned[0]
+
+
+def test_inspect_turn_composes_admission_without_spawn(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from friday.organs.coding.worker_boundary import default_coding_worker_boundary
+
+    def _boom(*_args: object, **_kwargs: object) -> None:
+        raise AssertionError("inspect turn spawned a process")
+
+    monkeypatch.setattr("subprocess.Popen", _boom, raising=False)
+    monkeypatch.setattr("subprocess.run", _boom, raising=False)
+    boundary = default_coding_worker_boundary(
+        friday_home=str(tmp_path / "friday-home"),
+        owner_home=str(tmp_path / "owner"),
+        database_path=str(tmp_path / "friday-home" / "data" / "state"),
+        worker_root=str(tmp_path / "friday-coding-worker"),
+    )
+    result = handle_coding_static_turn(
+        storage=None,
+        user_id=LEGACY_OWNER_USER_ID,
+        actor=_owner_actor(),
+        message="осмотри main.py",
+        conversation_id=None,
+        attachments=[{"filename": "main.py", "size": 12}],
+        worker_boundary=boundary,
+        spawn_runner=_boom,
+    )
+    assert result["context"]["coding_worker_admission"] == "admitted"
+    assert result["context"]["coding_worker_spawned"] is False
+    assert result["context"]["coding_worker_probe"] == "skipped"
+    assert result["context"]["coding_execution_attempted"] is False
 
 
 def test_guest_cannot_enter_coding_turn() -> None:

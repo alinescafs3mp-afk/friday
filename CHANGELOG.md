@@ -1,3 +1,14 @@
+## 0.208.20 — 2026-09-05
+
+### N3 isolated Coding worker boundary
+
+- Distinct sealed candidate for `semantic_supervisor_assist_to_shadow` after
+  live 0.208.19. Lands the dedicated `/coding` isolated-worker boundary on
+  landed identity/isolation/network/workspace/limits/admission contracts.
+  No Docker. Not the Engineer sandbox. Spawn only after admission. Untrusted
+  build/test of uploads remains fail-closed. SQLite remains at schema 50;
+  exact `0.208.19` is the predecessor and `0.207.90` the fallback.
+
 ## 0.208.19 — 2026-09-04
 
 ### N3 /coding static inspect

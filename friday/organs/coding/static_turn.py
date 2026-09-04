@@ -1,16 +1,31 @@
-"""Owner-only Coding Mode turn: static inspect, never execute."""
+"""Owner-only Coding Mode turn: static inspect, isolated worker, never execute."""
 
 from __future__ import annotations
 
+import hashlib
+import json
 import re
 import secrets
 from collections.abc import Mapping, Sequence
+from dataclasses import replace
+from pathlib import Path
 from typing import Any
 
 from friday.orchestration.coding_inspect_report import (
     CodingInspectReportState,
     CodingInspectReportV1,
     build_coding_inspect_report,
+)
+from friday.orchestration.coding_worker_admission import CodingWorkerAdmissionState
+from friday.organs.coding.worker_boundary import (
+    CodingWorkerBoundaryV1,
+    default_coding_worker_boundary,
+)
+from friday.organs.coding.worker_spawn import (
+    CodingWorkerRunner,
+    CodingWorkerSpawnV1,
+    compose_coding_worker_admission,
+    spawn_coding_worker,
 )
 from friday.permissions import ActorContext, AuthorizationError
 
@@ -57,10 +72,31 @@ def _members_from_attachments(attachments: Sequence[object] | None) -> list[dict
     return members
 
 
-def _russian_inspect_reply(report: CodingInspectReportV1, *, execute_claimed: bool) -> str:
+def _snapshot_sha256(members: Sequence[Mapping[str, object]]) -> str:
+    payload = json.dumps(list(members), ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode()
+    return hashlib.sha256(payload).hexdigest()
+
+
+def _homes() -> tuple[str, str, str]:
+    from friday.config import default_home
+
+    home = Path(default_home())
+    return str(home), str(Path.home()), str(home / "data" / "state")
+
+
+def _russian_inspect_reply(
+    report: CodingInspectReportV1,
+    *,
+    execute_claimed: bool,
+    worker_admitted: bool,
+) -> str:
     refused = "Исполнение, сборка и тесты не допущены."
     if execute_claimed:
         refused = "Запрос на выполнение отклонён. " + refused
+    if worker_admitted:
+        refused = refused + " Изолированный worker допущен, код загрузок не исполнялся."
+    else:
+        refused = refused + " Изолированный worker не допущен."
     if report.report is CodingInspectReportState.EMPTY:
         return "Режим Coding: статический осмотр. В этом ходе нет исходников для осмотра. " + refused
     if report.report is CodingInspectReportState.BLOCKED:
@@ -115,8 +151,10 @@ def handle_coding_static_turn(
     conversation_id: str | None,
     attachments: list[dict[str, Any]] | None,
     enable_tools: bool = False,
+    worker_boundary: CodingWorkerBoundaryV1 | None = None,
+    spawn_runner: CodingWorkerRunner | None = None,
 ) -> dict[str, Any]:
-    """Inspect attachment metadata. Never execute, spawn, or open paths."""
+    """Inspect attachment metadata. Spawn an isolated worker only if admitted."""
 
     del enable_tools
     _require_coding_actor(actor)
@@ -126,9 +164,37 @@ def handle_coding_static_turn(
     members = _members_from_attachments(attachments)
     report_id = "coding-inspect-" + secrets.token_hex(8)
     turn_id = "coding-turn-" + secrets.token_hex(8)
+    operation_id = "coding-op-" + secrets.token_hex(8)
+    snapshot = _snapshot_sha256(members)
     report = build_coding_inspect_report(report_id, turn_id, members=members)
     execute_claimed = _execute_claimed(message)
-    text = _russian_inspect_reply(report, execute_claimed=execute_claimed)
+    friday_home, owner_home, database_path = _homes()
+    boundary = worker_boundary or default_coding_worker_boundary(
+        friday_home=friday_home,
+        owner_home=owner_home,
+        database_path=database_path,
+    )
+    boundary = replace(
+        boundary,
+        workspace_path="work/" + operation_id,
+        export_path="out/" + operation_id,
+    )
+    admission = compose_coding_worker_admission(
+        admission_id="coding-adm-" + secrets.token_hex(8),
+        authenticated_turn_id=turn_id,
+        worker_id="coding-w-" + secrets.token_hex(8),
+        operation_id=operation_id,
+        project_id="coding-p-" + secrets.token_hex(8),
+        revision_selector=snapshot,
+        boundary=boundary,
+    )
+    spawn = CodingWorkerSpawnV1(False, admission.admission, "skipped", False)
+    if execute_claimed and admission.admission is CodingWorkerAdmissionState.ADMITTED:
+        spawn = spawn_coding_worker(admission, boundary, runner=spawn_runner)
+    worker_admitted = admission.admission is CodingWorkerAdmissionState.ADMITTED
+    text = _russian_inspect_reply(
+        report, execute_claimed=execute_claimed, worker_admitted=worker_admitted
+    )
     persisted_id = _ensure_conversation(
         storage,
         person_id=person_id,
@@ -157,6 +223,8 @@ def handle_coding_static_turn(
                 "interaction_mode": "coding",
                 "coding_inspect_report": report.report.value,
                 "coding_inspect_reason": report.reason.value,
+                "coding_worker_admission": admission.admission.value,
+                "coding_worker_admission_reason": admission.reason.value,
             },
         )
         assistant_id = assistant.get("id")
@@ -165,6 +233,10 @@ def handle_coding_static_turn(
         "coding_inspect_report": report.report.value,
         "coding_inspect_reason": report.reason.value,
         "coding_execution_attempted": False,
+        "coding_worker_admission": admission.admission.value,
+        "coding_worker_admission_reason": admission.reason.value,
+        "coding_worker_spawned": spawn.spawned,
+        "coding_worker_probe": spawn.probe,
         "llm_failed": False,
     }
     if report.report is not CodingInspectReportState.BLOCKED:
