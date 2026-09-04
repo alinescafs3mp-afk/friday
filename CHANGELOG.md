@@ -1,3 +1,13 @@
+## 0.208.11 — 2026-09-04
+
+### Semantic supervisor assist candidate
+
+- Distinct sealed candidate for evidence-gated `shadow→assist` after live
+  0.208.10 `assist_to_shadow`. After-restart window identity allows the
+  version bump. Assist stays off until that one-shot consume.
+- SQLite remains at schema 50; exact `0.208.10` is the predecessor and
+  `0.207.90` the fallback.
+
 ## 0.208.10 — 2026-09-04
 
 ### Representative-window after-restart attestation
