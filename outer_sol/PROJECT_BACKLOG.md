@@ -83,7 +83,8 @@ The live product queue is N1–N5. The shared operation-progress contract is
 live. Production `0.208.17` renders ordinary Telegram `/chat` status,
 Engineer status, file-album DOCUMENT status, Engineer FILE/ARCHIVE
 carrier, and observed web/archive chat status through that projection.
-N1 remaining gap is one final carrier. N2 currentness, evidence bundle,
+N1 remaining gap is live one-final-carrier cutover (packing is on
+`origin/main`). N2 currentness, evidence bundle,
 multi-query mission planner, provider fallback, source diversity,
 consumption, readiness and citation coverage, claim support, answer
 admission, contradiction coverage, exact mission coverage, evidence
@@ -840,7 +841,9 @@ Friday status → one final result carrier. Reuse
 - [x] Migrate `/engineer` Telegram status: coalesces to one editable
       message and uses the shared renderer. Live on `0.208.17`.
 - [ ] One final carrier: text, one file with caption, or one deterministic
-      archive. Delivery uncertainty edits status and never duplicates.
+      archive. Chat `make_file` packing (one file or one ZIP) is on
+      `origin/main` (`friday/orchestration/operation_result_carrier.py`).
+      Delivery uncertainty edits status and never duplicates. Not live.
 - [x] Restart, edit-reject, send-fence and cancel/timeout/`UNKNOWN` proof
       with actual Telegram message counts. Live on `0.208.17`.
 
@@ -928,9 +931,10 @@ the other landed contracts on document/table/Engineer/Coding paths.
 ### N3 — Coding Mode
 
 Status: modules started on `origin/main`. `/coding` does not exist.
-Engineer bubblewrap is not a Coding Worker. Until an isolated worker
-exists, static inspect/edit only; do not claim safe build/test of
-untrusted uploads.
+Engineer bubblewrap is not a Coding Worker. Prompt-to-small-project
+contracts (normalize, plan, scaffold, create admission) are on
+`origin/main` and unwired. Until an isolated worker exists, static
+inspect/edit only; do not claim safe build/test of untrusted uploads.
 
 - [x] Bare-source inspection contracts on `origin/main`
       (`coding_source_member.py`, `coding_source_tree.py`,
@@ -939,6 +943,8 @@ untrusted uploads.
       EMPTY / MAPPED|INSPECTED|HINTED / BLOCKED. No execute, no
       rebuild, no file I/O, filename-suffix hints only. Not wired.
 - [ ] Prompt-to-small-project and uploaded-project modification.
+      Prompt normalization, implementation plan, scaffold and create
+      admission are on `origin/main` (not wired; no execute).
 - [x] Persistent project identity contract on `origin/main`
       (`friday/orchestration/coding_project_identity.py`). EMPTY /
       IDENTIFIED / BLOCKED. Exact revision only; `latest`/`HEAD`/
