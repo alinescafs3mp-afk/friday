@@ -1,6 +1,6 @@
 # Friday: canonical project backlog
 
-Updated: 2026-09-04 (live `0.208.16`; Engineer status renderer on `main`; N2 Luna slices in flight)
+Updated: 2026-09-04 (live `0.208.16`; file-album status + N2 modules on `main`)
 
 This is the project's only backlog and mutable status register. It owns the
 current production identity, execution order, acceptance gaps and owner actions.
@@ -41,8 +41,10 @@ Trusted-CA health reports `version=0.208.16`. S3 assist-controller:
 `requested_mode=assist`, `effective_mode=off`, `promotion_admitted=false`,
 `activation.reason=material_loaded_not_accepted`,
 `source_revision_loaded=true`. Do not rebase assist→assist. `origin/main` is
-ahead of live (N1 builders on `main`; Engineer Telegram status renderer uses
-the shared projection on `origin/main` and is not yet live).
+ahead of live (N1 builders and file-album status wiring on `main`; Engineer
+Telegram status renderer uses the shared projection on `origin/main` and is
+not yet live). N2 currentness policy and `WebEvidenceBundleV1` are on
+`origin/main` and are not wired into live retrieval.
 
 - Production: immutable activation `phase=clear`; backend and Telegram bridge
   active; writer target `candidate`. Retention admission remains honestly
@@ -74,11 +76,13 @@ and S6 recovery/browse paths stay live.
 The live product queue is N1–N5. The shared operation-progress contract is
 live. Production `0.208.16` renders ordinary Telegram `/chat` status through
 that projection. Engineer Telegram status rendering on `origin/main` now uses
-the same projection (not live). Files/archive/web builders remain unwired.
-N2 currentness and `WebEvidenceBundleV1` slices are in Luna worktrees. N3
-Coding Mode, N4 whole-organism journeys and N5 maintainability follow that
-order. Physical Android, P0H deletion, off-machine mirror and
-provider-credential rotation remain owner-parked.
+the same projection (not live). File-album Telegram status on `origin/main`
+now uses the DOCUMENT files projection (not live). Archive and web journeys
+still need live wiring. N2 currentness policy and `WebEvidenceBundleV1` are
+on `origin/main` and are not consumed by live retrieval. N3 Coding Mode, N4
+whole-organism journeys and N5 maintainability follow that order. Physical
+Android, P0H deletion, off-machine mirror and provider-credential rotation
+remain owner-parked.
 
 ## Operating rules
 
@@ -806,8 +810,9 @@ second execution engine.
       or ETA.
 - [ ] Migrate ordinary `/chat`, files, archive and web onto that projection
       with one status created at the start of an interactive operation.
-      Ordinary `/chat` status rendering is on the projection; file/archive/web
-      builders exist and still need live Telegram wiring.
+      Ordinary `/chat` status rendering is on the projection; file-album
+      status on `origin/main` uses the DOCUMENT files projection (not live).
+      Archive and web builders exist and still need live Telegram wiring.
 - [ ] Migrate `/engineer`: builders and carrier policy are on `main`; Telegram
       status already coalesces to one editable message and now uses the shared
       renderer on `origin/main`. Remaining: no empty archive; no ZIP for one
@@ -820,17 +825,21 @@ second execution engine.
 
 ### N2 — Deep Web Research and Automatic Knowledge-Gap Search
 
-Status: not started. Today is a strong single-query 27s/3-source (max 8)
-pipeline with keyed providers. Missing: code-owned currentness policy,
-multi-query mission, claim ledger, `WebEvidenceBundleV1`.
+Status: modules started on `origin/main`. Today is still a strong
+single-query 27s/3-source (max 8) live pipeline. Code-owned currentness
+policy and frozen `WebEvidenceBundleV1` exist and are not wired.
+Remaining: multi-query mission, provider fallback policy, consumption.
 
-- [ ] Automatic currentness / knowledge-gap policy (not every timeless
-      question). Private filenames, paths and deictics stay local.
+- [x] Automatic currentness / knowledge-gap policy module on `origin/main`
+      (`friday/orchestration/web_currentness_policy.py`). Not wired into
+      live `web_surfer` or Telegram. Private filenames, paths and deictics
+      stay local.
 - [ ] Multi-query research mission (2–8 complementary public queries) with
       source diversity and one reliable provider plus honest degraded
       fallback.
-- [ ] `WebEvidenceBundleV1` (queries, sources, claims, contradictions,
-      missing evidence, coverage) consumed by the requesting workflow.
+- [x] `WebEvidenceBundleV1` contract on `origin/main`
+      (`friday/orchestration/web_evidence_bundle.py`). Not consumed by the
+      requesting workflow yet.
 - [ ] Integrate into document, table, Engineer and later Coding journeys.
 - [ ] Private representative benchmark and body-free public summary. Do not
       claim Gemini parity without a paired scored set.
@@ -940,10 +949,11 @@ checklist elsewhere. The Ctrl+T view is a compact projection of this list.
 ### Open and implementable
 
 - [ ] N1 two-message Telegram UX: `/chat` status uses the live projection
-      in `0.208.16`; Engineer status renderer is on `main`; files/archive/web
-      still need live wiring, one final carrier, and message-count proofs
-- [ ] N2 automatic currentness policy, multi-query `WebEvidenceBundleV1`
-      and downstream consumption
+      in `0.208.16`; Engineer status renderer and file-album DOCUMENT status
+      are on `main`; archive/web still need live wiring, one final carrier,
+      and message-count proofs
+- [ ] N2 currentness policy and `WebEvidenceBundleV1` are on `main` and
+      unwired; remaining multi-query mission, provider fallback, consumption
 - [ ] N3 Coding Mode MVP behind an isolated worker
 - [ ] N4 shared operation/situation projection and mixed-organ journeys
 - [ ] N5 extract only touched seams from giant runtime modules
