@@ -1,3 +1,16 @@
+## 0.208.18 — 2026-09-04
+
+### N1 carrier packing and N2–N5 source contracts
+
+- Distinct sealed candidate for `semantic_supervisor_shadow_to_assist` after
+  live 0.208.17 `assist_to_shadow`. Lands chat one-final-carrier packing,
+  live kernel/file+web/ingest `BLOCKED_PRIVATE` consumption, N3 isolated-worker
+  plus source-archive-plan plus upload-modification admission, N4 shared
+  operation/situation views, and the N5 kernel web-consumption extract.
+  Remaining N2 citation/claim/mission/answer-gate contracts stay
+  observation-bound. SQLite remains at schema 50; exact `0.208.17` is the
+  predecessor and `0.207.90` the fallback.
+
 ## 0.208.17 — 2026-09-04
 
 ### N1 Telegram surfaces and live web provider facts
