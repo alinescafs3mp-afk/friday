@@ -110,6 +110,10 @@ class MixedJourneyRevokeV1:
     def held(self) -> bool:
         return self.state is MixedJourneyRevokeState.HELD
 
+    @property
+    def is_revoked(self) -> bool:
+        return self.state is MixedJourneyRevokeState.REVOKED
+
     def to_mapping(self) -> dict[str, Any]:
         return {
             "schema": MIXED_JOURNEY_REVOKE_SCHEMA,

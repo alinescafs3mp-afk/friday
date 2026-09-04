@@ -123,6 +123,10 @@ class MixedJourneyOrgansV1:
     def organs(self) -> tuple[tuple[str, bool], ...]:
         return self.organ_presence
 
+    @property
+    def presence(self) -> tuple[tuple[str, bool], ...]:
+        return self.organ_presence
+
     def is_present(self, organ: str | MixedJourneyOrgan) -> bool:
         key = _organ(organ)
         return dict(self.organ_presence).get(key, False)
@@ -143,6 +147,7 @@ class MixedJourneyOrgansV1:
 MixedJourneyOrganPresence = MixedJourneyOrgansV1
 MixedJourneyOrgans = MixedJourneyOrgansV1
 MixedJourneyOrgansFacts = MixedJourneyOrgansFactsV1
+MixedJourneyOrganName = MixedJourneyOrgan
 OrgansState = MixedJourneyOrgansState
 OrgansReason = MixedJourneyOrgansReason
 
@@ -187,6 +192,18 @@ def _mapping_facts(raw: Mapping[str, Any]) -> dict[str, bool | None]:
             if name in values:
                 _fail("organ", "duplicate")
             values[name] = value
+    for field in ("present_organs", "absent_organs"):
+        listed = raw.get(field)
+        if listed is None:
+            continue
+        if isinstance(listed, (str, bytes, bytearray)) or not isinstance(listed, (list, tuple)):
+            _fail(field, "sequence")
+        names = [_organ(name) for name in listed]
+        if len(set(names)) != len(names):
+            _fail(field, "duplicate")
+        expected = {name for name, present in values.items() if present is (field == "present_organs")}
+        if set(names) != expected:
+            _fail(field, "mismatch")
     return values
 
 
@@ -288,6 +305,7 @@ __all__ = [
     "MIXED_JOURNEY_ORGANS_SCHEMA",
     "ORGAN_NAMES",
     "MixedJourneyOrgan",
+    "MixedJourneyOrganName",
     "MixedJourneyOrgans",
     "MixedJourneyOrgansError",
     "MixedJourneyOrgansFacts",

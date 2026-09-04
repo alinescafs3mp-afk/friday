@@ -143,6 +143,14 @@ class MixedJourneyCoverageV1:
         return self.missing_organs
 
     @property
+    def digest_by_organ(self) -> tuple[tuple[str, str], ...]:
+        return self.summary_digests
+
+    @property
+    def summary_digest_by_organ(self) -> tuple[tuple[str, str], ...]:
+        return self.summary_digests
+
+    @property
     def complete(self) -> bool:
         return self.state is MixedJourneyCoverageState.COMPLETE
 
@@ -244,6 +252,11 @@ def build_mixed_journey_coverage(
                 missing = raw.get("missing_organs", ())
                 if not isinstance(covered, (list, tuple)) or not isinstance(missing, (list, tuple)):
                     _fail("organs", "inferred")
+                if any(
+                    type(name) is not str or name.casefold() not in ORGAN_NAMES
+                    for name in (*covered, *missing)
+                ):
+                    _fail("organ", "unknown")
                 present = set(covered) | set(missing)
                 organs = {name: name in present for name in ORGAN_NAMES}
             return _build(key, turn, organs, summaries)

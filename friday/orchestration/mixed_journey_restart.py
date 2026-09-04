@@ -183,6 +183,14 @@ class MixedJourneyRestartV1:
     def restarted_state(self) -> bool:
         return self.state is MixedJourneyRestartState.RESTARTED
 
+    @property
+    def owner_count(self) -> int:
+        return self.effect_owner_count
+
+    @property
+    def selector(self) -> str | None:
+        return self.recency_selector
+
     def to_mapping(self) -> dict[str, Any]:
         return {
             "schema": MIXED_JOURNEY_RESTART_SCHEMA,
