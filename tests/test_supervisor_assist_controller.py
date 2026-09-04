@@ -807,7 +807,7 @@ def _web_evidence(
     if status is TransientWebEvidenceStatus.SOURCED:
         sources: list[dict[str, object]] = [
             {
-                "url": "https://public.example/current",
+                "url": "https://example.org/current",
                 "title": "Public current source",
                 "text": "Текущий публичный проверенный факт.",
                 "text_length": len("Текущий публичный проверенный факт."),

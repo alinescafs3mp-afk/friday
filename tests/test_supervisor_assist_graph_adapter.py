@@ -682,7 +682,7 @@ def _web_evidence(surface: CurrentFileWebAssistSurface) -> TransientWebCompariso
             "query": query,
             "sources": [
                 {
-                    "url": "https://public.example/current",
+                    "url": "https://example.org/current",
                     "title": "Public source",
                     "text": "Current public fact.",
                     "text_length": len("Current public fact."),

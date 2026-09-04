@@ -778,7 +778,7 @@ def test_authenticated_intake_roads_record_the_person_not_the_shared_tenant(sett
         async def fetch(self, _url: str, **_kwargs: object) -> FetchResult:
             text = "Синтетическая страница для проверки автора загрузки. " * 8
             return FetchResult(
-                url="https://example.test/direct",
+                url="https://example.org/direct",
                 title="Прямая страница",
                 text=text,
                 text_length=len(text),
@@ -856,7 +856,7 @@ def test_authenticated_intake_roads_record_the_person_not_the_shared_tenant(sett
 
         by_url = client.post(
             "/api/ingest/url",
-            json={"url": "https://example.test/direct"},
+            json={"url": "https://example.org/direct"},
             headers=person,
         )
         assert by_url.status_code == 200, by_url.text
