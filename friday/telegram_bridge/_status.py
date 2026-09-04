@@ -77,7 +77,7 @@ def _chat_step_state(
 ) -> OperationStepState:
     if stage is TelegramStatusStage.COMPLETE:
         return OperationStepState.COMPLETED
-    order = []
+    order: list[str] = []
     if item_total > 0:
         order.extend(item[0] for item in _CHAT_MEDIA_STEPS)
     order.extend(item[0] for item in _CHAT_CORE_STEPS)
