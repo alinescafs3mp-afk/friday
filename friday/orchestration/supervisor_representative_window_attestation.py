@@ -17,6 +17,7 @@ from __future__ import annotations
 import hashlib
 import hmac
 import json
+import math
 import os
 import re
 import secrets
@@ -62,6 +63,7 @@ REPRESENTATIVE_WINDOW_CONSUME_RESPONSE_SCHEMA = (
 REPRESENTATIVE_WINDOW_AUTHORITY = "server_recomputed_live_production"
 REPRESENTATIVE_WINDOW_ATTESTATION_TTL_SEC = 570
 REPRESENTATIVE_WINDOW_ATTESTATION_SKEW_SEC = 30
+REPRESENTATIVE_WINDOW_RUNTIME_REFRESH_SEC = 30
 REPRESENTATIVE_WINDOW_REQUEST_KEY_PREFIX = "semantic-supervisor-representative-window:"
 
 _SHA256_RE = re.compile(r"[0-9a-f]{64}\Z")
@@ -623,6 +625,34 @@ def _representative_window_current_server_identity_for_mode(
         ),
     }
     return _validate_server_identity(identity)
+
+
+async def refresh_representative_window_runtime_admission(
+    secondary: object,
+    *,
+    absolute_deadline_monotonic: float,
+) -> bool:
+    """Demand-probe the live epoch health window before issue or consume.
+
+    Laptop-local generation does not refresh Friday's process-epoch window.
+    A stale but already-admitted epoch uses the inventory probe only; a cold
+    epoch still runs the one-shot generation canary. Identity remains
+    fail-closed when the laptop is actually down.
+    """
+
+    if (
+        isinstance(absolute_deadline_monotonic, bool)
+        or not isinstance(absolute_deadline_monotonic, int | float)
+        or not math.isfinite(float(absolute_deadline_monotonic))
+    ):
+        return False
+    refresh = getattr(secondary, "refresh_semantic_supervisor_runtime_admission", None)
+    if not callable(refresh):
+        return False
+    try:
+        return await refresh(absolute_deadline_monotonic=float(absolute_deadline_monotonic)) is True
+    except Exception:
+        return False
 
 
 def representative_window_current_server_identity(
@@ -1614,11 +1644,13 @@ __all__ = [
     "REPRESENTATIVE_WINDOW_ISSUE_REQUEST_SCHEMA",
     "REPRESENTATIVE_WINDOW_ISSUE_RESPONSE_KEYS",
     "REPRESENTATIVE_WINDOW_ISSUE_RESPONSE_SCHEMA",
+    "REPRESENTATIVE_WINDOW_RUNTIME_REFRESH_SEC",
     "REPRESENTATIVE_WINDOW_SERVER_IDENTITY_KEYS",
     "RepresentativeWindowAttestationError",
     "consume_representative_window_attestation",
     "is_accepted_representative_window_attestation",
     "issue_representative_window_attestation",
+    "refresh_representative_window_runtime_admission",
     "representative_window_canonical",
     "representative_window_current_server_identity",
     "representative_window_target_server_identity_after_restart",

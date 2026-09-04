@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import time
+
 from fastapi import APIRouter, Response
 
 from friday.admin_api._deps import (
@@ -14,9 +16,11 @@ from friday.admin_api._deps import (
 )
 from friday.orchestration.supervisor_contracts import SupervisorMode
 from friday.orchestration.supervisor_representative_window_attestation import (
+    REPRESENTATIVE_WINDOW_RUNTIME_REFRESH_SEC,
     RepresentativeWindowAttestationError,
     consume_representative_window_attestation,
     issue_representative_window_attestation,
+    refresh_representative_window_runtime_admission,
     representative_window_canonical,
     representative_window_current_server_identity,
     validate_representative_window_consume_request,
@@ -51,6 +55,17 @@ def _current_identity(request: Request, mode: SupervisorMode) -> dict[str, objec
         ) from exc
 
 
+async def _identity_after_runtime_refresh(
+    request: Request,
+    mode: SupervisorMode,
+) -> dict[str, object]:
+    await refresh_representative_window_runtime_admission(
+        getattr(_services(request), "secondary_brain", None),
+        absolute_deadline_monotonic=time.monotonic() + REPRESENTATIVE_WINDOW_RUNTIME_REFRESH_SEC,
+    )
+    return _current_identity(request, mode)
+
+
 @router.post("/semantic-supervisor-witness/issue-representative-window-attestation")
 async def issue_semantic_supervisor_representative_window(request: Request) -> Response:
     """Recompute and issue one short-lived, one-use production witness."""
@@ -65,7 +80,7 @@ async def issue_semantic_supervisor_representative_window(request: Request) -> R
             _services(request).storage,
             user_id=actor.user_id,
             request_value=body,
-            current_server_identity=_current_identity(request, mode),
+            current_server_identity=await _identity_after_runtime_refresh(request, mode),
         )
     except RepresentativeWindowAttestationError as exc:
         raise HTTPException(
@@ -100,7 +115,7 @@ async def consume_semantic_supervisor_representative_window(request: Request) ->
             _services(request).storage,
             user_id=actor.user_id,
             request_value=body,
-            current_server_identity=_current_identity(request, mode),
+            current_server_identity=await _identity_after_runtime_refresh(request, mode),
         )
     except RepresentativeWindowAttestationError as exc:
         raise HTTPException(

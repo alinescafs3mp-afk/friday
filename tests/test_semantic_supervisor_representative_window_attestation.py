@@ -40,6 +40,7 @@ from friday.orchestration.supervisor_representative_window_attestation import (
     consume_representative_window_attestation,
     is_accepted_representative_window_attestation,
     issue_representative_window_attestation,
+    refresh_representative_window_runtime_admission,
     representative_window_current_server_identity,
     representative_window_observer_runner_sha256,
     representative_window_sha256,
@@ -662,6 +663,122 @@ def test_consume_is_one_shot_bound_and_failed_attempt_rolls_back() -> None:
             current_server_identity=_restart_identity(SupervisorMode.ASSIST),
             now=NOW + 3,
         )
+
+
+@pytest.mark.asyncio
+async def test_refresh_representative_window_runtime_admission_demands_scheduler_probe() -> None:
+    calls: list[float] = []
+
+    class Secondary:
+        async def refresh_semantic_supervisor_runtime_admission(
+            self,
+            *,
+            absolute_deadline_monotonic: float,
+        ) -> bool:
+            calls.append(absolute_deadline_monotonic)
+            return True
+
+    assert (
+        await refresh_representative_window_runtime_admission(
+            Secondary(),
+            absolute_deadline_monotonic=12.5,
+        )
+        is True
+    )
+    assert calls == [12.5]
+
+
+@pytest.mark.asyncio
+async def test_refresh_representative_window_runtime_admission_is_fail_closed() -> None:
+    class Missing:
+        pass
+
+    class Broken:
+        async def refresh_semantic_supervisor_runtime_admission(
+            self,
+            *,
+            absolute_deadline_monotonic: float,
+        ) -> bool:
+            raise RuntimeError("probe failed")
+
+    class Falsey:
+        async def refresh_semantic_supervisor_runtime_admission(
+            self,
+            *,
+            absolute_deadline_monotonic: float,
+        ) -> bool:
+            return False
+
+    deadline = time.monotonic() + 1.0
+    assert (
+        await refresh_representative_window_runtime_admission(
+            Missing(),
+            absolute_deadline_monotonic=deadline,
+        )
+        is False
+    )
+    assert (
+        await refresh_representative_window_runtime_admission(
+            Broken(),
+            absolute_deadline_monotonic=deadline,
+        )
+        is False
+    )
+    assert (
+        await refresh_representative_window_runtime_admission(
+            Falsey(),
+            absolute_deadline_monotonic=deadline,
+        )
+        is False
+    )
+    assert (
+        await refresh_representative_window_runtime_admission(
+            Missing(),
+            absolute_deadline_monotonic=True,  # type: ignore[arg-type]
+        )
+        is False
+    )
+
+
+@pytest.mark.asyncio
+async def test_admin_identity_refresh_runs_before_live_identity(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from friday.admin_api import _semantic_supervisor as admin_mod
+
+    order: list[str] = []
+
+    class Secondary:
+        async def refresh_semantic_supervisor_runtime_admission(
+            self,
+            *,
+            absolute_deadline_monotonic: float,
+        ) -> bool:
+            order.append("refresh")
+            assert absolute_deadline_monotonic > time.monotonic()
+            return True
+
+    class State:
+        secondary_brain = Secondary()
+
+    class App:
+        state = State()
+
+    class Request:
+        app = App()
+
+    def fake_identity(request: object, mode: SupervisorMode) -> dict[str, object]:
+        order.append("identity")
+        assert mode is SupervisorMode.ASSIST
+        return {"requested_mode": "shadow"}
+
+    monkeypatch.setattr(admin_mod, "_current_identity", fake_identity)
+    identity = await admin_mod._identity_after_runtime_refresh(
+        Request(),  # type: ignore[arg-type]
+        SupervisorMode.ASSIST,
+    )
+    assert identity == {"requested_mode": "shadow"}
+    assert order == ["refresh", "identity"]
 
 
 def test_owner_trust_root_routes_are_exactly_registered() -> None:

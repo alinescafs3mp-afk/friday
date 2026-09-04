@@ -355,7 +355,10 @@ transition; выключенный ноутбук допустим на activate
 source/evidence/policy — нет. Уже развёрнутый sibling повторно использовать
 нельзя: `candidate.commit` обязан отличаться от live previous. Issue
 representative-window требует healthy laptop runtime; TTL attestations 570 с;
-`SOURCE_REVISION` в budget/ENV — tree SHA-256 нового кандидата.
+`SOURCE_REVISION` в budget/ENV — tree SHA-256 нового кандидата. С 0.208.6
+issue/consume сначала demand-probe-ят process-epoch окно: stale admitted
+epoch — только inventory, cold epoch — one-shot generation canary.
+Laptop-local 15s generation это окно не обновляет.
 
 Promoted journey распознаётся только при exact current-turn attachment, явном
 current-web query, dialogue mode, claimed idempotency request и разрешённых
@@ -809,6 +812,8 @@ previous и сохраняет `0.207.90/schema50` immutable fallback.
 `0.208.5/schema50` DDL не меняет, принимает exact `0.208.3/schema50` как
 previous (`0.208.4` sibling не стал live) и сохраняет `0.207.90/schema50`
 immutable fallback.
+`0.208.6/schema50` DDL не меняет, принимает exact `0.208.5/schema50` как
+previous и сохраняет `0.207.90/schema50` immutable fallback.
 
 0.206.4 использует SQLite schema 34; Obsidian-релиз 0.207.2 поднимает её до
 schema 35. Новое поле имени загрузки принадлежит
@@ -1078,7 +1083,7 @@ process-owned result. Acquire одноразовый: отказ, timeout, drift
 attestation не разрешают повторный acquire на меньшем или новом tier.
 
 Во время probe `/api/health` ещё недоступен. Ждите до 420 секунд и дополнительно
-требуйте `status=ok` и `version=0.208.5`.
+требуйте `status=ok` и `version=0.208.6`.
 
 HTTP `status=ok` при `installed_mode=legacy` означает безопасную деградацию, но
 не успешный canary. В `canary`/`v12` Sentinel не реже раза в минуту

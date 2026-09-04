@@ -1,3 +1,15 @@
+## 0.208.6 — 2026-09-04
+
+### Representative-window demand probe
+
+- Issue and consume refresh Friday's 30s process-epoch admission before
+  identity. A stale admitted epoch uses the inventory probe; a cold epoch
+  still runs the one-shot generation canary. Laptop-local 15s generation is
+  not that window. Identity stays fail-closed when the laptop is down.
+- Distinct sealed candidate for `semantic_supervisor_assist_to_shadow`.
+  SQLite remains at schema 50; exact live predecessor is `0.208.5` and
+  `0.207.90` the fallback.
+
 ## 0.208.5 — 2026-09-04
 
 ### Assist health identity on wheel-only installs
