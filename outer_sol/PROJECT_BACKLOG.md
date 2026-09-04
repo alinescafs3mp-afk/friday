@@ -89,8 +89,10 @@ citation coverage, claim support, answer admission, contradiction
 coverage, exact mission coverage, evidence grounding, source date
 coverage, claim currentness and passage-reference coverage are on
 `origin/main` and are not consumed by live retrieval.
-N3 project identity and archive extract admission are on
-`origin/main` and are not wired. N3 Coding Mode, N4
+N3 project identity, archive extract admission, bare-source
+inspection, and archive extract-plan family (catalog, relative
+plan, digest facts, project isolation, overwrite/collision) are
+on `origin/main` and are not wired. N3 Coding Mode, N4
 whole-organism journeys and N5 maintainability follow that order. Physical
 Android, P0H deletion, off-machine mirror and provider-credential rotation
 remain owner-parked.
@@ -929,7 +931,12 @@ Engineer bubblewrap is not a Coding Worker. Until an isolated worker
 exists, static inspect/edit only; do not claim safe build/test of
 untrusted uploads.
 
-- [ ] Bare-source inspection (no execute, no rebuild unless asked).
+- [x] Bare-source inspection contracts on `origin/main`
+      (`coding_source_member.py`, `coding_source_tree.py`,
+      `coding_source_inspect.py`, `coding_inspect_hazards.py`,
+      `coding_toolchain_hint.py`, `coding_inspect_report.py`).
+      EMPTY / MAPPED|INSPECTED|HINTED / BLOCKED. No execute, no
+      rebuild, no file I/O, filename-suffix hints only. Not wired.
 - [ ] Prompt-to-small-project and uploaded-project modification.
 - [x] Persistent project identity contract on `origin/main`
       (`friday/orchestration/coding_project_identity.py`). EMPTY /
@@ -943,6 +950,15 @@ untrusted uploads.
       absolute paths, symlink/hardlink, device, size, bomb ratio,
       file count, nesting and case-fold collisions fail closed. Not
       wired; no archive is opened.
+- [x] Archive extract-plan family on `origin/main`
+      (`coding_archive_member_catalog.py`,
+      `coding_archive_extract_plan.py`,
+      `coding_archive_digest_facts.py`,
+      `coding_project_isolation_admission.py`,
+      `coding_archive_overwrite_plan.py`). Catalog, relative
+      destinations, supplied SHA-256 facts, project-root
+      isolation and overwrite/collision. No archive is opened.
+      Not wired.
 - [ ] One final source archive; restart, rollback and adversarial proof.
 
 Do not prebuild a compiler catalogue. Do not weaken Engineer Mode or
@@ -1045,8 +1061,9 @@ checklist elsewhere. The Ctrl+T view is a compact projection of this list.
       passage-reference coverage are on `main`; live `_web_research`
       refuses private URLs and empty-after-outbound; remaining live
       consumption of the other contracts
-- [ ] N3 Coding Mode MVP behind an isolated worker; project identity
-      and archive extract admission are on `main` and unwired
+- [ ] N3 Coding Mode MVP behind an isolated worker; project identity,
+      extract admission, bare-source inspection and extract-plan
+      family are on `main` and unwired
 - [ ] N4 shared operation/situation projection and mixed-organ journeys
 - [ ] N5 extract only touched seams from giant runtime modules
 
