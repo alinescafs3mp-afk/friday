@@ -1,6 +1,6 @@
 # Friday: canonical project backlog
 
-Updated: 2026-09-04 (live `0.208.18`; N1 one-final-carrier live; remaining N2 observation-bound; N3 `/coding` static inspect on `origin/main` not live; isolated worker remaining; N4 mixed-journey view on `origin/main` and unwired)
+Updated: 2026-09-04 (live `0.208.18`; N1 one-final-carrier live; remaining N2 observation-bound; N3 `/coding` static inspect + mode-view on `origin/main` not live; isolated worker remaining; N4 mixed-journey store projection on `origin/main` and unwired)
 
 This is the project's only backlog and mutable status register. It owns the
 current production identity, execution order, acceptance gaps and owner actions.
@@ -106,13 +106,15 @@ invalid provider facts; `_web_search` and `_web_fetch` refuse
 `POST /api/ingest/url` consume `BLOCKED_PRIVATE`. Other N2
 contracts stay observation-bound; do not fabricate witnesses. N3
 `/coding` static inspect is on `origin/main` and is not live; execute
-claims fail closed. Isolated worker remains. Project identity, archive
-extract admission, extract-plan family, prompt-to-small-project,
-isolated-worker contracts, one-final source-archive plan,
-result-archive-pack family and upload-modification admission stay
-source-only. N4 shared
-operation/situation view and mixed-journey view contracts are on
-`origin/main` and are not wired to stores or Telegram. N5
+claims fail closed. Isolated worker remains. Coding Mode intent,
+snapshot, execute-claim, plan-gate, carrier and view contracts are on
+`origin/main` and unwired. Project identity, archive extract admission,
+extract-plan family, prompt-to-small-project, isolated-worker
+contracts, one-final source-archive plan, result-archive-pack family
+and upload-modification admission stay source-only. N4 shared
+operation/situation view, mixed-journey view and store-shaped
+projection contracts are on `origin/main` and are not wired to stores
+or Telegram. N5
 extracted the kernel web-consumption seam; maintainability follows. Physical Android, P0H deletion, off-machine
 mirror and provider-credential rotation remain owner-parked.
 
@@ -1008,6 +1010,13 @@ uploads.
       `coding_result_rollback_admission.py`,
       `coding_result_uncertainty.py`); no archive is packed or opened.
       Not wired.
+- [x] Coding Mode situation composition on `origin/main`
+      (`coding_mode_intent.py`, `coding_mode_snapshot.py`,
+      `coding_mode_execute_claim.py`, `coding_mode_plan_gate.py`,
+      `coding_mode_carrier.py`, `coding_mode_view.py`). EMPTY /
+      PROJECTED / BLOCKED from landed inspect/admission facts.
+      Untrusted execute without an admitted worker fails closed.
+      Not wired to a process worker.
 
 Do not prebuild a compiler catalogue. Do not weaken Engineer Mode or
 primary release certification to create the worker.
@@ -1015,8 +1024,9 @@ primary release certification to create the worker.
 ### N4 — Whole-Organism Coherence
 
 Status: contracts started on `origin/main`. Durable organs exist; the
-shared view is not yet derived from live stores. Primary and secondary
-must share one operation identity. New modes compose existing primitives.
+shared view and store-shaped projection are not yet derived from live
+stores. Primary and secondary must share one operation identity. New
+modes compose existing primitives.
 
 - [x] Read-only `SharedOperationViewV1` / `AgentSituationProjectionV1`
       on `origin/main` from already-supplied facts. No new execution
@@ -1027,6 +1037,15 @@ must share one operation identity. New modes compose existing primitives.
       `mixed_journey_restart.py`, `mixed_journey_view.py`). EMPTY /
       PROJECTED / BLOCKED from already-supplied facts. No store or
       Telegram mix. Not wired.
+- [x] Mixed-journey store-shaped projection on `origin/main`
+      (`mixed_journey_file_facts.py`,
+      `mixed_journey_archive_facts.py`,
+      `mixed_journey_conversation_facts.py`,
+      `mixed_journey_web_facts.py`,
+      `mixed_journey_table_facts.py`,
+      `mixed_journey_store_projection.py`). Maps already-supplied
+      organ facts into MixedJourneyViewV1. No sqlite, path, archive
+      or network I/O. Not wired to stores or Telegram.
 - [ ] Mixed journeys live: file+archive+conversation+web+table;
       Engineer+advisories; Coding+current docs; restart during
       status+execution; revoke-before-publish. Contracts exist; live
@@ -1125,13 +1144,13 @@ checklist elsewhere. The Ctrl+T view is a compact projection of this list.
       without fabricated witnesses
 - [ ] N3 Coding Mode MVP behind an isolated worker; `/coding` static
       inspect is on `main` and is not live. Isolated worker remains.
-      Project identity, extract admission, extract-plan family,
-      prompt-to-small-project, isolated-worker, source-archive plan,
-      result-archive-pack family and upload-modification admission stay
-      source-only.
-- [ ] N4 shared operation/situation and mixed-journey view contracts
-      are on `main` and unwired; live mixed-organ journeys are not
-      derived from stores
+      Coding Mode view composition, project identity, extract
+      admission, extract-plan family, prompt-to-small-project,
+      isolated-worker, source-archive plan, result-archive-pack family
+      and upload-modification admission stay source-only.
+- [ ] N4 shared operation/situation, mixed-journey view and
+      store-shaped projection contracts are on `main` and unwired;
+      live mixed-organ journeys are not derived from stores
 - [ ] N5 extract only touched seams from giant runtime modules;
       kernel web-consumption helpers live on `0.208.18` in
       `friday/execution_kernel/web_consumption.py`
