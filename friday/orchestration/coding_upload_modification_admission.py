@@ -313,9 +313,7 @@ def build_coding_upload_modification_admission(
             authenticated_turn_id,
             CodingUploadModificationAdmissionReason.INVALID_FACTS,
         )
-    extract_supplied = (
-        extract_admission is not None or extract_plan is not None or overwrite_plan is not None
-    )
+    extract_supplied = extract_admission is not None or extract_plan is not None or overwrite_plan is not None
     if extract_supplied and (
         extract_admission_result is None or extract_plan_result is None or overwrite_result is None
     ):

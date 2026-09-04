@@ -37,10 +37,13 @@ def test_private_research_sources_refuse_after_observation() -> None:
     assert refusal["sources"] == []
     assert refusal["search_failed"] is True
     assert refusal["freshness"] == "week"
-    assert _web_research_private_source_refusal(
-        {"sources": [{"url": "https://docs.python.org/3/"}], "outbound_attempted": True},
-        "needle",
-    ) is None
+    assert (
+        _web_research_private_source_refusal(
+            {"sources": [{"url": "https://docs.python.org/3/"}], "outbound_attempted": True},
+            "needle",
+        )
+        is None
+    )
 
 
 def test_empty_sources_after_outbound_are_not_completeness() -> None:

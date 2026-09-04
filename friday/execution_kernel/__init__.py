@@ -7783,9 +7783,7 @@ class ExecutionKernel:
             }
             private_refusal = _web_research_private_source_refusal(observed_report, query)
             if private_refusal is not None:
-                return _web_search_consumption_failure(
-                    query, response, error="source_fact_private"
-                )
+                return _web_search_consumption_failure(query, response, error="source_fact_private")
             selected_id = getattr(results, "selected_provider_id", None)
             if isinstance(selected_id, str) and selected_id.strip():
                 observed_report["selected_provider_id"] = selected_id
@@ -7795,14 +7793,10 @@ class ExecutionKernel:
                 observed_report["provider_used_fallback"] = (
                     getattr(results, "provider_used_fallback", False) is True
                 )
-                provider_refusal = _web_research_provider_consumption_refusal(
-                    observed_report, query
-                )
+                provider_refusal = _web_research_provider_consumption_refusal(observed_report, query)
                 if provider_refusal is not None:
                     provider_error = provider_refusal.get("error") or "provider_facts_invalid"
-                    return _web_search_consumption_failure(
-                        query, response, error=str(provider_error)
-                    )
+                    return _web_search_consumption_failure(query, response, error=str(provider_error))
         if site or include_domains or exclude_domains:
             requested_results = int(search_options["max_results"])
             returned_results = len(results)

@@ -75,15 +75,11 @@ def _extract_family(*, existing: bool = False) -> dict[str, object]:
     catalog = build_coding_archive_member_catalog("catalog:1", TURN, members)
     admission = build_coding_archive_extract_admission("extract-adm:1", TURN, members)
     plan = build_coding_archive_extract_plan("extract:1", TURN, catalog, admission)
-    existing_facts = (
-        (CodingArchiveExistingDestinationFactV1("src/main.py", True),) if existing else ()
-    )
+    existing_facts = (CodingArchiveExistingDestinationFactV1("src/main.py", True),) if existing else ()
     return {
         "extract_admission": admission,
         "extract_plan": plan,
-        "overwrite_plan": build_coding_archive_overwrite_plan(
-            "overwrite:1", TURN, plan, existing_facts
-        ),
+        "overwrite_plan": build_coding_archive_overwrite_plan("overwrite:1", TURN, plan, existing_facts),
     }
 
 
@@ -124,18 +120,14 @@ def test_recency_identity_blocks_without_exposing_project() -> None:
 
 
 def test_secret_name_in_upload_blocks_modification() -> None:
-    result = build_coding_upload_modification_admission(
-        "adm-1", TURN, **_admitted_inputs(secret_name=True)
-    )
+    result = build_coding_upload_modification_admission("adm-1", TURN, **_admitted_inputs(secret_name=True))
     assert result.admission is CodingUploadModificationAdmissionState.BLOCKED
     assert result.reason is CodingUploadModificationAdmissionReason.HAZARDS_PRESENT
     assert result.project_id is None
 
 
 def test_create_only_plan_is_not_a_modification() -> None:
-    result = build_coding_upload_modification_admission(
-        "adm-1", TURN, **_admitted_inputs(edit=False)
-    )
+    result = build_coding_upload_modification_admission("adm-1", TURN, **_admitted_inputs(edit=False))
     assert result.reason is CodingUploadModificationAdmissionReason.PLAN_HAS_NO_EDIT
     assert result.project_id is None
 
@@ -180,8 +172,6 @@ def test_mapping_roundtrip_validates() -> None:
     assert validate_coding_upload_modification_admission(result) is True
     assert validate_coding_upload_modification_admission(encoded) is True
     assert validate_coding_upload_modification_admission({**encoded, "extra": "nope"}) is False
-    blocked = build_coding_upload_modification_admission(
-        "adm-1", TURN, **_admitted_inputs(secret_name=True)
-    )
+    blocked = build_coding_upload_modification_admission("adm-1", TURN, **_admitted_inputs(secret_name=True))
     assert validate_coding_upload_modification_admission(blocked.to_mapping()) is True
     assert validate_coding_upload_modification_admission({**encoded, "project_id": None}) is False
