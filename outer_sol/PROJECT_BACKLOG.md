@@ -1,6 +1,6 @@
 # Friday: canonical project backlog
 
-Updated: 2026-09-04 (live `0.208.16`; N2 source date coverage on `main`)
+Updated: 2026-09-04 (live `0.208.16`; N2 claim currentness and passage-reference coverage on `main`)
 
 This is the project's only backlog and mutable status register. It owns the
 current production identity, execution order, acceptance gaps and owner actions.
@@ -47,8 +47,9 @@ not yet live). N2 currentness policy, `WebEvidenceBundleV1`, multi-query
 mission planner, provider fallback policy, source diversity, research
 consumption, readiness composition, citation coverage, claim support,
 answer admission, contradiction coverage, exact mission coverage,
-evidence grounding and source date coverage are on `origin/main` and
-are not wired into live retrieval.
+evidence grounding, source date coverage, claim currentness and
+passage-reference coverage are on `origin/main` and are not wired into
+live retrieval.
 
 - Production: immutable activation `phase=clear`; backend and Telegram bridge
   active; writer target `candidate`. Retention admission remains honestly
@@ -85,8 +86,9 @@ now uses the DOCUMENT files projection (not live). Archive and web journeys
 still need live wiring. N2 currentness, evidence bundle, multi-query mission
 planner, provider fallback, source diversity, consumption, readiness and
 citation coverage, claim support, answer admission, contradiction
-coverage, exact mission coverage, evidence grounding and source date
-coverage are on `origin/main` and are not consumed by live retrieval.
+coverage, exact mission coverage, evidence grounding, source date
+coverage, claim currentness and passage-reference coverage are on
+`origin/main` and are not consumed by live retrieval.
 N3 Coding Mode, N4
 whole-organism journeys and N5 maintainability follow that order. Physical
 Android, P0H deletion, off-machine mirror and provider-credential rotation
@@ -841,9 +843,10 @@ single-query 27s/3-source (max 8) live pipeline. Code-owned currentness
 policy, frozen `WebEvidenceBundleV1`, multi-query mission planner, provider
 fallback policy, source diversity, research consumption, readiness
 composition, citation coverage, claim support, answer admission,
-contradiction coverage, exact mission coverage, evidence grounding and
-source date coverage exist and are not wired. Remaining: live
-`web_surfer` / Telegram / organ consumption.
+contradiction coverage, exact mission coverage, evidence grounding,
+source date coverage, claim currentness and passage-reference coverage
+exist and are not wired. Remaining: live `web_surfer` / Telegram /
+organ consumption.
 
 - [x] Automatic currentness / knowledge-gap policy module on `origin/main`
       (`friday/orchestration/web_currentness_policy.py`). Not wired into
@@ -897,6 +900,14 @@ source date coverage exist and are not wired. Remaining: live
       (`friday/orchestration/web_source_date_coverage.py`). EMPTY / DATED /
       PARTIAL / UNDATED / BLOCKED. `retrieved_at` alone is not dating.
       Not wired.
+- [x] Claim currentness admission on `origin/main`
+      (`friday/orchestration/web_claim_currentness.py`). EMPTY / ADMITTED /
+      HOLD / BLOCKED. `SEARCH_NOT_REQUIRED` does not admit current-sensitive
+      claims. Not wired.
+- [x] Passage-reference coverage on `origin/main`
+      (`friday/orchestration/web_passage_reference_coverage.py`). EMPTY /
+      REFERENCED / PARTIAL / BARE / BLOCKED. Title, digest and `retrieved_at`
+      are not references. Not wired.
 - [ ] Integrate into document, table, Engineer and later Coding journeys.
 - [ ] Private representative benchmark and body-free public summary. Do not
       claim Gemini parity without a paired scored set.
@@ -1012,8 +1023,9 @@ checklist elsewhere. The Ctrl+T view is a compact projection of this list.
 - [ ] N2 currentness, evidence bundle, mission, provider fallback, source
       diversity, consumption, readiness, citation coverage, claim support,
       answer admission, contradiction coverage, exact mission coverage,
-      evidence grounding and source date coverage are on `main` and
-      unwired; remaining live retrieval consumption
+      evidence grounding, source date coverage, claim currentness and
+      passage-reference coverage are on `main` and unwired; remaining
+      live retrieval consumption
 - [ ] N3 Coding Mode MVP behind an isolated worker
 - [ ] N4 shared operation/situation projection and mixed-organ journeys
 - [ ] N5 extract only touched seams from giant runtime modules
