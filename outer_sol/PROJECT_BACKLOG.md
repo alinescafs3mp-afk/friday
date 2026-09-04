@@ -1,6 +1,6 @@
 # Friday: canonical project backlog
 
-Updated: 2026-09-04 (live `0.208.16`; N2 claim currentness and passage-reference coverage on `main`)
+Updated: 2026-09-04 (live `0.208.16`; N3 project identity and archive extract admission on `main`)
 
 This is the project's only backlog and mutable status register. It owns the
 current production identity, execution order, acceptance gaps and owner actions.
@@ -89,7 +89,8 @@ citation coverage, claim support, answer admission, contradiction
 coverage, exact mission coverage, evidence grounding, source date
 coverage, claim currentness and passage-reference coverage are on
 `origin/main` and are not consumed by live retrieval.
-N3 Coding Mode, N4
+N3 project identity and archive extract admission are on
+`origin/main` and are not wired. N3 Coding Mode, N4
 whole-organism journeys and N5 maintainability follow that order. Physical
 Android, P0H deletion, off-machine mirror and provider-credential rotation
 remain owner-parked.
@@ -914,17 +915,25 @@ organ consumption.
 
 ### N3 — Coding Mode
 
-Status: not started. `/coding` does not exist. Engineer bubblewrap is not a
-Coding Worker. Until an isolated worker exists, static inspect/edit only;
-do not claim safe build/test of untrusted uploads.
+Status: modules started on `origin/main`. `/coding` does not exist.
+Engineer bubblewrap is not a Coding Worker. Until an isolated worker
+exists, static inspect/edit only; do not claim safe build/test of
+untrusted uploads.
 
 - [ ] Bare-source inspection (no execute, no rebuild unless asked).
 - [ ] Prompt-to-small-project and uploaded-project modification.
-- [ ] Persistent project identity, Git or equivalent snapshots, exact
-      revision selector (never recency-only).
+- [x] Persistent project identity contract on `origin/main`
+      (`friday/orchestration/coding_project_identity.py`). EMPTY /
+      IDENTIFIED / BLOCKED. Exact revision only; `latest`/`HEAD`/
+      `newest`/`current` fail closed. Not wired to git or a worker.
 - [ ] Isolated coding worker: no host secrets, no Docker socket, no
       production database, bounded network.
-- [ ] Safe archive extract (traversal, bombs, symlink/hardlink, size).
+- [x] Safe archive extract admission on `origin/main`
+      (`friday/orchestration/coding_archive_extract_admission.py`).
+      EMPTY / ADMITTED / BLOCKED from member metadata. Traversal,
+      absolute paths, symlink/hardlink, device, size, bomb ratio,
+      file count, nesting and case-fold collisions fail closed. Not
+      wired; no archive is opened.
 - [ ] One final source archive; restart, rollback and adversarial proof.
 
 Do not prebuild a compiler catalogue. Do not weaken Engineer Mode or
@@ -1026,7 +1035,8 @@ checklist elsewhere. The Ctrl+T view is a compact projection of this list.
       evidence grounding, source date coverage, claim currentness and
       passage-reference coverage are on `main` and unwired; remaining
       live retrieval consumption
-- [ ] N3 Coding Mode MVP behind an isolated worker
+- [ ] N3 Coding Mode MVP behind an isolated worker; project identity
+      and archive extract admission are on `main` and unwired
 - [ ] N4 shared operation/situation projection and mixed-organ journeys
 - [ ] N5 extract only touched seams from giant runtime modules
 
