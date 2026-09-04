@@ -1,6 +1,6 @@
 # Friday: canonical project backlog
 
-Updated: 2026-09-04 (live `0.208.17`; remaining N2 contracts observation-bound; N1 carrier packing and N3–N5 source contracts on `origin/main`, not live)
+Updated: 2026-09-04 (live `0.208.18`; N1 one-final-carrier live; remaining N2 observation-bound; N3–N4 source contracts on `origin/main` and unwired)
 
 This is the project's only backlog and mutable status register. It owns the
 current production identity, execution order, acceptance gaps and owner actions.
@@ -32,20 +32,22 @@ Do not copy that snapshot's release claims forward.
 - Database schema: 50 in deployed production and the fallback.
 
 Golden-journey receipts stay bound to that `0.208.1` root until rebound. The
-running sealed sibling is Friday `0.208.17` at
-`426729dc6dc0dc6839eeb537d09432dcbdb551f9` (tree-file
-`217b02555026176a3970c60903259ebcc68ad086c16cd7392011b94d853d20e2`, wheel
-`f8d8375b4c4d34ad3aa13f444dd22b029bcb0eb09fe61b2753d2458aedb6716e`, journal
-`clear`, predecessor `0.208.16` /
-`706510d06ec0bd7c2b7a2898103b3cfd9cddd5ea`). Trusted-CA health reports
-`version=0.208.17`. S3: `requested_mode=shadow`, `effective_mode=shadow`,
-`promotion_admitted=false`, `activation.reason=default_off`. Do not
-extra-hop to assist without a product sibling. Next product sibling that
-changes friday sources is `shadow_to_assist`. `origin/main` is the live
-sibling. N1 Telegram surfaces (ordinary `/chat` status, Engineer status
-renderer, file-album DOCUMENT status, Engineer FILE/ARCHIVE carrier,
-restart/edit-reject/send-fence/cancel counts, observed web/archive chat
-status) are live. N2 live `_web_research` refuses private observed URLs,
+running sealed sibling is Friday `0.208.18` at
+`19d1b89cbe5ebb9763b95c97dae6d8ebb03ad669` (tree-file
+`013f76d0e502a1b03e673ef87c32118a26c9acec1df36b7b4f81348b4acda483`, wheel
+`b520a5d117106b0acb654fa8cafa18ee2775d09b81db2075a57962bedcffbac1`, journal
+`clear`, predecessor `0.208.17` /
+`426729dc6dc0dc6839eeb537d09432dcbdb551f9`). Trusted-CA health reports
+`version=0.208.18`. S3: `requested_mode=assist`, `effective_mode=off`,
+`promotion_admitted=false`,
+`activation.reason=material_loaded_not_accepted`. Advice stays off until
+a genuine eligible witness; do not fabricate traffic. Next product
+sibling that changes friday sources is `assist_to_shadow`. `origin/main`
+is the live sibling. N1 Telegram surfaces (ordinary `/chat` status,
+Engineer status renderer, file-album DOCUMENT status, Engineer
+FILE/ARCHIVE carrier, restart/edit-reject/send-fence/cancel counts,
+observed web/archive chat status) and one-final-carrier packing are
+live. N2 live `_web_research` refuses private observed URLs,
 empty-after-outbound, and invalid provider facts; `_web_search` and
 `_web_fetch` refuse `BLOCKED_PRIVATE` the same way. `search`/`research`
 observe chain names as `WebProviderId` and the kernel consumes
@@ -88,11 +90,10 @@ deployed; advice remains off until the observation-bound witness. S5 40k lease
 and S6 recovery/browse paths stay live.
 
 The live product queue is N1–N5. The shared operation-progress contract is
-live. Production `0.208.17` renders ordinary Telegram `/chat` status,
+live. Production `0.208.18` renders ordinary Telegram `/chat` status,
 Engineer status, file-album DOCUMENT status, Engineer FILE/ARCHIVE
-carrier, and observed web/archive chat status through that projection.
-N1 remaining gap is live one-final-carrier cutover (packing is on
-`origin/main`). N2 currentness, evidence bundle,
+carrier, observed web/archive chat status, and one-final-carrier packing
+through that projection. N2 currentness, evidence bundle,
 multi-query mission planner, provider fallback, source diversity,
 consumption, readiness and citation coverage, claim support, answer
 admission, contradiction coverage, exact mission coverage, evidence
@@ -824,14 +825,13 @@ stays in Owner/external and must not block N1.
 
 ### N1 — Universal Operation Progress and Two-Message UX
 
-Status: contract live on `0.208.17`. Ordinary `/chat` status, Engineer
+Status: contract live on `0.208.18`. Ordinary `/chat` status, Engineer
 Telegram status, file-album DOCUMENT status, Engineer FILE/ARCHIVE
-carrier, observed web/archive chat status after `/api/chat`, and
-restart/edit-reject/send-fence/cancel Telegram method counts are live.
-Backend wait stays CHAT and does not mint SEARCHING_SOURCES. Remaining:
-one final carrier (text / one file with caption / one deterministic
-archive). Mandatory owner contract: one user message → one editable
-Friday status → one final result carrier. Reuse
+carrier, observed web/archive chat status after `/api/chat`,
+restart/edit-reject/send-fence/cancel Telegram method counts, and one
+final carrier packing are live. Backend wait stays CHAT and does not
+mint SEARCHING_SOURCES. Mandatory owner contract: one user message →
+one editable Friday status → one final result carrier. Reuse
 `TelegramStatusMessageManager`. Do not add a second execution engine.
 
 - [x] Shared `OperationProgressProjectionV1` and code-owned Russian renderer
@@ -844,23 +844,23 @@ Friday status → one final result carrier. Reuse
       status uses the DOCUMENT files projection. After `/api/chat` returns,
       observed web sources use FORMULATING_ANSWER and generated
       archives/files use archive or DOCUMENT delivering. Backend wait
-      stays CHAT. Live on `0.208.17`.
+      stays CHAT. Live on `0.208.18`.
 - [x] Migrate `/engineer` user carrier: policy lives in
       `friday/orchestration/engineer_result_carrier.py`; Telegram publication
       sends TEXT, one ordinary FILE, or a user ARCHIVE without receipts/logs.
-      Status() diagnostic ZIP is unchanged. Live on `0.208.17`.
+      Status() diagnostic ZIP is unchanged. Live on `0.208.18`.
 - [x] Migrate `/engineer` Telegram status: coalesces to one editable
-      message and uses the shared renderer. Live on `0.208.17`.
-- [ ] One final carrier: text, one file with caption, or one deterministic
-      archive. Chat `make_file` packing (one file or one ZIP) is on
-      `origin/main` (`friday/orchestration/operation_result_carrier.py`).
-      Delivery uncertainty edits status and never duplicates. Not live.
+      message and uses the shared renderer. Live on `0.208.18`.
+- [x] One final carrier: text, one file with caption, or one deterministic
+      archive. Chat `make_file` packing (one file or one ZIP) is live on
+      `0.208.18` (`friday/orchestration/operation_result_carrier.py`).
+      Delivery uncertainty edits status and never duplicates.
 - [x] Restart, edit-reject, send-fence and cancel/timeout/`UNKNOWN` proof
-      with actual Telegram message counts. Live on `0.208.17`.
+      with actual Telegram message counts. Live on `0.208.18`.
 
 ### N2 — Deep Web Research and Automatic Knowledge-Gap Search
 
-Status: modules started on `origin/main` and live as source in `0.208.17`.
+Status: modules started on `origin/main` and live as source in `0.208.18`.
 Today is still a strong single-query 27s/3-source (max 8) live pipeline.
 Code-owned currentness policy, frozen `WebEvidenceBundleV1`, multi-query
 mission planner, provider fallback policy, source diversity, research
@@ -1086,12 +1086,14 @@ checklist elsewhere. The Ctrl+T view is a compact projection of this list.
 - [x] N0 identity reconciliation: `main` = production = `6b61987a` /
       `0.208.11`; candidate chain `0.208.2`–`0.208.10` superseded
 
+### Closed on production `0.208.18`
+
+- [x] N1 two-message Telegram UX: `/chat`, Engineer, file-album,
+      FILE/ARCHIVE carrier, observed web/archive status and one-final-carrier
+      packing live on `0.208.18`
+
 ### Open and implementable
 
-- [ ] N1 two-message Telegram UX: `/chat`, Engineer, file-album,
-      FILE/ARCHIVE carrier and observed web/archive status live on
-      `0.208.17`; remaining live one-final-carrier cutover (packing on
-      `main`)
 - [ ] N2 currentness, evidence bundle, mission, provider fallback, source
       diversity, consumption, readiness, citation coverage, claim support,
       answer admission, contradiction coverage, exact mission coverage,
@@ -1106,8 +1108,8 @@ checklist elsewhere. The Ctrl+T view is a compact projection of this list.
       upload-modification admission are on `main` and unwired
 - [ ] N4 shared operation/situation projection and mixed-organ journeys
 - [ ] N5 extract only touched seams from giant runtime modules;
-      kernel web-consumption helpers extracted from
-      `friday/execution_kernel/__init__.py`
+      kernel web-consumption helpers live on `0.208.18` in
+      `friday/execution_kernel/web_consumption.py`
 
 ### Open and blocked
 
