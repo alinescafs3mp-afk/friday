@@ -156,6 +156,16 @@ class CodingModeViewV1:
             getattr(component, "state", getattr(component, "intent", None)).value != "empty" for component in components
         ):
             raise CodingModeViewError("empty_view_has_facts")
+        if state is CodingModeViewState.PROJECTED:
+            if any(
+                getattr(component, "state", getattr(component, "intent", None)).value == "blocked"
+                for component in components
+            ):
+                raise CodingModeViewError("projected_view_has_blocked_component")
+            if self.execute_claim.claim is CodingModeExecuteClaimState.EXECUTE_CLAIMED and (
+                self.worker_admission.admission is not CodingWorkerAdmissionState.ADMITTED
+            ):
+                raise CodingModeViewError("projected_view_lacks_worker")
         if state is not CodingModeViewState.PROJECTED and reason is CodingModeViewReason.PROJECTED:
             raise CodingModeViewError("non_projected_reason_invalid")
 

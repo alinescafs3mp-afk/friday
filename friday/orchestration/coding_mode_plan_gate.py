@@ -97,6 +97,8 @@ class CodingModePlanGateV1:
             if self.admission_id is None:
                 raise CodingModePlanGateError("admitted_gate_missing_admission")
             _identifier(self.admission_id, "admission_id", 128)
+            if self.plan_id is not None:
+                _identifier(self.plan_id, "plan_id", 128)
         elif self.admission_id is not None or self.plan_id is not None:
             raise CodingModePlanGateError("non_admitted_gate_exposes_plan")
 
