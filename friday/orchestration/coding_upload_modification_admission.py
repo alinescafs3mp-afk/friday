@@ -306,29 +306,26 @@ def build_coding_upload_modification_admission(
             authenticated_turn_id,
             CodingUploadModificationAdmissionReason.INVALID_FACTS,
         )
-    required = (identity_result, inspect_result, isolation_result, plan_result)
-    if any(item is None for item in required):
+    if identity_result is None or inspect_result is None or isolation_result is None or plan_result is None:
         return _blocked(
             admission_id,
             authenticated_turn_id,
             CodingUploadModificationAdmissionReason.INVALID_FACTS,
         )
     extract_supplied = extract_admission is not None or extract_plan is not None or overwrite_plan is not None
-    if extract_supplied and (
-        extract_admission_result is None or extract_plan_result is None or overwrite_result is None
-    ):
-        return _blocked(
-            admission_id,
-            authenticated_turn_id,
-            CodingUploadModificationAdmissionReason.EXTRACT_FAMILY_INCOMPLETE,
-        )
-    turns = [
+    turns: list[str | None] = [
         identity_result.authenticated_turn_id,
         inspect_result.authenticated_turn_id,
         isolation_result.authenticated_turn_id,
         plan_result.authenticated_turn_id,
     ]
     if extract_supplied:
+        if extract_admission_result is None or extract_plan_result is None or overwrite_result is None:
+            return _blocked(
+                admission_id,
+                authenticated_turn_id,
+                CodingUploadModificationAdmissionReason.EXTRACT_FAMILY_INCOMPLETE,
+            )
         turns.extend(
             (
                 extract_admission_result.authenticated_turn_id,
@@ -393,6 +390,12 @@ def build_coding_upload_modification_admission(
             CodingUploadModificationAdmissionReason.PLAN_HAS_NO_EDIT,
         )
     if extract_supplied:
+        if extract_admission_result is None or extract_plan_result is None or overwrite_result is None:
+            return _blocked(
+                admission_id,
+                authenticated_turn_id,
+                CodingUploadModificationAdmissionReason.EXTRACT_FAMILY_INCOMPLETE,
+            )
         if extract_admission_result.admission is not CodingArchiveExtractAdmissionState.ADMITTED:
             return _blocked(
                 admission_id,

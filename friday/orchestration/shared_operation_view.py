@@ -216,6 +216,10 @@ def _component(
     identity: str,
     turn_id: str,
 ) -> object:
+    builder: Any
+    schema: str
+    cls: type[Any]
+    facts_cls: type[Any]
     if kind == "binding":
         builder = build_shared_operation_binding
         schema = SHARED_OPERATION_BINDING_SCHEMA
@@ -655,7 +659,7 @@ def build_shared_operation_view(
                         raw.get("artifacts"), kind="artifacts", identity=view_key, turn_id=turn_key
                     )
                     if any(
-                        getattr(component, "state", None).value == "blocked"
+                        getattr(getattr(component, "state", None), "value", None) == "blocked"
                         for component in (binding_value, capability_value, secondary_value, artifacts_value)
                     ):
                         return _result(
@@ -687,9 +691,8 @@ def build_shared_operation_view(
             values = _mapping_facts(raw)
             view_id = view_key
             authenticated_turn_id = turn_key
-            operation_progress, binding, sources, pending, capability, secondary, artifacts, owners, pubs = (
-                values
-            )
+            operation_progress = cast(OperationProgressProjection | Mapping[str, Any] | None, values[0])
+            binding, sources, pending, capability, secondary, artifacts, owners, pubs = values[1:]
             if "facts" in raw:
                 facts = cast(SharedOperationViewFactsV1 | Mapping[str, Any], raw["facts"])
             else:
@@ -756,8 +759,8 @@ def build_shared_operation_view(
                 publishers = facts.publishers
             elif isinstance(facts, Mapping):
                 values = _mapping_facts(facts)
+                operation_progress = cast(OperationProgressProjection | Mapping[str, Any] | None, values[0])
                 (
-                    operation_progress,
                     binding,
                     sources,
                     pending,
@@ -766,7 +769,7 @@ def build_shared_operation_view(
                     artifacts,
                     effect_owners,
                     publishers,
-                ) = values
+                ) = values[1:]
                 authorized_source_summary = sources
                 pending_work_owner = None if pending is _MISSING else pending
             else:
