@@ -276,7 +276,9 @@ def test_uncertain_delivery_edits_status_instead_of_duplicating_a_result() -> No
             elapsed_sec=30,
         )
     )
-    assert "⚠️ Доставка результата не подтверждена." in render_operation_progress(projection)
+    text = render_operation_progress(projection)
+    assert text.startswith("⚠️ Выполняю задачу")
+    assert "⚠️ Доставка результата не подтверждена." in text
 
 
 @pytest.mark.parametrize(

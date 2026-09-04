@@ -156,6 +156,9 @@ def _queue_chat_progress(
         received_bytes=state.received_bytes,
         staged_items=state.staged_items,
         staged_bytes=state.staged_bytes,
+        operation_id=state.operation_id,
+        authenticated_turn_id=state.operation_id,
+        revision=revision,
     )
     if create:
         # Mark before the network await. A stage transition that happens while

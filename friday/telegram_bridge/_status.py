@@ -10,6 +10,14 @@ from typing import Any
 
 import httpx
 
+from friday.orchestration.operation_progress import (
+    OperationMode,
+    OperationProgressProjection,
+    OperationStepState,
+    ResultDeliveryState,
+    build_operation_progress,
+    render_operation_progress,
+)
 from friday.telegram_bridge._base import LOGGER, TELEGRAM_TEXT_LIMIT, split_for_telegram
 
 _OPERATION_ID_RE = re.compile(r"[A-Za-z0-9_.:-]{1,128}")
@@ -28,14 +36,6 @@ class TelegramStatusStage(str, Enum):
     DELIVERING_RESULT = "delivering_result"
     COMPLETE = "complete"
     STOPPED = "stopped"
-
-
-_RUNNING_STAGE_LABELS = {
-    TelegramStatusStage.RECEIVING_MEDIA: "получаю вложения из Telegram",
-    TelegramStatusStage.STAGING_DOCUMENTS: "передаю вложения в ядро",
-    TelegramStatusStage.BACKEND_WAIT: "ядро обрабатывает запрос",
-    TelegramStatusStage.DELIVERING_RESULT: "отправляю готовый результат",
-}
 
 
 def _elapsed_label(elapsed_sec: float) -> str:
@@ -57,6 +57,176 @@ def _bytes_label(value: int) -> str:
     return f"{amount / (1024 * 1024):.1f} МиБ"
 
 
+_CHAT_MEDIA_STEPS = (
+    ("receiving_media", "получаю вложения из Telegram", "files"),
+    ("staging_documents", "передаю вложения в ядро", "files"),
+)
+_CHAT_CORE_STEPS = (
+    ("backend_wait", "ядро обрабатывает запрос", "none"),
+    ("delivering_result", "отправляю готовый результат", "none"),
+)
+
+
+def _chat_step_state(
+    step_id: str,
+    stage: TelegramStatusStage,
+    *,
+    item_total: int,
+    received_items: int,
+    staged_items: int,
+) -> OperationStepState:
+    if stage is TelegramStatusStage.COMPLETE:
+        return OperationStepState.COMPLETED
+    order = []
+    if item_total > 0:
+        order.extend(item[0] for item in _CHAT_MEDIA_STEPS)
+    order.extend(item[0] for item in _CHAT_CORE_STEPS)
+    current = stage.value if stage is not TelegramStatusStage.STOPPED else None
+    if current not in order:
+        current = "backend_wait" if item_total <= 0 else "receiving_media"
+        if stage is TelegramStatusStage.STOPPED:
+            if item_total > 0 and staged_items >= item_total:
+                current = "backend_wait"
+            elif item_total > 0 and received_items >= item_total:
+                current = "staging_documents"
+            elif item_total > 0:
+                current = "receiving_media"
+            else:
+                current = "backend_wait"
+    current_index = order.index(current)
+    step_index = order.index(step_id)
+    if stage is TelegramStatusStage.STOPPED:
+        if step_index < current_index:
+            return OperationStepState.COMPLETED
+        return OperationStepState.CANCELLED
+    if step_index < current_index:
+        return OperationStepState.COMPLETED
+    if step_index == current_index:
+        return OperationStepState.RUNNING
+    return OperationStepState.PENDING
+
+
+def _chat_step_payload(
+    step_id: str,
+    label: str,
+    evidence_class: str,
+    state: OperationStepState,
+    *,
+    item_total: int,
+    received_items: int,
+    staged_items: int,
+) -> dict[str, Any]:
+    completed: int | None = None
+    total: int | None = None
+    percentage: int | None = None
+    if evidence_class == "files" and item_total > 0:
+        total = item_total
+        if step_id == "receiving_media":
+            completed = min(max(0, received_items), item_total)
+        else:
+            completed = min(max(0, staged_items), item_total)
+        if state is OperationStepState.COMPLETED:
+            completed = item_total
+            percentage = 100
+        elif state is OperationStepState.PENDING:
+            completed = 0
+            percentage = 0
+        elif state is OperationStepState.RUNNING:
+            percentage = None
+        else:
+            percentage = None
+    elif state is OperationStepState.COMPLETED:
+        percentage = 100
+    elif state is OperationStepState.PENDING:
+        percentage = 0
+    return {
+        "step_id": step_id,
+        "safe_label": label,
+        "state": str(state),
+        "completed_units": completed,
+        "total_units": total,
+        "percentage": percentage,
+        "evidence_class": evidence_class,
+    }
+
+
+def build_chat_operation_progress(
+    stage: TelegramStatusStage,
+    elapsed_sec: float,
+    *,
+    item_total: int = 0,
+    received_items: int = 0,
+    received_bytes: int = 0,
+    staged_items: int = 0,
+    staged_bytes: int = 0,
+    operation_id: str = "chat:status",
+    authenticated_turn_id: str = "chat:status",
+    revision: int = 1,
+) -> OperationProgressProjection:
+    """Admit one chat-status projection from bridge-observable facts only."""
+
+    del received_bytes, staged_bytes
+    total = max(0, int(item_total))
+    received = max(0, int(received_items))
+    staged = max(0, int(staged_items))
+    catalog = tuple(_CHAT_CORE_STEPS) if total <= 0 else _CHAT_MEDIA_STEPS + _CHAT_CORE_STEPS
+    steps = [
+        _chat_step_payload(
+            step_id,
+            label,
+            evidence_class,
+            _chat_step_state(
+                step_id,
+                stage,
+                item_total=total,
+                received_items=received,
+                staged_items=staged,
+            ),
+            item_total=total,
+            received_items=received,
+            staged_items=staged,
+        )
+        for step_id, label, evidence_class in catalog
+    ]
+    terminal = stage in {TelegramStatusStage.COMPLETE, TelegramStatusStage.STOPPED}
+    running = [item["step_id"] for item in steps if item["state"] == str(OperationStepState.RUNNING)]
+    cancelled = [item["step_id"] for item in steps if item["state"] == str(OperationStepState.CANCELLED)]
+    if running:
+        active = running[0]
+    elif cancelled:
+        active = cancelled[0]
+    else:
+        active = steps[-1]["step_id"]
+    if terminal:
+        delivery = (
+            ResultDeliveryState.CONFIRMED
+            if stage is TelegramStatusStage.COMPLETE
+            else ResultDeliveryState.UNCERTAIN
+        )
+    else:
+        delivery = (
+            ResultDeliveryState.IN_FLIGHT
+            if stage is TelegramStatusStage.DELIVERING_RESULT
+            else ResultDeliveryState.NOT_STARTED
+        )
+    return build_operation_progress(
+        {
+            "operation_id": operation_id,
+            "authenticated_turn_id": authenticated_turn_id,
+            "revision": max(1, int(revision)),
+            "terminal": terminal,
+            "mode": str(OperationMode.CHAT),
+            "title": "Выполняю задачу",
+            "ordered_steps": steps,
+            "active_step_id": active,
+            "elapsed_sec": max(0, int(elapsed_sec)),
+            "hard_deadline_remaining_sec": None,
+            "result_delivery_state": str(delivery),
+            "plan_generation": 1,
+        }
+    )
+
+
 def render_chat_status(
     stage: TelegramStatusStage,
     elapsed_sec: float,
@@ -66,31 +236,26 @@ def render_chat_status(
     received_bytes: int = 0,
     staged_items: int = 0,
     staged_bytes: int = 0,
+    operation_id: str = "chat:status",
+    authenticated_turn_id: str = "chat:status",
+    revision: int = 1,
 ) -> str:
-    """Render only exact elapsed time and a stage the bridge can observe."""
+    """Render chat status through the shared operation-progress contract."""
 
-    elapsed = _elapsed_label(elapsed_sec)
-    facts: list[str] = []
-    if item_total:
-        facts.append(
-            f"Получено вложений: {max(0, received_items)} из {max(0, item_total)}, "
-            f"{_bytes_label(received_bytes)}."
+    return render_operation_progress(
+        build_chat_operation_progress(
+            stage,
+            elapsed_sec,
+            item_total=item_total,
+            received_items=received_items,
+            received_bytes=received_bytes,
+            staged_items=staged_items,
+            staged_bytes=staged_bytes,
+            operation_id=operation_id,
+            authenticated_turn_id=authenticated_turn_id,
+            revision=revision,
         )
-        if staged_items or stage in {
-            TelegramStatusStage.STAGING_DOCUMENTS,
-            TelegramStatusStage.DELIVERING_RESULT,
-            TelegramStatusStage.COMPLETE,
-        }:
-            facts.append(
-                f"Принято ядром: {max(0, staged_items)} из {max(0, item_total)}, "
-                f"{_bytes_label(staged_bytes)}."
-            )
-    suffix = "\n" + " ".join(facts) if facts else ""
-    if stage is TelegramStatusStage.COMPLETE:
-        return f"✅ Запрос завершён за {elapsed}. Результат отправлен.{suffix}"
-    if stage is TelegramStatusStage.STOPPED:
-        return f"⏹ Обработка остановлена через {elapsed}.{suffix}"
-    return f"⏳ Запрос выполняется {elapsed}.\nЭтап: {_RUNNING_STAGE_LABELS[stage]}.{suffix}"
+    )
 
 
 def render_engineer_status(update: dict[str, Any]) -> str:
@@ -485,6 +650,7 @@ class TelegramStatusMessageManager:
 __all__ = [
     "TelegramStatusMessageManager",
     "TelegramStatusStage",
+    "build_chat_operation_progress",
     "render_chat_status",
     "render_engineer_status",
 ]

@@ -70,8 +70,9 @@ continuation cannot mint a fresh exact selector. S3 assist-controller is
 deployed; advice remains off until the observation-bound witness. S5 40k lease
 and S6 recovery/browse paths stay live.
 
-The live product queue is N1–N5. First implementable slice is N1: the shared
-operation-progress contract and renderer, then two-message Telegram UX.
+The live product queue is N1–N5. The shared operation-progress contract is
+live. Candidate `0.208.15` renders ordinary Telegram `/chat` status through
+that projection. Engineer, files, archive and web journeys still follow.
 N2 deep research, N3 Coding Mode, N4 whole-organism journeys and N5
 maintainability follow that order. Physical Android, P0H deletion, off-machine
 mirror and provider-credential rotation remain owner-parked.
@@ -787,17 +788,20 @@ stays in Owner/external and must not block N1.
 
 ### N1 — Universal Operation Progress and Two-Message UX
 
-Status: contract slice in source; not yet a production UX. Mandatory owner
-contract: one user message → one editable Friday status → one final result
-carrier. Reuse `TelegramStatusMessageManager`. Do not add a second execution
-engine.
+Status: contract live; ordinary `/chat` status uses the projection in
+`0.208.15`. Remaining: Engineer, files/archive/web journeys, one final
+carrier, and Telegram message-count proofs. Mandatory owner contract: one
+user message → one editable Friday status → one final result carrier.
+Reuse `TelegramStatusMessageManager`. Do not add a second execution engine.
 
-- [ ] Shared `OperationProgressProjectionV1` and code-owned Russian renderer
+- [x] Shared `OperationProgressProjectionV1` and code-owned Russian renderer
       (`friday/orchestration/operation_progress.py`). Truthful measured
       progress only; at most one current-focus step; no fabricated percent
       or ETA.
 - [ ] Migrate ordinary `/chat`, files, archive and web onto that projection
       with one status created at the start of an interactive operation.
+      Ordinary `/chat` status rendering is on the projection; richer
+      file/archive/web plans and Engineer still remain.
 - [ ] Migrate `/engineer`: no separate progress/terminal-status flood; no
       empty archive; no ZIP for one ordinary output file; no internal
       receipts/logs in the user archive by default.
@@ -927,8 +931,8 @@ checklist elsewhere. The Ctrl+T view is a compact projection of this list.
 
 ### Open and implementable
 
-- [ ] N1 shared operation-progress contract and renderer, then two-message
-      Telegram UX for `/chat`, files, archive, web and `/engineer`
+- [ ] N1 two-message Telegram UX: `/chat` status uses the live projection
+      in `0.208.15`; files, archive, web and `/engineer` still remain
 - [ ] N2 automatic currentness policy, multi-query `WebEvidenceBundleV1`
       and downstream consumption
 - [ ] N3 Coding Mode MVP behind an isolated worker

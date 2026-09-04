@@ -1,3 +1,14 @@
+## 0.208.15 — 2026-09-04
+
+### N1 chat status through operation-progress
+
+- Ordinary Telegram `/chat` status is rendered from
+  `OperationProgressProjectionV1` and still edited through
+  `TelegramStatusMessageManager`. Running steps show measured counts or no
+  percent; completed/pending steps may show `0%`/`100%`; no ETA. SQLite
+  remains at schema 50; exact `0.208.14` is the predecessor and `0.207.90`
+  the fallback.
+
 ## 0.208.14 — 2026-09-04
 
 ### Semantic supervisor shadow to assist

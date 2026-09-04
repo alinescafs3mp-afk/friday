@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import hashlib
+import re
 from typing import Any, cast
 
 import httpx
@@ -120,7 +121,12 @@ async def test_long_turn_uses_one_revision_stream_without_fake_phase_percent_or_
     assert [item["revision"] for item in statuses] == list(range(1, len(statuses) + 1))
     assert statuses[-1]["terminal"] is True
     assert statuses[-1]["text"].startswith("✅")
-    assert all("%" not in item["text"] and "ETA" not in item["text"] for item in statuses)
+    assert all("ETA" not in item["text"] for item in statuses)
+    assert all(
+        token in {"0%", "100%"}
+        for item in statuses
+        for token in re.findall(r"\d+%", item["text"])
+    )
     assert all("javac" not in item["text"].casefold() for item in statuses)
     assert all("четырьмя минутами" not in item["text"].casefold() for item in statuses)
     assert all(speech not in item["text"] for item in statuses)
@@ -535,8 +541,9 @@ async def test_album_status_observes_download_staging_backend_and_delivery_in_or
     revisions = [item["revision"] for item in statuses]
     assert revisions == sorted(set(revisions))
     assert "private album prompt" not in joined
-    assert "Получено вложений: 2 из 2, 14 Б" in joined
-    assert "Принято ядром: 2 из 2, 14 Б" in joined
+    assert any("из 2 файлов" in item["text"] for item in statuses)
+    assert "✅ передаю вложения в ядро - 100%" in joined
+    assert "✅ ядро обрабатывает запрос - 100%" in joined
 
 
 def test_recurring_schedule_stays_strictly_below_configured_bridge_ceiling() -> None:

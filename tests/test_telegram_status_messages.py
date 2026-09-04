@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 from collections.abc import Callable
 from typing import Any
 
@@ -13,6 +14,7 @@ from friday.telegram_bridge import _UpdateInbox
 from friday.telegram_bridge._status import (
     TelegramStatusMessageManager,
     TelegramStatusStage,
+    build_chat_operation_progress,
     render_chat_status,
 )
 
@@ -352,7 +354,49 @@ def test_status_renderer_contains_only_closed_stage_and_exact_elapsed_time() -> 
     texts = [render_chat_status(stage, 75) for stage in TelegramStatusStage]
 
     assert all(prompt not in text and model_output not in text for text in texts)
-    assert all("%" not in text and "ETA" not in text for text in texts)
-    assert "1 мин 15 с" in texts[0]
-    assert "ядро обрабатывает запрос" in render_chat_status(TelegramStatusStage.BACKEND_WAIT, 75)
+    assert all("ETA" not in text for text in texts)
+    assert all(
+        token in {"0%", "100%"}
+        for text in texts
+        for token in re.findall(r"\d+%", text)
+    )
+    assert "Прошло: 1 мин 15 с" in texts[0]
+    backend = render_chat_status(TelegramStatusStage.BACKEND_WAIT, 75)
+    assert "ядро обрабатывает запрос" in backend
+    assert "63%" not in backend
     assert render_chat_status(TelegramStatusStage.COMPLETE, 75).startswith("✅")
+    assert render_chat_status(TelegramStatusStage.STOPPED, 75).startswith("⏹")
+
+
+def test_chat_status_projection_uses_measured_file_counts_without_eta() -> None:
+    projection = build_chat_operation_progress(
+        TelegramStatusStage.STAGING_DOCUMENTS,
+        42,
+        item_total=4,
+        received_items=4,
+        received_bytes=2048,
+        staged_items=1,
+        staged_bytes=512,
+        operation_id="chat:8801",
+        authenticated_turn_id="chat:8801",
+        revision=2,
+    )
+    text = render_chat_status(
+        TelegramStatusStage.STAGING_DOCUMENTS,
+        42,
+        item_total=4,
+        received_items=4,
+        staged_items=1,
+        operation_id="chat:8801",
+        authenticated_turn_id="chat:8801",
+        revision=2,
+    )
+    assert projection.active_step_id == "staging_documents"
+    assert projection.ordered_steps[0].state.value == "completed"
+    assert projection.ordered_steps[1].completed_units == 1
+    assert projection.ordered_steps[1].total_units == 4
+    assert projection.ordered_steps[1].percentage is None
+    assert "1 из 4 файлов" in text
+    assert "ETA" not in text
+    assert "63%" not in text
+    assert text.startswith("⏳ Выполняю задачу")

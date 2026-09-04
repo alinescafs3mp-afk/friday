@@ -339,6 +339,14 @@ def build_operation_progress(raw: Mapping[str, Any]) -> OperationProgressProject
 
 def _heading(projection: OperationProgressProjection) -> str:
     title = projection.title
+    if projection.terminal:
+        if any(step.state is OperationStepState.CANCELLED for step in projection.ordered_steps):
+            return f"⏹ {title}"
+        if projection.result_delivery_state is ResultDeliveryState.FAILED:
+            return f"❌ {title}"
+        if projection.result_delivery_state is ResultDeliveryState.UNCERTAIN:
+            return f"⚠️ {title}"
+        return f"✅ {title}"
     if projection.mode is OperationMode.CODING:
         return f"🛠 {title}"
     return f"⏳ {title}"
