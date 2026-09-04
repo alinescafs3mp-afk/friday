@@ -1,6 +1,6 @@
 # Friday: canonical project backlog
 
-Updated: 2026-09-04 (live `0.208.16`; N1 observed web/archive Telegram status on `main`)
+Updated: 2026-09-04 (live `0.208.16`; N1 Telegram method-count proofs and live empty-research refusal on `main`)
 
 This is the project's only backlog and mutable status register. It owns the
 current production identity, execution order, acceptance gaps and owner actions.
@@ -813,6 +813,8 @@ Ordinary `/chat` on `origin/main` now edits the existing status from observed
 `web_sources` and generated files after `/api/chat` returns; backend wait
 stays CHAT and does not mint SEARCHING_SOURCES. File-album DOCUMENT status
 and Engineer user FILE/ARCHIVE carrier are on `origin/main` (not live).
+Restart, edit-reject, send-fence, cancel and permanent-backend STOPPED
+now have Telegram `sendMessage`/`editMessageText` counts on `origin/main`.
 Remaining: live cutover.
 Mandatory owner contract: one user message → one editable Friday status →
 one final result carrier. Reuse `TelegramStatusMessageManager`. Do not add a
@@ -833,12 +835,12 @@ second execution engine.
       `friday/orchestration/engineer_result_carrier.py`; Telegram publication
       sends TEXT, one ordinary FILE, or a user ARCHIVE without receipts/logs.
       Status() diagnostic ZIP is unchanged. Not live.
-- [ ] Migrate `/engineer` Telegram status: already coalesces to one editable
+- [x] Migrate `/engineer` Telegram status: already coalesces to one editable
       message and uses the shared renderer on `origin/main` (not live).
 - [ ] One final carrier: text, one file with caption, or one deterministic
       archive. Delivery uncertainty edits status and never duplicates.
-- [ ] Restart, edit-reject, send-fence and cancel/timeout/`UNKNOWN` proof
-      with actual Telegram message counts.
+- [x] Restart, edit-reject, send-fence and cancel/timeout/`UNKNOWN` proof
+      with actual Telegram message counts on `origin/main` (not live).
 
 ### N2 — Deep Web Research and Automatic Knowledge-Gap Search
 
@@ -849,8 +851,10 @@ fallback policy, source diversity, research consumption, readiness
 composition, citation coverage, claim support, answer admission,
 contradiction coverage, exact mission coverage, evidence grounding,
 source date coverage, claim currentness and passage-reference coverage
-exist and are not wired. Remaining: live `web_surfer` / Telegram /
-organ consumption.
+exist and are not wired. Live `_web_research` refuses private observed
+URLs and empty-after-outbound (`no_admitted_sources`); empty success is
+not completeness. Remaining: consume the other landed contracts on
+`web_surfer` / Telegram / organ paths.
 
 - [x] Automatic currentness / knowledge-gap policy module on `origin/main`
       (`friday/orchestration/web_currentness_policy.py`). Not wired into
@@ -872,7 +876,9 @@ organ consumption.
       only; EMPTY / SINGLE_HOST / CONCENTRATED / DIVERSE. Not wired.
 - [x] Research consumption gate on `origin/main`
       (`friday/orchestration/web_research_consumption.py`). CONSUMABLE /
-      CONSUMABLE_DEGRADED / BLOCKED_PRIVATE / UNAVAILABLE. Not wired.
+      CONSUMABLE_DEGRADED / BLOCKED_PRIVATE / UNAVAILABLE. Live kernel
+      refuses `BLOCKED_PRIVATE` and empty-after-outbound; other states
+      are not yet consumed by the requesting workflow.
 - [x] Research readiness composition on `origin/main`
       (`friday/orchestration/web_research_readiness.py`). READY /
       READY_DEGRADED / NOT_READY from mission, diversity and consumption.
@@ -1036,8 +1042,9 @@ checklist elsewhere. The Ctrl+T view is a compact projection of this list.
       diversity, consumption, readiness, citation coverage, claim support,
       answer admission, contradiction coverage, exact mission coverage,
       evidence grounding, source date coverage, claim currentness and
-      passage-reference coverage are on `main` and unwired; remaining
-      live retrieval consumption
+      passage-reference coverage are on `main`; live `_web_research`
+      refuses private URLs and empty-after-outbound; remaining live
+      consumption of the other contracts
 - [ ] N3 Coding Mode MVP behind an isolated worker; project identity
       and archive extract admission are on `main` and unwired
 - [ ] N4 shared operation/situation projection and mixed-organ journeys
