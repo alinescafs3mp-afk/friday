@@ -8,15 +8,43 @@
     "metrics": {
       "mrr_at_10_ppm": 394841,
       "ndcg_at_10_ppm": 420633,
-      "recall_at_10": {"denominator": 24, "numerator": 12, "ppm": 500000},
-      "recall_at_20": {"denominator": 24, "numerator": 13, "ppm": 541667}
+      "recall_at_10": {
+        "denominator": 24,
+        "numerator": 12,
+        "ppm": 500000
+      },
+      "recall_at_20": {
+        "denominator": 24,
+        "numerator": 13,
+        "ppm": 541667
+      }
     },
     "per_kind_recall_at_10": {
-      "cross-script": {"denominator": 4, "numerator": 0, "ppm": 0},
-      "lexical": {"denominator": 4, "numerator": 4, "ppm": 1000000},
-      "literal": {"denominator": 5, "numerator": 5, "ppm": 1000000},
-      "paraphrase": {"denominator": 6, "numerator": 2, "ppm": 333333},
-      "synonym": {"denominator": 5, "numerator": 1, "ppm": 200000}
+      "cross-script": {
+        "denominator": 4,
+        "numerator": 0,
+        "ppm": 0
+      },
+      "lexical": {
+        "denominator": 4,
+        "numerator": 4,
+        "ppm": 1000000
+      },
+      "literal": {
+        "denominator": 5,
+        "numerator": 5,
+        "ppm": 1000000
+      },
+      "paraphrase": {
+        "denominator": 6,
+        "numerator": 2,
+        "ppm": 333333
+      },
+      "synonym": {
+        "denominator": 5,
+        "numerator": 1,
+        "ppm": 200000
+      }
     },
     "release_sha256": "f6af7de2d7e09f2abec43d3ac99c615add814487f063b489db4e2dd47b9612ee",
     "repeat_output_sha256": "4924a3cb68790f755a1fa558aded668d02ab20797d7a093694b4d15b26fae770",
@@ -41,29 +69,57 @@
     "metrics": {
       "mrr_at_10_ppm": 916667,
       "ndcg_at_10_ppm": 938488,
-      "recall_at_10": {"denominator": 24, "numerator": 24, "ppm": 1000000},
-      "recall_at_20": {"denominator": 24, "numerator": 24, "ppm": 1000000}
+      "recall_at_10": {
+        "denominator": 24,
+        "numerator": 24,
+        "ppm": 1000000
+      },
+      "recall_at_20": {
+        "denominator": 24,
+        "numerator": 24,
+        "ppm": 1000000
+      }
     },
     "per_kind_recall_at_10": {
-      "cross-script": {"denominator": 4, "numerator": 4, "ppm": 1000000},
-      "lexical": {"denominator": 4, "numerator": 4, "ppm": 1000000},
-      "literal": {"denominator": 5, "numerator": 5, "ppm": 1000000},
-      "paraphrase": {"denominator": 6, "numerator": 6, "ppm": 1000000},
-      "synonym": {"denominator": 5, "numerator": 5, "ppm": 1000000}
+      "cross-script": {
+        "denominator": 4,
+        "numerator": 4,
+        "ppm": 1000000
+      },
+      "lexical": {
+        "denominator": 4,
+        "numerator": 4,
+        "ppm": 1000000
+      },
+      "literal": {
+        "denominator": 5,
+        "numerator": 5,
+        "ppm": 1000000
+      },
+      "paraphrase": {
+        "denominator": 6,
+        "numerator": 6,
+        "ppm": 1000000
+      },
+      "synonym": {
+        "denominator": 5,
+        "numerator": 5,
+        "ppm": 1000000
+      }
     },
-    "release_sha256": "f27d426d6181f0d35c56e1ea85af1cf40d5f9b695c08d112bd084f1b20d308bf",
+    "release_sha256": "72004cf8bedb1cd43bbf53f6cb5b8ad73f67131db965b607d8fa14c2a38b5886",
     "repeat_output_sha256": "79cf8ee51edc54cbfd815b54499490ab4390f9408dae7d5e534cddd8c3f70840",
     "result_sha256": "66e943fda982457e47e06eabc6ab977936646e2cecce8d78e089a7c00cd276a8",
-    "source_commit": "fd3ccacf02fd74276baea961cced3cfb3487b9d5",
+    "source_commit": "2dede221e65fb792c4329811dd46b31aac3d42a4",
     "source_guard": {
       "instrument_sha256_end": "fd489c05b86f680b5cb29b150284add6f025099f59deb048ad1aa0bd8a2c08ec",
       "instrument_sha256_start": "fd489c05b86f680b5cb29b150284add6f025099f59deb048ad1aa0bd8a2c08ec",
-      "release_sha256_end": "f27d426d6181f0d35c56e1ea85af1cf40d5f9b695c08d112bd084f1b20d308bf",
-      "release_sha256_start": "f27d426d6181f0d35c56e1ea85af1cf40d5f9b695c08d112bd084f1b20d308bf"
+      "release_sha256_end": "72004cf8bedb1cd43bbf53f6cb5b8ad73f67131db965b607d8fa14c2a38b5886",
+      "release_sha256_start": "72004cf8bedb1cd43bbf53f6cb5b8ad73f67131db965b607d8fa14c2a38b5886"
     },
     "source_worktree_clean": true,
     "source_worktree_status_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-    "stable_envelope_sha256": "c8460a719ee1ce9a947a1c38d2afd9edaa4d3b619d758258636754993274ddf8"
+    "stable_envelope_sha256": "124120d4330753b20b59169859d0e50fc2ae7b9542bdfb170d543b8d782d91ac"
   },
   "claim": {
     "corpus": "current_code_owned_synthetic_long_form_projection",
@@ -93,10 +149,18 @@
     "embedding_backend_benchmark": {
       "case_count": 24,
       "classification": "body_free_on_demand_model_benchmark_not_archive_federation_owner_corpus_or_release_evidence",
-      "dense_recall_at_10": {"denominator": 24, "numerator": 20, "ppm": 833333},
+      "dense_recall_at_10": {
+        "denominator": 24,
+        "numerator": 20,
+        "ppm": 833333
+      },
       "document_count": 140,
       "embedding_failures": 0,
-      "lexical_recall_at_10": {"denominator": 24, "numerator": 14, "ppm": 583333},
+      "lexical_recall_at_10": {
+        "denominator": 24,
+        "numerator": 14,
+        "ppm": 583333
+      },
       "model_id": "qwen3-embedding-0.6b",
       "recall_at_10_delta_ppm": 250000
     },
