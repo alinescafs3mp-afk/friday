@@ -6,7 +6,6 @@ from friday.orchestration.coding_mode_snapshot import (
     build_coding_mode_snapshot,
 )
 
-
 SHA256 = "a" * 64
 
 

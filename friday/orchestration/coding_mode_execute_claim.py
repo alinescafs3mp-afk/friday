@@ -85,12 +85,16 @@ class CodingModeExecuteClaimV1:
         object.__setattr__(self, "reason", reason)
         object.__setattr__(self, "operation", operation)
         if claim is CodingModeExecuteClaimState.EXECUTE_CLAIMED:
-            if operation not in {
-                CodingModeExecuteOperation.BUILD,
-                CodingModeExecuteOperation.TEST,
-                CodingModeExecuteOperation.EXECUTE,
-                CodingModeExecuteOperation.RUN,
-            } or self.worker_admission_id is None:
+            if (
+                operation
+                not in {
+                    CodingModeExecuteOperation.BUILD,
+                    CodingModeExecuteOperation.TEST,
+                    CodingModeExecuteOperation.EXECUTE,
+                    CodingModeExecuteOperation.RUN,
+                }
+                or self.worker_admission_id is None
+            ):
                 raise CodingModeExecuteClaimError("execute_claim_missing_facts")
             _identifier(self.worker_admission_id, "worker_admission_id", 128)
         elif self.worker_admission_id is not None:
@@ -148,14 +152,22 @@ def _identifier(value: object, field: str, maximum: int) -> str:
 
 def _state(value: object) -> CodingModeExecuteClaimState:
     try:
-        return value if isinstance(value, CodingModeExecuteClaimState) else CodingModeExecuteClaimState(cast(str, value))
+        return (
+            value
+            if isinstance(value, CodingModeExecuteClaimState)
+            else CodingModeExecuteClaimState(cast(str, value))
+        )
     except (TypeError, ValueError) as exc:
         raise CodingModeExecuteClaimError("claim_closed") from exc
 
 
 def _reason(value: object) -> CodingModeExecuteClaimReason:
     try:
-        return value if isinstance(value, CodingModeExecuteClaimReason) else CodingModeExecuteClaimReason(cast(str, value))
+        return (
+            value
+            if isinstance(value, CodingModeExecuteClaimReason)
+            else CodingModeExecuteClaimReason(cast(str, value))
+        )
     except (TypeError, ValueError) as exc:
         raise CodingModeExecuteClaimError("reason_closed") from exc
 
@@ -265,7 +277,13 @@ def build_coding_mode_execute_claim(
     claim_key = _identifier(claim_id, "claim_id", MAX_CLAIM_ID_CHARS)
     turn_key = _identifier(authenticated_turn_id, "authenticated_turn_id", MAX_AUTHENTICATED_TURN_ID_CHARS)
     if facts is not None:
-        if intent is not None or worker_admission is not None or worker is not None or execute_requested is not None or operation != CodingModeExecuteOperation.INSPECT:
+        if (
+            intent is not None
+            or worker_admission is not None
+            or worker is not None
+            or execute_requested is not None
+            or operation != CodingModeExecuteOperation.INSPECT
+        ):
             raise CodingModeExecuteClaimError("facts_and_explicit_claim_mixed")
         if isinstance(facts, CodingModeExecuteClaimFactsV1):
             intent = facts.intent
@@ -275,54 +293,122 @@ def build_coding_mode_execute_claim(
         elif isinstance(facts, Mapping):
             allowed_facts = {"intent", "worker_admission", "worker", "operation", "execute_requested"}
             if set(facts) - allowed_facts:
-                return _result(claim_key, turn_key, CodingModeExecuteClaimState.BLOCKED, CodingModeExecuteClaimReason.INVALID_FACTS)
+                return _result(
+                    claim_key,
+                    turn_key,
+                    CodingModeExecuteClaimState.BLOCKED,
+                    CodingModeExecuteClaimReason.INVALID_FACTS,
+                )
             intent = facts.get("intent")
             worker_admission = facts.get("worker_admission", facts.get("worker"))
             operation = facts.get("operation", CodingModeExecuteOperation.INSPECT)
             execute_requested = facts.get("execute_requested")
         else:
-            return _result(claim_key, turn_key, CodingModeExecuteClaimState.BLOCKED, CodingModeExecuteClaimReason.INVALID_FACTS)
+            return _result(
+                claim_key,
+                turn_key,
+                CodingModeExecuteClaimState.BLOCKED,
+                CodingModeExecuteClaimReason.INVALID_FACTS,
+            )
     if worker is not None:
         if worker_admission is not None:
             raise CodingModeExecuteClaimError("duplicate_worker")
         worker_admission = worker
-    if intent is None and worker_admission is None and execute_requested is None and operation in {
-        CodingModeExecuteOperation.INSPECT,
-        CodingModeExecuteOperation.STATIC,
-        "inspect",
-        "static",
-    }:
-        return _result(claim_key, turn_key, CodingModeExecuteClaimState.EMPTY, CodingModeExecuteClaimReason.NO_FACTS)
+    if (
+        intent is None
+        and worker_admission is None
+        and execute_requested is None
+        and operation
+        in {
+            CodingModeExecuteOperation.INSPECT,
+            CodingModeExecuteOperation.STATIC,
+            "inspect",
+            "static",
+        }
+    ):
+        return _result(
+            claim_key, turn_key, CodingModeExecuteClaimState.EMPTY, CodingModeExecuteClaimReason.NO_FACTS
+        )
     try:
         intent_value = _intent(intent, claim_key, turn_key) if intent is not None else None
         worker_value = _worker(worker_admission) if worker_admission is not None else None
         operation_value = _operation(operation)
     except (TypeError, ValueError):
-        return _result(claim_key, turn_key, CodingModeExecuteClaimState.BLOCKED, CodingModeExecuteClaimReason.INVALID_FACTS)
+        return _result(
+            claim_key,
+            turn_key,
+            CodingModeExecuteClaimState.BLOCKED,
+            CodingModeExecuteClaimReason.INVALID_FACTS,
+        )
     if intent_value is None:
-        return _result(claim_key, turn_key, CodingModeExecuteClaimState.BLOCKED, CodingModeExecuteClaimReason.INVALID_FACTS)
+        return _result(
+            claim_key,
+            turn_key,
+            CodingModeExecuteClaimState.BLOCKED,
+            CodingModeExecuteClaimReason.INVALID_FACTS,
+        )
     if intent_value.authenticated_turn_id != turn_key:
-        return _result(claim_key, turn_key, CodingModeExecuteClaimState.BLOCKED, CodingModeExecuteClaimReason.TURN_MISMATCH)
+        return _result(
+            claim_key,
+            turn_key,
+            CodingModeExecuteClaimState.BLOCKED,
+            CodingModeExecuteClaimReason.TURN_MISMATCH,
+        )
     if intent_value.intent is CodingModeIntentState.BLOCKED:
-        return _result(claim_key, turn_key, CodingModeExecuteClaimState.BLOCKED, CodingModeExecuteClaimReason.INTENT_BLOCKED)
+        return _result(
+            claim_key,
+            turn_key,
+            CodingModeExecuteClaimState.BLOCKED,
+            CodingModeExecuteClaimReason.INTENT_BLOCKED,
+        )
     if intent_value.intent is CodingModeIntentState.EMPTY:
-        return _result(claim_key, turn_key, CodingModeExecuteClaimState.BLOCKED, CodingModeExecuteClaimReason.INTENT_EMPTY)
+        return _result(
+            claim_key,
+            turn_key,
+            CodingModeExecuteClaimState.BLOCKED,
+            CodingModeExecuteClaimReason.INTENT_EMPTY,
+        )
     if worker_value is not None and worker_value.authenticated_turn_id != turn_key:
-        return _result(claim_key, turn_key, CodingModeExecuteClaimState.BLOCKED, CodingModeExecuteClaimReason.TURN_MISMATCH)
+        return _result(
+            claim_key,
+            turn_key,
+            CodingModeExecuteClaimState.BLOCKED,
+            CodingModeExecuteClaimReason.TURN_MISMATCH,
+        )
     if worker_value is not None and worker_value.admission is CodingWorkerAdmissionState.BLOCKED:
-        return _result(claim_key, turn_key, CodingModeExecuteClaimState.BLOCKED, CodingModeExecuteClaimReason.WORKER_BLOCKED)
+        return _result(
+            claim_key,
+            turn_key,
+            CodingModeExecuteClaimState.BLOCKED,
+            CodingModeExecuteClaimReason.WORKER_BLOCKED,
+        )
     try:
-        requested = execute_requested if execute_requested is not None else operation_value not in {
-            CodingModeExecuteOperation.INSPECT,
-            CodingModeExecuteOperation.STATIC,
-        }
+        requested = (
+            execute_requested
+            if execute_requested is not None
+            else operation_value
+            not in {
+                CodingModeExecuteOperation.INSPECT,
+                CodingModeExecuteOperation.STATIC,
+            }
+        )
         if type(requested) is not bool:
             raise CodingModeExecuteClaimError("execute_requested_invalid")
     except CodingModeExecuteClaimError:
-        return _result(claim_key, turn_key, CodingModeExecuteClaimState.BLOCKED, CodingModeExecuteClaimReason.INVALID_FACTS)
+        return _result(
+            claim_key,
+            turn_key,
+            CodingModeExecuteClaimState.BLOCKED,
+            CodingModeExecuteClaimReason.INVALID_FACTS,
+        )
     if not requested:
         if operation_value not in {CodingModeExecuteOperation.INSPECT, CodingModeExecuteOperation.STATIC}:
-            return _result(claim_key, turn_key, CodingModeExecuteClaimState.BLOCKED, CodingModeExecuteClaimReason.OPERATION_INVALID)
+            return _result(
+                claim_key,
+                turn_key,
+                CodingModeExecuteClaimState.BLOCKED,
+                CodingModeExecuteClaimReason.OPERATION_INVALID,
+            )
         return _result(
             claim_key,
             turn_key,
@@ -331,11 +417,26 @@ def build_coding_mode_execute_claim(
             operation=operation_value,
         )
     if worker_value is None:
-        return _result(claim_key, turn_key, CodingModeExecuteClaimState.BLOCKED, CodingModeExecuteClaimReason.WORKER_REQUIRED)
+        return _result(
+            claim_key,
+            turn_key,
+            CodingModeExecuteClaimState.BLOCKED,
+            CodingModeExecuteClaimReason.WORKER_REQUIRED,
+        )
     if worker_value.admission is not CodingWorkerAdmissionState.ADMITTED:
-        return _result(claim_key, turn_key, CodingModeExecuteClaimState.BLOCKED, CodingModeExecuteClaimReason.WORKER_NOT_ADMITTED)
+        return _result(
+            claim_key,
+            turn_key,
+            CodingModeExecuteClaimState.BLOCKED,
+            CodingModeExecuteClaimReason.WORKER_NOT_ADMITTED,
+        )
     if operation_value in {CodingModeExecuteOperation.INSPECT, CodingModeExecuteOperation.STATIC}:
-        return _result(claim_key, turn_key, CodingModeExecuteClaimState.BLOCKED, CodingModeExecuteClaimReason.OPERATION_INVALID)
+        return _result(
+            claim_key,
+            turn_key,
+            CodingModeExecuteClaimState.BLOCKED,
+            CodingModeExecuteClaimReason.OPERATION_INVALID,
+        )
     return _result(
         claim_key,
         turn_key,

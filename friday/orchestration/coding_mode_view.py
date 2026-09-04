@@ -31,12 +31,10 @@ from friday.orchestration.coding_mode_execute_claim import (
     build_coding_mode_execute_claim,
 )
 from friday.orchestration.coding_mode_intent import (
-    CodingModeIntentState,
     CodingModeIntentV1,
     build_coding_mode_intent,
 )
 from friday.orchestration.coding_mode_plan_gate import (
-    CodingModePlanGateState,
     CodingModePlanGateV1,
     build_coding_mode_plan_gate,
 )
@@ -146,14 +144,18 @@ class CodingModeViewV1:
             CodingWorkerAdmissionV1,
             CodingProjectIdentityV1,
         )
-        if any(not isinstance(component, expected) for component, expected in zip(components, expected_types, strict=True)):
+        if any(
+            not isinstance(component, expected)
+            for component, expected in zip(components, expected_types, strict=True)
+        ):
             raise CodingModeViewError("component_type_invalid")
         for component in components:
             component.__post_init__()
         if any(component.authenticated_turn_id != self.authenticated_turn_id for component in components):
             raise CodingModeViewError("component_turn_mismatch")
         if state is CodingModeViewState.EMPTY and any(
-            getattr(component, "state", getattr(component, "intent", None)).value != "empty" for component in components
+            getattr(component, "state", getattr(component, "intent", None)).value != "empty"
+            for component in components
         ):
             raise CodingModeViewError("empty_view_has_facts")
         if state is CodingModeViewState.PROJECTED:
@@ -350,7 +352,10 @@ def _inspect(value: object, view_id: str, turn: str) -> CodingInspectReportV1:
                 inspection = CodingSourceInspectV1(
                     cast(str, inspection_raw.get("inspect_id")),
                     cast(str, inspection_raw.get("authenticated_turn_id")),
-                    cast(CodingSourceInspectState, inspection_raw.get("inspection", inspection_raw.get("state"))),
+                    cast(
+                        CodingSourceInspectState,
+                        inspection_raw.get("inspection", inspection_raw.get("state")),
+                    ),
                     cast(int, inspection_raw.get("member_count")),
                     cast(int, inspection_raw.get("file_count")),
                     cast(int, inspection_raw.get("directory_count")),
@@ -394,7 +399,9 @@ def _inspect(value: object, view_id: str, turn: str) -> CodingInspectReportV1:
                 cast(CodingInspectReportReason, value.get("reason")),
             )
         except (TypeError, ValueError):
-            return build_coding_inspect_report(f"{view_id}:inspect", turn, members=({"relative_path": "../blocked"},))
+            return build_coding_inspect_report(
+                f"{view_id}:inspect", turn, members=({"relative_path": "../blocked"},)
+            )
     return build_coding_inspect_report(
         cast(str, value.get("report_id", f"{view_id}:inspect")),
         cast(str, value.get("authenticated_turn_id", turn)),
@@ -414,7 +421,9 @@ def _worker(value: object, view_id: str, turn: str) -> CodingWorkerAdmissionV1:
     return build_coding_worker_admission(f"{view_id}:worker", turn)
 
 
-def _empty_components(view_id: str, turn: str) -> tuple[
+def _empty_components(
+    view_id: str, turn: str
+) -> tuple[
     CodingModeIntentV1,
     CodingModeSnapshotV1,
     CodingModeExecuteClaimV1,
@@ -549,7 +558,19 @@ def build_coding_mode_view(
     view_key = _identifier(view_id, "view_id", MAX_VIEW_ID_CHARS)
     turn_key = _identifier(authenticated_turn_id, "authenticated_turn_id", MAX_AUTHENTICATED_TURN_ID_CHARS)
     if facts is not None:
-        if any(item is not None for item in (intent, snapshot, execute_claim, plan_gate, carrier, inspect_report, worker_admission, project_identity)):
+        if any(
+            item is not None
+            for item in (
+                intent,
+                snapshot,
+                execute_claim,
+                plan_gate,
+                carrier,
+                inspect_report,
+                worker_admission,
+                project_identity,
+            )
+        ):
             raise CodingModeViewError("facts_and_explicit_components_mixed")
         if isinstance(facts, CodingModeViewFactsV1):
             fact_values = facts
@@ -601,7 +622,13 @@ def build_coding_mode_view(
         fact_values.project_identity,
     )
     if all(item is None for item in raw_components):
-        return _result(view_key, turn_key, CodingModeViewState.EMPTY, _empty_components(view_key, turn_key), CodingModeViewReason.NO_FACTS)
+        return _result(
+            view_key,
+            turn_key,
+            CodingModeViewState.EMPTY,
+            _empty_components(view_key, turn_key),
+            CodingModeViewReason.NO_FACTS,
+        )
     try:
         components = (
             _intent(fact_values.intent, view_key, turn_key),
@@ -614,7 +641,13 @@ def build_coding_mode_view(
             _identity(fact_values.project_identity, view_key, turn_key),
         )
     except (TypeError, ValueError):
-        return _result(view_key, turn_key, CodingModeViewState.BLOCKED, _empty_components(view_key, turn_key), CodingModeViewReason.INVALID_FACTS)
+        return _result(
+            view_key,
+            turn_key,
+            CodingModeViewState.BLOCKED,
+            _empty_components(view_key, turn_key),
+            CodingModeViewReason.INVALID_FACTS,
+        )
     if any(component.authenticated_turn_id != turn_key for component in components):
         return _result(
             view_key,
@@ -627,12 +660,25 @@ def build_coding_mode_view(
         getattr(component, "state", getattr(component, "intent", None)).value == "blocked"
         for component in components
     ):
-        return _result(view_key, turn_key, CodingModeViewState.BLOCKED, components, CodingModeViewReason.COMPONENT_BLOCKED)
+        return _result(
+            view_key,
+            turn_key,
+            CodingModeViewState.BLOCKED,
+            components,
+            CodingModeViewReason.COMPONENT_BLOCKED,
+        )
     execute_value = components[2]
     worker_value = components[6]
-    if execute_value.claim is CodingModeExecuteClaimState.EXECUTE_CLAIMED and worker_value.admission is not CodingWorkerAdmissionState.ADMITTED:
-        return _result(view_key, turn_key, CodingModeViewState.BLOCKED, components, CodingModeViewReason.WORKER_REQUIRED)
-    return _result(view_key, turn_key, CodingModeViewState.PROJECTED, components, CodingModeViewReason.PROJECTED)
+    if (
+        execute_value.claim is CodingModeExecuteClaimState.EXECUTE_CLAIMED
+        and worker_value.admission is not CodingWorkerAdmissionState.ADMITTED
+    ):
+        return _result(
+            view_key, turn_key, CodingModeViewState.BLOCKED, components, CodingModeViewReason.WORKER_REQUIRED
+        )
+    return _result(
+        view_key, turn_key, CodingModeViewState.PROJECTED, components, CodingModeViewReason.PROJECTED
+    )
 
 
 build_mode_view = build_coding_mode_view

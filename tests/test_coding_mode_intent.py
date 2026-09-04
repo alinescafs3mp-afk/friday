@@ -12,7 +12,10 @@ def test_empty_prompt_upload_inspect_and_continue_states() -> None:
     prompt = build_coding_mode_intent("intent-1", "turn-1", prompt="make a tiny app")
     assert prompt.state is CodingModeIntentState.PROMPT
     assert prompt.prompt_body == "make a tiny app"
-    assert build_coding_mode_intent("intent-1", "turn-1", upload={"name": "source.zip"}).state is CodingModeIntentState.UPLOAD
+    assert (
+        build_coding_mode_intent("intent-1", "turn-1", upload={"name": "source.zip"}).state
+        is CodingModeIntentState.UPLOAD
+    )
     assert build_coding_mode_intent("intent-1", "turn-1", inspect=True).state is CodingModeIntentState.INSPECT
     continued = build_coding_mode_intent(
         "intent-1", "turn-1", project_id="project-1", revision_selector="revision-1"

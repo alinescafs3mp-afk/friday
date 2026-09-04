@@ -18,8 +18,16 @@ def test_no_facts_are_empty() -> None:
 def test_static_inspect_projects_without_worker() -> None:
     intent = build_coding_mode_intent("intent-1", "turn-1", inspect=True)
     execute = build_coding_mode_execute_claim("claim-1", "turn-1", intent)
-    report = build_coding_inspect_report("report-1", "turn-1", members=({"path": "main.py", "size": 1, "file_kind": "file", "executable": False, "link_kind": "none"},))
-    result = build_coding_mode_view("view-1", "turn-1", intent=intent, execute_claim=execute, inspect_report=report)
+    report = build_coding_inspect_report(
+        "report-1",
+        "turn-1",
+        members=(
+            {"path": "main.py", "size": 1, "file_kind": "file", "executable": False, "link_kind": "none"},
+        ),
+    )
+    result = build_coding_mode_view(
+        "view-1", "turn-1", intent=intent, execute_claim=execute, inspect_report=report
+    )
     assert result.state is CodingModeViewState.PROJECTED
     assert result.worker_admitted is False
 

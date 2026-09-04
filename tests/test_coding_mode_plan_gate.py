@@ -18,9 +18,13 @@ def create_admission() -> object:
     return build_coding_create_admission(
         "create-1",
         turn,
-        identity=build_coding_project_identity("identity-1", turn, project_id="project-1", revision_selector="revision-1"),
+        identity=build_coding_project_identity(
+            "identity-1", turn, project_id="project-1", revision_selector="revision-1"
+        ),
         prompt={"title": "project-1", "goal": "create a project"},
-        plan=build_coding_implementation_plan("plan-1", turn, [{"step_id": "readme", "action": "create", "target_path": "README.md"}]),
+        plan=build_coding_implementation_plan(
+            "plan-1", turn, [{"step_id": "readme", "action": "create", "target_path": "README.md"}]
+        ),
         scaffold=build_coding_project_scaffold("scaffold-1", turn, ["README.md"]),
     )
 
@@ -49,7 +53,17 @@ def test_create_consumes_create_admission() -> None:
 def test_blocked_admission_and_execute_without_worker_fail_closed() -> None:
     intent = build_coding_mode_intent("intent-1", "turn-1", prompt="create project")
     blocked = build_coding_mode_plan_gate(
-        "gate-1", "turn-1", intent, create_admission={"admission_id": "bad", "authenticated_turn_id": "turn-1", "admission": "blocked", "project_id": None, "revision_selector": None, "reason": "invalid_facts"}
+        "gate-1",
+        "turn-1",
+        intent,
+        create_admission={
+            "admission_id": "bad",
+            "authenticated_turn_id": "turn-1",
+            "admission": "blocked",
+            "project_id": None,
+            "revision_selector": None,
+            "reason": "invalid_facts",
+        },
     )
     assert blocked.state is CodingModePlanGateState.BLOCKED
     execute = build_coding_mode_execute_claim("claim-1", "turn-1", intent, operation="build")
@@ -60,5 +74,7 @@ def test_blocked_admission_and_execute_without_worker_fail_closed() -> None:
 
 def test_mapping_roundtrip() -> None:
     intent = build_coding_mode_intent("intent-1", "turn-1", inspect=True)
-    result = build_coding_mode_plan_gate("gate-1", "turn-1", intent, build_coding_mode_execute_claim("claim-1", "turn-1", intent))
+    result = build_coding_mode_plan_gate(
+        "gate-1", "turn-1", intent, build_coding_mode_execute_claim("claim-1", "turn-1", intent)
+    )
     assert build_coding_mode_plan_gate(result.to_mapping()) == result

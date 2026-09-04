@@ -155,14 +155,18 @@ def _identifier(value: object, field: str, maximum: int) -> str:
 
 def _state(value: object) -> CodingModeCarrierState:
     try:
-        return value if isinstance(value, CodingModeCarrierState) else CodingModeCarrierState(cast(str, value))
+        return (
+            value if isinstance(value, CodingModeCarrierState) else CodingModeCarrierState(cast(str, value))
+        )
     except (TypeError, ValueError) as exc:
         raise CodingModeCarrierError("carrier_closed") from exc
 
 
 def _reason(value: object) -> CodingModeCarrierReason:
     try:
-        return value if isinstance(value, CodingModeCarrierReason) else CodingModeCarrierReason(cast(str, value))
+        return (
+            value if isinstance(value, CodingModeCarrierReason) else CodingModeCarrierReason(cast(str, value))
+        )
     except (TypeError, ValueError) as exc:
         raise CodingModeCarrierError("reason_closed") from exc
 
@@ -285,7 +289,15 @@ def build_coding_mode_carrier(
         if set(raw) - allowed:
             raise CodingModeCarrierError("carrier_mapping_unknown_fields")
         if {"carrier", "state", "reason"}.intersection(raw):
-            required = {"schema", "carrier_id", "authenticated_turn_id", "carrier", "plan_id", "pack_id", "reason"}
+            required = {
+                "schema",
+                "carrier_id",
+                "authenticated_turn_id",
+                "carrier",
+                "plan_id",
+                "pack_id",
+                "reason",
+            }
             if set(raw) != required or raw.get("schema") != CODING_MODE_CARRIER_SCHEMA:
                 raise CodingModeCarrierError("carrier_mapping_serialized_invalid")
             return CodingModeCarrierV1(
@@ -305,7 +317,18 @@ def build_coding_mode_carrier(
     carrier_key = _identifier(carrier_id, "carrier_id", MAX_CARRIER_ID_CHARS)
     turn_key = _identifier(authenticated_turn_id, "authenticated_turn_id", MAX_AUTHENTICATED_TURN_ID_CHARS)
     if facts is not None:
-        if any(item is not None for item in (publication, archive_plan, pack, uncertainty, plan, pack_admission, publication_admission)):
+        if any(
+            item is not None
+            for item in (
+                publication,
+                archive_plan,
+                pack,
+                uncertainty,
+                plan,
+                pack_admission,
+                publication_admission,
+            )
+        ):
             raise CodingModeCarrierError("facts_and_explicit_carrier_mixed")
         if isinstance(facts, CodingModeCarrierFactsV1):
             publication = facts.publication
@@ -323,13 +346,20 @@ def build_coding_mode_carrier(
                 "uncertainty",
             }
             if set(facts) - allowed_facts:
-                return _result(carrier_key, turn_key, CodingModeCarrierState.BLOCKED, CodingModeCarrierReason.INVALID_FACTS)
+                return _result(
+                    carrier_key,
+                    turn_key,
+                    CodingModeCarrierState.BLOCKED,
+                    CodingModeCarrierReason.INVALID_FACTS,
+                )
             publication = facts.get("publication", facts.get("publication_admission"))
             archive_plan = facts.get("archive_plan", facts.get("plan"))
             pack = facts.get("pack", facts.get("pack_admission"))
             uncertainty = facts.get("uncertainty")
         else:
-            return _result(carrier_key, turn_key, CodingModeCarrierState.BLOCKED, CodingModeCarrierReason.INVALID_FACTS)
+            return _result(
+                carrier_key, turn_key, CodingModeCarrierState.BLOCKED, CodingModeCarrierReason.INVALID_FACTS
+            )
     if publication_admission is not None:
         if publication is not None:
             raise CodingModeCarrierError("duplicate_publication")
@@ -355,7 +385,9 @@ def build_coding_mode_carrier(
             and pack_value is None
             and uncertainty_value is None
         ):
-            return _result(carrier_key, turn_key, CodingModeCarrierState.TEXT, CodingModeCarrierReason.TEXT_RESULT)
+            return _result(
+                carrier_key, turn_key, CodingModeCarrierState.TEXT, CodingModeCarrierReason.TEXT_RESULT
+            )
         if publication is None and plan_value is not None:
             publication_value = build_coding_result_publication_admission(
                 f"{carrier_key}:publication",
@@ -367,44 +399,92 @@ def build_coding_mode_carrier(
         else:
             publication_value = _publication(publication) if publication is not None else None
     except (TypeError, ValueError):
-        return _result(carrier_key, turn_key, CodingModeCarrierState.BLOCKED, CodingModeCarrierReason.INVALID_FACTS)
+        return _result(
+            carrier_key, turn_key, CodingModeCarrierState.BLOCKED, CodingModeCarrierReason.INVALID_FACTS
+        )
     if archive_plan is not None and plan_value is None:
-        return _result(carrier_key, turn_key, CodingModeCarrierState.BLOCKED, CodingModeCarrierReason.INVALID_FACTS)
+        return _result(
+            carrier_key, turn_key, CodingModeCarrierState.BLOCKED, CodingModeCarrierReason.INVALID_FACTS
+        )
     if pack is not None and pack_value is None:
-        return _result(carrier_key, turn_key, CodingModeCarrierState.BLOCKED, CodingModeCarrierReason.INVALID_FACTS)
+        return _result(
+            carrier_key, turn_key, CodingModeCarrierState.BLOCKED, CodingModeCarrierReason.INVALID_FACTS
+        )
     if uncertainty is not None and uncertainty_value is None:
-        return _result(carrier_key, turn_key, CodingModeCarrierState.BLOCKED, CodingModeCarrierReason.INVALID_FACTS)
+        return _result(
+            carrier_key, turn_key, CodingModeCarrierState.BLOCKED, CodingModeCarrierReason.INVALID_FACTS
+        )
     if publication_value is None:
-        return _result(carrier_key, turn_key, CodingModeCarrierState.BLOCKED, CodingModeCarrierReason.PUBLICATION_REQUIRED)
+        return _result(
+            carrier_key,
+            turn_key,
+            CodingModeCarrierState.BLOCKED,
+            CodingModeCarrierReason.PUBLICATION_REQUIRED,
+        )
     if publication_value.authenticated_turn_id != turn_key:
-        return _result(carrier_key, turn_key, CodingModeCarrierState.BLOCKED, CodingModeCarrierReason.TURN_MISMATCH)
+        return _result(
+            carrier_key, turn_key, CodingModeCarrierState.BLOCKED, CodingModeCarrierReason.TURN_MISMATCH
+        )
     if publication_value.admission is CodingResultPublicationAdmissionState.BLOCKED:
-        return _result(carrier_key, turn_key, CodingModeCarrierState.BLOCKED, CodingModeCarrierReason.PUBLICATION_BLOCKED)
+        return _result(
+            carrier_key, turn_key, CodingModeCarrierState.BLOCKED, CodingModeCarrierReason.PUBLICATION_BLOCKED
+        )
     if publication_value.admission is CodingResultPublicationAdmissionState.EMPTY:
-        return _result(carrier_key, turn_key, CodingModeCarrierState.BLOCKED, CodingModeCarrierReason.PUBLICATION_EMPTY)
+        return _result(
+            carrier_key, turn_key, CodingModeCarrierState.BLOCKED, CodingModeCarrierReason.PUBLICATION_EMPTY
+        )
     if plan_value is not None:
         if plan_value.authenticated_turn_id != turn_key:
-            return _result(carrier_key, turn_key, CodingModeCarrierState.BLOCKED, CodingModeCarrierReason.TURN_MISMATCH)
+            return _result(
+                carrier_key, turn_key, CodingModeCarrierState.BLOCKED, CodingModeCarrierReason.TURN_MISMATCH
+            )
         if plan_value.plan is CodingResultArchivePlanState.BLOCKED:
-            return _result(carrier_key, turn_key, CodingModeCarrierState.BLOCKED, CodingModeCarrierReason.PLAN_BLOCKED)
+            return _result(
+                carrier_key, turn_key, CodingModeCarrierState.BLOCKED, CodingModeCarrierReason.PLAN_BLOCKED
+            )
         if plan_value.plan is CodingResultArchivePlanState.EMPTY:
-            return _result(carrier_key, turn_key, CodingModeCarrierState.TEXT, CodingModeCarrierReason.TEXT_RESULT)
+            return _result(
+                carrier_key, turn_key, CodingModeCarrierState.TEXT, CodingModeCarrierReason.TEXT_RESULT
+            )
         if plan_value.plan_id != publication_value.plan_id:
-            return _result(carrier_key, turn_key, CodingModeCarrierState.BLOCKED, CodingModeCarrierReason.PLAN_MISMATCH)
+            return _result(
+                carrier_key, turn_key, CodingModeCarrierState.BLOCKED, CodingModeCarrierReason.PLAN_MISMATCH
+            )
     if pack_value is not None:
         if pack_value.authenticated_turn_id != turn_key:
-            return _result(carrier_key, turn_key, CodingModeCarrierState.BLOCKED, CodingModeCarrierReason.TURN_MISMATCH)
+            return _result(
+                carrier_key, turn_key, CodingModeCarrierState.BLOCKED, CodingModeCarrierReason.TURN_MISMATCH
+            )
         if pack_value.admission is not CodingResultArchivePackAdmissionState.ADMITTED:
-            return _result(carrier_key, turn_key, CodingModeCarrierState.BLOCKED, CodingModeCarrierReason.PACK_NOT_ADMITTED)
+            return _result(
+                carrier_key,
+                turn_key,
+                CodingModeCarrierState.BLOCKED,
+                CodingModeCarrierReason.PACK_NOT_ADMITTED,
+            )
         if pack_value.pack_id != publication_value.pack_id:
-            return _result(carrier_key, turn_key, CodingModeCarrierState.BLOCKED, CodingModeCarrierReason.PACK_MISMATCH)
+            return _result(
+                carrier_key, turn_key, CodingModeCarrierState.BLOCKED, CodingModeCarrierReason.PACK_MISMATCH
+            )
     if uncertainty_value is not None:
         if uncertainty_value.authenticated_turn_id != turn_key:
-            return _result(carrier_key, turn_key, CodingModeCarrierState.BLOCKED, CodingModeCarrierReason.TURN_MISMATCH)
+            return _result(
+                carrier_key, turn_key, CodingModeCarrierState.BLOCKED, CodingModeCarrierReason.TURN_MISMATCH
+            )
         if uncertainty_value.uncertainty is CodingResultUncertaintyState.BLOCKED:
-            return _result(carrier_key, turn_key, CodingModeCarrierState.BLOCKED, CodingModeCarrierReason.UNCERTAINTY_BLOCKED)
+            return _result(
+                carrier_key,
+                turn_key,
+                CodingModeCarrierState.BLOCKED,
+                CodingModeCarrierReason.UNCERTAINTY_BLOCKED,
+            )
         if uncertainty_value.uncertainty is not CodingResultUncertaintyState.KNOWN:
-            return _result(carrier_key, turn_key, CodingModeCarrierState.BLOCKED, CodingModeCarrierReason.UNCERTAINTY_UNKNOWN)
+            return _result(
+                carrier_key,
+                turn_key,
+                CodingModeCarrierState.BLOCKED,
+                CodingModeCarrierReason.UNCERTAINTY_UNKNOWN,
+            )
     if publication_value.carrier == "file":
         return _result(
             carrier_key,
@@ -415,7 +495,9 @@ def build_coding_mode_carrier(
         )
     if publication_value.carrier == "archive":
         if publication_value.pack_id is None:
-            return _result(carrier_key, turn_key, CodingModeCarrierState.BLOCKED, CodingModeCarrierReason.PACK_REQUIRED)
+            return _result(
+                carrier_key, turn_key, CodingModeCarrierState.BLOCKED, CodingModeCarrierReason.PACK_REQUIRED
+            )
         return _result(
             carrier_key,
             turn_key,
@@ -424,7 +506,9 @@ def build_coding_mode_carrier(
             plan_id=publication_value.plan_id,
             pack_id=publication_value.pack_id,
         )
-    return _result(carrier_key, turn_key, CodingModeCarrierState.BLOCKED, CodingModeCarrierReason.INVALID_FACTS)
+    return _result(
+        carrier_key, turn_key, CodingModeCarrierState.BLOCKED, CodingModeCarrierReason.INVALID_FACTS
+    )
 
 
 build_mode_carrier = build_coding_mode_carrier

@@ -185,14 +185,20 @@ class CodingModeSnapshotV1:
 
 def _state(value: object) -> CodingModeSnapshotState:
     try:
-        return value if isinstance(value, CodingModeSnapshotState) else CodingModeSnapshotState(cast(str, value))
+        return (
+            value if isinstance(value, CodingModeSnapshotState) else CodingModeSnapshotState(cast(str, value))
+        )
     except (TypeError, ValueError) as exc:
         raise CodingModeSnapshotError("snapshot_closed") from exc
 
 
 def _reason(value: object) -> CodingModeSnapshotReason:
     try:
-        return value if isinstance(value, CodingModeSnapshotReason) else CodingModeSnapshotReason(cast(str, value))
+        return (
+            value
+            if isinstance(value, CodingModeSnapshotReason)
+            else CodingModeSnapshotReason(cast(str, value))
+        )
     except (TypeError, ValueError) as exc:
         raise CodingModeSnapshotError("reason_closed") from exc
 
@@ -294,7 +300,9 @@ def build_coding_mode_snapshot(
     snapshot_key = _identifier(snapshot_id, "snapshot_id", MAX_SNAPSHOT_ID_CHARS)
     turn_key = _identifier(authenticated_turn_id, "authenticated_turn_id", MAX_AUTHENTICATED_TURN_ID_CHARS)
     if members is None:
-        return _result(snapshot_key, turn_key, CodingModeSnapshotState.EMPTY, CodingModeSnapshotReason.NO_MEMBERS)
+        return _result(
+            snapshot_key, turn_key, CodingModeSnapshotState.EMPTY, CodingModeSnapshotReason.NO_MEMBERS
+        )
     try:
         values = _members(members)
     except CodingModeSnapshotError as exc:
@@ -314,8 +322,16 @@ def build_coding_mode_snapshot(
             reason = CodingModeSnapshotReason.MEMBER_LIMIT
         return _result(snapshot_key, turn_key, CodingModeSnapshotState.BLOCKED, reason)
     if not values:
-        return _result(snapshot_key, turn_key, CodingModeSnapshotState.EMPTY, CodingModeSnapshotReason.NO_MEMBERS)
-    return _result(snapshot_key, turn_key, CodingModeSnapshotState.SNAPSHOT, CodingModeSnapshotReason.SNAPSHOT_BOUND, values)
+        return _result(
+            snapshot_key, turn_key, CodingModeSnapshotState.EMPTY, CodingModeSnapshotReason.NO_MEMBERS
+        )
+    return _result(
+        snapshot_key,
+        turn_key,
+        CodingModeSnapshotState.SNAPSHOT,
+        CodingModeSnapshotReason.SNAPSHOT_BOUND,
+        values,
+    )
 
 
 build_mode_snapshot = build_coding_mode_snapshot

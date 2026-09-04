@@ -155,7 +155,9 @@ def _state(value: object) -> CodingModeIntentState:
 
 def _reason(value: object) -> CodingModeIntentReason:
     try:
-        return value if isinstance(value, CodingModeIntentReason) else CodingModeIntentReason(cast(str, value))
+        return (
+            value if isinstance(value, CodingModeIntentReason) else CodingModeIntentReason(cast(str, value))
+        )
     except (TypeError, ValueError) as exc:
         raise CodingModeIntentError("reason_closed") from exc
 
@@ -294,7 +296,18 @@ def build_coding_mode_intent(
                 cast(str | None, raw.get("revision_selector")),
                 cast(CodingModeIntentReason, raw.get("reason")),
             )
-        if facts is not None or any(value is not _MISSING for value in (prompt, upload, inspect, continue_request, continuation, project_id, revision_selector)):
+        if facts is not None or any(
+            value is not _MISSING
+            for value in (
+                prompt,
+                upload,
+                inspect,
+                continue_request,
+                continuation,
+                project_id,
+                revision_selector,
+            )
+        ):
             raise CodingModeIntentError("intent_mapping_and_explicit_facts_mixed")
         intent_id = cast(str, raw.get("intent_id"))
         authenticated_turn_id = cast(str, raw.get("authenticated_turn_id"))
@@ -302,7 +315,18 @@ def build_coding_mode_intent(
     intent_key = _identifier(intent_id, "intent_id", MAX_INTENT_ID_CHARS)
     turn_key = _identifier(authenticated_turn_id, "authenticated_turn_id", MAX_AUTHENTICATED_TURN_ID_CHARS)
     try:
-        if any(value is not _MISSING for value in (prompt, upload, inspect, continue_request, continuation, project_id, revision_selector)):
+        if any(
+            value is not _MISSING
+            for value in (
+                prompt,
+                upload,
+                inspect,
+                continue_request,
+                continuation,
+                project_id,
+                revision_selector,
+            )
+        ):
             if facts is not None:
                 raise CodingModeIntentError("facts_and_explicit_intent_mixed")
             continuation_value = continuation if continuation is not _MISSING else continue_request
@@ -317,7 +341,9 @@ def build_coding_mode_intent(
         else:
             fact_values = _facts(facts)
     except (TypeError, ValueError):
-        return _result(intent_key, turn_key, CodingModeIntentState.BLOCKED, CodingModeIntentReason.INVALID_FACTS)
+        return _result(
+            intent_key, turn_key, CodingModeIntentState.BLOCKED, CodingModeIntentReason.INVALID_FACTS
+        )
 
     prompt_present = fact_values.prompt is not None
     upload_present = fact_values.upload is not None
@@ -331,12 +357,16 @@ def build_coding_mode_intent(
     if present_count == 0:
         return _result(intent_key, turn_key, CodingModeIntentState.EMPTY, CodingModeIntentReason.NO_FACTS)
     if present_count > 1:
-        return _result(intent_key, turn_key, CodingModeIntentState.BLOCKED, CodingModeIntentReason.MULTIPLE_INTENTS)
+        return _result(
+            intent_key, turn_key, CodingModeIntentState.BLOCKED, CodingModeIntentReason.MULTIPLE_INTENTS
+        )
     if prompt_present:
         try:
             prompt_value = _prompt(fact_values.prompt)
         except (TypeError, ValueError):
-            return _result(intent_key, turn_key, CodingModeIntentState.BLOCKED, CodingModeIntentReason.INVALID_PROMPT)
+            return _result(
+                intent_key, turn_key, CodingModeIntentState.BLOCKED, CodingModeIntentReason.INVALID_PROMPT
+            )
         return _result(
             intent_key,
             turn_key,
@@ -345,13 +375,23 @@ def build_coding_mode_intent(
             prompt=prompt_value,
         )
     if upload_present:
-        if fact_values.upload is False or not isinstance(fact_values.upload, (bool, Mapping, list, tuple, str)):
-            return _result(intent_key, turn_key, CodingModeIntentState.BLOCKED, CodingModeIntentReason.INVALID_UPLOAD)
-        return _result(intent_key, turn_key, CodingModeIntentState.UPLOAD, CodingModeIntentReason.UPLOAD_RECEIVED)
+        if fact_values.upload is False or not isinstance(
+            fact_values.upload, (bool, Mapping, list, tuple, str)
+        ):
+            return _result(
+                intent_key, turn_key, CodingModeIntentState.BLOCKED, CodingModeIntentReason.INVALID_UPLOAD
+            )
+        return _result(
+            intent_key, turn_key, CodingModeIntentState.UPLOAD, CodingModeIntentReason.UPLOAD_RECEIVED
+        )
     if inspect_present:
         if fact_values.inspect is not True and not isinstance(fact_values.inspect, Mapping):
-            return _result(intent_key, turn_key, CodingModeIntentState.BLOCKED, CodingModeIntentReason.INVALID_INSPECT)
-        return _result(intent_key, turn_key, CodingModeIntentState.INSPECT, CodingModeIntentReason.INSPECT_RECEIVED)
+            return _result(
+                intent_key, turn_key, CodingModeIntentState.BLOCKED, CodingModeIntentReason.INVALID_INSPECT
+            )
+        return _result(
+            intent_key, turn_key, CodingModeIntentState.INSPECT, CodingModeIntentReason.INSPECT_RECEIVED
+        )
     try:
         identity = build_coding_project_identity(
             f"{intent_key}:identity",
@@ -360,13 +400,16 @@ def build_coding_mode_intent(
             revision_selector=fact_values.revision_selector,
         )
     except (TypeError, ValueError):
-        return _result(intent_key, turn_key, CodingModeIntentState.BLOCKED, CodingModeIntentReason.INVALID_CONTINUE)
+        return _result(
+            intent_key, turn_key, CodingModeIntentState.BLOCKED, CodingModeIntentReason.INVALID_CONTINUE
+        )
     if identity.identity.value == "blocked":
         reason = (
             CodingModeIntentReason.RECENCY_REVISION_SELECTOR
             if fact_values.revision_selector is not None
             and isinstance(fact_values.revision_selector, str)
-            and fact_values.revision_selector.strip().casefold() in {"", "latest", "head", "newest", "current"}
+            and fact_values.revision_selector.strip().casefold()
+            in {"", "latest", "head", "newest", "current"}
             else CodingModeIntentReason.INVALID_CONTINUE
         )
         if identity.closed_reason.value == "missing_project_id":

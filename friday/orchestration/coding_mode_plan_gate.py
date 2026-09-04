@@ -129,6 +129,7 @@ class CodingModePlanGateV1:
             "reason": self.reason.value,
         }
 
+
 @dataclass(frozen=True, slots=True)
 class CodingModePlanGateFactsV1:
     """Frozen inputs for one plan-selection gate."""
@@ -154,14 +155,20 @@ def _identifier(value: object, field: str, maximum: int) -> str:
 
 def _state(value: object) -> CodingModePlanGateState:
     try:
-        return value if isinstance(value, CodingModePlanGateState) else CodingModePlanGateState(cast(str, value))
+        return (
+            value if isinstance(value, CodingModePlanGateState) else CodingModePlanGateState(cast(str, value))
+        )
     except (TypeError, ValueError) as exc:
         raise CodingModePlanGateError("gate_closed") from exc
 
 
 def _reason(value: object) -> CodingModePlanGateReason:
     try:
-        return value if isinstance(value, CodingModePlanGateReason) else CodingModePlanGateReason(cast(str, value))
+        return (
+            value
+            if isinstance(value, CodingModePlanGateReason)
+            else CodingModePlanGateReason(cast(str, value))
+        )
     except (TypeError, ValueError) as exc:
         raise CodingModePlanGateError("reason_closed") from exc
 
@@ -304,7 +311,15 @@ def build_coding_mode_plan_gate(
         if set(raw) - allowed:
             raise CodingModePlanGateError("gate_mapping_unknown_fields")
         if {"gate", "state", "reason"}.intersection(raw):
-            required = {"schema", "gate_id", "authenticated_turn_id", "gate", "admission_id", "plan_id", "reason"}
+            required = {
+                "schema",
+                "gate_id",
+                "authenticated_turn_id",
+                "gate",
+                "admission_id",
+                "plan_id",
+                "reason",
+            }
             if set(raw) != required or raw.get("schema") != CODING_MODE_PLAN_GATE_SCHEMA:
                 raise CodingModePlanGateError("gate_mapping_serialized_invalid")
             return CodingModePlanGateV1(
@@ -360,7 +375,12 @@ def build_coding_mode_plan_gate(
                 "worker_admission",
             }
             if set(facts) - allowed_facts:
-                return _result(gate_key, turn_key, CodingModePlanGateState.BLOCKED, CodingModePlanGateReason.INVALID_FACTS)
+                return _result(
+                    gate_key,
+                    turn_key,
+                    CodingModePlanGateState.BLOCKED,
+                    CodingModePlanGateReason.INVALID_FACTS,
+                )
             intent = facts.get("intent")
             execute_claim = facts.get("execute_claim")
             create_admission = facts.get("create_admission", facts.get("create"))
@@ -370,7 +390,9 @@ def build_coding_mode_plan_gate(
             )
             worker_admission = facts.get("worker_admission")
         else:
-            return _result(gate_key, turn_key, CodingModePlanGateState.BLOCKED, CodingModePlanGateReason.INVALID_FACTS)
+            return _result(
+                gate_key, turn_key, CodingModePlanGateState.BLOCKED, CodingModePlanGateReason.INVALID_FACTS
+            )
     if create is not None:
         if create_admission is not None:
             raise CodingModePlanGateError("duplicate_create_admission")
@@ -379,49 +401,99 @@ def build_coding_mode_plan_gate(
         if modification_admission is not None:
             raise CodingModePlanGateError("duplicate_modify_admission")
         modification_admission = modify if modify is not None else upload_modification_admission
-    if all(item is None for item in (intent, execute_claim, create_admission, modification_admission, worker_admission)):
+    if all(
+        item is None
+        for item in (intent, execute_claim, create_admission, modification_admission, worker_admission)
+    ):
         return _result(gate_key, turn_key, CodingModePlanGateState.EMPTY, CodingModePlanGateReason.NO_FACTS)
     try:
         intent_value = _intent(intent, gate_key, turn_key) if intent is not None else None
         execute_value = _execute(execute_claim, gate_key, turn_key) if execute_claim is not None else None
         create_value = _create(create_admission, gate_key, turn_key) if create_admission is not None else None
-        modify_value = _modify(modification_admission, gate_key, turn_key) if modification_admission is not None else None
+        modify_value = (
+            _modify(modification_admission, gate_key, turn_key)
+            if modification_admission is not None
+            else None
+        )
         worker_value = _worker(worker_admission) if worker_admission is not None else None
     except (TypeError, ValueError):
-        return _result(gate_key, turn_key, CodingModePlanGateState.BLOCKED, CodingModePlanGateReason.INVALID_FACTS)
-    components = tuple(item for item in (intent_value, execute_value, create_value, modify_value, worker_value) if item is not None)
+        return _result(
+            gate_key, turn_key, CodingModePlanGateState.BLOCKED, CodingModePlanGateReason.INVALID_FACTS
+        )
+    components = tuple(
+        item
+        for item in (intent_value, execute_value, create_value, modify_value, worker_value)
+        if item is not None
+    )
     if intent_value is None:
-        return _result(gate_key, turn_key, CodingModePlanGateState.BLOCKED, CodingModePlanGateReason.INVALID_FACTS)
+        return _result(
+            gate_key, turn_key, CodingModePlanGateState.BLOCKED, CodingModePlanGateReason.INVALID_FACTS
+        )
     if any(getattr(item, "authenticated_turn_id", turn_key) != turn_key for item in components):
-        return _result(gate_key, turn_key, CodingModePlanGateState.BLOCKED, CodingModePlanGateReason.TURN_MISMATCH)
+        return _result(
+            gate_key, turn_key, CodingModePlanGateState.BLOCKED, CodingModePlanGateReason.TURN_MISMATCH
+        )
     if any(
         getattr(item, "intent", getattr(item, "claim", getattr(item, "admission", None))).value == "blocked"
         for item in components
         if hasattr(getattr(item, "intent", getattr(item, "claim", getattr(item, "admission", None))), "value")
     ):
         if execute_value is not None and execute_value.claim is CodingModeExecuteClaimState.BLOCKED:
-            return _result(gate_key, turn_key, CodingModePlanGateState.BLOCKED, CodingModePlanGateReason.EXECUTE_CLAIM_BLOCKED)
-        return _result(gate_key, turn_key, CodingModePlanGateState.BLOCKED, CodingModePlanGateReason.ADMISSION_BLOCKED)
+            return _result(
+                gate_key,
+                turn_key,
+                CodingModePlanGateState.BLOCKED,
+                CodingModePlanGateReason.EXECUTE_CLAIM_BLOCKED,
+            )
+        return _result(
+            gate_key, turn_key, CodingModePlanGateState.BLOCKED, CodingModePlanGateReason.ADMISSION_BLOCKED
+        )
     if intent_value.intent is CodingModeIntentState.BLOCKED:
-        return _result(gate_key, turn_key, CodingModePlanGateState.BLOCKED, CodingModePlanGateReason.INTENT_BLOCKED)
+        return _result(
+            gate_key, turn_key, CodingModePlanGateState.BLOCKED, CodingModePlanGateReason.INTENT_BLOCKED
+        )
     if intent_value.intent is CodingModeIntentState.EMPTY:
-        return _result(gate_key, turn_key, CodingModePlanGateState.BLOCKED, CodingModePlanGateReason.INTENT_EMPTY)
+        return _result(
+            gate_key, turn_key, CodingModePlanGateState.BLOCKED, CodingModePlanGateReason.INTENT_EMPTY
+        )
     if execute_value is not None and execute_value.claim is CodingModeExecuteClaimState.BLOCKED:
-        return _result(gate_key, turn_key, CodingModePlanGateState.BLOCKED, CodingModePlanGateReason.EXECUTE_CLAIM_BLOCKED)
+        return _result(
+            gate_key,
+            turn_key,
+            CodingModePlanGateState.BLOCKED,
+            CodingModePlanGateReason.EXECUTE_CLAIM_BLOCKED,
+        )
     if worker_value is not None and worker_value.admission is CodingWorkerAdmissionState.BLOCKED:
-        return _result(gate_key, turn_key, CodingModePlanGateState.BLOCKED, CodingModePlanGateReason.ADMISSION_BLOCKED)
+        return _result(
+            gate_key, turn_key, CodingModePlanGateState.BLOCKED, CodingModePlanGateReason.ADMISSION_BLOCKED
+        )
     if intent_value.intent is CodingModeIntentState.INSPECT:
-        return _result(gate_key, turn_key, CodingModePlanGateState.INSPECT_ONLY, CodingModePlanGateReason.INSPECT_ONLY)
+        return _result(
+            gate_key, turn_key, CodingModePlanGateState.INSPECT_ONLY, CodingModePlanGateReason.INSPECT_ONLY
+        )
     if intent_value.intent is CodingModeIntentState.PROMPT:
         if create_value is None:
-            return _result(gate_key, turn_key, CodingModePlanGateState.BLOCKED, CodingModePlanGateReason.CREATE_REQUIRED)
+            return _result(
+                gate_key, turn_key, CodingModePlanGateState.BLOCKED, CodingModePlanGateReason.CREATE_REQUIRED
+            )
         if create_value.admission is not CodingCreateAdmissionState.ADMITTED:
-            reason = CodingModePlanGateReason.ADMISSION_EMPTY if create_value.admission is CodingCreateAdmissionState.EMPTY else CodingModePlanGateReason.ADMISSION_NOT_ADMITTED
+            reason = (
+                CodingModePlanGateReason.ADMISSION_EMPTY
+                if create_value.admission is CodingCreateAdmissionState.EMPTY
+                else CodingModePlanGateReason.ADMISSION_NOT_ADMITTED
+            )
             return _result(gate_key, turn_key, CodingModePlanGateState.BLOCKED, reason)
-        if execute_value is not None and execute_value.claim is CodingModeExecuteClaimState.EXECUTE_CLAIMED and (
-            worker_value is None or worker_value.admission is not CodingWorkerAdmissionState.ADMITTED
+        if (
+            execute_value is not None
+            and execute_value.claim is CodingModeExecuteClaimState.EXECUTE_CLAIMED
+            and (worker_value is None or worker_value.admission is not CodingWorkerAdmissionState.ADMITTED)
         ):
-            return _result(gate_key, turn_key, CodingModePlanGateState.BLOCKED, CodingModePlanGateReason.WORKER_NOT_ADMITTED)
+            return _result(
+                gate_key,
+                turn_key,
+                CodingModePlanGateState.BLOCKED,
+                CodingModePlanGateReason.WORKER_NOT_ADMITTED,
+            )
         return _result(
             gate_key,
             turn_key,
@@ -430,14 +502,24 @@ def build_coding_mode_plan_gate(
             admission_id=create_value.admission_id,
         )
     if modify_value is None:
-        return _result(gate_key, turn_key, CodingModePlanGateState.BLOCKED, CodingModePlanGateReason.MODIFY_REQUIRED)
+        return _result(
+            gate_key, turn_key, CodingModePlanGateState.BLOCKED, CodingModePlanGateReason.MODIFY_REQUIRED
+        )
     if modify_value.admission is not CodingUploadModificationAdmissionState.ADMITTED:
-        reason = CodingModePlanGateReason.ADMISSION_EMPTY if modify_value.admission is CodingUploadModificationAdmissionState.EMPTY else CodingModePlanGateReason.ADMISSION_NOT_ADMITTED
+        reason = (
+            CodingModePlanGateReason.ADMISSION_EMPTY
+            if modify_value.admission is CodingUploadModificationAdmissionState.EMPTY
+            else CodingModePlanGateReason.ADMISSION_NOT_ADMITTED
+        )
         return _result(gate_key, turn_key, CodingModePlanGateState.BLOCKED, reason)
-    if execute_value is not None and execute_value.claim is CodingModeExecuteClaimState.EXECUTE_CLAIMED and (
-        worker_value is None or worker_value.admission is not CodingWorkerAdmissionState.ADMITTED
+    if (
+        execute_value is not None
+        and execute_value.claim is CodingModeExecuteClaimState.EXECUTE_CLAIMED
+        and (worker_value is None or worker_value.admission is not CodingWorkerAdmissionState.ADMITTED)
     ):
-        return _result(gate_key, turn_key, CodingModePlanGateState.BLOCKED, CodingModePlanGateReason.WORKER_NOT_ADMITTED)
+        return _result(
+            gate_key, turn_key, CodingModePlanGateState.BLOCKED, CodingModePlanGateReason.WORKER_NOT_ADMITTED
+        )
     return _result(
         gate_key,
         turn_key,
