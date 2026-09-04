@@ -1,3 +1,13 @@
+## 0.208.7 — 2026-09-04
+
+### Semantic supervisor assist candidate
+
+- Distinct sealed candidate for the evidence-gated `shadow→assist` ENV
+  transition on the live 0.208.6 tree identity. Assist stays off until that
+  one-shot operator consume.
+- SQLite remains at schema 50; exact `0.208.6` is the predecessor and
+  `0.207.90` the fallback.
+
 ## 0.208.6 — 2026-09-04
 
 ### Representative-window demand probe
