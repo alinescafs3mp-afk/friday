@@ -1,6 +1,6 @@
 # Friday: canonical project backlog
 
-Updated: 2026-09-05 (live `0.208.27`; N1 one-final-carrier live; N2 research mission/gates live on `_web_research`; N3 `/coding` create/archive/view and upload-modification EMPTY observer live; execute/run of uploaded programs fail-closed; N4 store-backed mixed journeys live; N5 implementable seam closed, ratchet standing)
+Updated: 2026-09-05 (live `0.208.28`; N1 one-final-carrier live; N2 research mission/gates live on `_web_research`; N3 `/coding` create/archive/view and upload-modification EMPTY observer live; execute/run of uploaded programs fail-closed; N4 store-backed mixed journeys live; N5 implementable seam closed, ratchet standing)
 
 This is the project's only backlog and mutable status register. It owns the
 current production identity, execution order, acceptance gaps and owner actions.
@@ -32,20 +32,17 @@ Do not copy that snapshot's release claims forward.
 - Database schema: 50 in deployed production and the fallback.
 
 Golden-journey receipts stay bound to that `0.208.1` root until rebound. The
-running sealed sibling is Friday `0.208.27` at
-`e5a25c4a9b988f5f4959b3c69eca4358a0bb6770` (tree-file
-`60ea6f01ff06233e4a7965daa792d0f7fef1b16c916b22de1ed191522f84494e`, wheel
-`9e9731acd8ba5c9e3e8657d78a01baf9f806f81ee6108bddf07ae91c4d1e109d`, journal
-`clear`, predecessor `0.208.26` /
-`9316a5e6cc2e16992a4eafaab04f3fc9f66ff01a`). Trusted-CA health reports
-`version=0.208.27`. S3: `requested_mode=assist`, `effective_mode=off`,
-`promotion_admitted=false`,
-`activation.reason=material_loaded_not_accepted`,
-`source_revision_loaded=true`,
-`representative_window_verified=true`. Advice stays off until a
-genuine eligible witness; do not fabricate traffic. Do not
-re-activate `e5a25c4a` or `9316a5e6`. Next product sibling that
-changes friday sources is `assist_to_shadow`. N1 Telegram surfaces and
+running sealed sibling is Friday `0.208.28` at
+`71833028e735e94b9020a1aa2a92c97ca141f0bf` (tree-file
+`ec18064695bd5116c052539907721e7e8c188535c26feb8c23575d36479a38d9`, wheel
+`f81cce01960bf1508eaa673e3076469197e0f479cd5cf5db9506f15c041c98fe`, journal
+`clear`, predecessor `0.208.27` /
+`e5a25c4a9b988f5f4959b3c69eca4358a0bb6770`). Trusted-CA health reports
+`version=0.208.28`. S3: `requested_mode=shadow`, `effective_mode=shadow`,
+`promotion_admitted=false`, `activation.reason=default_off`. Advice
+stays off until a genuine eligible witness; do not fabricate traffic.
+Do not re-activate `71833028` or `e5a25c4a`. Next product sibling that
+changes friday sources is `shadow_to_assist`. N1 Telegram surfaces and
 one-final-carrier packing remain live. N2 live `_web_research` plans a
 2–8 query public mission, executes complementary queries on
 fact-bearing public sources, and observes remaining N2 gates on the
@@ -60,10 +57,10 @@ archive extract, isolated untrusted `py_compile` / unittest,
 prompt-to-small-project, one-final `friday-source.zip` pack, digest
 and overwrite observation on extract, Coding Mode
 view/plan-gate/carrier, and upload-modification EMPTY observer remain
-live through `0.208.27`. Execute/run of uploaded programs stay
+live through `0.208.28`. Execute/run of uploaded programs stay
 fail-closed. This is not a safety certification. Upload-modification
 apply never rewrites uploaded project files. N4 store-backed mixed
-journeys remain live through `0.208.27`. N5 implementable seam
+journeys remain live through `0.208.28`. N5 implementable seam
 extract is closed, the maintainability ratchet remains standing.
 
 - Production: immutable activation `phase=clear`; backend and Telegram bridge
@@ -71,13 +68,17 @@ extract is closed, the maintainability ratchet remains standing.
   `review_required` and grants no apply/delete authority. V12 `canary_ready`
   with verified, installation and effective context all exactly `40960`.
 - Secondary: accepted/live GPT-OSS profile `gptoss20b-2335df…`; after the
-  `0.208.27` cutover `state=healthy`, `mode=assist`,
+  `0.208.28` cutover `state=cooldown`, `mode=assist`,
   `available=false` until Friday's process-epoch health window is
-  fresh. `/api/health` `cooldown` is the in-process circuit, not
+  fresh. `0.208.28` retries the detached startup probe once after
+  cooldown so a live laptop is visible without waiting for the next
+  activate. `/api/health` `cooldown` is the in-process circuit, not
   laptop Docker liveness; laptop-local generation does not refresh
-  that window. Supervisor advice stays off until a genuine eligible
-  current-file-plus-public-web consumed witness; no traffic is
-  fabricated. Primary-only behavior is preserved when the laptop is absent.
+  that window. Compact health still hides `circuit_retry_after_sec`
+  and `last_failure`; use `GET /api/admin/diagnostics`. Supervisor
+  advice stays off until a genuine eligible current-file-plus-public-web
+  consumed witness; no traffic is fabricated. Primary-only behavior is
+  preserved when the laptop is absent.
 - The reader-first body-free document-passage contour is fully converged: 1,720
   current parents and 16,359 child passages, with no pending v3 backfill. The two
   formerly invalid sparse-text v2 sources were repaired by the released v3
@@ -98,7 +99,7 @@ deployed; advice remains off until the observation-bound witness. S5 40k lease
 and S6 recovery/browse paths stay live.
 
 The live product queue is N1–N5. The shared operation-progress contract is
-live. Production `0.208.27` keeps ordinary Telegram `/chat` status,
+live. Production `0.208.28` keeps ordinary Telegram `/chat` status,
 Engineer status, file-album DOCUMENT status, Engineer FILE/ARCHIVE
 carrier, observed web/archive chat status, one-final-carrier packing,
 owner-private `/coding` static inspect, isolated-worker boundary,
@@ -106,9 +107,10 @@ admitted archive extract, isolated untrusted build/test of extracted
 uploads, prompt-to-small-project, one-final source archive pack,
 digest/overwrite observation on extract, Coding Mode
 view/plan-gate/carrier, upload-modification EMPTY observer, live
-`_web_research` mission/gates, and store-backed mixed journeys
-(Telegram MIXED when PROJECTED). Execute/run of uploaded programs
-stay fail-closed. This is not a safety certification.
+`_web_research` mission/gates, store-backed mixed journeys
+(Telegram MIXED when PROJECTED), and one delayed secondary startup
+re-probe after cooldown. Execute/run of uploaded programs stay
+fail-closed. This is not a safety certification.
 Upload-modification apply never rewrites uploaded project files.
 Gemini parity is not claimed. S3 advice stays off until a genuine
 eligible witness. N5 ratchet stays standing. Physical Android, P0H
@@ -959,7 +961,7 @@ archive extract, isolated untrusted `py_compile` / unittest,
 prompt-to-small-project, one-final `friday-source.zip` pack, digest
 and overwrite observation on extract, Coding Mode
 view/plan-gate/carrier, and upload-modification EMPTY observer remain
-live through `0.208.27`. Owner private Telegram only; execute/run of
+live through `0.208.28`. Owner private Telegram only; execute/run of
 uploaded programs stay fail-closed. Engineer bubblewrap is not a
 Coding Worker. This is not a safety certification.
 Upload-modification apply never rewrites uploaded project files. Do
@@ -1257,15 +1259,31 @@ checklist elsewhere. The Ctrl+T view is a compact projection of this list.
       in-process circuit, not laptop Docker liveness; laptop-local
       generation does not refresh Friday's process-epoch window.
 
+### Closed on production `0.208.28`
+
+- [x] Delayed secondary startup re-probe after cooldown live on
+      `0.208.28` at `71833028e735e94b9020a1aa2a92c97ca141f0bf`
+      (tree-file
+      `ec18064695bd5116c052539907721e7e8c188535c26feb8c23575d36479a38d9`,
+      wheel
+      `f81cce01960bf1508eaa673e3076469197e0f479cd5cf5db9506f15c041c98fe`).
+      One detached `_startup_probe` still; after the first epoch probe
+      if the circuit is `COOLDOWN` it sleeps `cooldown_retry_after_sec`
+      and retries inventory/canary once. Trusted-CA health is
+      `0.208.28` with `requested_mode=shadow` and
+      `effective_mode=shadow` (`default_off`). Secondary after cutover
+      restart: `mode=assist`, `state=cooldown`, `available=false`.
+      DR published index_revision 160; retention remains
+      `review_required`. Execute/run of uploaded programs stay
+      fail-closed. Gemini parity is not claimed. Do not re-activate
+      `71833028`. Next product sibling that changes friday sources is
+      `shadow_to_assist`. Compact `/api/health` `cooldown` remains the
+      in-process circuit, not laptop Docker liveness.
+
 ### Open and implementable
 
-- [ ] Secondary public health can stay `cooldown` after
-      `circuit_retry_after_sec=0` until Friday itself demand-probes.
-      Laptop-local generation does not refresh that window. One
-      delayed re-probe after cooldown (or an honest ready-to-probe
-      projection) so a live laptop is visible without waiting for
-      activate. Product sibling `0.208.28` with `assist_to_shadow`.
-      Do not fabricate S3 traffic.
+No closeable product sibling remains without owner. Do not extra-hop.
+Do not invent a Luna packet. Do not fabricate S3 traffic.
 
 ### Open and blocked
 
