@@ -57,6 +57,32 @@ _DEFAULT_ANSWER = (
 )
 
 
+def _cited_answer_of_json_bytes(minimum: int, maximum: int | None = None) -> str:
+    suffix = (
+        " [F1]. Первый источник даёт текущий контекст [W1]. "
+        "Второй источник подтверждает изменение [W2]. Третий источник задаёт границу [W3]."
+    )
+
+    def payload(count: int) -> str:
+        return ("Сравнение. " * count) + suffix
+
+    def encoded_size(count: int) -> int:
+        return len(json.dumps(payload(count), ensure_ascii=False).encode("utf-8"))
+
+    if encoded_size(0) > minimum:
+        raise AssertionError("citation suffix already exceeds the requested minimum")
+    count = 0
+    while encoded_size(count) < minimum:
+        count += 1
+        if count > 10_000:
+            raise AssertionError("could not grow the cited answer")
+    text = payload(count)
+    encoded = len(json.dumps(text, ensure_ascii=False).encode("utf-8"))
+    if maximum is not None and encoded > maximum:
+        raise AssertionError("cited answer exceeded the requested maximum")
+    return text
+
+
 @dataclass(frozen=True)
 class _ParentContext:
     inherited_budget: InheritedTurnBudget
@@ -652,7 +678,7 @@ async def test_q38_keeps_the_full_projection_that_q36_must_truncate() -> None:
     assert q36_result.requirements is current_file_web_model_requirements(8_192)
     assert CurrentFileWebPartialReason.LOCAL_CONTEXT_TRUNCATED not in q38_result.partial_reasons
     assert q38_result.status is CurrentFileWebComparisonStatus.COMPLETE
-    assert q38_result.requirements is current_file_web_model_requirements(32_768)
+    assert q38_result.requirements is current_file_web_model_requirements(40_960)
     q38_payload = json.loads(str(q38.calls[0][-1]["content"]))
     assert q38_payload["untrusted_evidence"]["file"]["locally_truncated"] is False
     assert all(
@@ -672,6 +698,90 @@ async def test_q38_keeps_the_full_projection_that_q36_must_truncate() -> None:
             q38_result,
             requirements=current_file_web_model_requirements(8_192),
         )
+
+
+def test_answer_json_budget_stays_1328_at_8192_and_caps_at_5312() -> None:
+    assert comparison_module._answer_json_utf8_budget(8_192) == 1_328
+    assert comparison_module._answer_json_utf8_budget(16_384) == 2_656
+    assert comparison_module._answer_json_utf8_budget(24_576) == 3_984
+    assert comparison_module._answer_json_utf8_budget(32_768) == 5_312
+    assert comparison_module._answer_json_utf8_budget(40_960) == 5_312
+    assert comparison_module._answer_json_utf8_budget(0) == 0
+
+
+@pytest.mark.asyncio
+async def test_q38_small_projection_leases_full_answer_budget_tier() -> None:
+    model = _ComparisonModel(available_context_tokens=40_960)
+    result = await compare_current_file_with_web(
+        model,
+        request=_REQUEST,
+        accepted_plan_sha256=_PLAN_SHA256,
+        prepared_file=_prepared_file(),
+        web_evidence=_full_web(),
+        absolute_deadline=time.monotonic() + 10,
+    )
+    assert result.status is CurrentFileWebComparisonStatus.COMPLETE
+    assert result.answer == _DEFAULT_ANSWER
+    assert result.requirements is current_file_web_model_requirements(32_768)
+    assert result.model_calls == 2
+
+
+@pytest.mark.asyncio
+async def test_q36_rejects_synthesis_over_base_answer_json_budget() -> None:
+    answer = _cited_answer_of_json_bytes(1_329, 5_312)
+    model = _ComparisonModel(answer=answer)
+    with pytest.raises(CurrentFileWebComparisonError) as captured:
+        await compare_current_file_with_web(
+            model,
+            request=_REQUEST,
+            accepted_plan_sha256=_PLAN_SHA256,
+            prepared_file=_prepared_file(),
+            web_evidence=_full_web(),
+            absolute_deadline=time.monotonic() + 10,
+        )
+    assert captured.value.failure_reason is FailureReason.INVALID_CONTRACT
+    assert captured.value.synthesis_outcome is OutcomeStatus.FAILED
+    assert captured.value.model_calls == len(model.calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_q38_accepts_synthesis_within_scaled_answer_json_budget() -> None:
+    answer = _cited_answer_of_json_bytes(3_500, 5_312)
+    model = _ComparisonModel(answer=answer, available_context_tokens=40_960)
+    result = await compare_current_file_with_web(
+        model,
+        request=_REQUEST,
+        accepted_plan_sha256=_PLAN_SHA256,
+        prepared_file=_prepared_file(),
+        web_evidence=_full_web(),
+        absolute_deadline=time.monotonic() + 10,
+    )
+    encoded = len(json.dumps(answer, ensure_ascii=False).encode("utf-8"))
+    assert encoded > 1_328
+    assert encoded <= 5_312
+    assert result.status is CurrentFileWebComparisonStatus.COMPLETE
+    assert result.answer == answer
+    assert result.requirements is current_file_web_model_requirements(32_768)
+    assert result.model_calls == 2
+    assert model.verifier_answer == answer
+
+
+@pytest.mark.asyncio
+async def test_q38_rejects_synthesis_over_scaled_answer_json_budget() -> None:
+    answer = _cited_answer_of_json_bytes(5_313)
+    model = _ComparisonModel(answer=answer, available_context_tokens=40_960)
+    with pytest.raises(CurrentFileWebComparisonError) as captured:
+        await compare_current_file_with_web(
+            model,
+            request=_REQUEST,
+            accepted_plan_sha256=_PLAN_SHA256,
+            prepared_file=_prepared_file(),
+            web_evidence=_full_web(),
+            absolute_deadline=time.monotonic() + 10,
+        )
+    assert captured.value.failure_reason is FailureReason.INVALID_CONTRACT
+    assert captured.value.synthesis_outcome is OutcomeStatus.FAILED
+    assert captured.value.model_calls == len(model.calls) == 1
 
 
 @pytest.mark.asyncio
@@ -827,7 +937,7 @@ async def test_q38_downgraded_acquire_fails_once_without_reacquire() -> None:
         )
 
     assert captured.value.failure_reason is FailureReason.STALE_STATE
-    assert model.requirements is current_file_web_model_requirements(32_768)
+    assert model.requirements is current_file_web_model_requirements(40_960)
     assert model.acquire_calls == 1
     assert model.lease_checks == 0
     assert model.calls == []

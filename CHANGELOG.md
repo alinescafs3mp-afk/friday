@@ -1,3 +1,16 @@
+## 0.208.40 — 2026-09-05
+
+### Scale file+web synthesis accept cap with measured context
+
+- Distinct sealed candidate for `semantic_supervisor_assist_to_shadow` after
+  live 0.208.39. File+web still generates up to 768 tokens, but the accept
+  cap was 1328 JSON bytes at every tier, so a live V12 answer was discarded
+  after a successful synthesis. The 8192 cap stays 1328. Higher measured
+  tiers scale that bound and cap it at 5312 so a full Q38 projection still
+  fits the verifier. Citation order, unowned brackets, service markup and
+  secret-free checks are unchanged. SQLite remains at schema 50; exact
+  `0.208.39` is the predecessor and `0.207.90` the fallback.
+
 ## 0.208.39 — 2026-09-05
 
 ### No-product shadow_to_assist restore

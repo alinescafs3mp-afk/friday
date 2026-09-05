@@ -45,11 +45,12 @@ from friday.model_input_hygiene import (
 )
 from friday.model_profiles import ModelProfileLease, ModelRequirements
 from friday.orchestration.file_read import (
+    _BASE_CONTEXT_TOKENS,
+    _CONTEXT_TOKEN_TIERS,
     V12FileReadError,
     _attested_input_max_bytes,
     _AttestedFileModel,
     _file_requirements,
-    _file_requirements_for_input_bytes,
     _lease_is_current_before_deadline,
     _lease_is_process_current,
     _messages_fit_attested_context,
@@ -81,6 +82,7 @@ _SERVICE_MARKUP_RE = re.compile(
 )
 _MAX_REQUEST_UTF8_BYTES = 768
 _MAX_ANSWER_JSON_UTF8_BYTES = 1_328
+_MAX_SCALED_ANSWER_JSON_UTF8_BYTES = 5_312
 _MAX_SYNTHESIS_TOKENS = 768
 _MAX_VERIFIER_TOKENS = 256
 _CURRENT_FILE_WEB_MODEL_BUDGET = (2, _MAX_SYNTHESIS_TOKENS)
@@ -175,6 +177,63 @@ def current_file_web_model_budget() -> tuple[int, int]:
     """Return exact model-call count and maximum output tokens per call."""
 
     return _CURRENT_FILE_WEB_MODEL_BUDGET
+
+
+def _empty_answer_json_utf8_bytes() -> int:
+    return len(json.dumps("", ensure_ascii=False).encode("utf-8"))
+
+
+def _answer_json_utf8_budget(required_context_tokens: int) -> int:
+    """Return the accept cap at one measured tier.
+
+    8192 stays 1328 so the default comparison still fits that attested
+    input. Higher tiers scale the same ratio, capped at 5312: 40960-linear
+    6640 overflows a full Q38 projection's verifier reserve.
+    """
+
+    if type(required_context_tokens) is not int or required_context_tokens not in _CONTEXT_TOKEN_TIERS:
+        return 0
+    scaled = (_MAX_ANSWER_JSON_UTF8_BYTES * required_context_tokens) // _BASE_CONTEXT_TOKENS
+    if scaled > _MAX_SCALED_ANSWER_JSON_UTF8_BYTES:
+        return _MAX_SCALED_ANSWER_JSON_UTF8_BYTES
+    return scaled
+
+
+def _reserved_verifier_utf8_bytes(empty_verifier_bytes: int, required_context_tokens: int) -> int:
+    budget = _answer_json_utf8_budget(required_context_tokens)
+    if budget <= 0 or type(empty_verifier_bytes) is not int or empty_verifier_bytes < 0:
+        return 0
+    return empty_verifier_bytes + 2 * (budget - _empty_answer_json_utf8_bytes())
+
+
+def _comparison_requirements(
+    *,
+    synthesis_input_bytes: int,
+    empty_verifier_bytes: int,
+    available_context_tokens: int,
+) -> ModelRequirements | None:
+    """Lease the least tier that still accepts the model's full answer budget."""
+
+    if (
+        type(synthesis_input_bytes) is not int
+        or synthesis_input_bytes < 0
+        or type(empty_verifier_bytes) is not int
+        or empty_verifier_bytes < 0
+    ):
+        return None
+    available_budget = _answer_json_utf8_budget(available_context_tokens)
+    if available_budget <= 0:
+        return None
+    for context_tokens in _CONTEXT_TOKEN_TIERS:
+        if context_tokens > available_context_tokens:
+            break
+        if _answer_json_utf8_budget(context_tokens) < available_budget:
+            continue
+        attested = _attested_input_max_bytes(context_tokens)
+        reserved = _reserved_verifier_utf8_bytes(empty_verifier_bytes, context_tokens)
+        if synthesis_input_bytes <= attested and reserved <= attested:
+            return _file_requirements(2, context_tokens)
+    return None
 
 
 def _lease_matches_requirements(
@@ -610,12 +669,16 @@ def _projection_fits(
         partial_reasons=partial_reasons,
     )
     verifier = _verifier_messages(request=request, evidence=evidence, answer="")
-    empty_answer_bytes = len(json.dumps("", ensure_ascii=False).encode("utf-8"))
-    reserved_verifier_bytes = len(
+    empty_verifier_bytes = len(
         json.dumps(verifier, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
-    ) + 2 * (_MAX_ANSWER_JSON_UTF8_BYTES - empty_answer_bytes)
+    )
+    reserved_verifier_bytes = _reserved_verifier_utf8_bytes(
+        empty_verifier_bytes,
+        required_context_tokens,
+    )
     return bool(
-        model_messages_are_secret_free(synthesis)
+        reserved_verifier_bytes > 0
+        and model_messages_are_secret_free(synthesis)
         and model_messages_are_secret_free(verifier)
         and _messages_fit_attested_context(synthesis, required_context_tokens)
         and _messages_fit_attested_context(verifier, required_context_tokens)
@@ -709,14 +772,21 @@ def _has_unowned_brackets(text: str, expected_tokens: set[str]) -> bool:
     return any("BRACKET" in unicodedata.name(character, "") for character in remainder)
 
 
-def _validate_answer(answer: object, expected_labels: tuple[str, ...]) -> str:
+def _validate_answer(
+    answer: object,
+    expected_labels: tuple[str, ...],
+    *,
+    max_utf8_bytes: int,
+) -> str:
     if type(answer) is not str:
         raise ValueError("comparison answer is not text")
+    if type(max_utf8_bytes) is not int or max_utf8_bytes <= 0:
+        raise ValueError("comparison answer budget is invalid")
     normalized = answer.strip()
     expected_tokens = {f"[{label}]" for label in expected_labels}
     if (
         not normalized
-        or len(json.dumps(normalized, ensure_ascii=False).encode("utf-8")) > _MAX_ANSWER_JSON_UTF8_BYTES
+        or len(json.dumps(normalized, ensure_ascii=False).encode("utf-8")) > max_utf8_bytes
         or _SERVICE_MARKUP_RE.search(normalized)
         or not model_visible_text_is_secret_free(normalized)
         or not secondary_model_messages_are_secret_free([{"role": "assistant", "content": normalized}])
@@ -856,7 +926,14 @@ class CurrentFileWebComparison:
             _require_digest(value, label=label)
         _require_partial_reasons(self.partial_reasons, status=self.status)
         try:
-            if _validate_answer(self.answer, self.citation_labels) != self.answer:
+            if (
+                _validate_answer(
+                    self.answer,
+                    self.citation_labels,
+                    max_utf8_bytes=_answer_json_utf8_budget(self.requirements.required_context_tokens),
+                )
+                != self.answer
+            ):
                 raise ValueError("answer is not canonical")
         except (TypeError, ValueError, UnicodeError):
             raise CurrentFileWebComparisonError("accepted comparison answer is invalid") from None
@@ -1050,7 +1127,6 @@ async def compare_current_file_with_web(
         evidence=evidence,
         answer="",
     )
-    empty_answer_bytes = len(json.dumps("", ensure_ascii=False).encode("utf-8"))
     synthesis_input_bytes = len(
         json.dumps(
             synthesis_messages,
@@ -1058,18 +1134,16 @@ async def compare_current_file_with_web(
             separators=(",", ":"),
         ).encode("utf-8")
     )
-    reserved_verifier_bytes = len(
+    empty_verifier_bytes = len(
         json.dumps(
             empty_verifier_messages,
             ensure_ascii=False,
             separators=(",", ":"),
         ).encode("utf-8")
-    ) + 2 * (_MAX_ANSWER_JSON_UTF8_BYTES - empty_answer_bytes)
-    requirements = _file_requirements_for_input_bytes(
-        model,
-        2,
-        synthesis_input_bytes,
-        reserved_verifier_bytes,
+    )
+    requirements = _comparison_requirements(
+        synthesis_input_bytes=synthesis_input_bytes,
+        empty_verifier_bytes=empty_verifier_bytes,
         available_context_tokens=available_context_tokens,
     )
     if requirements is None:
@@ -1168,8 +1242,13 @@ async def compare_current_file_with_web(
             failure_reason=FailureReason.PROVIDER_FAILURE,
             synthesis_outcome=OutcomeStatus.UNAVAILABLE,
         ) from None
+    answer_budget = _answer_json_utf8_budget(requirements.required_context_tokens)
     try:
-        answer = _validate_answer(synthesis["content"], labels)
+        answer = _validate_answer(
+            synthesis["content"],
+            labels,
+            max_utf8_bytes=answer_budget,
+        )
     except (KeyError, TypeError, ValueError, UnicodeError):
         raise CurrentFileWebComparisonError(
             "comparison synthesis was rejected",
@@ -1180,7 +1259,11 @@ async def compare_current_file_with_web(
         ) from None
     if status is CurrentFileWebComparisonStatus.PARTIAL:
         try:
-            answer = _validate_answer(f"{_partial_notice(partial_reasons)}\n\n{answer}", labels)
+            answer = _validate_answer(
+                f"{_partial_notice(partial_reasons)}\n\n{answer}",
+                labels,
+                max_utf8_bytes=answer_budget,
+            )
         except (TypeError, ValueError, UnicodeError):
             raise CurrentFileWebComparisonError(
                 "partial comparison disclosure exceeds its contract",
