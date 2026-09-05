@@ -1,6 +1,6 @@
 # Friday: canonical project backlog
 
-Updated: 2026-09-05 (live `0.208.26`; N1 one-final-carrier live; N2 research mission/gates live on `_web_research`; N3 `/coding` create/archive/view live; execute/run of uploaded programs fail-closed; N4 store-backed mixed journeys live; N5 implementable seam closed, ratchet standing)
+Updated: 2026-09-05 (live `0.208.27`; N1 one-final-carrier live; N2 research mission/gates live on `_web_research`; N3 `/coding` create/archive/view and upload-modification EMPTY observer live; execute/run of uploaded programs fail-closed; N4 store-backed mixed journeys live; N5 implementable seam closed, ratchet standing)
 
 This is the project's only backlog and mutable status register. It owns the
 current production identity, execution order, acceptance gaps and owner actions.
@@ -32,17 +32,20 @@ Do not copy that snapshot's release claims forward.
 - Database schema: 50 in deployed production and the fallback.
 
 Golden-journey receipts stay bound to that `0.208.1` root until rebound. The
-running sealed sibling is Friday `0.208.26` at
-`9316a5e6cc2e16992a4eafaab04f3fc9f66ff01a` (tree-file
-`4368e94d92a1bb5b41e81f98706fa6e1338b9a5e6c19f654efc9f14c0be8607e`, wheel
-`f98055784f1948335da9cf332b15596936a693f47b506eefc8026e8ea5c45915`, journal
-`clear`, predecessor `0.208.25` /
-`60b62c71be58f8dd8a507ccb2e77d28b2f9d028c`). Trusted-CA health reports
-`version=0.208.26`. S3: `requested_mode=shadow`, `effective_mode=shadow`,
-`promotion_admitted=false`, `activation.reason=default_off`. Advice
-stays off until a genuine eligible witness; do not fabricate traffic.
-Do not re-activate `9316a5e6`. Next product sibling that changes
-friday sources is `shadow_to_assist`. N1 Telegram surfaces and
+running sealed sibling is Friday `0.208.27` at
+`e5a25c4a9b988f5f4959b3c69eca4358a0bb6770` (tree-file
+`60ea6f01ff06233e4a7965daa792d0f7fef1b16c916b22de1ed191522f84494e`, wheel
+`9e9731acd8ba5c9e3e8657d78a01baf9f806f81ee6108bddf07ae91c4d1e109d`, journal
+`clear`, predecessor `0.208.26` /
+`9316a5e6cc2e16992a4eafaab04f3fc9f66ff01a`). Trusted-CA health reports
+`version=0.208.27`. S3: `requested_mode=assist`, `effective_mode=off`,
+`promotion_admitted=false`,
+`activation.reason=material_loaded_not_accepted`,
+`source_revision_loaded=true`,
+`representative_window_verified=true`. Advice stays off until a
+genuine eligible witness; do not fabricate traffic. Do not
+re-activate `e5a25c4a` or `9316a5e6`. Next product sibling that
+changes friday sources is `assist_to_shadow`. N1 Telegram surfaces and
 one-final-carrier packing remain live. N2 live `_web_research` plans a
 2–8 query public mission, executes complementary queries on
 fact-bearing public sources, and observes remaining N2 gates on the
@@ -55,22 +58,25 @@ Gemini parity; do not claim Gemini parity without a paired scored
 set. N3 `/coding` static inspect, isolated-worker boundary, admitted
 archive extract, isolated untrusted `py_compile` / unittest,
 prompt-to-small-project, one-final `friday-source.zip` pack, digest
-and overwrite observation on extract, and Coding Mode
-view/plan-gate/carrier remain live through `0.208.26`. Execute/run of
-uploaded programs stay fail-closed. This is not a safety
-certification. Upload-modification apply stays source-only. N4
-store-backed mixed journeys remain live through `0.208.26`. N5
-implementable seam extract is closed, the maintainability ratchet
-remains standing.
+and overwrite observation on extract, Coding Mode
+view/plan-gate/carrier, and upload-modification EMPTY observer remain
+live through `0.208.27`. Execute/run of uploaded programs stay
+fail-closed. This is not a safety certification. Upload-modification
+apply never rewrites uploaded project files. N4 store-backed mixed
+journeys remain live through `0.208.27`. N5 implementable seam
+extract is closed, the maintainability ratchet remains standing.
 
 - Production: immutable activation `phase=clear`; backend and Telegram bridge
   active; writer target `candidate`. Retention admission remains honestly
   `review_required` and grants no apply/delete authority. V12 `canary_ready`
   with verified, installation and effective context all exactly `40960`.
 - Secondary: accepted/live GPT-OSS profile `gptoss20b-2335df…`; after the
-  `0.208.26` cutover restart `state=cooldown`, `mode=assist`,
-  `available=false`. Supervisor advice stays off until a genuine
-  eligible current-file-plus-public-web consumed witness; no traffic is
+  `0.208.27` cutover `state=healthy`, `mode=assist`,
+  `available=false` until Friday's process-epoch health window is
+  fresh. `/api/health` `cooldown` is the in-process circuit, not
+  laptop Docker liveness; laptop-local generation does not refresh
+  that window. Supervisor advice stays off until a genuine eligible
+  current-file-plus-public-web consumed witness; no traffic is
   fabricated. Primary-only behavior is preserved when the laptop is absent.
 - The reader-first body-free document-passage contour is fully converged: 1,720
   current parents and 16,359 child passages, with no pending v3 backfill. The two
@@ -92,17 +98,18 @@ deployed; advice remains off until the observation-bound witness. S5 40k lease
 and S6 recovery/browse paths stay live.
 
 The live product queue is N1–N5. The shared operation-progress contract is
-live. Production `0.208.26` keeps ordinary Telegram `/chat` status,
+live. Production `0.208.27` keeps ordinary Telegram `/chat` status,
 Engineer status, file-album DOCUMENT status, Engineer FILE/ARCHIVE
 carrier, observed web/archive chat status, one-final-carrier packing,
 owner-private `/coding` static inspect, isolated-worker boundary,
 admitted archive extract, isolated untrusted build/test of extracted
 uploads, prompt-to-small-project, one-final source archive pack,
 digest/overwrite observation on extract, Coding Mode
-view/plan-gate/carrier, live `_web_research` mission/gates, and
-store-backed mixed journeys (Telegram MIXED when PROJECTED).
-Execute/run of uploaded programs stay fail-closed. This is not a
-safety certification. Upload-modification apply stays source-only.
+view/plan-gate/carrier, upload-modification EMPTY observer, live
+`_web_research` mission/gates, and store-backed mixed journeys
+(Telegram MIXED when PROJECTED). Execute/run of uploaded programs
+stay fail-closed. This is not a safety certification.
+Upload-modification apply never rewrites uploaded project files.
 Gemini parity is not claimed. S3 advice stays off until a genuine
 eligible witness. N5 ratchet stays standing. Physical Android, P0H
 deletion, off-machine mirror and provider-credential rotation remain
@@ -950,12 +957,13 @@ witnesses.
 Status: `/coding` static inspect, isolated-worker boundary, admitted
 archive extract, isolated untrusted `py_compile` / unittest,
 prompt-to-small-project, one-final `friday-source.zip` pack, digest
-and overwrite observation on extract, and Coding Mode
-view/plan-gate/carrier remain live through `0.208.26`. Owner private
-Telegram only; execute/run of uploaded programs stay fail-closed.
-Engineer bubblewrap is not a Coding Worker. This is not a safety
-certification. Upload-modification apply stays source-only. Do not
-claim safe build/test of untrusted uploads.
+and overwrite observation on extract, Coding Mode
+view/plan-gate/carrier, and upload-modification EMPTY observer remain
+live through `0.208.27`. Owner private Telegram only; execute/run of
+uploaded programs stay fail-closed. Engineer bubblewrap is not a
+Coding Worker. This is not a safety certification.
+Upload-modification apply never rewrites uploaded project files. Do
+not claim safe build/test of untrusted uploads.
 
 - [x] Bare-source inspection contracts on `origin/main`
       (`coding_source_member.py`, `coding_source_tree.py`,
@@ -967,7 +975,12 @@ claim safe build/test of untrusted uploads.
       live on `0.208.20`.
 - [x] Prompt-to-small-project live on `0.208.26`
       (`friday/organs/coding/create.py`). Unbounded «всё» fail-closed;
-      no execute. Upload-modification admission remains source-only.
+      no execute.
+- [x] Upload-modification EMPTY observer live on `0.208.27`
+      (`friday/organs/coding/modify.py`). Composes
+      `coding_upload_modification_admission` from inspect, isolation,
+      identity and edit-plan facts. Never applies file rewrites of
+      uploaded projects. Execute/run stay fail-closed.
 - [x] Persistent project identity contract on `origin/main`
       (`friday/orchestration/coding_project_identity.py`). EMPTY /
       IDENTIFIED / BLOCKED. Exact revision only; `latest`/`HEAD`/
@@ -1224,14 +1237,35 @@ checklist elsewhere. The Ctrl+T view is a compact projection of this list.
       is not claimed. Do not re-activate `9316a5e6`. Next product
       sibling that changes friday sources is `shadow_to_assist`.
 
+### Closed on production `0.208.27`
+
+- [x] N3 upload-modification EMPTY observer live on `0.208.27` at
+      `e5a25c4a9b988f5f4959b3c69eca4358a0bb6770` (tree-file
+      `60ea6f01ff06233e4a7965daa792d0f7fef1b16c916b22de1ed191522f84494e`,
+      wheel `9e9731acd8ba5c9e3e8657d78a01baf9f806f81ee6108bddf07ae91c4d1e109d`).
+      Trusted-CA health is `0.208.27` with `requested_mode=assist` and
+      `effective_mode=off` (`material_loaded_not_accepted`;
+      `source_revision_loaded` and `representative_window_verified`
+      true). Secondary after cutover: `mode=assist`, `state=healthy`,
+      `available=false` until the process-epoch health window is
+      fresh. DR published index_revision 156; retention remains
+      `review_required`. Apply never rewrites uploaded project files.
+      Execute/run of uploaded programs stay fail-closed. Gemini
+      parity is not claimed. Do not re-activate `e5a25c4a`. Next
+      product sibling that changes friday sources is
+      `assist_to_shadow`. Public `/api/health` `cooldown` is the
+      in-process circuit, not laptop Docker liveness; laptop-local
+      generation does not refresh Friday's process-epoch window.
+
 ### Open and implementable
 
-- [ ] N3 upload-modification EMPTY observer: compose
-      `coding_upload_modification_admission` on live `/coding`
-      static_turn from landed inspect, isolation, identity and
-      edit-plan facts. Never apply file rewrites of uploaded
-      projects. Fail-closed execute/run. Product sibling `0.208.27`
-      with `shadow_to_assist`.
+- [ ] Secondary public health can stay `cooldown` after
+      `circuit_retry_after_sec=0` until Friday itself demand-probes.
+      Laptop-local generation does not refresh that window. One
+      delayed re-probe after cooldown (or an honest ready-to-probe
+      projection) so a live laptop is visible without waiting for
+      activate. Product sibling `0.208.28` with `assist_to_shadow`.
+      Do not fabricate S3 traffic.
 
 ### Open and blocked
 
