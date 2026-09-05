@@ -233,11 +233,13 @@ class _Promotion:
         refresh_eligible: bool = True,
         runtime_admitted: bool = True,
         mode: SupervisorMode = SupervisorMode.ASSIST,
+        denied_reason: AssistPromotionReason | None = None,
     ) -> None:
         self.admitted = admitted
         self.refresh_eligible = refresh_eligible
         self.runtime_admitted = runtime_admitted
         self.mode = mode
+        self.denied_reason = denied_reason
         self.preflight_calls = 0
         self.refresh_calls = 0
         self.calls = 0
@@ -245,6 +247,7 @@ class _Promotion:
         self.preflight_actor_bindings: list[str | None] = []
         self.actor_bindings: list[str | None] = []
         self.scheduler = SimpleNamespace()
+        self.last_closed_reason = "none"
 
     def runtime_admission_refresh_is_eligible(
         self,
@@ -274,7 +277,24 @@ class _Promotion:
         self.calls += 1
         self.events.append("decide")
         self.actor_bindings.append(actor_binding_sha256)
-        return _promotion(self.mode) if self.admitted else None
+        if self.admitted:
+            self.last_closed_reason = AssistPromotionReason.ADMITTED.value
+            return _promotion(self.mode)
+        if self.denied_reason is not None:
+            self.last_closed_reason = self.denied_reason.value
+            return AssistPromotionDecision(
+                promotion_admitted=False,
+                readiness=AssistPromotionReadiness.SOURCE_READY,
+                reason=self.denied_reason,
+                requested_mode=self.mode,
+                admitted_mode=SupervisorMode.OFF,
+                source_ready=True,
+                live_evidence_ready=False,
+                operator_gate_bound=False,
+                evidence_sha256=None,
+            )
+        self.last_closed_reason = "promotion_candidate_unavailable"
+        return None
 
 
 class _Planner:
@@ -1148,6 +1168,32 @@ async def test_preownership_failure_calls_legacy_exactly_once() -> None:
 
 
 @pytest.mark.asyncio
+async def test_denied_promotion_records_last_reason_on_controller_status() -> None:
+    promotion = _Promotion(
+        admitted=False,
+        denied_reason=AssistPromotionReason.LAPTOP_RUNTIME_UNAVAILABLE,
+    )
+    controller = _controller(promotion=promotion)
+
+    async def legacy() -> dict[str, object]:
+        return {"message": "legacy"}
+
+    result = await controller.execute(
+        _surface(),
+        legacy_primary=legacy,
+        absolute_deadline=time.monotonic() + 3,
+    )
+    status = controller.semantic_supervisor_status()
+
+    assert result.outcome is SupervisorAssistOutcome.LEGACY
+    assert status["last_promotion_reason"] == "laptop_runtime_unavailable"
+    assert status["fallback_reasons"] == {"promotion_not_admitted": 1}
+    assert status["promotion_attempt_total"] == 1
+    assert status["promotion_evaluation_total"] == 1
+    assert status["promotion_admitted_total"] == 0
+
+
+@pytest.mark.asyncio
 async def test_demand_refresh_can_restore_promotion_before_planning() -> None:
     class DemandRecoveredPromotion(_Promotion):
         def __init__(self) -> None:
@@ -1220,6 +1266,9 @@ async def test_runtime_admission_refresh_failure_has_no_ownership_or_effect_surf
     assert promotion.refresh_calls == 1
     assert promotion.calls == planner.calls == 0
     assert promotion.events == ["preflight", "refresh"]
+    assert controller.semantic_supervisor_status()["last_promotion_reason"] == (
+        "laptop_runtime_unavailable"
+    )
 
 
 @pytest.mark.asyncio

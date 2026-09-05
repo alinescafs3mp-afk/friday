@@ -1,3 +1,14 @@
+## 0.208.30 — 2026-09-05
+
+### Demand-refresh admits only a healthy laptop runtime
+
+- Distinct sealed candidate for `semantic_supervisor_assist_to_shadow` after
+  live 0.208.29. Demand-refresh now succeeds only when the process-epoch
+  laptop circuit is healthy; inventory no longer drops a previously admitted
+  profile match mid-probe; assist promotion records a body-free last reason
+  on controller status. SQLite remains at schema 50; exact `0.208.29` is the
+  predecessor and `0.207.90` the fallback.
+
 ## 0.208.29 — 2026-09-05
 
 ### No-product shadow_to_assist restore

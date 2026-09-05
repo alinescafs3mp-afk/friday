@@ -500,8 +500,11 @@ class SecondaryBrainScheduler:
             time.monotonic() - self._last_probe_success_monotonic <= self._client.config.health_interval_sec
         )
 
-    def _admission_is_fresh(self) -> bool:
-        return self._epoch_admitted and self._health_is_fresh()
+    def _admission_is_fresh(self, status: SecondaryStatus | None = None) -> bool:
+        if self._client is None or not self._epoch_admitted or not self._health_is_fresh():
+            return False
+        current = status if status is not None else self.status()
+        return current.state is SecondaryState.HEALTHY
 
     async def _ensure_epoch_admitted(
         self,
@@ -685,10 +688,11 @@ class SecondaryBrainScheduler:
             workload=ModelWorkload.PLAN_CANDIDATE,
         )
         self._record_queue_wait(ModelWorkload.PLAN_CANDIDATE, queue_wait_sec)
-        if failure is None:
-            return True
-        self._record_skip(ModelWorkload.PLAN_CANDIDATE, failure, local=True)
-        return False
+        if failure is not None:
+            self._record_skip(ModelWorkload.PLAN_CANDIDATE, failure, local=True)
+            return False
+        status = self.status()
+        return self._admission_is_fresh(status)
 
     async def __aenter__(self) -> SecondaryBrainScheduler:
         return self
@@ -736,9 +740,7 @@ class SecondaryBrainScheduler:
             "policy_id": self._supervisor_admission.policy_id,
             "policy_sha256": self._supervisor_admission.policy_sha256,
             "workload_available": workload_available,
-            "runtime_available": bool(
-                workload_available and status.state is SecondaryState.HEALTHY and self._admission_is_fresh()
-            ),
+            "runtime_available": bool(workload_available and self._admission_is_fresh(status)),
             "closed_reason": closed_reason.value,
         }
 
@@ -758,16 +760,11 @@ class SecondaryBrainScheduler:
             "policy_id": self._effect_shadow_admission.policy_id,
             "policy_sha256": self._effect_shadow_admission.policy_sha256,
             "workload_available": workload_available,
-            "runtime_available": bool(
-                workload_available and status.state is SecondaryState.HEALTHY and self._admission_is_fresh()
-            ),
+            "runtime_available": bool(workload_available and self._admission_is_fresh(status)),
             "closed_reason": closed_reason.value,
         }
 
-    def public_status(self) -> dict[str, object]:
-        """Return the compact projection safe for the public health route."""
-
-        status = self.status()
+    def _public_status_from(self, status: SecondaryStatus) -> dict[str, object]:
         return {
             "schema": "friday.optional-secondary-health.v1",
             "role": "optional_advisory",
@@ -775,10 +772,15 @@ class SecondaryBrainScheduler:
             "configured": self._client is not None,
             "mode": self.mode.value,
             "state": status.state.value,
-            "available": status.state is SecondaryState.HEALTHY and self._admission_is_fresh(),
+            "available": self._admission_is_fresh(status),
             "semantic_supervisor": self._supervisor_status(status),
             "effect_shadow": self._effect_shadow_status(status),
         }
+
+    def public_status(self) -> dict[str, object]:
+        """Return the compact projection safe for the public health route."""
+
+        return self._public_status_from(self.status())
 
     def diagnostics_status(self) -> dict[str, object]:
         """Return bounded owner diagnostics without endpoint or content data."""
@@ -787,7 +789,7 @@ class SecondaryBrainScheduler:
         supervisor_status = self._supervisor_status(status)
         effect_shadow_status = self._effect_shadow_status(status)
         return {
-            **self.public_status(),
+            **self._public_status_from(status),
             "last_failure": status.last_failure.value if status.last_failure is not None else None,
             "active_requests": status.active_requests,
             "selected_total": sum(self._selected_by_workload.values()),

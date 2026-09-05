@@ -23,7 +23,11 @@ from friday.orchestration.semantic_supervisor import (
     build_supervisor_request,
     parse_and_admit_supervisor_proposal,
 )
-from friday.orchestration.supervisor_assist_activation import AssistPromotionActivationMaterial
+from friday.orchestration.supervisor_assist_activation import (
+    AssistPromotionActivationError,
+    AssistPromotionActivationMaterial,
+    scheduler_admission_snapshot_from_status,
+)
 from friday.orchestration.supervisor_assist_promotion import (
     AssistPromotionDecision,
     admit_supervisor_assist_promotion,
@@ -120,6 +124,19 @@ class PrimaryModelRuntime(Protocol):
     ) -> dict[str, Any]: ...
 
 
+_SCHEDULER_PUBLIC_KEYS = (
+    "schema",
+    "role",
+    "enabled",
+    "configured",
+    "mode",
+    "state",
+    "available",
+    "semantic_supervisor",
+    "effect_shadow",
+)
+
+
 def _status(runtime: object, method_name: str) -> Mapping[str, object]:
     method = getattr(runtime, method_name, None)
     if not callable(method):
@@ -129,6 +146,12 @@ def _status(runtime: object, method_name: str) -> Mapping[str, object]:
     except Exception:
         return {}
     return value if isinstance(value, Mapping) else {}
+
+
+def _scheduler_projections(runtime: object) -> tuple[Mapping[str, object], Mapping[str, object]]:
+    diagnostics = _status(runtime, "diagnostics_status")
+    public = {key: diagnostics[key] for key in _SCHEDULER_PUBLIC_KEYS if key in diagnostics}
+    return public, diagnostics
 
 
 def _guarded(guard: Callable[[], bool] | None) -> Callable[[], bool] | None:
@@ -217,6 +240,19 @@ class AssistPromotionEvaluator:
 
     material: AssistPromotionActivationMaterial
     scheduler: AssistRuntimeAdmissionScheduler
+    _closed_reason: list[str] = field(default_factory=lambda: ["none"], repr=False, compare=False)
+
+    def _remember_closed_reason(self, reason: str) -> None:
+        box = self._closed_reason
+        box.clear()
+        box.append(reason)
+
+    @property
+    def last_closed_reason(self) -> str:
+        box = self._closed_reason
+        if not box or type(box[-1]) is not str:
+            return "none"
+        return box[-1]
 
     def runtime_admission_refresh_is_eligible(
         self,
@@ -229,9 +265,10 @@ class AssistPromotionEvaluator:
         if not isinstance(self.material, AssistPromotionActivationMaterial):
             return False
         try:
+            public, diagnostics = _scheduler_projections(self.scheduler)
             candidate = self.material.fresh_candidate(
-                _status(self.scheduler, "public_status"),
-                _status(self.scheduler, "diagnostics_status"),
+                public,
+                diagnostics,
                 binding_snapshot,
                 actor_binding_sha256=actor_binding_sha256,
             )
@@ -277,17 +314,26 @@ class AssistPromotionEvaluator:
         binding_snapshot: CapabilityBindingSnapshot,
         actor_binding_sha256: str | None = None,
     ) -> AssistPromotionDecision | None:
+        self._remember_closed_reason("none")
         if not isinstance(self.material, AssistPromotionActivationMaterial):
+            self._remember_closed_reason("promotion_candidate_unavailable")
             return None
         try:
+            public, diagnostics = _scheduler_projections(self.scheduler)
+            try:
+                scheduler_admission_snapshot_from_status(public, diagnostics)
+            except AssistPromotionActivationError as exc:
+                self._remember_closed_reason(exc.reason.value)
+                return None
             candidate = self.material.fresh_candidate(
-                _status(self.scheduler, "public_status"),
-                _status(self.scheduler, "diagnostics_status"),
+                public,
+                diagnostics,
                 binding_snapshot,
                 actor_binding_sha256=actor_binding_sha256,
             )
             evidence = self.material.loaded_evidence
             if candidate is None or evidence is None:
+                self._remember_closed_reason("promotion_candidate_unavailable")
                 return None
             decision = admit_supervisor_assist_promotion(
                 candidate,
@@ -295,8 +341,10 @@ class AssistPromotionEvaluator:
                 self.material.operator_gate,
             )
         except Exception:
+            self._remember_closed_reason("promotion_decision_failed")
             return None
-        return decision if decision.promotion_admitted else None
+        self._remember_closed_reason(decision.reason.value)
+        return decision
 
 
 @dataclass(slots=True)

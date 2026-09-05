@@ -504,7 +504,6 @@ class SecondaryEndpointClient:
     ) -> SecondaryFailure | None:
         """Verify the admitted profile manifest and exact served alias."""
 
-        self._profile_manifest_match = False
         remaining = min(
             self.config.call_budget_sec,
             absolute_deadline_monotonic - self._clock(),

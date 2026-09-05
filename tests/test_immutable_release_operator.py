@@ -5645,6 +5645,7 @@ def _semantic_supervisor_health_payload(mode: str) -> dict[str, object]:
             "ordinary_event_failure_total": 0,
             "ownership_uncertain_total": 0,
             "fallback_reasons": {},
+            "last_promotion_reason": "none",
             "runtime_owner": "durable_graph_after_admission",
             "publication_owner": "primary",
             "tools_allowed": False,
@@ -5806,6 +5807,7 @@ def test_semantic_supervisor_promoted_health_binds_loaded_activation_material(mo
         ("schema", "friday.semantic-supervisor-shadow-runtime.v1"),
         ("role", "discarded_advisory_shadow"),
         ("max_review_rounds", 0),
+        ("last_promotion_reason", "laptop_runtime_unavailable"),
     ):
         mutated = json.loads(json.dumps(payload))
         mutated["semantic_supervisor"][key] = value

@@ -450,6 +450,48 @@ async def test_profile_manifest_is_hashed_before_model_inventory() -> None:
 
 
 @pytest.mark.asyncio
+async def test_in_flight_profile_probe_keeps_previous_manifest_match() -> None:
+    started = asyncio.Event()
+    release = asyncio.Event()
+    profile_calls = 0
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal profile_calls
+        if request.url.path.endswith("/friday-profile"):
+            profile_calls += 1
+            if profile_calls == 1:
+                return _profile_response()
+            started.set()
+            await release.wait()
+            return _profile_response()
+        return httpx.Response(
+            200,
+            headers=_PROFILE_HEADERS,
+            json={"data": [{"id": _ALIAS}]},
+        )
+
+    client = SecondaryEndpointClient(_endpoint_config(), transport=httpx.MockTransport(handler))
+    probe: asyncio.Task[SecondaryFailure | None] | None = None
+    try:
+        assert await client.probe_models(absolute_deadline_monotonic=time.monotonic() + 2.0) is None
+        assert client.status().profile_manifest_match is True
+        probe = asyncio.create_task(
+            client.probe_models(absolute_deadline_monotonic=time.monotonic() + 2.0)
+        )
+        await asyncio.wait_for(started.wait(), timeout=1.0)
+        assert client.status().profile_manifest_match is True
+        release.set()
+        assert await probe is None
+        assert client.status().profile_manifest_match is True
+    finally:
+        release.set()
+        if probe is not None:
+            probe.cancel()
+            await asyncio.gather(probe, return_exceptions=True)
+        await client.aclose()
+
+
+@pytest.mark.asyncio
 async def test_wrong_profile_manifest_fails_before_model_inventory() -> None:
     requested_paths: list[str] = []
 
@@ -2181,6 +2223,41 @@ async def test_semantic_runtime_refresh_uses_only_content_free_stale_epoch_probe
             "skipped_total": 0,
             "in_flight": 0,
         }
+    finally:
+        await scheduler.aclose()
+
+
+@pytest.mark.asyncio
+async def test_semantic_runtime_refresh_is_false_when_clock_fresh_epoch_is_unhealthy(
+    settings: Any,
+) -> None:
+    paths: list[str] = []
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        paths.append(request.url.path)
+        raise AssertionError("clock-fresh unhealthy epoch must not generate")
+
+    scheduler = build_secondary_brain(
+        _configured_settings(settings, private=True),
+        transport=httpx.MockTransport(handler),
+    )
+    scheduler._supervisor_mode = SecondaryMode.SHADOW  # noqa: SLF001 - isolate promoted port
+    scheduler.allowed_workloads = scheduler.allowed_workloads | {ModelWorkload.PLAN_CANDIDATE}
+    scheduler._epoch_admitted = True  # noqa: SLF001 - clock-fresh admitted process epoch
+    scheduler._last_probe_success_monotonic = time.monotonic()  # noqa: SLF001
+    assert scheduler._client is not None
+    await scheduler._client.invalidate(SecondaryFailure.TIMEOUT)
+    try:
+        assert scheduler.status().state is SecondaryState.COOLDOWN
+        assert scheduler.public_status()["available"] is False
+        assert (
+            await scheduler.refresh_semantic_supervisor_runtime_admission(
+                absolute_deadline_monotonic=time.monotonic() + 2.0,
+            )
+            is False
+        )
+        assert paths == []
+        assert scheduler.diagnostics_status()["semantic_supervisor"]["runtime_available"] is False
     finally:
         await scheduler.aclose()
 

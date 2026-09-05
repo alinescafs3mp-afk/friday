@@ -957,6 +957,7 @@ _SEMANTIC_SUPERVISOR_ASSIST_CONTROLLER_STATUS_KEYS = frozenset(
         "ordinary_event_failure_total",
         "ownership_uncertain_total",
         "fallback_reasons",
+        "last_promotion_reason",
         "runtime_owner",
         "publication_owner",
         "tools_allowed",
@@ -1815,6 +1816,7 @@ def _semantic_supervisor_health_identity_matches(
             and semantic.get("tools_allowed") is False
             and semantic.get("effects_allowed") is False
             and semantic.get("closed") is False
+            and semantic.get("last_promotion_reason") == "none"
             and semantic["promotion_admitted_total"] <= semantic["promotion_evaluation_total"]
             and semantic["promotion_evaluation_total"] <= semantic["promotion_attempt_total"]
             and controller_scheduler.get("state") in {"probing", "healthy", "degraded", "cooldown"}

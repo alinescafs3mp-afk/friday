@@ -68,6 +68,7 @@ from friday.orchestration.semantic_supervisor import (
     build_supervisor_input,
     supervisor_timeout_sec,
 )
+from friday.orchestration.supervisor_assist_activation import AssistPromotionActivationReason
 from friday.orchestration.supervisor_assist_graph_adapter import (
     AssistAdmissionBoundary,
     AssistBoundaryCheck,
@@ -151,6 +152,19 @@ SUPERVISOR_ASSIST_CONTROLLER_STATUS_SCHEMA = "friday.semantic-supervisor-assist-
 SUPERVISOR_ASSIST_RESTART_STATUS_SCHEMA = "friday.semantic-supervisor-assist-restart-status.v1"
 
 _DIGEST_RE = re.compile(r"[0-9a-f]{64}\Z")
+_PROMOTION_REASON_RE = re.compile(r"[a-z][a-z0-9_]{0,95}\Z")
+_LAST_PROMOTION_REASON_NONE = "none"
+_CONTROLLER_PROMOTION_REASONS = frozenset(
+    {
+        _LAST_PROMOTION_REASON_NONE,
+        "promotion_candidate_unavailable",
+        "promotion_decision_failed",
+        "controller_rejected_admitted",
+        "promotion_not_admitted",
+        *(reason.value for reason in AssistPromotionReason),
+        *(reason.value for reason in AssistPromotionActivationReason),
+    }
+)
 _MAX_STATUS_REASON_KEYS = 32
 _FILE_AUTHORITY_DENIAL_REASONS = frozenset(
     {"files_read_denied", "foreign_file_read_denied", "principal_not_active"}
@@ -755,6 +769,14 @@ def _safe_counter(counter: Counter[str]) -> dict[str, int]:
     return dict(sorted(counter.items())[:_MAX_STATUS_REASON_KEYS])
 
 
+def _closed_last_promotion_reason(value: object) -> str:
+    if type(value) is not str or _PROMOTION_REASON_RE.fullmatch(value) is None:
+        return "promotion_not_admitted"
+    if value not in _CONTROLLER_PROMOTION_REASONS:
+        return "promotion_not_admitted"
+    return value
+
+
 def _scheduler_identity(evaluator: object) -> dict[str, object]:
     scheduler = getattr(evaluator, "scheduler", None)
     public_method = getattr(scheduler, "public_status", None)
@@ -904,7 +926,11 @@ class SupervisorAssistController:
         self._restart_recovery_finished = False
         self._last_admitted_mode = SupervisorMode.OFF
         self._last_admitted_actor_binding_sha256: str | None = None
+        self._last_promotion_reason = _LAST_PROMOTION_REASON_NONE
         self._closed = False
+
+    def _remember_promotion_reason(self, reason: object) -> None:
+        self._last_promotion_reason = _closed_last_promotion_reason(reason)
 
     def _current_promotion(self) -> AssistPromotionDecision | None:
         """Re-evaluate the last admitted actor against fresh local runtime facts."""
@@ -957,6 +983,7 @@ class SupervisorAssistController:
             "ownership_uncertain_total": self._ownership_uncertain_total,
             "restart_recovery": self.restart_recovery_status(),
             "fallback_reasons": _safe_counter(self._fallback_reasons),
+            "last_promotion_reason": self._last_promotion_reason,
             "runtime_owner": "durable_graph_after_admission",
             "publication_owner": "primary",
             "tools_allowed": False,
@@ -1307,23 +1334,39 @@ class SupervisorAssistController:
                 actor_binding_sha256=canary_actor_binding,
             )
         except Exception:
+            if count_evaluation:
+                self._remember_promotion_reason("promotion_decision_failed")
             return None
-        if type(decision) is not AssistPromotionDecision:
-            return None
-        admitted = cast(AssistPromotionDecision, decision)
-        if (
-            not admitted.promotion_admitted
-            or admitted.reason is not AssistPromotionReason.ADMITTED
-            or admitted.readiness is not AssistPromotionReadiness.LIVE_EVIDENCE_READY
-            or admitted.admitted_mode not in {SupervisorMode.ASSIST, SupervisorMode.CANARY}
-            or admitted.requested_mode is not admitted.admitted_mode
-            or admitted.evidence_sha256 is None
-            or admitted.execution_authorized
-            or admitted.publication_authorized
-            or admitted.storage_write_authorized
-        ):
-            return None
-        return admitted
+        if type(decision) is AssistPromotionDecision:
+            admitted = cast(AssistPromotionDecision, decision)
+            if count_evaluation:
+                self._remember_promotion_reason(admitted.reason.value)
+            if (
+                not admitted.promotion_admitted
+                or admitted.reason is not AssistPromotionReason.ADMITTED
+                or admitted.readiness is not AssistPromotionReadiness.LIVE_EVIDENCE_READY
+                or admitted.admitted_mode not in {SupervisorMode.ASSIST, SupervisorMode.CANARY}
+                or admitted.requested_mode is not admitted.admitted_mode
+                or admitted.evidence_sha256 is None
+                or admitted.execution_authorized
+                or admitted.publication_authorized
+                or admitted.storage_write_authorized
+            ):
+                if count_evaluation and admitted.promotion_admitted:
+                    self._remember_promotion_reason("controller_rejected_admitted")
+                return None
+            return admitted
+        if count_evaluation:
+            closed = getattr(self._promotion, "last_closed_reason", "promotion_candidate_unavailable")
+            if callable(closed):
+                try:
+                    closed = closed()
+                except Exception:
+                    closed = "promotion_candidate_unavailable"
+            self._remember_promotion_reason(
+                closed if type(closed) is str else "promotion_candidate_unavailable"
+            )
+        return None
 
     async def _prepare_prospective(
         self,
@@ -1382,6 +1425,7 @@ class SupervisorAssistController:
         if runtime_admitted is not True:
             self._last_admitted_mode = SupervisorMode.OFF
             self._last_admitted_actor_binding_sha256 = None
+            self._remember_promotion_reason("laptop_runtime_unavailable")
             return None
         refreshed_snapshot = self._fresh_snapshot()
         if refreshed_snapshot is None:
