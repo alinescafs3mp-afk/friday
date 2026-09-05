@@ -1272,7 +1272,7 @@ async def compare_current_file_with_web(
             max_utf8_bytes=answer_budget,
         )
     except (KeyError, TypeError, ValueError, UnicodeError) as exc:
-        LOGGER.warning("comparison synthesis was rejected: %s", exc)
+        LOGGER.warning("comparison synthesis was rejected: %s", type(exc).__name__)
         raise CurrentFileWebComparisonError(
             "comparison synthesis was rejected",
             model_calls=model_calls,
