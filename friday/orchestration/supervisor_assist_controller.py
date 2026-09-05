@@ -161,6 +161,7 @@ _CONTROLLER_PROMOTION_REASONS = frozenset(
         "promotion_decision_failed",
         "controller_rejected_admitted",
         "promotion_not_admitted",
+        "plan_bind_failed",
         *(reason.value for reason in AssistPromotionReason),
         *(reason.value for reason in AssistPromotionActivationReason),
     }
@@ -1503,6 +1504,7 @@ class SupervisorAssistController:
                 turn_deadline_monotonic_ns=int(deadline * 1_000_000_000),
                 authority_attestor=cast(PlanAuthorityAttestor, attest),
                 capability_bindings=snapshot,
+                sealed_web_query=surface.web_plan.owned_query(),
             )
         except Exception:
             return None
@@ -1553,8 +1555,10 @@ class SupervisorAssistController:
                 source_identity_sha256=surface.attachment.source_identity_sha256,
                 content_sha256=surface.attachment_content_sha256,
             )
-            or bind_assist_plan_to_surface(plan, surface) is None
         ):
+            return None
+        if bind_assist_plan_to_surface(plan, surface) is None:
+            self._remember_promotion_reason("plan_bind_failed")
             return None
         primary_ready = await self._primary_model.prepare_primary_model(
             absolute_deadline=deadline,
@@ -3225,7 +3229,12 @@ class SupervisorAssistController:
             except Exception:
                 prospective = None
             if prospective is None:
-                return await self._legacy(legacy_primary, reason="promotion_not_admitted")
+                fallback_reason = (
+                    "plan_bind_failed"
+                    if self._last_promotion_reason == "plan_bind_failed"
+                    else "promotion_not_admitted"
+                )
+                return await self._legacy(legacy_primary, reason=fallback_reason)
             if _exact_future_deadline(prospective.absolute_deadline) is None:
                 return await self._legacy(legacy_primary, reason="deadline_exhausted")
             admitted_surface.require_current_authenticated_call_scope()

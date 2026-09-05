@@ -1,3 +1,14 @@
+## 0.208.32 — 2026-09-05
+
+### Assist plan owns the sealed public-web query
+
+- Distinct sealed candidate for `semantic_supervisor_assist_to_shadow` after
+  live 0.208.31. Kernel admission stamps the code-owned sealed surface query
+  onto `web.search.current` instead of executing a model paraphrase. Bind
+  failure is recorded as `plan_bind_failed` instead of collapsing into
+  `promotion_not_admitted`. SQLite remains at schema 50; exact `0.208.31` is
+  the predecessor and `0.207.90` the fallback.
+
 ## 0.208.31 — 2026-09-05
 
 ### No-product shadow_to_assist restore

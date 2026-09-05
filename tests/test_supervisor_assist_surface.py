@@ -229,7 +229,12 @@ def _bind_authenticated_call_scope(
     )
 
 
-def _plan(surface: CurrentFileWebAssistSurface, *, query: str) -> Any:
+def _plan(
+    surface: CurrentFileWebAssistSurface,
+    *,
+    query: str,
+    sealed_web_query: str | None = None,
+) -> Any:
     supervisor_input = build_supervisor_input(surface.turn, _settings())
     proposal = SupervisorProposal.parse(
         {
@@ -303,6 +308,7 @@ def _plan(surface: CurrentFileWebAssistSurface, *, query: str) -> Any:
                 witness_sha256="9" * 64,
             ),
             capability_bindings=operational_capability_snapshot(),
+            sealed_web_query=sealed_web_query,
         ),
     )
     assert decision.admitted and decision.plan is not None
@@ -541,3 +547,18 @@ def test_plan_binding_requires_exact_sealed_outbound_query() -> None:
 
     mismatched = _plan(surface, query="другие публичные правила 2026")
     assert bind_assist_plan_to_surface(mismatched, surface) is None
+
+
+def test_admit_replaces_paraphrased_web_query_with_sealed_surface_query() -> None:
+    query = "актуальные публичные правила 2026"
+    paraphrase = "другие публичные правила 2026"
+    surface = _surface(message=_message(query))
+    owned = surface.web_plan.owned_query()
+    plan = _plan(surface, query=paraphrase, sealed_web_query=owned)
+    bindings = bind_assist_plan_to_surface(plan, surface)
+    assert bindings is not None
+    web_input = next(item.plan_step.input for item in bindings if item.graph_step_id == "read_current_web")
+    assert web_input["query_intent"] == owned
+    assert web_input["query_intent"] != paraphrase
+    assert owned not in repr(surface)
+    assert owned not in repr(surface.web_plan)

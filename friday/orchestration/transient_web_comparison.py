@@ -274,6 +274,12 @@ class SealedPublicWebQuery:
     def canonical_sha256(self) -> str:
         return _canonical_sha256(self.identity_payload())
 
+    def owned_query(self) -> str:
+        """Return the process-owned outbound query. Do not log this string."""
+
+        self.__post_init__()
+        return self._query
+
 
 def seal_explicit_public_web_query(
     *,

@@ -298,8 +298,14 @@ class _Promotion:
 
 
 class _Planner:
-    def __init__(self, *, admit: bool = True) -> None:
+    def __init__(
+        self,
+        *,
+        admit: bool = True,
+        query: str = "актуальные публичные правила 2026",
+    ) -> None:
         self.admit = admit
+        self.query = query
         self.calls = 0
 
     async def propose(
@@ -314,7 +320,7 @@ class _Planner:
         assert absolute_deadline > time.monotonic()
         if not self.admit or pre_dispatch_validator is None or pre_dispatch_validator() is not True:
             return None
-        query = "актуальные публичные правила 2026"
+        query = self.query
         review_modes = (
             ("secondary_after_deterministic_checks", "none")
             if supervisor_input.budgets.max_review_rounds == 1
@@ -1486,6 +1492,37 @@ async def test_plan_mint_authority_denial_falls_back_before_graph_admission() ->
 
 
 @pytest.mark.asyncio
+async def test_plan_bind_failure_records_distinct_fallback_reason(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        "friday.orchestration.supervisor_assist_controller.bind_assist_plan_to_surface",
+        lambda *_args, **_kwargs: None,
+    )
+    controller = _controller()
+    legacy_calls = 0
+
+    async def legacy() -> dict[str, object]:
+        nonlocal legacy_calls
+        legacy_calls += 1
+        return {"message": "legacy"}
+
+    result = await controller.execute(
+        _surface(),
+        legacy_primary=legacy,
+        absolute_deadline=time.monotonic() + 3,
+    )
+    status = controller.semantic_supervisor_status()
+
+    assert result.outcome is SupervisorAssistOutcome.LEGACY
+    assert legacy_calls == 1
+    assert status["last_promotion_reason"] == "plan_bind_failed"
+    assert status["fallback_reasons"] == {"plan_bind_failed": 1}
+    assert status["promotion_admitted_total"] == 0
+    assert status["invoked_total"] == 0
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("fail_at", "propagates"),
     [(2, False), (3, False), (4, False), (5, True)],
@@ -1979,6 +2016,44 @@ async def test_authenticated_primary_journey_narrows_deadline_and_has_zero_tool_
         ) == (0, 0, 0)
         assert primary.lease is not None
         assert primary.lease.requirements_sha256 == requirements.canonical_sha256()
+
+
+@pytest.mark.asyncio
+async def test_paraphrased_planner_query_still_owns_and_executes_sealed_web_query(
+    storage: Any,
+    _exact_request_effect_fence: Any,
+) -> None:
+    paraphrase = "другие публичные правила 2026"
+    with _bound_authenticated_stored_surface(
+        storage,
+        "paraphrased-web-query",
+        _exact_request_effect_fence,
+    ) as (surface, projection, _attachments, _ingestion, parent_deadline):
+        owned = surface.web_plan.owned_query()
+        assert owned != paraphrase
+        web_reader = _WebReader(_web_evidence(surface))
+        controller = _controller(
+            planner=_Planner(query=paraphrase),
+            graph_adapter=_CountingAdapter(storage),
+            file_reader=_FileReader(_prepared_file(surface, projection)),
+            web_reader=web_reader,
+        )
+
+        async def forbidden_legacy() -> dict[str, object]:
+            raise AssertionError("paraphrased query_intent must still own the sealed web query")
+
+        result = await controller.execute(
+            surface,
+            legacy_primary=forbidden_legacy,
+            absolute_deadline=parent_deadline + 30,
+        )
+        status = controller.semantic_supervisor_status()
+
+        assert result.outcome is SupervisorAssistOutcome.PUBLISHED
+        assert web_reader.calls == 1
+        assert status["fallback_reasons"] == {}
+        assert status["invoked_total"] == 1
+        assert owned not in repr(surface.web_plan)
 
 
 @pytest.mark.asyncio

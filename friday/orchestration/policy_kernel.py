@@ -42,6 +42,7 @@ from friday.orchestration.supervisor_contracts import (
     SupervisorStep,
     TaskClass,
     canonical_sha256,
+    parse_query_intent,
     parse_supervisor_goal,
     parse_supervisor_purpose,
 )
@@ -131,6 +132,7 @@ class PolicyAdmissionContext:
         repr=False,
         compare=False,
     )
+    sealed_web_query: str | None = field(default=None, repr=False)
 
     def __post_init__(self) -> None:
         for label, value in (
@@ -157,6 +159,13 @@ class PolicyAdmissionContext:
             or not callable(self.authority_attestor)
         ):
             raise ExecutionPlanError("deadline and authority attestor must be code-owned")
+        if self.sealed_web_query is not None:
+            try:
+                parsed = parse_query_intent(self.sealed_web_query, label="sealed_web_query")
+            except SupervisorContractError as exc:
+                raise ExecutionPlanError("sealed web query must be a closed natural-language intent") from exc
+            if parsed != self.sealed_web_query:
+                raise ExecutionPlanError("sealed web query must be a closed natural-language intent")
 
 
 @dataclass(frozen=True, slots=True)
@@ -344,6 +353,23 @@ def _source_scope_is_admitted(
     )
 
 
+def _owned_step_input(
+    step: SupervisorStep,
+    context: PolicyAdmissionContext,
+) -> Mapping[str, Any]:
+    """Stamp the sealed surface query onto assist web steps. Never execute a paraphrase."""
+
+    if (
+        context.authority_scope is not PlanAuthorityScope.ASSIST_EXECUTION
+        or step.target_id != WEB_SEARCH_CURRENT_ID
+        or context.sealed_web_query is None
+    ):
+        return step.input
+    owned = dict(step.input)
+    owned["query_intent"] = context.sealed_web_query
+    return owned
+
+
 def admit_supervisor_proposal(
     proposal: SupervisorProposal,
     supervisor_input: SupervisorInput,
@@ -451,6 +477,7 @@ def admit_supervisor_proposal(
         tool_id = binding.tool_id if binding is not None else None
         adapter_id = binding.adapter_id if binding is not None else None
         effect_class = binding.effect_class if binding is not None else CapabilityEffectClass.READ
+        step_input = _owned_step_input(step, context)
         admitted_step_items.append(
             ValidatedStep(
                 step_id=step.step_id,
@@ -461,12 +488,12 @@ def admit_supervisor_proposal(
                 resolved_adapter_id=adapter_id,
                 depends_on=step.depends_on,
                 parallel_group=step.parallel_group,
-                input=step.input,
+                input=step_input,
                 idempotency_key=canonical_sha256(
                     {
                         "step_id": step.step_id,
                         "target_id": step.target_id,
-                        "input": dict(step.input),
+                        "input": dict(step_input),
                         "manifest_id": supervisor_input.manifest.digest_hex(),
                         "binding_snapshot_sha256": context.capability_bindings.digest_hex(),
                         "security_id": security_id,
