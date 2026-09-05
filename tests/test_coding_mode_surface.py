@@ -211,7 +211,7 @@ def test_execute_claim_extracts_admitted_archive_without_running_it(
     assert spawned[0][0] == "/usr/bin/bwrap"
     assert spawned[1][0] == "/usr/bin/bwrap"
     assert any("loader.discover" in part for part in spawned[1])
-    assert not any("src/main.py" == part for part in spawned[1])
+    assert not any(part == "src/main.py" for part in spawned[1])
 
 
 def test_compile_claim_builds_extracted_archive_without_executing_it(
@@ -282,11 +282,11 @@ def test_pytest_claim_runs_isolated_unittest_of_extracted_tests(
         worker_root=str(worker_root),
     )
     payload = (
-        "import unittest\n"
-        "class T(unittest.TestCase):\n"
-        "    def test_a(self):\n"
-        "        self.assertEqual(1, 1)\n"
-    ).encode()
+        b"import unittest\n"
+        b"class T(unittest.TestCase):\n"
+        b"    def test_a(self):\n"
+        b"        self.assertEqual(1, 1)\n"
+    )
     result = handle_coding_static_turn(
         storage=None,
         user_id=LEGACY_OWNER_USER_ID,
