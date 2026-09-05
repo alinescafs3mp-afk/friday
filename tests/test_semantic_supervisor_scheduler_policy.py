@@ -141,6 +141,13 @@ def _chat_response(configured: Any, content: str, *, finish_reason: str = "stop"
 def _mark_epoch_fresh(scheduler: SecondaryBrainScheduler) -> None:
     scheduler._epoch_admitted = True  # noqa: SLF001 - isolate priority behavior from probes
     scheduler._last_probe_success_monotonic = time.monotonic()  # noqa: SLF001
+    client = scheduler._client
+    if client is None:
+        return
+    client._state = SecondaryState.HEALTHY  # noqa: SLF001
+    client._last_failure = None  # noqa: SLF001
+    client._profile_manifest_match = True  # noqa: SLF001
+    client._served_model_match = True  # noqa: SLF001
 
 
 def _unit_scheduler() -> SecondaryBrainScheduler:
