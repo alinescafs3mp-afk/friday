@@ -943,8 +943,6 @@ class TransientWebComparisonAdapter:
             )
         evidence = _project_report(plan, report)
         if evidence.status is TransientWebEvidenceStatus.UNAVAILABLE:
-            LOGGER.warning(
-                "transient web comparison unavailable: %s",
-                evidence.unavailable_reason.value,
-            )
+            safe_code = evidence.unavailable_reason.value
+            LOGGER.warning("transient web comparison unavailable: %s", safe_code)
         return evidence
