@@ -257,18 +257,18 @@ def observe_coding_archive_extract(
                 )
                 if isolation.admission is not CodingProjectIsolationAdmissionState.ADMITTED:
                     return _blocked(CodingArchiveExtractObserveReason.ISOLATION_NOT_GRANTED)
-                info = by_path.get(destination)
+                zip_info = by_path.get(destination)
                 dest = _safe_destination(root_path, destination)
-                if info is None or dest is None:
+                if zip_info is None or dest is None:
                     return _blocked(CodingArchiveExtractObserveReason.ISOLATION_NOT_GRANTED)
-                member = _member_from_zip(info)
+                member = _member_from_zip(zip_info)
                 if member is None:
                     return _blocked(CodingArchiveExtractObserveReason.INVALID_ARCHIVE)
                 if member.file_kind is CodingArchiveFileKind.DIRECTORY:
                     pending.append((dest, None))
                     continue
                 try:
-                    with archive.open(info, "r") as handle:
+                    with archive.open(zip_info, "r") as handle:
                         payload = handle.read()
                 except (OSError, RuntimeError, ValueError, zipfile.BadZipFile):
                     return _blocked(CodingArchiveExtractObserveReason.WRITE_FAILED)
@@ -276,13 +276,13 @@ def observe_coding_archive_extract(
                     return _blocked(CodingArchiveExtractObserveReason.INVALID_ARCHIVE)
                 pending.append((dest, payload))
             try:
-                for dest, payload in pending:
-                    if payload is None:
+                for dest, body in pending:
+                    if body is None:
                         ensure_private_directory(dest)
                         continue
                     ensure_private_directory(dest.parent)
                     prepare_private_file(dest)
-                    dest.write_bytes(payload)
+                    dest.write_bytes(body)
                     restrict_private_file(dest)
             except (OSError, ValueError):
                 return _blocked(CodingArchiveExtractObserveReason.WRITE_FAILED)
