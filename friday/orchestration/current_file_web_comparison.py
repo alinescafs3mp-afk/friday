@@ -203,11 +203,7 @@ def _answer_json_utf8_budget(
     if type(required_context_tokens) is not int or required_context_tokens not in _CONTEXT_TOKEN_TIERS:
         return 0
     scaled = (_MAX_ANSWER_JSON_UTF8_BYTES * required_context_tokens) // _BASE_CONTEXT_TOKENS
-    cap = (
-        _MAX_ACCEPTED_ANSWER_JSON_UTF8_BYTES
-        if for_acceptance
-        else _MAX_SCALED_ANSWER_JSON_UTF8_BYTES
-    )
+    cap = _MAX_ACCEPTED_ANSWER_JSON_UTF8_BYTES if for_acceptance else _MAX_SCALED_ANSWER_JSON_UTF8_BYTES
     if scaled > cap:
         return cap
     return scaled
@@ -804,9 +800,7 @@ def _validate_answer(
         raise ValueError("comparison answer is empty")
     encoded = len(json.dumps(normalized, ensure_ascii=False).encode("utf-8"))
     if encoded > max_utf8_bytes:
-        raise ValueError(
-            f"comparison answer exceeds the json budget encoded={encoded} max={max_utf8_bytes}"
-        )
+        raise ValueError(f"comparison answer exceeds the json budget encoded={encoded} max={max_utf8_bytes}")
     expected_tokens = {f"[{label}]" for label in expected_labels}
     if (
         _SERVICE_MARKUP_RE.search(normalized)
