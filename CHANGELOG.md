@@ -1,3 +1,12 @@
+## 0.208.47 — 2026-09-05
+
+### No-product shadow_to_assist restore
+
+- Distinct sealed candidate for `semantic_supervisor_shadow_to_assist` after
+  live 0.208.46. No product source change. Restores the assist semantic
+  supervisor ENV after the 0.208.46 assist_to_shadow cycle. SQLite remains at
+  schema 50; exact `0.208.46` is the predecessor and `0.207.90` the fallback.
+
 ## 0.208.46 — 2026-09-05
 
 ### Log a closed file+web synthesis reject class without answer bodies
