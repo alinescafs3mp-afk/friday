@@ -1,3 +1,21 @@
+## 0.208.46 — 2026-09-05
+
+### Log a closed file+web synthesis reject class without answer bodies
+
+- Distinct sealed candidate for `semantic_supervisor_assist_to_shadow` after
+  live 0.208.45. File+web still generates up to 768 tokens and still accepts
+  `finish_reason=stop` or `length` with no tool calls. Live V12 on 0.208.45
+  returned a 678-token stop-finished synthesis that `_validate_answer`
+  rejected as a bare `ValueError`, so JSON-byte overflow and citation/unsafe
+  failures were indistinguishable in the journal. `_validate_answer` now
+  raises a closed `_AnswerRejected` class (`not_text`, `invalid_budget`,
+  `empty`, `json_budget`, `service_markup`, `secrets`, `citation_labels`,
+  `unowned_brackets`). The synthesis path logs `json_budget encoded=%d max=%d`
+  or the closed code string; it never logs the answer body. 8192 stays 1328.
+  Verifier reserve stays 5312. Post-synthesis acceptance at 40960 stays 6640.
+  SQLite remains at schema 50; exact `0.208.45` is the predecessor and
+  `0.207.90` the fallback.
+
 ## 0.208.45 — 2026-09-05
 
 ### No-product shadow_to_assist restore

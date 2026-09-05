@@ -4,6 +4,7 @@ import asyncio
 import hashlib
 import inspect
 import json
+import logging
 import time
 from dataclasses import dataclass, fields, replace
 from typing import Any
@@ -845,6 +846,119 @@ async def test_q38_rejects_synthesis_over_scaled_answer_json_budget() -> None:
     assert captured.value.failure_reason is FailureReason.INVALID_CONTRACT
     assert captured.value.synthesis_outcome is OutcomeStatus.FAILED
     assert captured.value.model_calls == len(model.calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_validate_answer_closed_reject_codes_are_logged_without_bodies(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    labels = ("F1", "W1", "W2", "W3")
+    budget = 1_328
+    cited = (
+        "Файл сообщает локальный факт [F1]. Первый источник даёт текущий контекст [W1]. "
+        "Второй источник подтверждает изменение [W2]. Третий источник задаёт границу [W3]."
+    )
+    markup = "<tool_call>forbidden</tool_call> [F1]. Веб [W1]. Ещё [W2]. Конец [W3]."
+    secret = "API_TOKEN=abcdefgh12345678 [F1]. Веб [W1]. Ещё [W2]. Конец [W3]."
+    missing_web = "Файл без веб-меток [F1]."
+    leftover = cited + " Примечание [нет]."
+    oversized = _cited_answer_of_json_bytes(1_329)
+    reject = comparison_module._AnswerRejected
+    validate = comparison_module._validate_answer
+
+    assert {
+        "not_text",
+        "invalid_budget",
+        "empty",
+        "json_budget",
+        "service_markup",
+        "secrets",
+        "citation_labels",
+        "unowned_brackets",
+    } == comparison_module._ANSWER_REJECT_CODES
+
+    with pytest.raises(reject) as captured:
+        validate(None, labels, max_utf8_bytes=budget)
+    assert captured.value.code == "not_text"
+
+    with pytest.raises(reject) as captured:
+        validate(cited, labels, max_utf8_bytes=0)
+    assert captured.value.code == "invalid_budget"
+
+    with pytest.raises(reject) as captured:
+        validate("   ", labels, max_utf8_bytes=budget)
+    assert captured.value.code == "empty"
+
+    with pytest.raises(reject) as captured:
+        validate(oversized, labels, max_utf8_bytes=budget)
+    assert captured.value.code == "json_budget"
+    assert captured.value.encoded > budget
+    assert captured.value.max_utf8_bytes == budget
+
+    with pytest.raises(reject) as captured:
+        validate(markup, labels, max_utf8_bytes=budget)
+    assert captured.value.code == "service_markup"
+
+    with pytest.raises(reject) as captured:
+        validate(secret, labels, max_utf8_bytes=budget)
+    assert captured.value.code == "secrets"
+
+    with pytest.raises(reject) as captured:
+        validate(missing_web, labels, max_utf8_bytes=budget)
+    assert captured.value.code == "citation_labels"
+
+    with pytest.raises(reject) as captured:
+        validate(leftover, labels, max_utf8_bytes=budget)
+    assert captured.value.code == "unowned_brackets"
+
+    logger_name = comparison_module.LOGGER.name
+    q38_oversize = _cited_answer_of_json_bytes(6_641)
+    with caplog.at_level(logging.WARNING, logger=logger_name):
+        model = _ComparisonModel(answer=q38_oversize, available_context_tokens=40_960)
+        with pytest.raises(CurrentFileWebComparisonError) as captured:
+            await compare_current_file_with_web(
+                model,
+                request=_REQUEST,
+                accepted_plan_sha256=_PLAN_SHA256,
+                prepared_file=_prepared_file(),
+                web_evidence=_full_web(),
+                absolute_deadline=time.monotonic() + 10,
+            )
+        assert captured.value.failure_reason is FailureReason.INVALID_CONTRACT
+        assert captured.value.synthesis_outcome is OutcomeStatus.FAILED
+        assert captured.value.model_calls == 1
+
+        citation_model = _ComparisonModel(answer=missing_web)
+        with pytest.raises(CurrentFileWebComparisonError) as captured:
+            await compare_current_file_with_web(
+                citation_model,
+                request=_REQUEST,
+                accepted_plan_sha256=_PLAN_SHA256,
+                prepared_file=_prepared_file(),
+                web_evidence=_full_web(),
+                absolute_deadline=time.monotonic() + 10,
+            )
+        assert captured.value.failure_reason is FailureReason.INVALID_CONTRACT
+        assert captured.value.synthesis_outcome is OutcomeStatus.FAILED
+        assert captured.value.model_calls == 1
+
+    records = [record.getMessage() for record in caplog.records if record.name == logger_name]
+    assert any(
+        message
+        == (
+            "comparison synthesis was rejected: json_budget "
+            f"encoded={len(json.dumps(q38_oversize, ensure_ascii=False).encode('utf-8'))} "
+            "max=6640"
+        )
+        for message in records
+    )
+    assert "comparison synthesis was rejected: citation_labels" in records
+    joined = "\n".join(records)
+    assert q38_oversize not in joined
+    assert missing_web not in joined
+    assert secret not in joined
+    assert "API_TOKEN" not in joined
+    assert "[нет]" not in joined
 
 
 @pytest.mark.asyncio

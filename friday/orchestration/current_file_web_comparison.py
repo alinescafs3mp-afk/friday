@@ -785,6 +785,43 @@ def _has_unowned_brackets(text: str, expected_tokens: set[str]) -> bool:
     return any("BRACKET" in unicodedata.name(character, "") for character in remainder)
 
 
+_ANSWER_REJECT_CODES = frozenset(
+    {
+        "not_text",
+        "invalid_budget",
+        "empty",
+        "json_budget",
+        "service_markup",
+        "secrets",
+        "citation_labels",
+        "unowned_brackets",
+    }
+)
+
+
+class _AnswerRejected(ValueError):
+    """Closed reject class for comparison answers; logs never receive the body."""
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        code: str,
+        encoded: int = 0,
+        max_utf8_bytes: int = 0,
+    ) -> None:
+        if type(code) is not str or code not in _ANSWER_REJECT_CODES:
+            raise TypeError("comparison answer reject code is closed")
+        if type(encoded) is not int or encoded < 0:
+            encoded = 0
+        if type(max_utf8_bytes) is not int or max_utf8_bytes < 0:
+            max_utf8_bytes = 0
+        self.code = code
+        self.encoded = encoded
+        self.max_utf8_bytes = max_utf8_bytes
+        super().__init__(message)
+
+
 def _validate_answer(
     answer: object,
     expected_labels: tuple[str, ...],
@@ -792,24 +829,43 @@ def _validate_answer(
     max_utf8_bytes: int,
 ) -> str:
     if type(answer) is not str:
-        raise ValueError("comparison answer is not text")
+        raise _AnswerRejected("comparison answer is not text", code="not_text")
     if type(max_utf8_bytes) is not int or max_utf8_bytes <= 0:
-        raise ValueError("comparison answer budget is invalid")
+        raise _AnswerRejected("comparison answer budget is invalid", code="invalid_budget")
     normalized = answer.strip()
     if not normalized:
-        raise ValueError("comparison answer is empty")
+        raise _AnswerRejected("comparison answer is empty", code="empty")
     encoded = len(json.dumps(normalized, ensure_ascii=False).encode("utf-8"))
     if encoded > max_utf8_bytes:
-        raise ValueError(f"comparison answer exceeds the json budget encoded={encoded} max={max_utf8_bytes}")
+        raise _AnswerRejected(
+            f"comparison answer exceeds the json budget encoded={encoded} max={max_utf8_bytes}",
+            code="json_budget",
+            encoded=encoded,
+            max_utf8_bytes=max_utf8_bytes,
+        )
     expected_tokens = {f"[{label}]" for label in expected_labels}
-    if (
-        _SERVICE_MARKUP_RE.search(normalized)
-        or not model_visible_text_is_secret_free(normalized)
-        or not secondary_model_messages_are_secret_free([{"role": "assistant", "content": normalized}])
-        or tuple(_CITATION_RE.findall(normalized)) != expected_labels
-        or _has_unowned_brackets(normalized, expected_tokens)
+    if _SERVICE_MARKUP_RE.search(normalized):
+        raise _AnswerRejected(
+            "comparison answer is unsafe or has invalid citations",
+            code="service_markup",
+        )
+    if not model_visible_text_is_secret_free(normalized) or not secondary_model_messages_are_secret_free(
+        [{"role": "assistant", "content": normalized}]
     ):
-        raise ValueError("comparison answer is unsafe or has invalid citations")
+        raise _AnswerRejected(
+            "comparison answer is unsafe or has invalid citations",
+            code="secrets",
+        )
+    if tuple(_CITATION_RE.findall(normalized)) != expected_labels:
+        raise _AnswerRejected(
+            "comparison answer is unsafe or has invalid citations",
+            code="citation_labels",
+        )
+    if _has_unowned_brackets(normalized, expected_tokens):
+        raise _AnswerRejected(
+            "comparison answer is unsafe or has invalid citations",
+            code="unowned_brackets",
+        )
     return normalized
 
 
@@ -1274,6 +1330,25 @@ async def compare_current_file_with_web(
             labels,
             max_utf8_bytes=answer_budget,
         )
+    except _AnswerRejected as rejected:
+        reject_code = rejected.code
+        if reject_code == "json_budget":
+            encoded_size = rejected.encoded
+            max_bytes = rejected.max_utf8_bytes
+            LOGGER.warning(
+                "comparison synthesis was rejected: json_budget encoded=%d max=%d",
+                encoded_size,
+                max_bytes,
+            )
+        else:
+            LOGGER.warning("comparison synthesis was rejected: %s", reject_code)
+        raise CurrentFileWebComparisonError(
+            "comparison synthesis was rejected",
+            model_calls=model_calls,
+            failure_stage=FailureStage.SYNTHESIS_CONTRADICTION,
+            failure_reason=FailureReason.INVALID_CONTRACT,
+            synthesis_outcome=OutcomeStatus.FAILED,
+        ) from None
     except (KeyError, TypeError, ValueError, UnicodeError) as exc:
         LOGGER.warning("comparison synthesis was rejected: %s", type(exc).__name__)
         raise CurrentFileWebComparisonError(
