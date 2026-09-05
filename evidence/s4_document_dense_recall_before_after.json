@@ -110,7 +110,7 @@
     "release_sha256": "25a7b6bc55c1a4198d672836d335a39c28c490a9788c489fb64d63e7238bb790",
     "repeat_output_sha256": "79cf8ee51edc54cbfd815b54499490ab4390f9408dae7d5e534cddd8c3f70840",
     "result_sha256": "66e943fda982457e47e06eabc6ab977936646e2cecce8d78e089a7c00cd276a8",
-    "source_commit": "7981f1e28ff3ca3f0a6f2fc2afd78bdb52c0f952",
+    "source_commit": "a75d8acf4afe8acefc2b7621d02aa5c24f5ca903",
     "source_guard": {
       "instrument_sha256_end": "fd489c05b86f680b5cb29b150284add6f025099f59deb048ad1aa0bd8a2c08ec",
       "instrument_sha256_start": "fd489c05b86f680b5cb29b150284add6f025099f59deb048ad1aa0bd8a2c08ec",
