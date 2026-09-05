@@ -1,6 +1,6 @@
 # Friday: canonical project backlog
 
-Updated: 2026-09-05 (live `0.208.25`; N1 one-final-carrier live; remaining N2 observation-bound; N3 `/coding` static inspect + isolated-worker boundary + admitted archive extract + isolated untrusted build/test loop live; execute/run of uploaded programs fail-closed; N4 store-backed mixed journeys live; N5 implementable seam closed, ratchet standing)
+Updated: 2026-09-05 (live `0.208.26`; N1 one-final-carrier live; N2 research mission/gates live on `_web_research`; N3 `/coding` create/archive/view live; execute/run of uploaded programs fail-closed; N4 store-backed mixed journeys live; N5 implementable seam closed, ratchet standing)
 
 This is the project's only backlog and mutable status register. It owns the
 current production identity, execution order, acceptance gaps and owner actions.
@@ -32,51 +32,44 @@ Do not copy that snapshot's release claims forward.
 - Database schema: 50 in deployed production and the fallback.
 
 Golden-journey receipts stay bound to that `0.208.1` root until rebound. The
-running sealed sibling is Friday `0.208.25` at
-`60b62c71be58f8dd8a507ccb2e77d28b2f9d028c` (tree-file
-`be7a18fa77a0a797272c08eab61e931c6846a089087c17f9dce77fb1bf3992e6`, wheel
-`ac319a5415664faf15a1700bad88f7c59d5c7852f5d8c02d752fed2f7c5bc5e1`, journal
-`clear`, predecessor `0.208.24` /
-`edb6270976fc5622fe8215c07246d56ce7e31d0a`). Trusted-CA health reports
-`version=0.208.25`. S3: `requested_mode=assist`, `effective_mode=off`,
-`promotion_admitted=false`,
-`activation.reason=material_loaded_not_accepted`. Advice stays off until
-a genuine eligible witness; do not fabricate traffic. Next product
-sibling that changes friday sources is `assist_to_shadow`. N1 Telegram
-surfaces (ordinary `/chat` status, Engineer status renderer, file-album
-DOCUMENT status, Engineer FILE/ARCHIVE carrier,
-restart/edit-reject/send-fence/cancel counts, observed web/archive chat
-status) and one-final-carrier packing are live. N2 live `_web_research`
-refuses private observed URLs, empty-after-outbound, and invalid
-provider facts; `_web_search` and `_web_fetch` refuse `BLOCKED_PRIVATE`
-the same way. `search`/`research` observe chain names as `WebProviderId`
-and the kernel consumes `select_web_provider` when
-`selected_provider_id` is present. File+web comparison and
-`POST /api/ingest/url` refuse observed private URLs via the same
-consumption gate. Other N2 contracts stay observation-bound: live
-requesting workflows do not observe claims, dates, passages or
-missions. Do not fabricate those witnesses. N3 `/coding` static inspect
-and the dedicated isolated-worker boundary remain live through
-`0.208.25`; admitted in-memory archive extract into the isolated
-workspace remains live through `0.208.25`; isolated untrusted
-`py_compile` / stdlib unittest of extracted uploads remains live
-through `0.208.25`; execute/run of uploaded programs stay fail-closed. This is
-not a safety certification. Other N3 inspect,
-prompt-to-small-project, result-archive-plan,
-upload-modification-admission and Coding Mode view/carrier/plan-gate
-families stay source-only. N4 store-backed mixed journeys remain live
-through `0.208.25`: file+archive+conversation+web+table identities
-project into Telegram MIXED when PROJECTED; exclusive
-DOCUMENT/ARCHIVE/RESEARCH remain otherwise. The 0.208.24 N3 loop did
-not dump into `friday/agent_runtime`; N5 implementable seam extract
-is closed, the maintainability ratchet remains standing.
+running sealed sibling is Friday `0.208.26` at
+`9316a5e6cc2e16992a4eafaab04f3fc9f66ff01a` (tree-file
+`4368e94d92a1bb5b41e81f98706fa6e1338b9a5e6c19f654efc9f14c0be8607e`, wheel
+`f98055784f1948335da9cf332b15596936a693f47b506eefc8026e8ea5c45915`, journal
+`clear`, predecessor `0.208.25` /
+`60b62c71be58f8dd8a507ccb2e77d28b2f9d028c`). Trusted-CA health reports
+`version=0.208.26`. S3: `requested_mode=shadow`, `effective_mode=shadow`,
+`promotion_admitted=false`, `activation.reason=default_off`. Advice
+stays off until a genuine eligible witness; do not fabricate traffic.
+Do not re-activate `9316a5e6`. Next product sibling that changes
+friday sources is `shadow_to_assist`. N1 Telegram surfaces and
+one-final-carrier packing remain live. N2 live `_web_research` plans a
+2–8 query public mission, executes complementary queries on
+fact-bearing public sources, and observes remaining N2 gates on the
+admitted report without inventing claims; empty research does not
+attach those keys; `SEARCH_BLOCKED_PRIVATE` never becomes a query
+plan. `_web_search` and `_web_fetch` refuse `BLOCKED_PRIVATE`.
+File+web comparison and `POST /api/ingest/url` consume
+`BLOCKED_PRIVATE`. Private N2 self-score is Friday's own gates, not
+Gemini parity; do not claim Gemini parity without a paired scored
+set. N3 `/coding` static inspect, isolated-worker boundary, admitted
+archive extract, isolated untrusted `py_compile` / unittest,
+prompt-to-small-project, one-final `friday-source.zip` pack, digest
+and overwrite observation on extract, and Coding Mode
+view/plan-gate/carrier remain live through `0.208.26`. Execute/run of
+uploaded programs stay fail-closed. This is not a safety
+certification. Upload-modification apply stays source-only. N4
+store-backed mixed journeys remain live through `0.208.26`. N5
+implementable seam extract is closed, the maintainability ratchet
+remains standing.
 
 - Production: immutable activation `phase=clear`; backend and Telegram bridge
   active; writer target `candidate`. Retention admission remains honestly
   `review_required` and grants no apply/delete authority. V12 `canary_ready`
   with verified, installation and effective context all exactly `40960`.
-- Secondary: accepted/live GPT-OSS profile `gptoss20b-2335df…`; `state=healthy`,
-  `mode=assist`, `available=false`. Supervisor advice stays off until a genuine
+- Secondary: accepted/live GPT-OSS profile `gptoss20b-2335df…`; after the
+  `0.208.26` cutover restart `state=cooldown`, `mode=assist`,
+  `available=false`. Supervisor advice stays off until a genuine
   eligible current-file-plus-public-web consumed witness; no traffic is
   fabricated. Primary-only behavior is preserved when the laptop is absent.
 - The reader-first body-free document-passage contour is fully converged: 1,720
@@ -99,41 +92,21 @@ deployed; advice remains off until the observation-bound witness. S5 40k lease
 and S6 recovery/browse paths stay live.
 
 The live product queue is N1–N5. The shared operation-progress contract is
-live. Production `0.208.25` keeps ordinary Telegram `/chat` status,
+live. Production `0.208.26` keeps ordinary Telegram `/chat` status,
 Engineer status, file-album DOCUMENT status, Engineer FILE/ARCHIVE
 carrier, observed web/archive chat status, one-final-carrier packing,
-owner-private `/coding` static inspect, the dedicated `/coding`
-isolated-worker boundary, admitted in-memory archive extract into the
-isolated workspace, isolated untrusted build/test of extracted uploads,
-and store-backed mixed journeys (Telegram MIXED
-when PROJECTED).
-N2 currentness, evidence bundle,
-multi-query mission planner, provider fallback, source diversity,
-consumption, readiness and citation coverage, claim support, answer
-admission, contradiction coverage, exact mission coverage, evidence
-grounding, source date coverage, claim currentness and
-passage-reference coverage are on `origin/main` and live as source.
-Live `_web_research` refuses private URLs, empty-after-outbound and
-invalid provider facts; `_web_search` and `_web_fetch` refuse
-`BLOCKED_PRIVATE`; observed chain names are consumed when
-`selected_provider_id` is present. File+web comparison and
-`POST /api/ingest/url` consume `BLOCKED_PRIVATE`. Other N2
-contracts stay observation-bound; do not fabricate witnesses. N3
-`/coding` static inspect, isolated-worker boundary, admitted archive
-extract and isolated untrusted build/test of extracted uploads remain
-live through `0.208.25`; execute/run of uploaded programs stay
-fail-closed. This is not a safety certification. Coding Mode
-intent, snapshot, plan-gate, carrier and view contracts are on
-`origin/main` and unwired. Project identity, prompt-to-small-project,
-one-final source-archive plan, result-archive-pack family
-and upload-modification admission stay source-only. N4 shared
-operation/situation view, mixed-journey view, store-shaped projection
-and the live store observer remain on `0.208.25`. N5
-extracted the kernel web-consumption seam on `0.208.18`; the 0.208.24
-N3 loop did not dump into `friday/agent_runtime`; the implementable
-seam-extract row is closed on `0.208.25` and the ratchet stays
-standing. Physical Android, P0H deletion, off-machine
-mirror and provider-credential rotation remain owner-parked.
+owner-private `/coding` static inspect, isolated-worker boundary,
+admitted archive extract, isolated untrusted build/test of extracted
+uploads, prompt-to-small-project, one-final source archive pack,
+digest/overwrite observation on extract, Coding Mode
+view/plan-gate/carrier, live `_web_research` mission/gates, and
+store-backed mixed journeys (Telegram MIXED when PROJECTED).
+Execute/run of uploaded programs stay fail-closed. This is not a
+safety certification. Upload-modification apply stays source-only.
+Gemini parity is not claimed. S3 advice stays off until a genuine
+eligible witness. N5 ratchet stays standing. Physical Android, P0H
+deletion, off-machine mirror and provider-credential rotation remain
+owner-parked.
 
 ## Operating rules
 
@@ -881,34 +854,29 @@ one editable Friday status → one final result carrier. Reuse
 
 ### N2 — Deep Web Research and Automatic Knowledge-Gap Search
 
-Status: modules started on `origin/main` and live as source in `0.208.18`.
-Today is still a strong single-query 27s/3-source (max 8) live pipeline.
-Code-owned currentness policy, frozen `WebEvidenceBundleV1`, multi-query
-mission planner, provider fallback policy, source diversity, research
-consumption, readiness composition, citation coverage, claim support,
-answer admission, contradiction coverage, exact mission coverage,
-evidence grounding, source date coverage, claim currentness and
-passage-reference coverage exist and are not wired into Coding journeys.
-Live `_web_research` refuses private observed URLs, empty-after-outbound
-(`no_admitted_sources`) and invalid provider facts; empty success is not
-completeness. `_web_search` and `_web_fetch` refuse `BLOCKED_PRIVATE`.
-File+web comparison and `POST /api/ingest/url` consume `BLOCKED_PRIVATE`
-the same way. Remaining N2 contracts stay observation-bound: live
-requesting workflows do not observe claims, dates, passages or missions.
-Table CSV/spreadsheet URLs already go through file+web consumption.
-Coding `/coding` static inspect and isolated-worker boundary are live
-on `0.208.20`.
-Do not wire mission/answer-gate into live single-query `_web_research`.
-Do not fabricate those facts.
+Status: live on `0.208.26`. `_web_research` plans a 2–8 complementary
+public-query mission, executes those queries on fact-bearing public
+sources, and observes remaining N2 gates on the already-admitted
+report. Empty research does not attach observation keys.
+`SEARCH_BLOCKED_PRIVATE` never becomes a query plan. The observer
+does not search, fetch, or invent claims. Live `_web_research` still
+refuses private observed URLs, empty-after-outbound
+(`no_admitted_sources`) and invalid provider facts. `_web_search`
+and `_web_fetch` refuse `BLOCKED_PRIVATE`. File+web comparison and
+`POST /api/ingest/url` consume `BLOCKED_PRIVATE`. Private N2
+self-score is Friday's own gates, not Gemini parity. Do not claim
+Gemini parity without a paired scored set. Do not fabricate
+witnesses.
 
 - [x] Automatic currentness / knowledge-gap policy module on `origin/main`
       (`friday/orchestration/web_currentness_policy.py`). Not wired into
       live `web_surfer` or Telegram. Private filenames, paths and deictics
       stay local.
-- [x] Multi-query research mission planner on `origin/main`
+- [x] Multi-query research mission planner live on `0.208.26`
       (`friday/orchestration/web_research_mission.py`). Emits 2–8
       complementary public queries; `SEARCH_BLOCKED_PRIVATE` never becomes a
-      query plan. Not wired.
+      query plan. Kernel `_web_research` plans and executes complementary
+      queries on fact-bearing public sources.
 - [x] Provider selection and honest degraded-fallback policy on
       `origin/main` (`friday/orchestration/web_provider_policy.py`). Not
       wired into live `web_surfer`. PRIMARY_OK / FALLBACK_USED /
@@ -918,7 +886,8 @@ Do not fabricate those facts.
       requesting workflow yet.
 - [x] Public-web source diversity on `origin/main`
       (`friday/orchestration/web_source_diversity.py`). Lexical hostname
-      only; EMPTY / SINGLE_HOST / CONCENTRATED / DIVERSE. Not wired.
+      only; EMPTY / SINGLE_HOST / CONCENTRATED / DIVERSE. Observed live
+      on `0.208.26`.
 - [x] Research consumption gate on `origin/main`
       (`friday/orchestration/web_research_consumption.py`). CONSUMABLE /
       CONSUMABLE_DEGRADED / BLOCKED_PRIVATE / UNAVAILABLE. Live kernel
@@ -926,65 +895,67 @@ Do not fabricate those facts.
       `POST /api/ingest/url` refuse `BLOCKED_PRIVATE`; kernel research also
       refuses empty-after-outbound. Other states are not yet consumed
       by the requesting workflow.
-- [x] Research readiness composition on `origin/main`
+- [x] Research readiness composition observed live on `0.208.26`
       (`friday/orchestration/web_research_readiness.py`). READY /
       READY_DEGRADED / NOT_READY from mission, diversity and consumption.
-      Not wired.
 - [x] Citation host coverage on `origin/main`
       (`friday/orchestration/web_citation_coverage.py`). COMPLETE / PARTIAL /
-      EMPTY / BLOCKED_PRIVATE; lexical hostname only. Not wired.
+      EMPTY / BLOCKED_PRIVATE; lexical hostname only. Observed live
+      on `0.208.26`.
 - [x] Claim-support contract on `origin/main`
       (`friday/orchestration/web_claim_support.py`). COMPLETE / PARTIAL /
       EMPTY / UNSUPPORTED / BLOCKED. Contradicting-only and unknown source
-      ids are not support. Not wired.
-- [x] Answer-admission gate on `origin/main`
+      ids are not support. Observed live on `0.208.26`.
+- [x] Answer-admission gate observed live on `0.208.26`
       (`friday/orchestration/web_research_answer_gate.py`). ADMITTED /
       ADMITTED_DEGRADED / HOLD / BLOCKED from readiness and citation
-      coverage. Not wired.
+      coverage. Does not invent claims.
 - [x] Contradiction coverage on `origin/main`
       (`friday/orchestration/web_contradiction_coverage.py`). EMPTY / NONE /
       PRESENT / UNIVERSAL / BLOCKED. Supporting-only is not contradiction.
-      Not wired.
-- [x] Exact mission coverage on `origin/main`
+      Observed live on `0.208.26`.
+- [x] Exact mission coverage observed live on `0.208.26`
       (`friday/orchestration/web_mission_coverage.py`). COMPLETE / PARTIAL /
       EMPTY / BLOCKED. Extra executed queries do not complete coverage.
-      Not wired.
+      Coverage input is only planned queries that actually ran.
 - [x] Evidence grounding on `origin/main`
       (`friday/orchestration/web_evidence_grounding.py`). EMPTY / GROUNDED /
       PARTIAL / UNGROUNDED / BLOCKED. A claim is grounded iff an admitted
-      supporting or contradicting source id is present. Not wired.
+      supporting or contradicting source id is present. Observed live
+      on `0.208.26`.
 - [x] Source date coverage on `origin/main`
       (`friday/orchestration/web_source_date_coverage.py`). EMPTY / DATED /
       PARTIAL / UNDATED / BLOCKED. `retrieved_at` alone is not dating.
-      Not wired.
+      Observed live on `0.208.26`.
 - [x] Claim currentness admission on `origin/main`
       (`friday/orchestration/web_claim_currentness.py`). EMPTY / ADMITTED /
       HOLD / BLOCKED. `SEARCH_NOT_REQUIRED` does not admit current-sensitive
-      claims. Not wired.
+      claims. Observed live on `0.208.26`.
 - [x] Passage-reference coverage on `origin/main`
       (`friday/orchestration/web_passage_reference_coverage.py`). EMPTY /
       REFERENCED / PARTIAL / BARE / BLOCKED. Title, digest and `retrieved_at`
-      are not references. Not wired.
-- [ ] Remaining N2 contracts stay observation-bound until a live workflow
-      observes claims, dates, passages or missions. Table file+web and
-      kernel/ingest paths already consume `BLOCKED_PRIVATE`. Do not wire
-      mission/answer-gate into live single-query `_web_research`. Do not
-      fabricate witnesses.
-- [ ] Private representative benchmark and body-free public summary. Do not
-      claim Gemini parity without a paired scored set.
+      are not references. Observed live on `0.208.26`.
+- [x] Remaining N2 contracts observed live on `0.208.26` by
+      `friday/execution_kernel/web_research_gates.py` on an already-admitted
+      research report. Compact keys only; fail-closed on TypeError/ValueError.
+      Do not fabricate witnesses.
+- [x] Private representative N2 self-score on `0.208.26`
+      (`test_n2_private_self_score_is_friday_gates_not_gemini_parity`).
+      Body-free compact dict of Friday's own gates. Explicitly not Gemini
+      parity.
+- [ ] Gemini parity needs a paired scored set. Do not claim it.
 
 ### N3 — Coding Mode
 
-Status: `/coding` static inspect and the dedicated isolated-worker
-boundary remain live through `0.208.25`. Admitted in-memory archive
-extract into the isolated workspace remains live through `0.208.25`.
-Isolated untrusted `py_compile` and stdlib unittest of extracted
-uploads remain live through `0.208.25` after worker admission and a
-confirmed isolation probe. Owner private Telegram only; execute/run of uploaded
-programs stay fail-closed. Engineer bubblewrap is not a Coding Worker.
-This is not a safety certification. Prompt-to-small-project and
-one-final source-archive plan contracts stay unwired. Do not claim
-safe build/test of untrusted uploads.
+Status: `/coding` static inspect, isolated-worker boundary, admitted
+archive extract, isolated untrusted `py_compile` / unittest,
+prompt-to-small-project, one-final `friday-source.zip` pack, digest
+and overwrite observation on extract, and Coding Mode
+view/plan-gate/carrier remain live through `0.208.26`. Owner private
+Telegram only; execute/run of uploaded programs stay fail-closed.
+Engineer bubblewrap is not a Coding Worker. This is not a safety
+certification. Upload-modification apply stays source-only. Do not
+claim safe build/test of untrusted uploads.
 
 - [x] Bare-source inspection contracts on `origin/main`
       (`coding_source_member.py`, `coding_source_tree.py`,
@@ -994,10 +965,9 @@ safe build/test of untrusted uploads.
       rebuild, no file I/O, filename-suffix hints only. Live as
       `/coding` static inspect on `0.208.19`. Isolated-worker boundary
       live on `0.208.20`.
-- [x] Prompt-to-small-project and uploaded-project modification.
-      Prompt normalization, implementation plan, scaffold, create
-      admission and upload-modification admission are on `origin/main`
-      (not wired; no execute).
+- [x] Prompt-to-small-project live on `0.208.26`
+      (`friday/organs/coding/create.py`). Unbounded «всё» fail-closed;
+      no execute. Upload-modification admission remains source-only.
 - [x] Persistent project identity contract on `origin/main`
       (`friday/orchestration/coding_project_identity.py`). EMPTY /
       IDENTIFIED / BLOCKED. Exact revision only; `latest`/`HEAD`/
@@ -1023,9 +993,9 @@ safe build/test of untrusted uploads.
       `coding_project_isolation_admission.py`,
       `coding_archive_overwrite_plan.py`). Catalog, relative
       destinations, project-root isolation are consumed by the
-      extract observer live on `0.208.22`. Digest facts
-      and overwrite/collision stay unwired. Untrusted execute
-      remains fail-closed.
+      extract observer live on `0.208.22`. Digest facts and
+      overwrite/collision are observed on extract live on `0.208.26`.
+      Untrusted execute remains fail-closed.
 - [x] One final source archive; restart, rollback and adversarial proof.
       TEXT/FILE/ARCHIVE plan, manifest, pack admission, publication,
       restart, rollback and uncertainty contracts are on `origin/main`
@@ -1035,8 +1005,10 @@ safe build/test of untrusted uploads.
       `coding_result_publication_admission.py`,
       `coding_result_restart_admission.py`,
       `coding_result_rollback_admission.py`,
-      `coding_result_uncertainty.py`); no archive is packed or opened.
-      Not wired.
+      `coding_result_uncertainty.py`). One-final `friday-source.zip`
+      pack, restart/rollback EMPTY observation and uncertainty are
+      live on `0.208.26`. Never restart/rollback I/O. Execute/run
+      stay fail-closed.
 - [x] Coding Mode situation composition on `origin/main`
       (`coding_mode_intent.py`, `coding_mode_snapshot.py`,
       `coding_mode_execute_claim.py`, `coding_mode_plan_gate.py`,
@@ -1045,6 +1017,7 @@ safe build/test of untrusted uploads.
       Untrusted execute without an admitted worker fails closed.
       Execute-claim is composed by `/coding` static_turn live on
       `0.208.22`; isolated BUILD/TEST loop is live on `0.208.24`;
+      plan-gate, carrier and view are composed live on `0.208.26`;
       the process worker remains probe-only; execute/run stay
       fail-closed.
 
@@ -1233,21 +1206,37 @@ checklist elsewhere. The Ctrl+T view is a compact projection of this list.
       `0.208.18` in `friday/execution_kernel/web_consumption.py`.
       The N5 chapter stays a standing ratchet.
 
+### Closed on production `0.208.26`
+
+- [x] N2 live research mission/gates and N3 `/coding` create, digest/
+      overwrite extract observation, one-final `friday-source.zip`
+      pack, restart/rollback EMPTY observation, and Coding Mode
+      view/plan-gate/carrier live on `0.208.26` at
+      `9316a5e6cc2e16992a4eafaab04f3fc9f66ff01a` (tree-file
+      `4368e94d92a1bb5b41e81f98706fa6e1338b9a5e6c19f654efc9f14c0be8607e`,
+      wheel `f98055784f1948335da9cf332b15596936a693f47b506eefc8026e8ea5c45915`).
+      Trusted-CA health is `0.208.26` with `requested_mode=shadow` and
+      `effective_mode=shadow` (`default_off`). Secondary after cutover
+      restart: `mode=assist`, `state=cooldown`, `available=false`.
+      DR published index_revision 152; retention remains
+      `review_required`. Upload-modification apply stays source-only.
+      Execute/run of uploaded programs stay fail-closed. Gemini parity
+      is not claimed. Do not re-activate `9316a5e6`. Next product
+      sibling that changes friday sources is `shadow_to_assist`.
+
 ### Open and implementable
 
-None. Implementable N1–N5 rows are closed on production. Remaining
-N1–N5 work is the standing N5 ratchet or observation-blocked N2.
+- [ ] N3 upload-modification EMPTY observer: compose
+      `coding_upload_modification_admission` on live `/coding`
+      static_turn from landed inspect, isolation, identity and
+      edit-plan facts. Never apply file rewrites of uploaded
+      projects. Fail-closed execute/run. Product sibling `0.208.27`
+      with `shadow_to_assist`.
 
 ### Open and blocked
 
-- [ ] N2 remaining contracts stay observation-bound until a live workflow
-      observes claims, dates, passages or missions. Live `_web_research`
-      already refuses private URLs, empty-after-outbound and invalid
-      provider facts; `_web_search`/`_web_fetch`, file+web and
-      `POST /api/ingest/url` consume `BLOCKED_PRIVATE`. Do not wire
-      mission/answer-gate into live single-query `_web_research`. Do not
-      fabricate witnesses. Private representative benchmark / Gemini
-      parity needs a paired scored set.
+- [ ] Gemini parity needs a paired scored set. Do not claim it.
+      Private N2 self-score is Friday's own gates, not Gemini.
 - [ ] S3 Supervisor advice on live turns — observation-bound. Need a genuine
       eligible current-file-plus-public-web consumed witness. Do not
       fabricate traffic.
