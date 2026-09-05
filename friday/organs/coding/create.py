@@ -176,11 +176,17 @@ def observe_coding_create(
         goal=goal,
         language_hint=hint,
     )
-    if prompt.prompt is not CodingPromptNormalizationState.NORMALIZED or prompt.title is None or prompt.goal is None:
+    if (
+        prompt.prompt is not CodingPromptNormalizationState.NORMALIZED
+        or prompt.title is None
+        or prompt.goal is None
+    ):
         admission = build_coding_create_admission(
             f"{turn_id}-create",
             turn_id,
-            identity=build_coding_project_identity(f"{turn_id}-ident", turn_id, project_id=project_id, revision_selector="rev-blocked"),
+            identity=build_coding_project_identity(
+                f"{turn_id}-ident", turn_id, project_id=project_id, revision_selector="rev-blocked"
+            ),
             prompt=prompt,
             plan=build_coding_implementation_plan(f"{turn_id}-plan", turn_id),
             scaffold=build_coding_project_scaffold(f"{turn_id}-scaffold", turn_id),
@@ -194,7 +200,11 @@ def observe_coding_create(
     bodies = _bodies(prompt.title, prompt.goal, source_name)
     paths = tuple(sorted(bodies))
     steps = tuple(
-        {"step_id": re.sub(r"[^a-z0-9]+", "_", path.rsplit(".", 1)[0].casefold()).strip("_") or "file", "action": "create", "target_path": path}
+        {
+            "step_id": re.sub(r"[^a-z0-9]+", "_", path.rsplit(".", 1)[0].casefold()).strip("_") or "file",
+            "action": "create",
+            "target_path": path,
+        }
         for path in paths
     )
     seen: dict[str, int] = {}
@@ -206,7 +216,9 @@ def observe_coding_create(
             step = {**step, "step_id": f"{key}_{seen[key]}"}
         unique_steps.append(step)
     revision = hashlib.sha256(
-        json.dumps({path: hashlib.sha256(bodies[path]).hexdigest() for path in paths}, sort_keys=True).encode()
+        json.dumps(
+            {path: hashlib.sha256(bodies[path]).hexdigest() for path in paths}, sort_keys=True
+        ).encode()
     ).hexdigest()
     identity = build_coding_project_identity(
         f"{turn_id}-ident",
@@ -229,7 +241,9 @@ def observe_coding_create(
             turn_id,
             CodingCreateObserveReason.ADMISSION_NOT_GRANTED,
             admission=admission,
-            identity=identity if identity.identity is CodingProjectIdentityState.IDENTIFIED else build_coding_project_identity(f"{turn_id}-ident", turn_id),
+            identity=identity
+            if identity.identity is CodingProjectIdentityState.IDENTIFIED
+            else build_coding_project_identity(f"{turn_id}-ident", turn_id),
         )
     if not worker_admitted:
         return _blocked(
@@ -242,7 +256,9 @@ def observe_coding_create(
         ensure_private_directory(workspace)
         root = str(workspace.resolve())
     except (OSError, ValueError):
-        return _blocked(turn_id, CodingCreateObserveReason.WRITE_FAILED, admission=admission, identity=identity)
+        return _blocked(
+            turn_id, CodingCreateObserveReason.WRITE_FAILED, admission=admission, identity=identity
+        )
     pending: list[tuple[Path, bytes]] = []
     for path in paths:
         isolation = build_coding_project_isolation_admission(
@@ -276,7 +292,9 @@ def observe_coding_create(
             dest.write_bytes(body)
             restrict_private_file(dest)
     except (OSError, ValueError):
-        return _blocked(turn_id, CodingCreateObserveReason.WRITE_FAILED, admission=admission, identity=identity)
+        return _blocked(
+            turn_id, CodingCreateObserveReason.WRITE_FAILED, admission=admission, identity=identity
+        )
     return CodingCreateObserveV1(
         CodingCreateObserveState.WRITTEN,
         CodingCreateObserveReason.WRITTEN,

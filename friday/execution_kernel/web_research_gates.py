@@ -113,9 +113,7 @@ def _source_facts(report: Mapping[str, Any]) -> list[dict[str, object]]:
     return facts
 
 
-def _provider_selection(
-    report: Mapping[str, Any], urls: tuple[str, ...]
-) -> WebProviderSelection | None:
+def _provider_selection(report: Mapping[str, Any], urls: tuple[str, ...]) -> WebProviderSelection | None:
     selected_id = report.get("selected_provider_id")
     if not isinstance(selected_id, str) or not selected_id.strip():
         return None
@@ -195,9 +193,7 @@ def complementary_mission_queries(
     if mission is None:
         return ()
     original = " ".join(query.casefold().split())
-    return tuple(
-        item for item in mission.query_plan if " ".join(item.casefold().split()) != original
-    )
+    return tuple(item for item in mission.query_plan if " ".join(item.casefold().split()) != original)
 
 
 def merge_unique_research_sources(
@@ -243,9 +239,12 @@ def merge_unique_research_sources(
         report["completed_sources"] = len(raw)
         failed = report.get("failed_sources")
         timed_out = report.get("timed_out_sources")
-        if isinstance(failed, int) and not isinstance(failed, bool) and isinstance(
-            timed_out, int
-        ) and not isinstance(timed_out, bool):
+        if (
+            isinstance(failed, int)
+            and not isinstance(failed, bool)
+            and isinstance(timed_out, int)
+            and not isinstance(timed_out, bool)
+        ):
             report["requested_sources"] = len(raw) + failed + timed_out
 
 

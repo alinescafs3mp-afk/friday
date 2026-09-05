@@ -208,7 +208,9 @@ def _russian_inspect_reply(
     elif extract.state is CodingArchiveExtractObserveState.BLOCKED:
         refused = refused + " Распаковка архива не допущена."
     if created_state == "written":
-        refused = refused + " Небольшой проект записан в изолированное рабочее место. Программа не исполнялась."
+        refused = (
+            refused + " Небольшой проект записан в изолированное рабочее место. Программа не исполнялась."
+        )
     elif created_state == "blocked":
         refused = refused + " Создание проекта не допущено."
     if archive_state == "archive":
@@ -378,7 +380,10 @@ def handle_coding_static_turn(
             runner=spawn_runner,
             created=created,
         )
-    ready = created.state is CodingCreateObserveState.WRITTEN or extract.state is CodingArchiveExtractObserveState.EXTRACTED
+    ready = (
+        created.state is CodingCreateObserveState.WRITTEN
+        or extract.state is CodingArchiveExtractObserveState.EXTRACTED
+    )
     result_archive = observe_coding_result_archive(
         turn_id=turn_id,
         workspace=workspace,

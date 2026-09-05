@@ -527,9 +527,7 @@ def test_unbounded_prompt_to_project_is_blocked(tmp_path) -> None:
     assert list((tmp_path / "friday-coding-worker").glob("work/*/main.py")) == []
 
 
-def test_created_scaffold_can_run_isolated_unittest(
-    tmp_path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_created_scaffold_can_run_isolated_unittest(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
     from friday.organs.coding.worker_boundary import default_coding_worker_boundary
 
     def _boom(*_args: object, **_kwargs: object) -> None:
