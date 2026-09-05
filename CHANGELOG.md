@@ -1,3 +1,14 @@
+## 0.208.24 — 2026-09-05
+
+### N3 isolated untrusted build/test loop
+
+- Distinct sealed candidate for `semantic_supervisor_assist_to_shadow` after
+  live 0.208.23. Lands isolated `/coding` build (`py_compile`) and stdlib
+  unittest of extracted uploads only after worker admission and a confirmed
+  isolation probe. Execute/run of uploaded programs stay fail-closed. This is
+  not a safety certification. SQLite remains at schema 50; exact `0.208.23`
+  is the predecessor and `0.207.90` the fallback.
+
 ## 0.208.23 — 2026-09-05
 
 ### No-product shadow_to_assist restore

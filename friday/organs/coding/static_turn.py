@@ -1,4 +1,4 @@
-"""Owner-only Coding Mode turn: static inspect, isolated worker, never execute."""
+"""Owner-only Coding Mode turn: static inspect, isolated worker, fail-closed execute."""
 
 from __future__ import annotations
 
@@ -19,6 +19,7 @@ from friday.orchestration.coding_inspect_report import (
 from friday.orchestration.coding_mode_execute_claim import (
     CodingModeExecuteClaimState,
     CodingModeExecuteClaimV1,
+    CodingModeExecuteOperation,
     build_coding_mode_execute_claim,
 )
 from friday.orchestration.coding_mode_intent import build_coding_mode_intent
@@ -29,6 +30,12 @@ from friday.organs.coding.extract import (
     CodingArchiveExtractObserveV1,
     first_archive_bytes,
     observe_coding_archive_extract,
+)
+from friday.organs.coding.loop import (
+    CodingIsolatedLoopReason,
+    CodingIsolatedLoopState,
+    CodingIsolatedLoopV1,
+    observe_coding_isolated_loop,
 )
 from friday.organs.coding.worker_boundary import (
     CodingWorkerBoundaryV1,
@@ -42,10 +49,16 @@ from friday.organs.coding.worker_spawn import (
 )
 from friday.permissions import ActorContext, AuthorizationError
 
+_TEST_CLAIM_RE = re.compile(
+    r"(?i)(?:\b(?:pytest|py\.test)\b|\bgo\s+test\b|прогон)"
+)
+_BUILD_CLAIM_RE = re.compile(
+    r"(?i)(?:\b(?:compile|rebuild|build)\b|скомпилир|пересобери)"
+)
 _EXECUTE_CLAIM_RE = re.compile(
     r"(?i)(?:"
-    r"\b(?:run|execute|exec|compile|rebuild|pytest|npm|make|cargo|go\s+test)\b"
-    r"|запусти|выполн|скомпилир|пересобери|прогон"
+    r"\b(?:run|execute|exec|npm|make|cargo)\b"
+    r"|запусти|выполн"
     r")"
 )
 
@@ -57,8 +70,15 @@ def _require_coding_actor(actor: ActorContext) -> None:
         raise AuthorizationError("Coding mode is available only to the installation owner")
 
 
-def _execute_claimed(message: str) -> bool:
-    return _EXECUTE_CLAIM_RE.search(message or "") is not None
+def _claimed_operation(message: str) -> CodingModeExecuteOperation | None:
+    text = message or ""
+    if _TEST_CLAIM_RE.search(text) is not None:
+        return CodingModeExecuteOperation.TEST
+    if _BUILD_CLAIM_RE.search(text) is not None:
+        return CodingModeExecuteOperation.BUILD
+    if _EXECUTE_CLAIM_RE.search(text) is not None:
+        return CodingModeExecuteOperation.EXECUTE
+    return None
 
 
 def _compose_execute_claim(
@@ -68,7 +88,8 @@ def _compose_execute_claim(
     members: Sequence[Mapping[str, object]],
     admission: object,
 ) -> tuple[bool, CodingModeExecuteClaimV1]:
-    execute_requested = _execute_claimed(message)
+    operation = _claimed_operation(message)
+    execute_requested = operation is not None
     if execute_requested:
         if members:
             intent = build_coding_mode_intent(f"{turn_id}-intent", turn_id, upload=True)
@@ -79,7 +100,7 @@ def _compose_execute_claim(
             turn_id,
             intent,
             worker=admission,
-            operation="execute",
+            operation=operation,
         )
     else:
         intent = build_coding_mode_intent(f"{turn_id}-intent", turn_id, inspect=True)
@@ -129,12 +150,29 @@ def _russian_inspect_reply(
     execute_claimed: bool,
     worker_admitted: bool,
     extract: CodingArchiveExtractObserveV1,
+    loop: CodingIsolatedLoopV1,
 ) -> str:
-    refused = "Исполнение, сборка и тесты не допущены."
-    if execute_claimed:
-        refused = "Запрос на выполнение отклонён. " + refused
+    if loop.state is CodingIsolatedLoopState.BUILT:
+        refused = "Изолированная компиляция выполнена. Код загрузок не исполнялся. Это не сертификат безопасности."
+    elif loop.state is CodingIsolatedLoopState.TESTED:
+        refused = "Изолированный тест выполнен. Это не сертификат безопасности."
+    elif loop.reason is CodingIsolatedLoopReason.NO_TESTS:
+        refused = "Изолированный тест не нашёл тестов. Исполнение программы не допущено."
+    elif loop.reason is CodingIsolatedLoopReason.BUILD_FAILED:
+        refused = "Изолированная компиляция не удалась. Код не исполнялся."
+    elif loop.reason is CodingIsolatedLoopReason.TEST_FAILED:
+        refused = "Изолированный тест не прошёл. Это не сертификат безопасности."
+    elif loop.reason is CodingIsolatedLoopReason.EXECUTE_FORBIDDEN:
+        refused = "Запрос на выполнение отклонён. Исполнение, сборка и тесты не допущены."
+    else:
+        refused = "Исполнение, сборка и тесты не допущены."
+        if execute_claimed:
+            refused = "Запрос на выполнение отклонён. " + refused
     if worker_admitted:
-        refused = refused + " Изолированный worker допущен, код загрузок не исполнялся."
+        if loop.untrusted_execute:
+            refused = refused + " Изолированный worker допущен."
+        else:
+            refused = refused + " Изолированный worker допущен, код загрузок не исполнялся."
     else:
         refused = refused + " Изолированный worker не допущен."
     if extract.state is CodingArchiveExtractObserveState.EXTRACTED:
@@ -253,12 +291,28 @@ def handle_coding_static_turn(
             workspace=Path(boundary.worker_root) / boundary.workspace_path,
             raw=first_archive_bytes(attachments),
         )
+    loop = CodingIsolatedLoopV1(
+        CodingIsolatedLoopState.EMPTY,
+        CodingIsolatedLoopReason.NO_WORKSPACE,
+        False,
+    )
+    if execute_claim.claim is CodingModeExecuteClaimState.EXECUTE_CLAIMED:
+        operation = execute_claim.operation or CodingModeExecuteOperation.EXECUTE
+        loop = observe_coding_isolated_loop(
+            admission=admission,
+            boundary=boundary,
+            spawn=spawn,
+            extract=extract,
+            operation=operation,
+            runner=spawn_runner,
+        )
     worker_admitted = admission.admission is CodingWorkerAdmissionState.ADMITTED
     text = _russian_inspect_reply(
         report,
         execute_claimed=execute_claimed,
         worker_admitted=worker_admitted,
         extract=extract,
+        loop=loop,
     )
     persisted_id = _ensure_conversation(
         storage,
@@ -297,7 +351,7 @@ def handle_coding_static_turn(
         "interaction_mode": "coding",
         "coding_inspect_report": report.report.value,
         "coding_inspect_reason": report.reason.value,
-        "coding_execution_attempted": False,
+        "coding_execution_attempted": loop.untrusted_execute,
         "coding_worker_admission": admission.admission.value,
         "coding_worker_admission_reason": admission.reason.value,
         "coding_worker_spawned": spawn.spawned,
@@ -305,6 +359,9 @@ def handle_coding_static_turn(
         "coding_archive_extract": extract.state.value,
         "coding_archive_extract_reason": extract.reason.value,
         "coding_archive_extracted_count": extract.extracted_count,
+        "coding_loop": loop.state.value,
+        "coding_loop_reason": loop.reason.value,
+        "coding_loop_untrusted_execute": loop.untrusted_execute,
         "llm_failed": False,
     }
     if report.report is not CodingInspectReportState.BLOCKED:

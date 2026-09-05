@@ -173,6 +173,8 @@ def test_execute_claim_extracts_admitted_archive_without_running_it(
     def _runner(argv: tuple[str, ...], timeout_sec: int) -> int:
         spawned.append(argv)
         del timeout_sec
+        if any("loader.discover" in part for part in argv):
+            return 2
         return 0
 
     monkeypatch.setattr("subprocess.Popen", _boom, raising=False)
@@ -198,13 +200,152 @@ def test_execute_claim_extracts_admitted_archive_without_running_it(
     assert result["context"]["coding_execution_attempted"] is False
     assert result["context"]["coding_archive_extract"] == "extracted"
     assert result["context"]["coding_archive_extracted_count"] == 1
+    assert result["context"]["coding_loop"] == "blocked"
+    assert result["context"]["coding_loop_reason"] == "no_tests"
     assert result["context"]["coding_worker_spawned"] is True
     assert "архив распакован" in result["message"].casefold()
     assert "не допущен" in result["message"].casefold()
     assert len(extracted) == 1
     assert extracted[0].read_bytes() == b"print(1)\n"
-    assert len(spawned) == 1
+    assert len(spawned) == 2
     assert spawned[0][0] == "/usr/bin/bwrap"
+    assert spawned[1][0] == "/usr/bin/bwrap"
+    assert any("loader.discover" in part for part in spawned[1])
+    assert not any("src/main.py" == part for part in spawned[1])
+
+
+def test_compile_claim_builds_extracted_archive_without_executing_it(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from friday.organs.coding.worker_boundary import default_coding_worker_boundary
+
+    def _boom(*_args: object, **_kwargs: object) -> None:
+        raise AssertionError("coding turn spawned a host process")
+
+    spawned: list[tuple[str, ...]] = []
+
+    def _runner(argv: tuple[str, ...], timeout_sec: int) -> int:
+        spawned.append(argv)
+        del timeout_sec
+        return 0
+
+    monkeypatch.setattr("subprocess.Popen", _boom, raising=False)
+    monkeypatch.setattr("subprocess.run", _boom, raising=False)
+    worker_root = tmp_path / "friday-coding-worker"
+    boundary = default_coding_worker_boundary(
+        friday_home=str(tmp_path / "friday-home"),
+        owner_home=str(tmp_path / "owner"),
+        database_path=str(tmp_path / "friday-home" / "data" / "state"),
+        worker_root=str(worker_root),
+    )
+    result = handle_coding_static_turn(
+        storage=None,
+        user_id=LEGACY_OWNER_USER_ID,
+        actor=_owner_actor(),
+        message="скомпилируй",
+        conversation_id=None,
+        attachments=[_zip_attachment({"src/main.py": b"VALUE = 1\n"})],
+        worker_boundary=boundary,
+        spawn_runner=_runner,
+    )
+    assert result["context"]["coding_archive_extract"] == "extracted"
+    assert result["context"]["coding_loop"] == "built"
+    assert result["context"]["coding_execution_attempted"] is False
+    assert "компиляция выполнена" in result["message"].casefold()
+    assert "не сертификат" in result["message"].casefold()
+    assert len(spawned) == 2
+    assert any("py_compile" in part for part in spawned[1])
+
+
+def test_pytest_claim_runs_isolated_unittest_of_extracted_tests(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from friday.organs.coding.worker_boundary import default_coding_worker_boundary
+
+    def _boom(*_args: object, **_kwargs: object) -> None:
+        raise AssertionError("coding turn spawned a host process")
+
+    spawned: list[tuple[str, ...]] = []
+
+    def _runner(argv: tuple[str, ...], timeout_sec: int) -> int:
+        spawned.append(argv)
+        del timeout_sec
+        return 0
+
+    monkeypatch.setattr("subprocess.Popen", _boom, raising=False)
+    monkeypatch.setattr("subprocess.run", _boom, raising=False)
+    worker_root = tmp_path / "friday-coding-worker"
+    boundary = default_coding_worker_boundary(
+        friday_home=str(tmp_path / "friday-home"),
+        owner_home=str(tmp_path / "owner"),
+        database_path=str(tmp_path / "friday-home" / "data" / "state"),
+        worker_root=str(worker_root),
+    )
+    payload = (
+        "import unittest\n"
+        "class T(unittest.TestCase):\n"
+        "    def test_a(self):\n"
+        "        self.assertEqual(1, 1)\n"
+    ).encode()
+    result = handle_coding_static_turn(
+        storage=None,
+        user_id=LEGACY_OWNER_USER_ID,
+        actor=_owner_actor(),
+        message="запусти pytest",
+        conversation_id=None,
+        attachments=[_zip_attachment({"test_ok.py": payload})],
+        worker_boundary=boundary,
+        spawn_runner=_runner,
+    )
+    assert result["context"]["coding_archive_extract"] == "extracted"
+    assert result["context"]["coding_loop"] == "tested"
+    assert result["context"]["coding_execution_attempted"] is True
+    assert "изолированный тест выполнен" in result["message"].casefold()
+    assert "не сертификат" in result["message"].casefold()
+    assert len(spawned) == 2
+    assert any("loader.discover" in part for part in spawned[1])
+
+
+def test_run_program_claim_stays_fail_closed_after_extract(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from friday.organs.coding.worker_boundary import default_coding_worker_boundary
+
+    def _boom(*_args: object, **_kwargs: object) -> None:
+        raise AssertionError("coding turn spawned a host process")
+
+    spawned: list[tuple[str, ...]] = []
+
+    def _runner(argv: tuple[str, ...], timeout_sec: int) -> int:
+        spawned.append(argv)
+        del timeout_sec
+        return 0
+
+    monkeypatch.setattr("subprocess.Popen", _boom, raising=False)
+    monkeypatch.setattr("subprocess.run", _boom, raising=False)
+    worker_root = tmp_path / "friday-coding-worker"
+    boundary = default_coding_worker_boundary(
+        friday_home=str(tmp_path / "friday-home"),
+        owner_home=str(tmp_path / "owner"),
+        database_path=str(tmp_path / "friday-home" / "data" / "state"),
+        worker_root=str(worker_root),
+    )
+    result = handle_coding_static_turn(
+        storage=None,
+        user_id=LEGACY_OWNER_USER_ID,
+        actor=_owner_actor(),
+        message="запусти main.py",
+        conversation_id=None,
+        attachments=[_zip_attachment({"main.py": b"print(1)\n"})],
+        worker_boundary=boundary,
+        spawn_runner=_runner,
+    )
+    assert result["context"]["coding_archive_extract"] == "extracted"
+    assert result["context"]["coding_loop"] == "blocked"
+    assert result["context"]["coding_loop_reason"] == "execute_forbidden"
+    assert result["context"]["coding_execution_attempted"] is False
+    assert "запрос на выполнение отклонён" in result["message"].casefold()
+    assert len(spawned) == 1
 
 
 def test_inspect_turn_does_not_extract_archive(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:

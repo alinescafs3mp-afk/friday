@@ -114,9 +114,13 @@ def coding_worker_bwrap_argv(
     hazards: tuple[str, ...],
     uid: int,
     gid: int,
+    python_c: str | None = None,
+    python_args: tuple[str, ...] | None = None,
 ) -> tuple[str, ...]:
     """Return the Coding-specific bwrap argv.  Hazards are probe args, not binds."""
 
+    source = _PROBE if python_c is None else python_c
+    args = (workspace_path, export_path, *hazards) if python_args is None else python_args
     return (
         BWRAP_EXECUTABLE,
         "--unshare-all",
@@ -155,10 +159,8 @@ def coding_worker_bwrap_argv(
         "--",
         PYTHON_EXECUTABLE,
         "-c",
-        _PROBE,
-        workspace_path,
-        export_path,
-        *hazards,
+        source,
+        *args,
     )
 
 
