@@ -1,3 +1,15 @@
+## 0.208.28 — 2026-09-05
+
+### Secondary startup probe retries once after cooldown
+
+- Distinct sealed candidate for `semantic_supervisor_assist_to_shadow` after
+  live 0.208.27. After a failed process-epoch startup probe the circuit
+  stays `cooldown` until Friday itself probes again; laptop-local
+  generation does not refresh that window. Start now waits out
+  `circuit_retry_after_sec` and retries the inventory/canary probe once.
+  Never a noisy loop. SQLite remains at schema 50; exact `0.208.27` is
+  the predecessor and `0.207.90` the fallback.
+
 ## 0.208.27 — 2026-09-05
 
 ### N3 upload-modification EMPTY observer

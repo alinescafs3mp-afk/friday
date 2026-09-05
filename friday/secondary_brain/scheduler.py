@@ -446,7 +446,11 @@ class SecondaryBrainScheduler:
                 pass
 
     def start(self) -> None:
-        """Start one non-blocking process-epoch probe; never a noisy loop."""
+        """Start one process-epoch probe and at most one cooldown retry.
+
+        Never a noisy loop. Laptop-local generation does not refresh this
+        window; Friday has to probe it.
+        """
 
         if (
             self._closed
@@ -457,7 +461,7 @@ class SecondaryBrainScheduler:
             return
         self._startup_probe_task = asyncio.create_task(self._startup_probe())
 
-    async def _startup_probe(self) -> None:
+    async def _run_detached_epoch_probe(self) -> None:
         if self._client is None:
             return
         deadline = time.monotonic() + min(
@@ -472,6 +476,20 @@ class SecondaryBrainScheduler:
             # The task is intentionally detached from primary startup.  The
             # client already projects all expected failures as closed enums.
             return
+
+    async def _startup_probe(self) -> None:
+        await self._run_detached_epoch_probe()
+        if self._closed or self._client is None or self._admission_is_fresh():
+            return
+        status = self._client.status()
+        if status.state is not SecondaryState.COOLDOWN:
+            return
+        wait = status.cooldown_retry_after_sec
+        if wait > 0.0:
+            await asyncio.sleep(wait)
+        if self._closed or self._client is None or self._admission_is_fresh():
+            return
+        await self._run_detached_epoch_probe()
 
     def _health_is_fresh(self) -> bool:
         if self._client is None:

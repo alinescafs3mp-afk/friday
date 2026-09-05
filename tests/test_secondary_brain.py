@@ -2674,6 +2674,74 @@ async def test_wrong_models_inventory_opens_cooldown_without_generation(settings
 
 
 @pytest.mark.asyncio
+async def test_startup_probe_retries_once_after_cooldown_when_laptop_returns(
+    settings: Any,
+) -> None:
+    online = False
+    generations = 0
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal generations
+        if not online:
+            raise httpx.ConnectError("synthetic laptop offline", request=request)
+        if request.url.path.endswith("/friday-profile"):
+            return _profile_response()
+        if request.url.path.endswith("/models"):
+            return _models_response()
+        generations += 1
+        return _response(content="ready")
+
+    scheduler = build_secondary_brain(
+        replace(_configured_settings(settings), secondary_llm_cooldown_sec=0.01),
+        transport=httpx.MockTransport(handler),
+    )
+    try:
+        scheduler.start()
+        for _ in range(50):
+            if scheduler.status().state is SecondaryState.COOLDOWN:
+                break
+            await asyncio.sleep(0)
+        assert scheduler.status().state is SecondaryState.COOLDOWN
+        online = True
+        for _ in range(200):
+            if scheduler.status().state is SecondaryState.HEALTHY:
+                break
+            await asyncio.sleep(0.002)
+        assert scheduler.status().state is SecondaryState.HEALTHY
+        assert generations == 1
+        assert scheduler.public_status()["available"] is True
+    finally:
+        await scheduler.aclose()
+
+
+@pytest.mark.asyncio
+async def test_startup_probe_does_not_loop_after_retry_fails(settings: Any) -> None:
+    calls = 0
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal calls
+        calls += 1
+        raise httpx.ConnectError("synthetic laptop offline", request=request)
+
+    scheduler = build_secondary_brain(
+        replace(_configured_settings(settings), secondary_llm_cooldown_sec=0.01),
+        transport=httpx.MockTransport(handler),
+    )
+    try:
+        scheduler.start()
+        for _ in range(200):
+            if calls >= 2:
+                break
+            await asyncio.sleep(0.002)
+        assert calls == 2
+        assert scheduler.status().state is SecondaryState.COOLDOWN
+        await asyncio.sleep(0.04)
+        assert calls == 2
+    finally:
+        await scheduler.aclose()
+
+
+@pytest.mark.asyncio
 async def test_laptop_is_readmitted_on_demand_without_primary_restart(settings: Any) -> None:
     online = False
     paths: list[str] = []
