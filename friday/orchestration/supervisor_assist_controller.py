@@ -2897,7 +2897,11 @@ class SupervisorAssistController:
                 return await self._stop_result(record)
             prepared_file = file_result.prepared_file
             web_evidence = web_result.web_evidence
-            if prepared_file is not None and web_evidence is not None:
+            web_usable = web_result.state in {
+                CompareCurrentFileWebStepState.COMPLETE,
+                CompareCurrentFileWebStepState.EMPTY,
+            }
+            if prepared_file is not None and web_evidence is not None and web_usable:
                 async with record.mutation_lock:
                     synthesis_claimed = await self._claim(
                         record,

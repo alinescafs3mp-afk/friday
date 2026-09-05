@@ -20,6 +20,7 @@ import asyncio
 import hashlib
 import hmac
 import json
+import logging
 import math
 import re
 import secrets
@@ -46,6 +47,8 @@ from friday.orchestration.web_research_consumption import (
     build_web_research_consumption,
 )
 from friday.permissions import ActorContext, AuthorizationService
+
+LOGGER = logging.getLogger("friday.orchestration.transient_web_comparison")
 
 TRANSIENT_WEB_SECURITY_ID = "web.compare.transient"
 TRANSIENT_WEB_ADAPTER_ID = "transient_web_comparison"
@@ -924,6 +927,7 @@ class TransientWebComparisonAdapter:
                 async with asyncio.timeout(timeout_seconds):
                     report = await self._web.research(plan._query, max_sources=_MAX_SOURCES)
         except TimeoutError:
+            LOGGER.warning("transient web comparison unavailable: search_timed_out")
             return _evidence(
                 plan,
                 status=TransientWebEvidenceStatus.UNAVAILABLE,
@@ -931,9 +935,16 @@ class TransientWebComparisonAdapter:
                 search_timed_out=True,
             )
         except Exception:  # noqa: BLE001 -- exception text must not cross this privacy boundary
+            LOGGER.warning("transient web comparison unavailable: provider_error")
             return _evidence(
                 plan,
                 status=TransientWebEvidenceStatus.UNAVAILABLE,
                 reason=TransientWebUnavailableReason.PROVIDER_ERROR,
             )
-        return _project_report(plan, report)
+        evidence = _project_report(plan, report)
+        if evidence.status is TransientWebEvidenceStatus.UNAVAILABLE:
+            LOGGER.warning(
+                "transient web comparison unavailable: %s",
+                evidence.unavailable_reason.value,
+            )
+        return evidence

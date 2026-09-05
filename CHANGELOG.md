@@ -1,3 +1,14 @@
+## 0.208.36 — 2026-09-05
+
+### Promoted file+web journey uses the authenticated call deadline
+
+- Distinct sealed candidate for `semantic_supervisor_assist_to_shadow` after
+  live 0.208.35. The primary compare-current-file-with-current-web journey
+  inherits the authenticated call budget instead of being capped at the 12s
+  supervisor timeout. Unavailable web evidence no longer enters synthesis.
+  SQLite remains at schema 50; exact `0.208.35` is the predecessor and
+  `0.207.90` the fallback.
+
 ## 0.208.35 — 2026-09-05
 
 ### No-product shadow_to_assist restore

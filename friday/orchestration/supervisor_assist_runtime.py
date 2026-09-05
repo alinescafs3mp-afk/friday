@@ -120,6 +120,15 @@ class AssistOrdinaryPostCommitObserver(Protocol):
 
 def _future_deadline(settings: object, inherited: object) -> float:
     now = time.monotonic()
+    if (
+        not isinstance(inherited, bool)
+        and isinstance(inherited, int | float)
+        and math.isfinite(float(inherited))
+    ):
+        # The authenticated call budget is the primary file+web journey ceiling.
+        # ``semantic_supervisor_timeout_sec`` (12s) is the advisory/secondary
+        # bound and cannot cover WebSurfer.research (27s) plus two model calls.
+        return max(now, float(inherited))
     configured = getattr(settings, "semantic_supervisor_timeout_sec", None)
     if (
         isinstance(configured, bool)
@@ -128,16 +137,9 @@ def _future_deadline(settings: object, inherited: object) -> float:
         or float(configured) <= 0
     ):
         configured = 0.001
-    deadline = now + float(configured)
-    if (
-        not isinstance(inherited, bool)
-        and isinstance(inherited, int | float)
-        and math.isfinite(float(inherited))
-    ):
-        deadline = min(deadline, float(inherited))
     # The controller treats an exhausted deadline as an ordinary pre-ownership
     # fallback.  Keep the value finite and let that single owner make the call.
-    return max(now, deadline)
+    return now + float(configured)
 
 
 def _validated_pending(

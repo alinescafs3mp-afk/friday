@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import math
+import time
 from dataclasses import dataclass
 from types import SimpleNamespace
 from typing import Any
@@ -19,6 +21,7 @@ from friday.orchestration.supervisor_assist_ingress import (
 from friday.orchestration.supervisor_assist_runtime import (
     SemanticSupervisorAssistRuntime,
     SupervisorAssistRuntimeError,
+    _future_deadline,
 )
 from friday.pending_durable_turn import PendingDurableTurnAdmission
 from friday.permissions import ActorContext
@@ -502,3 +505,28 @@ async def test_close_is_idempotent_and_does_not_close_primary() -> None:
             actor=_actor(),
             conversation_id=_CONVERSATION,
         )
+
+
+def test_promoted_journey_deadline_inherits_authenticated_call_budget() -> None:
+    settings = SimpleNamespace(semantic_supervisor_timeout_sec=12.0)
+    inherited = time.monotonic() + 720.0
+    deadline = _future_deadline(settings, inherited)
+    assert deadline == inherited
+    assert deadline - time.monotonic() > 700.0
+
+
+def test_promoted_journey_deadline_falls_back_to_supervisor_timeout() -> None:
+    settings = SimpleNamespace(semantic_supervisor_timeout_sec=12.0)
+    before = time.monotonic()
+    deadline = _future_deadline(settings, None)
+    after = time.monotonic()
+    assert before + 12.0 <= deadline <= after + 12.0
+    assert math.isfinite(deadline)
+
+
+def test_exhausted_inherited_deadline_stays_finite_now() -> None:
+    settings = SimpleNamespace(semantic_supervisor_timeout_sec=12.0)
+    before = time.monotonic()
+    deadline = _future_deadline(settings, before - 5.0)
+    after = time.monotonic()
+    assert before <= deadline <= after

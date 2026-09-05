@@ -2266,6 +2266,51 @@ async def test_mixed_authority_denial_closes_without_synthesis_capability(storag
 
 
 @pytest.mark.asyncio
+async def test_unavailable_web_terminalizes_without_synthesis(storage: Any) -> None:
+    surface, projection = _stored_surface(storage, "web-unavailable")
+    adapter = _CountingAdapter(storage)
+    primary = _Primary()
+    controller = _controller(
+        primary=primary,
+        graph_adapter=adapter,
+        file_reader=_FileReader(_prepared_file(surface, projection)),
+        web_reader=_WebReader(_web_evidence(surface, TransientWebEvidenceStatus.UNAVAILABLE)),
+        max_review_rounds=0,
+    )
+
+    async def forbidden_legacy() -> dict[str, object]:
+        raise AssertionError("legacy cannot run after ownership")
+
+    result = await controller.execute(
+        surface,
+        legacy_primary=forbidden_legacy,
+        absolute_deadline=time.monotonic() + 4,
+    )
+
+    assert result.outcome is SupervisorAssistOutcome.TERMINAL
+    assert result.response is not None
+    assert result.response["message"] == (
+        "Сравнение не выполнено: один из необходимых источников сейчас недоступен."
+    )
+    assert primary.acquire_calls == 0 and primary.calls == []
+    assert adapter.publish_calls == 0
+    assert adapter.terminal_calls == 1
+    pending = result.pending_admission
+    assert pending is not None and pending.work_graph_id is not None and pending.revision is not None
+    closed = adapter.load(
+        AssistGraphCursor(
+            graph_id=pending.work_graph_id,
+            user_id=surface.actor.user_id,
+            conversation_id=surface.conversation_id,
+            revision=pending.revision,
+        )
+    )
+    assert closed is not None
+    assert closed.outcome_reason is CompareCurrentFileWebGraphOutcomeReason.CAPABILITY_UNAVAILABLE
+    assert closed.step(WEB_READ_STEP_ID).state is CompareCurrentFileWebStepState.UNAVAILABLE
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("max_review_rounds", [0, 1])
 async def test_review_and_web_recovery_are_strictly_bounded(
     storage: Any,
