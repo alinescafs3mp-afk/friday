@@ -16,7 +16,20 @@ from friday.orchestration.coding_inspect_report import (
     CodingInspectReportV1,
     build_coding_inspect_report,
 )
+from friday.orchestration.coding_mode_execute_claim import (
+    CodingModeExecuteClaimState,
+    CodingModeExecuteClaimV1,
+    build_coding_mode_execute_claim,
+)
+from friday.orchestration.coding_mode_intent import build_coding_mode_intent
 from friday.orchestration.coding_worker_admission import CodingWorkerAdmissionState
+from friday.organs.coding.extract import (
+    CodingArchiveExtractObserveReason,
+    CodingArchiveExtractObserveState,
+    CodingArchiveExtractObserveV1,
+    first_archive_bytes,
+    observe_coding_archive_extract,
+)
 from friday.organs.coding.worker_boundary import (
     CodingWorkerBoundaryV1,
     default_coding_worker_boundary,
@@ -46,6 +59,32 @@ def _require_coding_actor(actor: ActorContext) -> None:
 
 def _execute_claimed(message: str) -> bool:
     return _EXECUTE_CLAIM_RE.search(message or "") is not None
+
+
+def _compose_execute_claim(
+    *,
+    turn_id: str,
+    message: str,
+    members: Sequence[Mapping[str, object]],
+    admission: object,
+) -> tuple[bool, CodingModeExecuteClaimV1]:
+    execute_requested = _execute_claimed(message)
+    if execute_requested:
+        if members:
+            intent = build_coding_mode_intent(f"{turn_id}-intent", turn_id, upload=True)
+        else:
+            intent = build_coding_mode_intent(f"{turn_id}-intent", turn_id, prompt=message)
+        claim = build_coding_mode_execute_claim(
+            f"{turn_id}-claim",
+            turn_id,
+            intent,
+            worker=admission,
+            operation="execute",
+        )
+    else:
+        intent = build_coding_mode_intent(f"{turn_id}-intent", turn_id, inspect=True)
+        claim = build_coding_mode_execute_claim(f"{turn_id}-claim", turn_id, intent)
+    return execute_requested, claim
 
 
 def _members_from_attachments(attachments: Sequence[object] | None) -> list[dict[str, object]]:
@@ -89,6 +128,7 @@ def _russian_inspect_reply(
     *,
     execute_claimed: bool,
     worker_admitted: bool,
+    extract: CodingArchiveExtractObserveV1,
 ) -> str:
     refused = "Исполнение, сборка и тесты не допущены."
     if execute_claimed:
@@ -97,6 +137,10 @@ def _russian_inspect_reply(
         refused = refused + " Изолированный worker допущен, код загрузок не исполнялся."
     else:
         refused = refused + " Изолированный worker не допущен."
+    if extract.state is CodingArchiveExtractObserveState.EXTRACTED:
+        refused = refused + " Архив распакован в изолированное рабочее место."
+    elif extract.state is CodingArchiveExtractObserveState.BLOCKED:
+        refused = refused + " Распаковка архива не допущена."
     if report.report is CodingInspectReportState.EMPTY:
         return "Режим Coding: статический осмотр. В этом ходе нет исходников для осмотра. " + refused
     if report.report is CodingInspectReportState.BLOCKED:
@@ -167,7 +211,6 @@ def handle_coding_static_turn(
     operation_id = "coding-op-" + secrets.token_hex(8)
     snapshot = _snapshot_sha256(members)
     report = build_coding_inspect_report(report_id, turn_id, members=members)
-    execute_claimed = _execute_claimed(message)
     friday_home, owner_home, database_path = _homes()
     boundary = worker_boundary or default_coding_worker_boundary(
         friday_home=friday_home,
@@ -188,11 +231,35 @@ def handle_coding_static_turn(
         revision_selector=snapshot,
         boundary=boundary,
     )
+    execute_claimed, execute_claim = _compose_execute_claim(
+        turn_id=turn_id,
+        message=message,
+        members=members,
+        admission=admission,
+    )
     spawn = CodingWorkerSpawnV1(False, admission.admission, "skipped", False)
     if execute_claimed and admission.admission is CodingWorkerAdmissionState.ADMITTED:
         spawn = spawn_coding_worker(admission, boundary, runner=spawn_runner)
+    extract = CodingArchiveExtractObserveV1(
+        CodingArchiveExtractObserveState.EMPTY,
+        CodingArchiveExtractObserveReason.NO_ARCHIVE,
+        0,
+        False,
+    )
+    if execute_claim.claim is CodingModeExecuteClaimState.EXECUTE_CLAIMED:
+        extract = observe_coding_archive_extract(
+            extract_id="coding-x-" + secrets.token_hex(8),
+            authenticated_turn_id=turn_id,
+            workspace=Path(boundary.worker_root) / boundary.workspace_path,
+            raw=first_archive_bytes(attachments),
+        )
     worker_admitted = admission.admission is CodingWorkerAdmissionState.ADMITTED
-    text = _russian_inspect_reply(report, execute_claimed=execute_claimed, worker_admitted=worker_admitted)
+    text = _russian_inspect_reply(
+        report,
+        execute_claimed=execute_claimed,
+        worker_admitted=worker_admitted,
+        extract=extract,
+    )
     persisted_id = _ensure_conversation(
         storage,
         person_id=person_id,
@@ -235,6 +302,9 @@ def handle_coding_static_turn(
         "coding_worker_admission_reason": admission.reason.value,
         "coding_worker_spawned": spawn.spawned,
         "coding_worker_probe": spawn.probe,
+        "coding_archive_extract": extract.state.value,
+        "coding_archive_extract_reason": extract.reason.value,
+        "coding_archive_extracted_count": extract.extracted_count,
         "llm_failed": False,
     }
     if report.report is not CodingInspectReportState.BLOCKED:

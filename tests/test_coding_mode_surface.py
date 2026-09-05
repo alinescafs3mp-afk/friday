@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import base64
+import io
+import zipfile
 from dataclasses import replace
 from typing import Any
 from unittest.mock import AsyncMock
@@ -142,6 +145,147 @@ def test_execute_claim_is_refused_and_does_not_execute(tmp_path, monkeypatch: py
     assert len(spawned) == 1
     assert spawned[0][0] == "/usr/bin/bwrap"
     assert "--unshare-all" in spawned[0]
+
+
+def _zip_attachment(members: dict[str, bytes]) -> dict[str, Any]:
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w") as archive:
+        for name, payload in members.items():
+            archive.writestr(name, payload)
+    raw = buffer.getvalue()
+    return {
+        "filename": "app.zip",
+        "size": len(raw),
+        "content_b64": base64.standard_b64encode(raw).decode("ascii"),
+    }
+
+
+def test_execute_claim_extracts_admitted_archive_without_running_it(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from friday.organs.coding.worker_boundary import default_coding_worker_boundary
+
+    def _boom(*_args: object, **_kwargs: object) -> None:
+        raise AssertionError("coding turn spawned a host process")
+
+    spawned: list[tuple[str, ...]] = []
+
+    def _runner(argv: tuple[str, ...], timeout_sec: int) -> int:
+        spawned.append(argv)
+        del timeout_sec
+        return 0
+
+    monkeypatch.setattr("subprocess.Popen", _boom, raising=False)
+    monkeypatch.setattr("subprocess.run", _boom, raising=False)
+    worker_root = tmp_path / "friday-coding-worker"
+    boundary = default_coding_worker_boundary(
+        friday_home=str(tmp_path / "friday-home"),
+        owner_home=str(tmp_path / "owner"),
+        database_path=str(tmp_path / "friday-home" / "data" / "state"),
+        worker_root=str(worker_root),
+    )
+    result = handle_coding_static_turn(
+        storage=None,
+        user_id=LEGACY_OWNER_USER_ID,
+        actor=_owner_actor(),
+        message="запусти pytest",
+        conversation_id=None,
+        attachments=[_zip_attachment({"src/main.py": b"print(1)\n"})],
+        worker_boundary=boundary,
+        spawn_runner=_runner,
+    )
+    extracted = list(worker_root.glob("work/*/src/main.py"))
+    assert result["context"]["coding_execution_attempted"] is False
+    assert result["context"]["coding_archive_extract"] == "extracted"
+    assert result["context"]["coding_archive_extracted_count"] == 1
+    assert result["context"]["coding_worker_spawned"] is True
+    assert "архив распакован" in result["message"].casefold()
+    assert "не допущен" in result["message"].casefold()
+    assert len(extracted) == 1
+    assert extracted[0].read_bytes() == b"print(1)\n"
+    assert len(spawned) == 1
+    assert spawned[0][0] == "/usr/bin/bwrap"
+
+
+def test_inspect_turn_does_not_extract_archive(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from friday.organs.coding.worker_boundary import default_coding_worker_boundary
+
+    def _boom(*_args: object, **_kwargs: object) -> None:
+        raise AssertionError("inspect turn spawned a process")
+
+    monkeypatch.setattr("subprocess.Popen", _boom, raising=False)
+    monkeypatch.setattr("subprocess.run", _boom, raising=False)
+    worker_root = tmp_path / "friday-coding-worker"
+    boundary = default_coding_worker_boundary(
+        friday_home=str(tmp_path / "friday-home"),
+        owner_home=str(tmp_path / "owner"),
+        database_path=str(tmp_path / "friday-home" / "data" / "state"),
+        worker_root=str(worker_root),
+    )
+    result = handle_coding_static_turn(
+        storage=None,
+        user_id=LEGACY_OWNER_USER_ID,
+        actor=_owner_actor(),
+        message="осмотри app.zip",
+        conversation_id=None,
+        attachments=[_zip_attachment({"src/main.py": b"print(1)\n"})],
+        worker_boundary=boundary,
+        spawn_runner=_boom,
+    )
+    assert result["context"]["coding_archive_extract"] == "empty"
+    assert result["context"]["coding_archive_extracted_count"] == 0
+    assert result["context"]["coding_worker_spawned"] is False
+    assert result["context"]["coding_execution_attempted"] is False
+    assert list(worker_root.glob("work/*/src/main.py")) == []
+
+
+def test_zip_slip_execute_claim_does_not_write_outside_workspace(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from friday.organs.coding.worker_boundary import default_coding_worker_boundary
+
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w") as archive:
+        archive.writestr("../escape.txt", b"nope")
+    raw = buffer.getvalue()
+
+    def _boom(*_args: object, **_kwargs: object) -> None:
+        raise AssertionError("coding turn spawned a host process")
+
+    def _runner(argv: tuple[str, ...], timeout_sec: int) -> int:
+        del argv, timeout_sec
+        return 0
+
+    monkeypatch.setattr("subprocess.Popen", _boom, raising=False)
+    monkeypatch.setattr("subprocess.run", _boom, raising=False)
+    worker_root = tmp_path / "friday-coding-worker"
+    boundary = default_coding_worker_boundary(
+        friday_home=str(tmp_path / "friday-home"),
+        owner_home=str(tmp_path / "owner"),
+        database_path=str(tmp_path / "friday-home" / "data" / "state"),
+        worker_root=str(worker_root),
+    )
+    result = handle_coding_static_turn(
+        storage=None,
+        user_id=LEGACY_OWNER_USER_ID,
+        actor=_owner_actor(),
+        message="запусти pytest",
+        conversation_id=None,
+        attachments=[
+            {
+                "filename": "evil.zip",
+                "size": len(raw),
+                "content_b64": base64.standard_b64encode(raw).decode("ascii"),
+            }
+        ],
+        worker_boundary=boundary,
+        spawn_runner=_runner,
+    )
+    assert result["context"]["coding_archive_extract"] == "blocked"
+    assert result["context"]["coding_execution_attempted"] is False
+    assert "распаковка архива не допущена" in result["message"].casefold()
+    assert not (tmp_path / "escape.txt").exists()
+    assert not (worker_root / "escape.txt").exists()
 
 
 def test_inspect_turn_composes_admission_without_spawn(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:

@@ -1,3 +1,14 @@
+## 0.208.22 — 2026-09-05
+
+### N3 admitted archive extract observer
+
+- Distinct sealed candidate for `semantic_supervisor_assist_to_shadow` after
+  live 0.208.21. Lands in-memory zip extract into the isolated `/coding`
+  workspace only after landed catalog, extract admission, extract plan and
+  project-root isolation. Host paths are never opened. `ZipFile.extract` is
+  not used. Untrusted execute remains fail-closed. SQLite remains at schema
+  50; exact `0.208.21` is the predecessor and `0.207.90` the fallback.
+
 ## 0.208.21 — 2026-09-05
 
 ### N4 live store-backed mixed journeys

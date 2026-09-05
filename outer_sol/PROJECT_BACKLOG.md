@@ -966,12 +966,14 @@ Do not fabricate those facts.
 ### N3 — Coding Mode
 
 Status: `/coding` static inspect and the dedicated isolated-worker
-boundary are live on `0.208.20`. Owner private Telegram only; execute
-claims fail closed. Engineer bubblewrap is not a Coding Worker.
-Untrusted build/test of uploads remains fail-closed; that implement
-loop is the remaining N3 MVP checkbox. Prompt-to-small-project and
-one-final source-archive plan contracts stay unwired. Do not claim
-safe build/test of untrusted uploads.
+boundary are live on `0.208.20`. Admitted in-memory archive extract
+into the isolated workspace lands on candidate `0.208.22`. Owner
+private Telegram only; execute claims fail closed. Engineer
+bubblewrap is not a Coding Worker. Untrusted build/test of uploads
+remains fail-closed; that implement loop is the remaining N3 MVP
+checkbox. Prompt-to-small-project and one-final source-archive plan
+contracts stay unwired. Do not claim safe build/test of untrusted
+uploads.
 
 - [x] Bare-source inspection contracts on `origin/main`
       (`coding_source_member.py`, `coding_source_tree.py`,
@@ -998,17 +1000,19 @@ safe build/test of untrusted uploads.
       (`friday/orchestration/coding_archive_extract_admission.py`).
       EMPTY / ADMITTED / BLOCKED from member metadata. Traversal,
       absolute paths, symlink/hardlink, device, size, bomb ratio,
-      file count, nesting and case-fold collisions fail closed. Not
-      wired; no archive is opened.
+      file count, nesting and case-fold collisions fail closed.
+      In-memory zip extract observer consumes this gate on the
+      `0.208.22` candidate; host paths are never opened.
 - [x] Archive extract-plan family on `origin/main`
       (`coding_archive_member_catalog.py`,
       `coding_archive_extract_plan.py`,
       `coding_archive_digest_facts.py`,
       `coding_project_isolation_admission.py`,
       `coding_archive_overwrite_plan.py`). Catalog, relative
-      destinations, supplied SHA-256 facts, project-root
-      isolation and overwrite/collision. No archive is opened.
-      Not wired.
+      destinations, project-root isolation are consumed by the
+      extract observer on the `0.208.22` candidate. Digest facts
+      and overwrite/collision stay unwired. Untrusted execute
+      remains fail-closed.
 - [x] One final source archive; restart, rollback and adversarial proof.
       TEXT/FILE/ARCHIVE plan, manifest, pack admission, publication,
       restart, rollback and uncertainty contracts are on `origin/main`
@@ -1026,7 +1030,8 @@ safe build/test of untrusted uploads.
       `coding_mode_carrier.py`, `coding_mode_view.py`). EMPTY /
       PROJECTED / BLOCKED from landed inspect/admission facts.
       Untrusted execute without an admitted worker fails closed.
-      Not wired to a process worker.
+      Execute-claim is composed by `/coding` static_turn on the
+      `0.208.22` candidate; the process worker remains probe-only.
 
 Do not prebuild a compiler catalogue. Do not weaken Engineer Mode or
 primary release certification to create the worker.
@@ -1170,11 +1175,12 @@ checklist elsewhere. The Ctrl+T view is a compact projection of this list.
 
 - [ ] N3 Coding Mode MVP implement/build/test loop of untrusted
       uploads; `/coding` static inspect and isolated-worker boundary
-      remain live through `0.208.21`. Untrusted execute remains
-      fail-closed. Coding Mode view composition, project identity,
-      extract admission, extract-plan family, prompt-to-small-project,
-      source-archive plan, result-archive-pack family
-      and upload-modification admission stay source-only.
+      remain live through `0.208.21`. Admitted in-memory archive
+      extract into the isolated workspace lands on candidate
+      `0.208.22`. Untrusted execute remains fail-closed. Coding Mode
+      view composition, project identity, prompt-to-small-project,
+      source-archive plan, result-archive-pack family, digest facts
+      and overwrite-plan stay source-only.
 - [ ] N5 extract only touched seams from giant runtime modules;
       kernel web-consumption helpers live on `0.208.18` in
       `friday/execution_kernel/web_consumption.py`
