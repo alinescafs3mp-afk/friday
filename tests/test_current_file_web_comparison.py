@@ -250,6 +250,7 @@ class _ComparisonModel:
         answer: str = _DEFAULT_ANSWER,
         verifier_supported: bool = True,
         effectful_call: int | None = None,
+        synthesis_finish_reason: str = "stop",
         hanging_call: int | None = None,
         lease_states: tuple[bool, ...] = (True, True),
         leased_context_tokens: int | None = None,
@@ -261,6 +262,7 @@ class _ComparisonModel:
         self.answer = answer
         self.verifier_supported = verifier_supported
         self.effectful_call = effectful_call
+        self.synthesis_finish_reason = synthesis_finish_reason
         self.hanging_call = hanging_call
         self.lease_states = lease_states
         self.leased_context_tokens = leased_context_tokens
@@ -374,7 +376,11 @@ class _ComparisonModel:
                 "tool_calls": [{"id": "forbidden"}],
             }
         if call_number == 1:
-            return {"content": self.answer, "finish_reason": "stop", "tool_calls": None}
+            return {
+                "content": self.answer,
+                "finish_reason": self.synthesis_finish_reason,
+                "tool_calls": None,
+            }
         payload = json.loads(str(messages[-1]["content"]))
         self.verifier_answer = str(payload["answer"])
         labels = ["F1", *(item["label"] for item in payload["evidence"]["web"]["sources"])]
@@ -606,6 +612,60 @@ async def test_tool_call_from_synthesis_or_verifier_is_rejected(
         )
     assert captured.value.model_calls == len(model.calls) == expected_calls
     assert captured.value.failure_reason is FailureReason.INVALID_CONTRACT
+
+
+@pytest.mark.asyncio
+async def test_length_finished_synthesis_is_accepted_when_answer_validates() -> None:
+    model = _ComparisonModel(synthesis_finish_reason="length")
+    result = await compare_current_file_with_web(
+        model,
+        request=_REQUEST,
+        accepted_plan_sha256=_PLAN_SHA256,
+        prepared_file=_prepared_file(),
+        web_evidence=_full_web(),
+        absolute_deadline=time.monotonic() + 10,
+    )
+    assert result.status is CurrentFileWebComparisonStatus.COMPLETE
+    assert result.answer == _DEFAULT_ANSWER
+    assert result.citation_labels == ("F1", "W1", "W2", "W3")
+    assert result.model_calls == len(model.calls) == 2
+
+
+@pytest.mark.asyncio
+async def test_length_finished_synthesis_still_rejects_invalid_citations() -> None:
+    model = _ComparisonModel(
+        answer="Файл без веб-меток [F1].",
+        synthesis_finish_reason="length",
+    )
+    with pytest.raises(CurrentFileWebComparisonError) as captured:
+        await compare_current_file_with_web(
+            model,
+            request=_REQUEST,
+            accepted_plan_sha256=_PLAN_SHA256,
+            prepared_file=_prepared_file(),
+            web_evidence=_full_web(),
+            absolute_deadline=time.monotonic() + 10,
+        )
+    assert captured.value.failure_reason is FailureReason.INVALID_CONTRACT
+    assert captured.value.synthesis_outcome is OutcomeStatus.FAILED
+    assert captured.value.model_calls == len(model.calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_non_stop_non_length_synthesis_finish_is_rejected() -> None:
+    model = _ComparisonModel(synthesis_finish_reason="content_filter")
+    with pytest.raises(CurrentFileWebComparisonError) as captured:
+        await compare_current_file_with_web(
+            model,
+            request=_REQUEST,
+            accepted_plan_sha256=_PLAN_SHA256,
+            prepared_file=_prepared_file(),
+            web_evidence=_full_web(),
+            absolute_deadline=time.monotonic() + 10,
+        )
+    assert captured.value.failure_reason is FailureReason.INVALID_CONTRACT
+    assert captured.value.synthesis_outcome is OutcomeStatus.FAILED
+    assert captured.value.model_calls == len(model.calls) == 1
 
 
 @pytest.mark.asyncio

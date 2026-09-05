@@ -1,3 +1,19 @@
+## 0.208.44 — 2026-09-05
+
+### Accept length-finished file+web synthesis when the answer validates
+
+- Distinct sealed candidate for `semantic_supervisor_assist_to_shadow` after
+  live 0.208.43. File+web still generates up to 768 tokens and still requires
+  `finish_reason=stop` or `length` with no tool calls. Live V12 on 0.208.43
+  returned a 768-token length-finished synthesis after file and web both
+  completed; `_call_model_once` treated `length` as a contract break and
+  Friday published canned `step_failed` before `_validate_answer`. A
+  length-finished text answer now continues into the existing citation,
+  secret-free and JSON-byte checks; `content_filter`, tool calls and other
+  finish reasons stay fail-closed. 8192 stays 1328. Verifier reserve stays
+  5312. Post-synthesis acceptance at 40960 stays 6640. SQLite remains at
+  schema 50; exact `0.208.43` is the predecessor and `0.207.90` the fallback.
+
 ## 0.208.43 — 2026-09-05
 
 ### No-product shadow_to_assist restore

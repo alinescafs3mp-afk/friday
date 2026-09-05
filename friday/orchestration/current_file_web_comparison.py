@@ -1039,10 +1039,13 @@ async def _call_model_once(
     )
     if not isinstance(response, dict):
         raise _ModelResponseError("model returned a non-object response")
-    if response.get("finish_reason") != "stop" or response.get("tool_calls") not in (None, []):
+    finish_reason = response.get("finish_reason")
+    if response.get("tool_calls") not in (None, []) or finish_reason not in {"stop", "length"}:
         raise _ModelResponseError("model response was incomplete or effectful")
     if type(response.get("content")) is not str:
         raise _ModelResponseError("model response has no exact text")
+    if finish_reason == "length":
+        LOGGER.warning("comparison model used the output token ceiling")
     return response
 
 
