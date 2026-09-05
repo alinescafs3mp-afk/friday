@@ -2778,8 +2778,11 @@ async def test_startup_probe_retries_once_after_cooldown_when_laptop_returns(
             await asyncio.sleep(0)
         assert scheduler.status().state is SecondaryState.COOLDOWN
         online = True
-        for _ in range(200):
-            if scheduler.status().state is SecondaryState.HEALTHY:
+        for _ in range(400):
+            if (
+                scheduler.status().state is SecondaryState.HEALTHY
+                and scheduler.public_status()["available"] is True
+            ):
                 break
             await asyncio.sleep(0.002)
         assert scheduler.status().state is SecondaryState.HEALTHY
