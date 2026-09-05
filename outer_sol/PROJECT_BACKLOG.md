@@ -1,6 +1,6 @@
 # Friday: canonical project backlog
 
-Updated: 2026-09-05 (live `0.208.24`; N1 one-final-carrier live; remaining N2 observation-bound; N3 `/coding` static inspect + isolated-worker boundary + admitted archive extract + isolated untrusted build/test loop live; execute/run of uploaded programs fail-closed; N4 store-backed mixed journeys live)
+Updated: 2026-09-05 (live `0.208.25`; N1 one-final-carrier live; remaining N2 observation-bound; N3 `/coding` static inspect + isolated-worker boundary + admitted archive extract + isolated untrusted build/test loop live; execute/run of uploaded programs fail-closed; N4 store-backed mixed journeys live; N5 implementable seam closed, ratchet standing)
 
 This is the project's only backlog and mutable status register. It owns the
 current production identity, execution order, acceptance gaps and owner actions.
@@ -32,17 +32,17 @@ Do not copy that snapshot's release claims forward.
 - Database schema: 50 in deployed production and the fallback.
 
 Golden-journey receipts stay bound to that `0.208.1` root until rebound. The
-running sealed sibling is Friday `0.208.24` at
-`edb6270976fc5622fe8215c07246d56ce7e31d0a` (tree-file
-`3f0cbdf6b6ab46cbcd6a8e896e1b26dc38cf432d8ff22f79e0cf7a5bc3919e7a`, wheel
-`2fce2230a609dc3cf3a0d097aee67fa4c368760b25970536d3e7d938c638d163`, journal
-`clear`, predecessor `0.208.23` /
-`424f406d46eb6481db2518b9f3a90df39070fc1c`). Trusted-CA health reports
-`version=0.208.24`. S3: `requested_mode=shadow`, `effective_mode=shadow`,
+running sealed sibling is Friday `0.208.25` at
+`60b62c71be58f8dd8a507ccb2e77d28b2f9d028c` (tree-file
+`be7a18fa77a0a797272c08eab61e931c6846a089087c17f9dce77fb1bf3992e6`, wheel
+`ac319a5415664faf15a1700bad88f7c59d5c7852f5d8c02d752fed2f7c5bc5e1`, journal
+`clear`, predecessor `0.208.24` /
+`edb6270976fc5622fe8215c07246d56ce7e31d0a`). Trusted-CA health reports
+`version=0.208.25`. S3: `requested_mode=assist`, `effective_mode=off`,
 `promotion_admitted=false`,
-`activation.reason=default_off`. Advice stays off until
+`activation.reason=material_loaded_not_accepted`. Advice stays off until
 a genuine eligible witness; do not fabricate traffic. Next product
-sibling that changes friday sources is `shadow_to_assist`. N1 Telegram
+sibling that changes friday sources is `assist_to_shadow`. N1 Telegram
 surfaces (ordinary `/chat` status, Engineer status renderer, file-album
 DOCUMENT status, Engineer FILE/ARCHIVE carrier,
 restart/edit-reject/send-fence/cancel counts, observed web/archive chat
@@ -57,17 +57,19 @@ consumption gate. Other N2 contracts stay observation-bound: live
 requesting workflows do not observe claims, dates, passages or
 missions. Do not fabricate those witnesses. N3 `/coding` static inspect
 and the dedicated isolated-worker boundary remain live through
-`0.208.24`; admitted in-memory archive extract into the isolated
-workspace remains live through `0.208.24`; isolated untrusted
-`py_compile` / stdlib unittest of extracted uploads is live on
-`0.208.24`; execute/run of uploaded programs stay fail-closed. This is
+`0.208.25`; admitted in-memory archive extract into the isolated
+workspace remains live through `0.208.25`; isolated untrusted
+`py_compile` / stdlib unittest of extracted uploads remains live
+through `0.208.25`; execute/run of uploaded programs stay fail-closed. This is
 not a safety certification. Other N3 inspect,
 prompt-to-small-project, result-archive-plan,
 upload-modification-admission and Coding Mode view/carrier/plan-gate
 families stay source-only. N4 store-backed mixed journeys remain live
-through `0.208.24`: file+archive+conversation+web+table identities
+through `0.208.25`: file+archive+conversation+web+table identities
 project into Telegram MIXED when PROJECTED; exclusive
-DOCUMENT/ARCHIVE/RESEARCH remain otherwise.
+DOCUMENT/ARCHIVE/RESEARCH remain otherwise. The 0.208.24 N3 loop did
+not dump into `friday/agent_runtime`; N5 implementable seam extract
+is closed, the maintainability ratchet remains standing.
 
 - Production: immutable activation `phase=clear`; backend and Telegram bridge
   active; writer target `candidate`. Retention admission remains honestly
@@ -97,7 +99,7 @@ deployed; advice remains off until the observation-bound witness. S5 40k lease
 and S6 recovery/browse paths stay live.
 
 The live product queue is N1–N5. The shared operation-progress contract is
-live. Production `0.208.24` keeps ordinary Telegram `/chat` status,
+live. Production `0.208.25` keeps ordinary Telegram `/chat` status,
 Engineer status, file-album DOCUMENT status, Engineer FILE/ARCHIVE
 carrier, observed web/archive chat status, one-final-carrier packing,
 owner-private `/coding` static inspect, the dedicated `/coding`
@@ -119,15 +121,18 @@ invalid provider facts; `_web_search` and `_web_fetch` refuse
 contracts stay observation-bound; do not fabricate witnesses. N3
 `/coding` static inspect, isolated-worker boundary, admitted archive
 extract and isolated untrusted build/test of extracted uploads remain
-live through `0.208.24`; execute/run of uploaded programs stay
+live through `0.208.25`; execute/run of uploaded programs stay
 fail-closed. This is not a safety certification. Coding Mode
 intent, snapshot, plan-gate, carrier and view contracts are on
 `origin/main` and unwired. Project identity, prompt-to-small-project,
 one-final source-archive plan, result-archive-pack family
 and upload-modification admission stay source-only. N4 shared
 operation/situation view, mixed-journey view, store-shaped projection
-and the live store observer remain on `0.208.24`. N5
-extracted the kernel web-consumption seam; maintainability follows. Physical Android, P0H deletion, off-machine
+and the live store observer remain on `0.208.25`. N5
+extracted the kernel web-consumption seam on `0.208.18`; the 0.208.24
+N3 loop did not dump into `friday/agent_runtime`; the implementable
+seam-extract row is closed on `0.208.25` and the ratchet stays
+standing. Physical Android, P0H deletion, off-machine
 mirror and provider-credential rotation remain owner-parked.
 
 ## Operating rules
@@ -971,11 +976,11 @@ Do not fabricate those facts.
 ### N3 — Coding Mode
 
 Status: `/coding` static inspect and the dedicated isolated-worker
-boundary remain live through `0.208.24`. Admitted in-memory archive
-extract into the isolated workspace remains live through `0.208.24`.
+boundary remain live through `0.208.25`. Admitted in-memory archive
+extract into the isolated workspace remains live through `0.208.25`.
 Isolated untrusted `py_compile` and stdlib unittest of extracted
-uploads are live on `0.208.24` after worker admission and a confirmed
-isolation probe. Owner private Telegram only; execute/run of uploaded
+uploads remain live through `0.208.25` after worker admission and a
+confirmed isolation probe. Owner private Telegram only; execute/run of uploaded
 programs stay fail-closed. Engineer bubblewrap is not a Coding Worker.
 This is not a safety certification. Prompt-to-small-project and
 one-final source-archive plan contracts stay unwired. Do not claim
@@ -1088,7 +1093,10 @@ Status: standing rule, not a rewrite. `friday/agent_runtime/__init__.py` is
 seam exists. Extract only a touched seam with exact parity tests. Do not
 begin a clean-architecture rewrite. Kernel web-consumption helpers now live
 in `friday/execution_kernel/web_consumption.py`; `_web_search`/`_web_fetch`/
-`_web_research` still own quota and adapter I/O.
+`_web_research` still own quota and adapter I/O. Inventory of live
+`0.208.24` N3 loop vs `0.208.23` found no dump into `agent_runtime`
+(thin `handle_coding_static_turn` dispatch only). The implementable
+checkbox is closed on `0.208.25`; this chapter stays in force.
 
 ### Removed from the active queue
 
@@ -1210,11 +1218,25 @@ checklist elsewhere. The Ctrl+T view is a compact projection of this list.
       `effective_mode=shadow` (`default_off`). Next product sibling
       that changes friday sources is `shadow_to_assist`.
 
+### Closed on production `0.208.25`
+
+- [x] No-product `semantic_supervisor_shadow_to_assist` restore after
+      live `0.208.24`. Trusted-CA health is `0.208.25` with
+      `requested_mode=assist` and `effective_mode=off`
+      (`material_loaded_not_accepted`). N3 isolated build/test loop
+      remains live and did not dump into `friday/agent_runtime`.
+      Execute/run of uploaded programs stay fail-closed. Next product
+      sibling that changes friday sources is `assist_to_shadow`.
+- [x] N5 implementable seam extract: no giant-runtime dump from the
+      `0.208.24` N3 loop (two thin `handle_coding_static_turn`
+      dispatch sites). Kernel web-consumption helpers remain on
+      `0.208.18` in `friday/execution_kernel/web_consumption.py`.
+      The N5 chapter stays a standing ratchet.
+
 ### Open and implementable
 
-- [ ] N5 extract only touched seams from giant runtime modules;
-      kernel web-consumption helpers live on `0.208.18` in
-      `friday/execution_kernel/web_consumption.py`
+None. Implementable N1–N5 rows are closed on production. Remaining
+N1–N5 work is the standing N5 ratchet or observation-blocked N2.
 
 ### Open and blocked
 
