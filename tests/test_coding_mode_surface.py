@@ -457,6 +457,119 @@ def test_inspect_turn_composes_admission_without_spawn(tmp_path, monkeypatch: py
     assert result["context"]["coding_execution_attempted"] is False
 
 
+def test_prompt_to_small_project_writes_scaffold_without_executing(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from friday.organs.coding.worker_boundary import default_coding_worker_boundary
+
+    def _boom(*_args: object, **_kwargs: object) -> None:
+        raise AssertionError("create turn spawned a host process")
+
+    monkeypatch.setattr("subprocess.Popen", _boom, raising=False)
+    monkeypatch.setattr("subprocess.run", _boom, raising=False)
+    worker_root = tmp_path / "friday-coding-worker"
+    boundary = default_coding_worker_boundary(
+        friday_home=str(tmp_path / "friday-home"),
+        owner_home=str(tmp_path / "owner"),
+        database_path=str(tmp_path / "friday-home" / "data" / "state"),
+        worker_root=str(worker_root),
+    )
+    result = handle_coding_static_turn(
+        storage=None,
+        user_id=LEGACY_OWNER_USER_ID,
+        actor=_owner_actor(),
+        message="создай hello world на python",
+        conversation_id=None,
+        attachments=[],
+        worker_boundary=boundary,
+        spawn_runner=_boom,
+    )
+    written = list(worker_root.glob("work/*/main.py"))
+    assert result["context"]["coding_create"] == "written"
+    assert result["context"]["coding_plan_gate"] == "create"
+    assert result["context"]["coding_result_archive"] == "archive"
+    assert result["context"]["coding_result_restart"] == "empty"
+    assert result["context"]["coding_result_rollback"] == "empty"
+    assert result["context"]["coding_execution_attempted"] is False
+    assert result["context"]["coding_worker_spawned"] is False
+    assert "небольшой проект записан" in result["message"].casefold()
+    assert "итоговый архив" in result["message"].casefold()
+    assert len(written) == 1
+    assert b"GOAL" in written[0].read_bytes()
+    assert result["files"]
+    assert result["files"][0]["filename"] == "friday-source.zip"
+    assert "запусти" not in result["message"].casefold() or "не исполнялась" in result["message"].casefold()
+
+
+def test_unbounded_prompt_to_project_is_blocked(tmp_path) -> None:
+    from friday.organs.coding.worker_boundary import default_coding_worker_boundary
+
+    boundary = default_coding_worker_boundary(
+        friday_home=str(tmp_path / "friday-home"),
+        owner_home=str(tmp_path / "owner"),
+        database_path=str(tmp_path / "friday-home" / "data" / "state"),
+        worker_root=str(tmp_path / "friday-coding-worker"),
+    )
+    result = handle_coding_static_turn(
+        storage=None,
+        user_id=LEGACY_OWNER_USER_ID,
+        actor=_owner_actor(),
+        message="создай всё",
+        conversation_id=None,
+        attachments=[],
+        worker_boundary=boundary,
+    )
+    assert result["context"]["coding_create"] == "blocked"
+    assert result["context"]["coding_plan_gate"] == "blocked"
+    assert result["context"]["coding_execution_attempted"] is False
+    assert result["files"] == []
+    assert "создание проекта не допущено" in result["message"].casefold()
+    assert list((tmp_path / "friday-coding-worker").glob("work/*/main.py")) == []
+
+
+def test_created_scaffold_can_run_isolated_unittest(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from friday.organs.coding.worker_boundary import default_coding_worker_boundary
+
+    def _boom(*_args: object, **_kwargs: object) -> None:
+        raise AssertionError("coding turn spawned a host process")
+
+    spawned: list[tuple[str, ...]] = []
+
+    def _runner(argv: tuple[str, ...], timeout_sec: int) -> int:
+        spawned.append(argv)
+        del timeout_sec
+        return 0
+
+    monkeypatch.setattr("subprocess.Popen", _boom, raising=False)
+    monkeypatch.setattr("subprocess.run", _boom, raising=False)
+    worker_root = tmp_path / "friday-coding-worker"
+    boundary = default_coding_worker_boundary(
+        friday_home=str(tmp_path / "friday-home"),
+        owner_home=str(tmp_path / "owner"),
+        database_path=str(tmp_path / "friday-home" / "data" / "state"),
+        worker_root=str(worker_root),
+    )
+    result = handle_coding_static_turn(
+        storage=None,
+        user_id=LEGACY_OWNER_USER_ID,
+        actor=_owner_actor(),
+        message="создай hello world на python и запусти pytest",
+        conversation_id=None,
+        attachments=[],
+        worker_boundary=boundary,
+        spawn_runner=_runner,
+    )
+    assert result["context"]["coding_create"] == "written"
+    assert result["context"]["coding_loop"] == "tested"
+    assert result["context"]["coding_execution_attempted"] is True
+    assert result["context"]["coding_archive_extract"] == "empty"
+    assert "изолированный тест выполнен" in result["message"].casefold()
+    assert len(spawned) == 2
+    assert any("loader.discover" in part for part in spawned[1])
+
+
 def test_guest_cannot_enter_coding_turn() -> None:
     from friday.permissions import AuthorizationError
 

@@ -43,6 +43,13 @@ from friday.execution_kernel.web_consumption import (
     _web_search_consumption_failure,
     _web_search_result_urls,
 )
+from friday.execution_kernel.web_research_gates import (
+    complementary_mission_queries,
+    merge_unique_research_sources,
+    observe_web_research_gates,
+    plan_kernel_web_research_mission,
+    report_has_admitted_fact_sources,
+)
 from friday.failures import safe_failure_text
 from friday.file_delivery import (
     AuthorizedFileReadError,
@@ -2497,6 +2504,20 @@ def _web_research_for_llm(data: dict[str, Any]) -> tuple[str, bool]:
         "outbound_attempted",
         "error",
         "note",
+        "research_mission_executed",
+        "research_mission_query_count",
+        "research_executed_query_count",
+        "research_mission_coverage",
+        "research_diversity",
+        "research_readiness",
+        "research_consumption",
+        "research_answer_admission",
+        "research_source_dates",
+        "research_passages",
+        "research_claim_support",
+        "research_grounding",
+        "research_contradiction",
+        "research_claim_currentness",
     ):
         if key not in data:
             continue
@@ -8123,6 +8144,55 @@ class ExecutionKernel:
                         "error": ("topic_mismatch" if complete_topic_proof else "topic_evidence_incomplete"),
                     }
                 )
+        executed_queries = [query]
+        mission = None
+        if report.get("search_failed") is not True:
+            mission = plan_kernel_web_research_mission(query, freshness=freshness)
+            if report_has_admitted_fact_sources(report) and not topic_class and not source_class:
+                for extra_query in complementary_mission_queries(query, mission):
+                    exhausted = self._web_quota_refusal(actor)
+                    if exhausted:
+                        break
+                    extra_options: dict[str, Any] = {"max_sources": bounded_sources}
+                    if freshness:
+                        extra_options["freshness"] = freshness
+                    if source_class:
+                        extra_options["source_class"] = source_class
+                    try:
+                        extra_raw = await web.research(extra_query, **extra_options)
+                    except Exception:  # noqa: BLE001 — keep the first admitted report
+                        LOGGER.warning("Complementary web research query failed after outbound start")
+                        break
+                    if not isinstance(extra_raw, Mapping):
+                        continue
+                    extra_report = {**extra_raw, "query": extra_query, "outbound_attempted": True}
+                    executed_queries.append(extra_query)
+                    if freshness:
+                        extra_report["freshness"] = freshness
+                        extra_report[SEARCH_FILTER_ATTESTATION_KEY] = {"freshness": freshness}
+                        if not search_filter_is_attested(extra_raw, "freshness", freshness):
+                            continue
+                    if source_class:
+                        extra_report["source_class"] = source_class
+                    if _web_research_private_source_refusal(extra_report, extra_query) is not None:
+                        continue
+                    if _web_research_empty_source_refusal(extra_report, extra_query) is not None:
+                        continue
+                    if _web_research_provider_consumption_refusal(extra_report, extra_query) is not None:
+                        continue
+                    extra_sources = extra_report.get("sources")
+                    if not isinstance(extra_sources, list):
+                        continue
+                    merge_unique_research_sources(report, extra_sources, bound=bounded_sources)
+            report.update(
+                observe_web_research_gates(
+                    query,
+                    report,
+                    executed_queries=executed_queries,
+                    mission=mission,
+                    freshness=freshness,
+                )
+            )
         captured = await self._capture_web_sources(
             actor,
             query,

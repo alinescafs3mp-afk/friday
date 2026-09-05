@@ -1887,3 +1887,146 @@ async def test_kernel_refuses_a_language_source_label_as_selected_provider(
     assert report["outbound_attempted"] is True
     assert report["search_failed"] is True
     assert storage.list_inbox("operator") == []
+
+
+@pytest.mark.asyncio
+async def test_kernel_observes_n2_gates_without_inventing_claims(
+    settings,
+    storage,
+) -> None:
+    class PublicSourceResearch:
+        async def research(self, query: str, **options: object) -> dict[str, object]:
+            del options
+            return _complete_research_report(query, "https://docs.python.org/3/")
+
+    kernel, actor = _research_kernel(settings, storage, PublicSourceResearch())
+
+    report = await kernel._web_research(  # noqa: SLF001
+        actor=actor,
+        query="needle",
+        max_sources=3,
+    )
+
+    assert "error" not in report
+    assert report["research_mission_executed"] is True
+    assert report["research_mission_query_count"] >= 2
+    assert report["research_executed_query_count"] >= 2
+    assert report["research_mission_coverage"] == "complete"
+    assert report["research_diversity"] == "single_host"
+    assert report["research_source_dates"] == "undated"
+    assert report["research_passages"] == "bare"
+    assert report["research_claim_support"] == "empty"
+    assert report["research_grounding"] == "empty"
+    assert report["research_contradiction"] == "empty"
+    assert report["research_claim_currentness"] == "empty"
+    assert report["research_answer_admission"] in {"hold", "blocked"}
+    assert [item["url"] for item in report["sources"]] == ["https://docs.python.org/3/"]
+
+
+@pytest.mark.asyncio
+async def test_kernel_does_not_run_mission_queries_on_empty_research(
+    settings,
+    storage,
+) -> None:
+    calls: list[str] = []
+
+    class EmptySourceResearch:
+        async def research(self, query: str, **options: object) -> dict[str, object]:
+            del options
+            calls.append(query)
+            return {
+                "query": query,
+                "sources": [],
+                "requested_sources": 3,
+                "completed_sources": 0,
+                "timed_out_sources": 0,
+                "failed_sources": 3,
+                "search_timed_out": False,
+            }
+
+    kernel, actor = _research_kernel(settings, storage, EmptySourceResearch())
+
+    report = await kernel._web_research(  # noqa: SLF001
+        actor=actor,
+        query="needle",
+        max_sources=3,
+    )
+
+    assert calls == ["needle"]
+    assert report["error"] == "no_admitted_sources"
+    assert "research_mission_executed" not in report
+
+
+@pytest.mark.asyncio
+async def test_kernel_does_not_claim_a_blocked_private_topic_as_a_mission(
+    settings,
+    storage,
+) -> None:
+    class PublicSourceResearch:
+        async def research(self, query: str, **options: object) -> dict[str, object]:
+            del options
+            return _complete_research_report(query, "https://docs.python.org/3/")
+
+    kernel, actor = _research_kernel(settings, storage, PublicSourceResearch())
+
+    report = await kernel._web_research(  # noqa: SLF001
+        actor=actor,
+        query="private-filtered-canary",
+        max_sources=3,
+    )
+
+    assert report.get("research_mission_executed") is not True
+    assert report.get("research_mission_coverage") in {None, "blocked", "empty", "partial"}
+
+
+_N2_PRIVATE_SELF_SCORE = {
+    "research_mission_executed": True,
+    "research_mission_query_count": 4,
+    "research_executed_query_count": 5,
+    "research_mission_coverage": "complete",
+    "research_diversity": "single_host",
+    "research_readiness": "ready_degraded",
+    "research_consumption": "consumable",
+    "research_answer_admission": "hold",
+    "research_source_dates": "undated",
+    "research_passages": "bare",
+    "research_claim_support": "empty",
+    "research_grounding": "empty",
+    "research_contradiction": "empty",
+    "research_claim_currentness": "empty",
+}
+
+
+def test_n2_private_self_score_is_friday_gates_not_gemini_parity() -> None:
+    """Body-free private N2 scorecard of Friday's own gates.
+
+    This is not Gemini parity.  A paired scored set has not been supplied.
+    Claims, dates and passages are observed empty/undated/bare, never invented.
+    """
+
+    from friday.execution_kernel.web_research_gates import (
+        complementary_mission_queries,
+        observe_web_research_gates,
+        plan_kernel_web_research_mission,
+    )
+
+    query = "needle"
+    mission = plan_kernel_web_research_mission(query, turn_id="n2-bench-turn")
+    assert mission is not None
+    extras = complementary_mission_queries(query, mission)
+    executed = (query, *extras)
+    report = _complete_research_report(query, "https://docs.python.org/3/")
+    report["selected_provider_id"] = "brave"
+    score = observe_web_research_gates(
+        query,
+        report,
+        executed_queries=executed,
+        mission=mission,
+    )
+    assert score == _N2_PRIVATE_SELF_SCORE
+    encoded = json.dumps(score, sort_keys=True)
+    assert "gemini" not in encoded.casefold()
+    assert "paired_scored_set" not in encoded
+    assert "text" not in score
+    assert "sources" not in score
+    assert "gemini_parity" not in score

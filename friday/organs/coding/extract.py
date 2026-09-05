@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import base64
 import binascii
+import hashlib
 import io
 import zipfile
 from collections.abc import Mapping, Sequence
@@ -39,6 +40,8 @@ class CodingArchiveExtractObserveReason(StrEnum):
     INVALID_ARCHIVE = "invalid_archive"
     ADMISSION_NOT_GRANTED = "admission_not_granted"
     PLAN_NOT_GRANTED = "plan_not_granted"
+    DIGEST_NOT_BOUND = "digest_not_bound"
+    OVERWRITE_COLLISION = "overwrite_collision"
     ISOLATION_NOT_GRANTED = "isolation_not_granted"
     WRITE_FAILED = "write_failed"
 
@@ -51,6 +54,8 @@ class CodingArchiveExtractObserveV1:
     reason: CodingArchiveExtractObserveReason
     extracted_count: int
     untrusted_execute: bool = False
+    digest_state: str = "empty"
+    overwrite_state: str = "empty"
 
 
 def _unix_mode(info: zipfile.ZipInfo) -> int:
@@ -241,6 +246,52 @@ def observe_coding_archive_extract(
             )
             if plan.plan is not CodingArchiveExtractPlanState.PLANNED:
                 return _blocked(CodingArchiveExtractObserveReason.PLAN_NOT_GRANTED)
+            from friday.orchestration.coding_archive_digest_facts import (
+                CodingArchiveDigestFactsState,
+                build_coding_archive_digest_facts,
+            )
+            from friday.orchestration.coding_archive_overwrite_plan import (
+                CodingArchiveExistingDestinationFactV1,
+                CodingArchiveOverwritePlanState,
+                build_coding_archive_overwrite_plan,
+            )
+
+            digest_facts = build_coding_archive_digest_facts(
+                extract_id + "-digest",
+                authenticated_turn_id,
+                hashlib.sha256(raw).hexdigest(),
+            )
+            if digest_facts.digest_state is not CodingArchiveDigestFactsState.BOUND:
+                return CodingArchiveExtractObserveV1(
+                    CodingArchiveExtractObserveState.BLOCKED,
+                    CodingArchiveExtractObserveReason.DIGEST_NOT_BOUND,
+                    0,
+                    False,
+                    digest_facts.digest_state.value,
+                    "empty",
+                )
+            existing = tuple(
+                CodingArchiveExistingDestinationFactV1(
+                    path=destination,
+                    exists=(workspace / destination).exists(),
+                )
+                for destination in plan.destination_paths
+            )
+            overwrite = build_coding_archive_overwrite_plan(
+                extract_id + "-ow",
+                authenticated_turn_id,
+                plan,
+                existing,
+            )
+            if overwrite.plan is not CodingArchiveOverwritePlanState.CLEAR:
+                return CodingArchiveExtractObserveV1(
+                    CodingArchiveExtractObserveState.BLOCKED,
+                    CodingArchiveExtractObserveReason.OVERWRITE_COLLISION,
+                    0,
+                    False,
+                    digest_facts.digest_state.value,
+                    overwrite.plan.value,
+                )
             try:
                 ensure_private_directory(workspace)
                 root_path = workspace.resolve()
@@ -291,6 +342,8 @@ def observe_coding_archive_extract(
                 CodingArchiveExtractObserveReason.EXTRACTED,
                 len(pending),
                 False,
+                digest_facts.digest_state.value,
+                overwrite.plan.value,
             )
         except contract_errors:
             return _blocked(CodingArchiveExtractObserveReason.INVALID_ARCHIVE)

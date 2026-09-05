@@ -121,10 +121,12 @@ def observe_coding_isolated_loop(
     extract: CodingArchiveExtractObserveV1,
     operation: CodingModeExecuteOperation,
     runner: CodingWorkerRunner | None = None,
+    created: object | None = None,
 ) -> CodingIsolatedLoopV1:
     """Compile or unittest extracted files after admission. Never run uploaded programs."""
 
-    if extract.state is not CodingArchiveExtractObserveState.EXTRACTED:
+    created_ready = getattr(getattr(created, "state", None), "value", None) == "written"
+    if extract.state is not CodingArchiveExtractObserveState.EXTRACTED and not created_ready:
         return _empty()
     if operation in {CodingModeExecuteOperation.INSPECT, CodingModeExecuteOperation.STATIC}:
         return _empty(CodingIsolatedLoopReason.NO_CLAIM)

@@ -81,8 +81,26 @@ def test_admitted_regular_files_are_extracted_without_execute(tmp_path: Path) ->
     assert result.state is CodingArchiveExtractObserveState.EXTRACTED
     assert result.extracted_count == 2
     assert result.untrusted_execute is False
+    assert result.digest_state == "bound"
+    assert result.overwrite_state == "clear"
     assert (workspace / "src" / "main.py").read_bytes() == b"print(1)\n"
     assert (workspace / "README.md").read_bytes() == b"hi\n"
+
+
+def test_existing_destination_blocks_extract_without_overwrite(tmp_path: Path) -> None:
+    workspace = tmp_path / "workspace"
+    (workspace / "src").mkdir(parents=True)
+    (workspace / "src" / "main.py").write_bytes(b"old\n")
+    result = observe_coding_archive_extract(
+        extract_id="extract.1",
+        authenticated_turn_id="turn.1",
+        workspace=workspace,
+        raw=_zip_bytes({"src/main.py": b"new\n"}),
+    )
+    assert result.state is CodingArchiveExtractObserveState.BLOCKED
+    assert result.reason is CodingArchiveExtractObserveReason.OVERWRITE_COLLISION
+    assert result.overwrite_state == "collision"
+    assert (workspace / "src" / "main.py").read_bytes() == b"old\n"
 
 
 def test_zip_slip_is_blocked_and_writes_nothing(tmp_path: Path) -> None:

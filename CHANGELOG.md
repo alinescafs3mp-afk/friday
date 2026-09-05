@@ -1,3 +1,16 @@
+## 0.208.26 — 2026-09-05
+
+### N2 live mission/gates and N3 create/result-archive
+
+- Distinct sealed candidate for `semantic_supervisor_assist_to_shadow` after
+  live 0.208.25. Lands complementary public-web mission queries and honest N2
+  gate observations on admitted `_web_research` without inventing claims.
+  Lands `/coding` prompt-to-small-project, digest/overwrite extract, one-final
+  source archive and restart/rollback observation. Execute/run of uploaded
+  programs stay fail-closed. This is not Gemini parity and not a safety
+  certification. SQLite remains at schema 50; exact `0.208.25` is the
+  predecessor and `0.207.90` the fallback.
+
 ## 0.208.25 — 2026-09-05
 
 ### No-product shadow_to_assist restore

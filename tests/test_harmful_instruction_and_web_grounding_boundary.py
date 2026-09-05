@@ -3233,7 +3233,8 @@ async def test_real_web_handler_with_a_readable_source_persists_accepted_evidenc
         enable_tools=True,
     )
 
-    assert surfer.queries == [query]
+    assert surfer.queries[0] == query
+    assert query in surfer.queries
     assert answer in reply["message"]
     assert fact in reply["message"]
     assert reply["tools_used"] == ["web_research"]
@@ -3316,7 +3317,8 @@ async def test_refilled_current_web_target_keeps_answer_and_full_provenance(
     )
 
     expected_ledger = [{"title": row["title"], "url": row["url"]} for row in source_rows]
-    assert surfer.queries == [query]
+    assert surfer.queries[0] == query
+    assert query in surfer.queries
     assert len(router.calls) == 1
     assert answer in reply["message"]
     assert reply["message"] != _WEB_EVIDENCE_MISSING
