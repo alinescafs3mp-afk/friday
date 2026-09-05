@@ -107,19 +107,19 @@
         "ppm": 1000000
       }
     },
-    "release_sha256": "7bfbc22b52540667fa51feaacce23f47aad503a71da47edfe449a4f29dcdbba9",
+    "release_sha256": "15e0fc786240c31141f9ca8934c4ffbb451901d722256142123363d94c87cbe3",
     "repeat_output_sha256": "79cf8ee51edc54cbfd815b54499490ab4390f9408dae7d5e534cddd8c3f70840",
     "result_sha256": "66e943fda982457e47e06eabc6ab977936646e2cecce8d78e089a7c00cd276a8",
-    "source_commit": "6c22df755d71409770e83ae1db4abdf551b7877b",
+    "source_commit": "96618765bc20951672b67f2e1c6093e254067892",
     "source_guard": {
       "instrument_sha256_end": "fd489c05b86f680b5cb29b150284add6f025099f59deb048ad1aa0bd8a2c08ec",
       "instrument_sha256_start": "fd489c05b86f680b5cb29b150284add6f025099f59deb048ad1aa0bd8a2c08ec",
-      "release_sha256_end": "7bfbc22b52540667fa51feaacce23f47aad503a71da47edfe449a4f29dcdbba9",
-      "release_sha256_start": "7bfbc22b52540667fa51feaacce23f47aad503a71da47edfe449a4f29dcdbba9"
+      "release_sha256_end": "15e0fc786240c31141f9ca8934c4ffbb451901d722256142123363d94c87cbe3",
+      "release_sha256_start": "15e0fc786240c31141f9ca8934c4ffbb451901d722256142123363d94c87cbe3"
     },
     "source_worktree_clean": true,
     "source_worktree_status_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-    "stable_envelope_sha256": "d7f5fc3c2c1170c9f5385c1fa3a900d5cf0d727167f4440950cacd32b510eabe"
+    "stable_envelope_sha256": "1cb4eba978c38e024dc5644b74c034082cab5805f8ec1310edd6dabdd7a45d96"
   },
   "claim": {
     "corpus": "current_code_owned_synthetic_long_form_projection",
