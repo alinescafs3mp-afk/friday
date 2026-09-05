@@ -886,6 +886,8 @@ previous и сохраняет `0.207.90/schema50` immutable fallback.
 previous и сохраняет `0.207.90/schema50` immutable fallback.
 `0.208.41/schema50` DDL не меняет, принимает exact `0.208.40/schema50` как
 previous и сохраняет `0.207.90/schema50` immutable fallback.
+`0.208.42/schema50` DDL не меняет, принимает exact `0.208.41/schema50` как
+previous и сохраняет `0.207.90/schema50` immutable fallback.
 
 0.206.4 использует SQLite schema 34; Obsidian-релиз 0.207.2 поднимает её до
 schema 35. Новое поле имени загрузки принадлежит
@@ -1150,15 +1152,16 @@ orchestration.model_gate.verified_context_tokens = 40960
 `8192/16384/24576/32768/40960`; Qwen3.6 и объекты без нового capacity API
 остаются на 8192. Размер считается отдельно для каждого model-вызова, включая
 worst-case JSON expansion полного разрешённого ответа внутри verifier input.
-Для file+web comparison полный разрешённый ответ на 8192 остаётся 1328 JSON
-байт, а на 40960 — 5312, поэтому small-input на q38 берёт 32768, а полная
-крупная проекция — 40960.
+Для file+web comparison verifier-reserve на 8192 остаётся 1328 JSON байт,
+а на 32768/40960 — 5312, поэтому полная крупная проекция на q38 по-прежнему
+помещается. Post-synthesis accept на 40960 — линейные 6640, поэтому
+small-input на q38 берёт 40960, чтобы принять полный русский синтез.
 Requirements digest и tier переносятся без подмены через plan/binding, lease и
 process-owned result. Acquire одноразовый: отказ, timeout, drift либо отзыв
 attestation не разрешают повторный acquire на меньшем или новом tier.
 
 Во время probe `/api/health` ещё недоступен. Ждите до 420 секунд и дополнительно
-требуйте `status=ok` и `version=0.208.41`.
+требуйте `status=ok` и `version=0.208.42`.
 
 HTTP `status=ok` при `installed_mode=legacy` означает безопасную деградацию, но
 не успешный canary. В `canary`/`v12` Sentinel не реже раза в минуту

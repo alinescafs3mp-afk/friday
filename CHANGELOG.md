@@ -1,3 +1,18 @@
+## 0.208.42 — 2026-09-05
+
+### Raise file+web scaled synthesis accept cap to 6640
+
+- Distinct sealed candidate for `semantic_supervisor_assist_to_shadow` after
+  live 0.208.41. File+web still generates up to 768 tokens. Live V12 on
+  0.208.41 returned a 678-token stop-finished synthesis that still exceeded
+  the 5312 JSON-byte accept cap, so Friday published canned `step_failed`
+  after file and web both completed. 8192 stays 1328. Verifier reserve stays
+  capped at 5312 so a full Q38 projection still fits. Post-synthesis
+  acceptance at 40960 uses the linear 6640; the actual verifier is then
+  checked against attested input. Citation order, unowned brackets, service
+  markup and secret-free checks are unchanged. SQLite remains at schema 50;
+  exact `0.208.41` is the predecessor and `0.207.90` the fallback.
+
 ## 0.208.41 — 2026-09-05
 
 ### No-product shadow_to_assist restore

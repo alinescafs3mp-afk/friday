@@ -18,6 +18,7 @@ import asyncio
 import hashlib
 import hmac
 import json
+import logging
 import math
 import re
 import secrets
@@ -83,6 +84,8 @@ _SERVICE_MARKUP_RE = re.compile(
 _MAX_REQUEST_UTF8_BYTES = 768
 _MAX_ANSWER_JSON_UTF8_BYTES = 1_328
 _MAX_SCALED_ANSWER_JSON_UTF8_BYTES = 5_312
+_MAX_ACCEPTED_ANSWER_JSON_UTF8_BYTES = 6_640
+LOGGER = logging.getLogger(__name__)
 _MAX_SYNTHESIS_TOKENS = 768
 _MAX_VERIFIER_TOKENS = 256
 _CURRENT_FILE_WEB_MODEL_BUDGET = (2, _MAX_SYNTHESIS_TOKENS)
@@ -183,19 +186,30 @@ def _empty_answer_json_utf8_bytes() -> int:
     return len(json.dumps("", ensure_ascii=False).encode("utf-8"))
 
 
-def _answer_json_utf8_budget(required_context_tokens: int) -> int:
-    """Return the accept cap at one measured tier.
+def _answer_json_utf8_budget(
+    required_context_tokens: int,
+    *,
+    for_acceptance: bool = False,
+) -> int:
+    """Return the reserved or accepted JSON-byte cap at one measured tier.
 
     8192 stays 1328 so the default comparison still fits that attested
-    input. Higher tiers scale the same ratio, capped at 5312: 40960-linear
-    6640 overflows a full Q38 projection's verifier reserve.
+    input. Higher tiers scale the same ratio. Verifier reserve stays capped
+    at 5312 so a full Q38 projection still fits. Post-synthesis acceptance
+    may use the 40960-linear 6640; the actual verifier is then checked
+    against attested input.
     """
 
     if type(required_context_tokens) is not int or required_context_tokens not in _CONTEXT_TOKEN_TIERS:
         return 0
     scaled = (_MAX_ANSWER_JSON_UTF8_BYTES * required_context_tokens) // _BASE_CONTEXT_TOKENS
-    if scaled > _MAX_SCALED_ANSWER_JSON_UTF8_BYTES:
-        return _MAX_SCALED_ANSWER_JSON_UTF8_BYTES
+    cap = (
+        _MAX_ACCEPTED_ANSWER_JSON_UTF8_BYTES
+        if for_acceptance
+        else _MAX_SCALED_ANSWER_JSON_UTF8_BYTES
+    )
+    if scaled > cap:
+        return cap
     return scaled
 
 
@@ -221,13 +235,16 @@ def _comparison_requirements(
         or empty_verifier_bytes < 0
     ):
         return None
-    available_budget = _answer_json_utf8_budget(available_context_tokens)
+    available_budget = _answer_json_utf8_budget(
+        available_context_tokens,
+        for_acceptance=True,
+    )
     if available_budget <= 0:
         return None
     for context_tokens in _CONTEXT_TOKEN_TIERS:
         if context_tokens > available_context_tokens:
             break
-        if _answer_json_utf8_budget(context_tokens) < available_budget:
+        if _answer_json_utf8_budget(context_tokens, for_acceptance=True) < available_budget:
             continue
         attested = _attested_input_max_bytes(context_tokens)
         reserved = _reserved_verifier_utf8_bytes(empty_verifier_bytes, context_tokens)
@@ -783,11 +800,16 @@ def _validate_answer(
     if type(max_utf8_bytes) is not int or max_utf8_bytes <= 0:
         raise ValueError("comparison answer budget is invalid")
     normalized = answer.strip()
+    if not normalized:
+        raise ValueError("comparison answer is empty")
+    encoded = len(json.dumps(normalized, ensure_ascii=False).encode("utf-8"))
+    if encoded > max_utf8_bytes:
+        raise ValueError(
+            f"comparison answer exceeds the json budget encoded={encoded} max={max_utf8_bytes}"
+        )
     expected_tokens = {f"[{label}]" for label in expected_labels}
     if (
-        not normalized
-        or len(json.dumps(normalized, ensure_ascii=False).encode("utf-8")) > max_utf8_bytes
-        or _SERVICE_MARKUP_RE.search(normalized)
+        _SERVICE_MARKUP_RE.search(normalized)
         or not model_visible_text_is_secret_free(normalized)
         or not secondary_model_messages_are_secret_free([{"role": "assistant", "content": normalized}])
         or tuple(_CITATION_RE.findall(normalized)) != expected_labels
@@ -930,7 +952,10 @@ class CurrentFileWebComparison:
                 _validate_answer(
                     self.answer,
                     self.citation_labels,
-                    max_utf8_bytes=_answer_json_utf8_budget(self.requirements.required_context_tokens),
+                    max_utf8_bytes=_answer_json_utf8_budget(
+                        self.requirements.required_context_tokens,
+                        for_acceptance=True,
+                    ),
                 )
                 != self.answer
             ):
@@ -1242,14 +1267,18 @@ async def compare_current_file_with_web(
             failure_reason=FailureReason.PROVIDER_FAILURE,
             synthesis_outcome=OutcomeStatus.UNAVAILABLE,
         ) from None
-    answer_budget = _answer_json_utf8_budget(requirements.required_context_tokens)
+    answer_budget = _answer_json_utf8_budget(
+        requirements.required_context_tokens,
+        for_acceptance=True,
+    )
     try:
         answer = _validate_answer(
             synthesis["content"],
             labels,
             max_utf8_bytes=answer_budget,
         )
-    except (KeyError, TypeError, ValueError, UnicodeError):
+    except (KeyError, TypeError, ValueError, UnicodeError) as exc:
+        LOGGER.warning("comparison synthesis was rejected: %s", exc)
         raise CurrentFileWebComparisonError(
             "comparison synthesis was rejected",
             model_calls=model_calls,

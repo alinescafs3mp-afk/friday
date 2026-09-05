@@ -706,6 +706,9 @@ def test_answer_json_budget_stays_1328_at_8192_and_caps_at_5312() -> None:
     assert comparison_module._answer_json_utf8_budget(24_576) == 3_984
     assert comparison_module._answer_json_utf8_budget(32_768) == 5_312
     assert comparison_module._answer_json_utf8_budget(40_960) == 5_312
+    assert comparison_module._answer_json_utf8_budget(8_192, for_acceptance=True) == 1_328
+    assert comparison_module._answer_json_utf8_budget(32_768, for_acceptance=True) == 5_312
+    assert comparison_module._answer_json_utf8_budget(40_960, for_acceptance=True) == 6_640
     assert comparison_module._answer_json_utf8_budget(0) == 0
 
 
@@ -722,7 +725,7 @@ async def test_q38_small_projection_leases_full_answer_budget_tier() -> None:
     )
     assert result.status is CurrentFileWebComparisonStatus.COMPLETE
     assert result.answer == _DEFAULT_ANSWER
-    assert result.requirements is current_file_web_model_requirements(32_768)
+    assert result.requirements is current_file_web_model_requirements(40_960)
     assert result.model_calls == 2
 
 
@@ -746,7 +749,7 @@ async def test_q36_rejects_synthesis_over_base_answer_json_budget() -> None:
 
 @pytest.mark.asyncio
 async def test_q38_accepts_synthesis_within_scaled_answer_json_budget() -> None:
-    answer = _cited_answer_of_json_bytes(3_500, 5_312)
+    answer = _cited_answer_of_json_bytes(5_313, 6_640)
     model = _ComparisonModel(answer=answer, available_context_tokens=40_960)
     result = await compare_current_file_with_web(
         model,
@@ -757,18 +760,18 @@ async def test_q38_accepts_synthesis_within_scaled_answer_json_budget() -> None:
         absolute_deadline=time.monotonic() + 10,
     )
     encoded = len(json.dumps(answer, ensure_ascii=False).encode("utf-8"))
-    assert encoded > 1_328
-    assert encoded <= 5_312
+    assert encoded > 5_312
+    assert encoded <= 6_640
     assert result.status is CurrentFileWebComparisonStatus.COMPLETE
     assert result.answer == answer
-    assert result.requirements is current_file_web_model_requirements(32_768)
+    assert result.requirements is current_file_web_model_requirements(40_960)
     assert result.model_calls == 2
     assert model.verifier_answer == answer
 
 
 @pytest.mark.asyncio
 async def test_q38_rejects_synthesis_over_scaled_answer_json_budget() -> None:
-    answer = _cited_answer_of_json_bytes(5_313)
+    answer = _cited_answer_of_json_bytes(6_641)
     model = _ComparisonModel(answer=answer, available_context_tokens=40_960)
     with pytest.raises(CurrentFileWebComparisonError) as captured:
         await compare_current_file_with_web(
