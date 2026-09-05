@@ -1189,7 +1189,7 @@ def test_interrupted_job_restart_is_durable_unknown_and_reconciles_without_guess
     jobs.close()
 
     restarted_runner = _Runner()
-    restarted, auth, reopened, restarted_plan = _daemon(
+    restarted, auth, reopened, _restarted_plan = _daemon(
         tmp_path,
         restarted_runner,
         database=database,
@@ -1206,7 +1206,7 @@ def test_interrupted_job_restart_is_durable_unknown_and_reconciles_without_guess
 
     reconciled = _call(
         restarted,
-        _request(auth, restarted_plan, "JobReconcile", sequence=2, body={}),
+        _request(auth, plan, "JobReconcile", sequence=2, body={}),
     )
     assert reconciled["ok"] is True
     assert reconciled["result"]["job_id"] == _JOB_ID
