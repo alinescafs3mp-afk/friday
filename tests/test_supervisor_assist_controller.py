@@ -1523,6 +1523,97 @@ async def test_plan_bind_failure_records_distinct_fallback_reason(
 
 
 @pytest.mark.asyncio
+async def test_plan_not_admitted_records_distinct_fallback_reason() -> None:
+    planner = _Planner(admit=False)
+    controller = _controller(planner=planner)
+    legacy_calls = 0
+
+    async def legacy() -> dict[str, object]:
+        nonlocal legacy_calls
+        legacy_calls += 1
+        return {"message": "legacy"}
+
+    result = await controller.execute(
+        _surface(),
+        legacy_primary=legacy,
+        absolute_deadline=time.monotonic() + 3,
+    )
+    status = controller.semantic_supervisor_status()
+
+    assert result.outcome is SupervisorAssistOutcome.LEGACY
+    assert planner.calls == 1
+    assert legacy_calls == 1
+    assert status["last_promotion_reason"] == "plan_not_admitted"
+    assert status["fallback_reasons"] == {"plan_not_admitted": 1}
+    assert status["promotion_admitted_total"] == 0
+    assert status["invoked_total"] == 0
+
+
+@pytest.mark.asyncio
+async def test_long_call_budget_caps_plan_admission_within_supervisor_budget() -> None:
+    class CapturingPlanner(_Planner):
+        def __init__(self) -> None:
+            super().__init__(admit=True)
+            self.context: PolicyAdmissionContext | None = None
+            self.journey_remaining: float | None = None
+            self.planning_remaining_ns: int | None = None
+            self.parsed: ParsedSupervisorProposal | None = None
+
+        async def propose(
+            self,
+            supervisor_input: SupervisorInput,
+            context: PolicyAdmissionContext,
+            *,
+            absolute_deadline: float,
+            pre_dispatch_validator: Callable[[], bool] | None = None,
+        ) -> ParsedSupervisorProposal | None:
+            now = time.monotonic()
+            now_ns = time.monotonic_ns()
+            self.context = context
+            self.journey_remaining = absolute_deadline - now
+            self.planning_remaining_ns = context.turn_deadline_monotonic_ns - now_ns
+            self.parsed = await super().propose(
+                supervisor_input,
+                context,
+                absolute_deadline=absolute_deadline,
+                pre_dispatch_validator=pre_dispatch_validator,
+            )
+            return None
+
+    planner = CapturingPlanner()
+    controller = _controller(planner=planner)
+    legacy_calls = 0
+
+    async def legacy() -> dict[str, object]:
+        nonlocal legacy_calls
+        legacy_calls += 1
+        return {"message": "legacy"}
+
+    result = await controller.execute(
+        _surface(),
+        legacy_primary=legacy,
+        absolute_deadline=time.monotonic() + 720,
+    )
+    status = controller.semantic_supervisor_status()
+    budget_ns = semantic_supervisor_policy.SUPERVISOR_TURN_DEADLINE_MS * 1_000_000
+
+    assert result.outcome is SupervisorAssistOutcome.LEGACY
+    assert planner.calls == 1
+    assert planner.context is not None
+    assert planner.journey_remaining is not None and planner.journey_remaining > 700
+    assert planner.planning_remaining_ns is not None
+    assert 0 < planner.planning_remaining_ns <= budget_ns
+    assert planner.parsed is not None
+    assert planner.parsed.decision.admitted is True
+    assert planner.parsed.decision.plan is not None
+    assert legacy_calls == 1
+    assert status["last_promotion_reason"] == "plan_not_admitted"
+    assert status["fallback_reasons"] == {"plan_not_admitted": 1}
+    assert status["promotion_admitted_total"] == 0
+    assert status["invoked_total"] == 0
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("fail_at", "propagates"),
     [(2, False), (3, False), (4, False), (5, True)],

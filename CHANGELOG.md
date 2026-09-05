@@ -1,3 +1,16 @@
+## 0.208.38 — 2026-09-05
+
+### Cap plan-admission remaining time to the supervisor budget
+
+- Distinct sealed candidate for `semantic_supervisor_assist_to_shadow` after
+  live 0.208.37. The primary file+web journey still inherits the authenticated
+  call budget. Kernel admission remaining time is capped to the supervisor
+  turn deadline so a long journey is not rejected as expired. Planner skip
+  after an admitted promotion is recorded as `plan_not_admitted`,
+  `plan_identity_mismatch`, or `plan_context_failed` instead of collapsing
+  into `promotion_not_admitted`. SQLite remains at schema 50; exact `0.208.37`
+  is the predecessor and `0.207.90` the fallback.
+
 ## 0.208.37 — 2026-09-05
 
 ### No-product shadow_to_assist restore

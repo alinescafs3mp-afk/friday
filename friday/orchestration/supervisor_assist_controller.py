@@ -162,8 +162,19 @@ _CONTROLLER_PROMOTION_REASONS = frozenset(
         "controller_rejected_admitted",
         "promotion_not_admitted",
         "plan_bind_failed",
+        "plan_not_admitted",
+        "plan_identity_mismatch",
+        "plan_context_failed",
         *(reason.value for reason in AssistPromotionReason),
         *(reason.value for reason in AssistPromotionActivationReason),
+    }
+)
+_POST_DECISION_FALLBACK_REASONS = frozenset(
+    {
+        "plan_bind_failed",
+        "plan_not_admitted",
+        "plan_identity_mismatch",
+        "plan_context_failed",
     }
 )
 _MAX_STATUS_REASON_KEYS = 32
@@ -614,6 +625,26 @@ def _bounded_primary_journey_deadline(
         and child.safety_deadline.monotonic_ns <= scope.deadline_monotonic_ns
         else None
     )
+
+
+def _planning_deadline_ns(*, journey_deadline: float, turn_deadline_ms: int) -> int | None:
+    """Cap kernel admission remaining time to ``turn_deadline_ms``.
+
+    The primary file+web journey may inherit the authenticated call ceiling.
+    ``admit_supervisor_proposal`` rejects remaining time above the supervisor
+    budget.  Those clocks stay distinct.
+    """
+
+    if type(turn_deadline_ms) is not int or turn_deadline_ms <= 0:
+        return None
+    journey_ns = int(journey_deadline * 1_000_000_000)
+    now_ns = time.monotonic_ns()
+    if journey_ns <= now_ns:
+        return None
+    planning_ns = min(journey_ns, now_ns + turn_deadline_ms * 1_000_000)
+    if planning_ns <= now_ns:
+        return None
+    return planning_ns
 
 
 def _read_outcome_sha256(
@@ -1472,6 +1503,13 @@ class SupervisorAssistController:
                 source_identity_sha256=surface.attachment.source_identity_sha256,
                 content_sha256=surface.attachment_content_sha256,
             )
+            planning_deadline_ns = _planning_deadline_ns(
+                journey_deadline=deadline,
+                turn_deadline_ms=supervisor_input.budgets.turn_deadline_ms,
+            )
+            if planning_deadline_ns is None:
+                self._remember_promotion_reason("plan_not_admitted")
+                return None
 
             def attest(boundary: PlanAuthorityBoundary) -> PlanAuthorityDecision:
                 if (
@@ -1483,7 +1521,7 @@ class SupervisorAssistController:
                     or boundary.policy_sha256 != SUPERVISOR_ASSIST_PRODUCT_POLICY_SHA256
                     or boundary.budget_sha256 != supervisor_input.budgets.canonical_sha256()
                     or boundary.capability_bindings_sha256 != snapshot.digest_hex()
-                    or boundary.turn_deadline_monotonic_ns != int(deadline * 1_000_000_000)
+                    or boundary.turn_deadline_monotonic_ns != planning_deadline_ns
                 ):
                     return PlanAuthorityDecision.rejected(PlanAuthorityReason.INVALID_BOUNDARY)
                 try:
@@ -1501,12 +1539,13 @@ class SupervisorAssistController:
                 conversation_binding_sha256=conversation_binding_sha256,
                 authority_scope=PlanAuthorityScope.ASSIST_EXECUTION,
                 source_bindings=(source_binding,),
-                turn_deadline_monotonic_ns=int(deadline * 1_000_000_000),
+                turn_deadline_monotonic_ns=planning_deadline_ns,
                 authority_attestor=cast(PlanAuthorityAttestor, attest),
                 capability_bindings=snapshot,
                 sealed_web_query=surface.web_plan.owned_query(),
             )
         except Exception:
+            self._remember_promotion_reason("plan_context_failed")
             return None
 
         def planning_still_current() -> bool:
@@ -1532,9 +1571,11 @@ class SupervisorAssistController:
         )
         surface.require_current_authenticated_call_scope()
         if type(parsed) is not ParsedSupervisorProposal:
+            self._remember_promotion_reason("plan_not_admitted")
             return None
         proposal = cast(ParsedSupervisorProposal, parsed)
         if not proposal.decision.admitted or type(proposal.decision.plan) is not ValidatedExecutionPlan:
+            self._remember_promotion_reason("plan_not_admitted")
             return None
         plan = cast(ValidatedExecutionPlan, proposal.decision.plan)
         if (
@@ -1556,6 +1597,7 @@ class SupervisorAssistController:
                 content_sha256=surface.attachment_content_sha256,
             )
         ):
+            self._remember_promotion_reason("plan_identity_mismatch")
             return None
         if bind_assist_plan_to_surface(plan, surface) is None:
             self._remember_promotion_reason("plan_bind_failed")
@@ -3234,8 +3276,8 @@ class SupervisorAssistController:
                 prospective = None
             if prospective is None:
                 fallback_reason = (
-                    "plan_bind_failed"
-                    if self._last_promotion_reason == "plan_bind_failed"
+                    self._last_promotion_reason
+                    if self._last_promotion_reason in _POST_DECISION_FALLBACK_REASONS
                     else "promotion_not_admitted"
                 )
                 return await self._legacy(legacy_primary, reason=fallback_reason)
