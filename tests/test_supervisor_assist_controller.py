@@ -1266,9 +1266,7 @@ async def test_runtime_admission_refresh_failure_has_no_ownership_or_effect_surf
     assert promotion.refresh_calls == 1
     assert promotion.calls == planner.calls == 0
     assert promotion.events == ["preflight", "refresh"]
-    assert controller.semantic_supervisor_status()["last_promotion_reason"] == (
-        "laptop_runtime_unavailable"
-    )
+    assert controller.semantic_supervisor_status()["last_promotion_reason"] == "laptop_runtime_unavailable"
 
 
 @pytest.mark.asyncio

@@ -475,9 +475,7 @@ async def test_in_flight_profile_probe_keeps_previous_manifest_match() -> None:
     try:
         assert await client.probe_models(absolute_deadline_monotonic=time.monotonic() + 2.0) is None
         assert client.status().profile_manifest_match is True
-        probe = asyncio.create_task(
-            client.probe_models(absolute_deadline_monotonic=time.monotonic() + 2.0)
-        )
+        probe = asyncio.create_task(client.probe_models(absolute_deadline_monotonic=time.monotonic() + 2.0))
         await asyncio.wait_for(started.wait(), timeout=1.0)
         assert client.status().profile_manifest_match is True
         release.set()
