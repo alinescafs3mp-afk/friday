@@ -1,3 +1,14 @@
+## 0.208.27 — 2026-09-05
+
+### N3 upload-modification EMPTY observer
+
+- Distinct sealed candidate for `semantic_supervisor_shadow_to_assist` after
+  live 0.208.26. Lands `/coding` upload-modification admission on inspect,
+  isolation, identity and edit-plan facts. Apply stays empty: uploaded
+  project files are never rewritten. Execute/run of uploaded programs stay
+  fail-closed. This is not a safety certification. SQLite remains at schema
+  50; exact `0.208.26` is the predecessor and `0.207.90` the fallback.
+
 ## 0.208.26 — 2026-09-05
 
 ### N2 live mission/gates and N3 create/result-archive

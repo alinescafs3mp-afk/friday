@@ -45,6 +45,10 @@ from friday.organs.coding.loop import (
     CodingIsolatedLoopV1,
     observe_coding_isolated_loop,
 )
+from friday.organs.coding.modify import (
+    modify_requested,
+    observe_coding_upload_modification,
+)
 from friday.organs.coding.result_archive import observe_coding_result_archive
 from friday.organs.coding.worker_boundary import (
     CodingWorkerBoundaryV1,
@@ -177,6 +181,7 @@ def _russian_inspect_reply(
     created_state: str,
     archive_state: str,
     plan_gate: str,
+    modify_state: str = "empty",
 ) -> str:
     if loop.state is CodingIsolatedLoopState.BUILT:
         refused = (
@@ -213,6 +218,10 @@ def _russian_inspect_reply(
         )
     elif created_state == "blocked":
         refused = refused + " Создание проекта не допущено."
+    if modify_state == "admitted":
+        refused = refused + " Правка загрузки допущена. Файлы загруженного проекта не изменялись."
+    elif modify_state == "blocked":
+        refused = refused + " Правка загрузки не допущена."
     if archive_state == "archive":
         refused = refused + " Итоговый архив исходников подготовлен."
     elif archive_state == "file":
@@ -276,7 +285,7 @@ def handle_coding_static_turn(
     worker_boundary: CodingWorkerBoundaryV1 | None = None,
     spawn_runner: CodingWorkerRunner | None = None,
 ) -> dict[str, Any]:
-    """Inspect, optionally create a bounded scaffold, extract, build/test. Never run uploads."""
+    """Inspect, create, admit upload edits, extract, build/test. Never apply or run uploads."""
 
     del enable_tools
     _require_coding_actor(actor)
@@ -312,8 +321,11 @@ def handle_coding_static_turn(
     )
     worker_admitted = admission.admission is CodingWorkerAdmissionState.ADMITTED
     creating = create_requested(message, has_members=bool(members))
+    modifying = modify_requested(message, has_members=bool(members))
     if creating:
         intent = build_coding_mode_intent(f"{turn_id}-intent", turn_id, prompt=message)
+    elif modifying:
+        intent = build_coding_mode_intent(f"{turn_id}-intent", turn_id, upload=True)
     else:
         intent = build_coding_mode_intent(f"{turn_id}-intent", turn_id, inspect=True)
     execute_claimed, execute_claim = _compose_execute_claim(
@@ -331,6 +343,16 @@ def handle_coding_static_turn(
         workspace=workspace,
         worker_admitted=worker_admitted,
         has_members=bool(members),
+    )
+    modified = observe_coding_upload_modification(
+        turn_id=turn_id,
+        project_id=project_id,
+        revision_selector=snapshot,
+        message=message,
+        workspace=workspace,
+        inspect_report=report,
+        members=members,
+        creating=creating,
     )
     if created.state is CodingCreateObserveState.WRITTEN:
         written_members: list[dict[str, object]] = []
@@ -391,12 +413,14 @@ def handle_coding_static_turn(
         ready=ready,
     )
     create_admission = created.admission if creating else None
+    modification_admission = modified.admission if modifying else None
     plan_gate = build_coding_mode_plan_gate(
         f"{turn_id}-gate",
         turn_id,
         intent,
         execute_claim,
         create_admission=create_admission,
+        modification_admission=modification_admission,
         worker_admission=admission,
     )
     snapshot_members = _workspace_snapshot(workspace) if ready else None
@@ -426,6 +450,7 @@ def handle_coding_static_turn(
         created_state=created.state.value,
         archive_state=result_archive.state.value,
         plan_gate=plan_gate.gate.value,
+        modify_state=modified.state.value,
     )
     persisted_id = _ensure_conversation(
         storage,
@@ -479,6 +504,9 @@ def handle_coding_static_turn(
         "coding_loop_untrusted_execute": loop.untrusted_execute,
         "coding_create": created.state.value,
         "coding_create_reason": created.reason.value,
+        "coding_upload_modification": modified.state.value,
+        "coding_upload_modification_reason": modified.reason.value,
+        "coding_upload_applied": modified.applied,
         "coding_plan_gate": plan_gate.gate.value,
         "coding_mode_view": view.state.value,
         "coding_result_archive": result_archive.state.value,

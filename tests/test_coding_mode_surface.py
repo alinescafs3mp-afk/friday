@@ -87,6 +87,8 @@ def test_empty_coding_turn_is_empty() -> None:
     )
     assert result["context"]["coding_inspect_report"] == CodingInspectReportState.EMPTY.value
     assert result["context"]["coding_member_count"] == 0
+    assert result["context"]["coding_upload_modification"] == "empty"
+    assert result["context"]["coding_upload_applied"] is False
     assert "нет исходников" in result["message"]
 
 
@@ -566,6 +568,83 @@ def test_created_scaffold_can_run_isolated_unittest(tmp_path, monkeypatch: pytes
     assert "изолированный тест выполнен" in result["message"].casefold()
     assert len(spawned) == 2
     assert any("loader.discover" in part for part in spawned[1])
+
+
+def test_upload_modification_is_admitted_and_not_applied(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from friday.organs.coding.worker_boundary import default_coding_worker_boundary
+
+    def _boom(*_args: object, **_kwargs: object) -> None:
+        raise AssertionError("modify turn spawned a host process")
+
+    monkeypatch.setattr("subprocess.Popen", _boom, raising=False)
+    monkeypatch.setattr("subprocess.run", _boom, raising=False)
+    worker_root = tmp_path / "friday-coding-worker"
+    boundary = default_coding_worker_boundary(
+        friday_home=str(tmp_path / "friday-home"),
+        owner_home=str(tmp_path / "owner"),
+        database_path=str(tmp_path / "friday-home" / "data" / "state"),
+        worker_root=str(worker_root),
+    )
+    result = handle_coding_static_turn(
+        storage=None,
+        user_id=LEGACY_OWNER_USER_ID,
+        actor=_owner_actor(),
+        message="измени main.py: добавь docstring",
+        conversation_id=None,
+        attachments=[{"filename": "main.py", "size": 12}],
+        worker_boundary=boundary,
+        spawn_runner=_boom,
+    )
+    assert result["context"]["coding_upload_modification"] == "admitted"
+    assert result["context"]["coding_upload_applied"] is False
+    assert result["context"]["coding_plan_gate"] == "modify"
+    assert result["context"]["coding_execution_attempted"] is False
+    assert result["context"]["coding_create"] == "empty"
+    assert "правка загрузки допущена" in result["message"].casefold()
+    assert "не изменялись" in result["message"].casefold()
+    assert list(worker_root.glob("work/*/main.py")) == []
+
+
+def test_upload_modification_execute_claim_stays_fail_closed(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from friday.organs.coding.worker_boundary import default_coding_worker_boundary
+
+    def _boom(*_args: object, **_kwargs: object) -> None:
+        raise AssertionError("modify execute spawned a host process")
+
+    spawned: list[tuple[str, ...]] = []
+
+    def _runner(argv: tuple[str, ...], timeout_sec: int) -> int:
+        spawned.append(argv)
+        del timeout_sec
+        return 0
+
+    monkeypatch.setattr("subprocess.Popen", _boom, raising=False)
+    monkeypatch.setattr("subprocess.run", _boom, raising=False)
+    worker_root = tmp_path / "friday-coding-worker"
+    boundary = default_coding_worker_boundary(
+        friday_home=str(tmp_path / "friday-home"),
+        owner_home=str(tmp_path / "owner"),
+        database_path=str(tmp_path / "friday-home" / "data" / "state"),
+        worker_root=str(worker_root),
+    )
+    result = handle_coding_static_turn(
+        storage=None,
+        user_id=LEGACY_OWNER_USER_ID,
+        actor=_owner_actor(),
+        message="измени main.py и запусти",
+        conversation_id=None,
+        attachments=[{"filename": "main.py", "size": 12}],
+        worker_boundary=boundary,
+        spawn_runner=_runner,
+    )
+    assert result["context"]["coding_upload_applied"] is False
+    assert result["context"]["coding_execution_attempted"] is False
+    assert result["context"]["coding_loop_untrusted_execute"] is False
+    assert "запрос на выполнение отклонён" in result["message"].casefold()
+    assert list(worker_root.glob("work/*/main.py")) == []
+    assert not any("python" in part and "main.py" in part for argv in spawned for part in argv)
 
 
 def test_guest_cannot_enter_coding_turn() -> None:
