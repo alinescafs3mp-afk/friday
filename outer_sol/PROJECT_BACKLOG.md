@@ -953,6 +953,10 @@ witnesses.
       Body-free compact dict of Friday's own gates. Explicitly not Gemini
       parity.
 - [ ] Gemini parity needs a paired scored set. Do not claim it.
+      Owner-parked into Pandora 2026-09-05 (P0W cancelled; owner will not
+      enable or pay a Google billing account; Gemini API Search grounding
+      unavailable). Evidence:
+      `handoffs/SolGoodman/P0W-CANCELLED-BY-USER-001.md`. Not `[x]`.
 
 ### N3 — Coding Mode
 
@@ -1120,6 +1124,10 @@ checkbox is closed on `0.208.25`; this chapter stays in force.
   - Parked Sol R8I worktree/patch under `~/.jericho/runtime/friday-s4-r8i-exact-runtime.worktree`
     and `~/.jericho/grok-takeover/patches/s4-r8i-exact-runtime.unstaged.diff`.
     Do not merge it; it fights the landed dispatch owner.
+  - Gemini parity / P0W Gemini-first web search — cancelled before
+    implementation. Owner will not enable or pay a Google billing account.
+    Keep Friday's Yandex path. Do not claim Gemini parity. Do not resurrect
+    P0W. Evidence: `handoffs/SolGoodman/P0W-CANCELLED-BY-USER-001.md`.
 
 ## Owner/external actions
 
@@ -1289,6 +1297,9 @@ Do not invent a Luna packet. Do not fabricate S3 traffic.
 
 - [ ] Gemini parity needs a paired scored set. Do not claim it.
       Private N2 self-score is Friday's own gates, not Gemini.
+      Owner-parked into Pandora 2026-09-05 (P0W cancelled; no Google billing;
+      Gemini API Search grounding unavailable). Evidence:
+      `handoffs/SolGoodman/P0W-CANCELLED-BY-USER-001.md`. Not `[x]`.
 - [ ] S3 Supervisor advice on live turns — observation-bound. Need a genuine
       eligible current-file-plus-public-web consumed witness. Do not
       fabricate traffic.
