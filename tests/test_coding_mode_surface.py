@@ -306,9 +306,7 @@ def test_pytest_claim_runs_isolated_unittest_of_extracted_tests(
     assert any("loader.discover" in part for part in spawned[1])
 
 
-def test_run_program_claim_stays_fail_closed_after_extract(
-    tmp_path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_run_program_claim_stays_fail_closed_after_extract(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
     from friday.organs.coding.worker_boundary import default_coding_worker_boundary
 
     def _boom(*_args: object, **_kwargs: object) -> None:

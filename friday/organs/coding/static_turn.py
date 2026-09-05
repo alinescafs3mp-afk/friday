@@ -49,12 +49,8 @@ from friday.organs.coding.worker_spawn import (
 )
 from friday.permissions import ActorContext, AuthorizationError
 
-_TEST_CLAIM_RE = re.compile(
-    r"(?i)(?:\b(?:pytest|py\.test)\b|\bgo\s+test\b|прогон)"
-)
-_BUILD_CLAIM_RE = re.compile(
-    r"(?i)(?:\b(?:compile|rebuild|build)\b|скомпилир|пересобери)"
-)
+_TEST_CLAIM_RE = re.compile(r"(?i)(?:\b(?:pytest|py\.test)\b|\bgo\s+test\b|прогон)")
+_BUILD_CLAIM_RE = re.compile(r"(?i)(?:\b(?:compile|rebuild|build)\b|скомпилир|пересобери)")
 _EXECUTE_CLAIM_RE = re.compile(
     r"(?i)(?:"
     r"\b(?:run|execute|exec|npm|make|cargo)\b"
@@ -153,7 +149,9 @@ def _russian_inspect_reply(
     loop: CodingIsolatedLoopV1,
 ) -> str:
     if loop.state is CodingIsolatedLoopState.BUILT:
-        refused = "Изолированная компиляция выполнена. Код загрузок не исполнялся. Это не сертификат безопасности."
+        refused = (
+            "Изолированная компиляция выполнена. Код загрузок не исполнялся. Это не сертификат безопасности."
+        )
     elif loop.state is CodingIsolatedLoopState.TESTED:
         refused = "Изолированный тест выполнен. Это не сертификат безопасности."
     elif loop.reason is CodingIsolatedLoopReason.NO_TESTS:
