@@ -1,6 +1,6 @@
 # Friday: canonical project backlog
 
-Updated: 2026-09-05 (live `0.208.21`; N1 one-final-carrier live; remaining N2 observation-bound; N3 `/coding` static inspect + isolated-worker boundary live; untrusted execute fail-closed; N4 store-backed mixed journeys live)
+Updated: 2026-09-05 (live `0.208.22`; N1 one-final-carrier live; remaining N2 observation-bound; N3 `/coding` static inspect + isolated-worker boundary + admitted archive extract live; untrusted execute fail-closed; N4 store-backed mixed journeys live)
 
 This is the project's only backlog and mutable status register. It owns the
 current production identity, execution order, acceptance gaps and owner actions.
@@ -32,17 +32,17 @@ Do not copy that snapshot's release claims forward.
 - Database schema: 50 in deployed production and the fallback.
 
 Golden-journey receipts stay bound to that `0.208.1` root until rebound. The
-running sealed sibling is Friday `0.208.21` at
-`1d57fca555cf98537a679aa398afb0df5ba2603f` (tree-file
-`77c16feb52b4dac3fd1d7b482b4df18e5bef58f7312ae2af98b946eb9a5759c5`, wheel
-`756b7fde7c74ba2160181dc1ac9ae59697978e588b4f547174e32bb35c647fc9`, journal
-`clear`, predecessor `0.208.20` /
-`bcc0b2daf567ba366801bee9d22ade76649f1d6f`). Trusted-CA health reports
-`version=0.208.21`. S3: `requested_mode=assist`, `effective_mode=off`,
+running sealed sibling is Friday `0.208.22` at
+`2d03fe0d739a48a99a6bf380e45b7fada7fa6f51` (tree-file
+`6da3196e80c88267e8790620893f7d66e5a64eaed76697a325ce4bd0d1521ea3`, wheel
+`47357948bbe1fa6eb51f4dfb0ee4029d8d91b27a48bd45a9d8f16fb9fb69223e`, journal
+`clear`, predecessor `0.208.21` /
+`1d57fca555cf98537a679aa398afb0df5ba2603f`). Trusted-CA health reports
+`version=0.208.22`. S3: `requested_mode=shadow`, `effective_mode=shadow`,
 `promotion_admitted=false`,
-`activation.reason=material_loaded_not_accepted`. Advice stays off until
-a genuine eligible witness; do not fabricate traffic. Next product
-sibling that changes friday sources is `assist_to_shadow`. N1 Telegram
+`activation.reason=default_off`. Advice stays off until a genuine
+eligible witness; do not fabricate traffic. Next product sibling that
+changes friday sources is `shadow_to_assist`. N1 Telegram
 surfaces (ordinary `/chat` status, Engineer status renderer, file-album
 DOCUMENT status, Engineer FILE/ARCHIVE carrier,
 restart/edit-reject/send-fence/cancel counts, observed web/archive chat
@@ -56,15 +56,16 @@ and the kernel consumes `select_web_provider` when
 consumption gate. Other N2 contracts stay observation-bound: live
 requesting workflows do not observe claims, dates, passages or
 missions. Do not fabricate those witnesses. N3 `/coding` static inspect
-and the dedicated isolated-worker boundary are live on `0.208.20` and
-remain live through `0.208.21`; execute claims fail closed; untrusted
+and the dedicated isolated-worker boundary remain live through
+`0.208.22`; admitted in-memory archive extract into the isolated
+workspace is live on `0.208.22`; execute claims fail closed; untrusted
 build/test of uploads remains fail-closed. Other N3 inspect,
-extract-plan, prompt-to-small-project, result-archive-plan,
+prompt-to-small-project, result-archive-plan,
 upload-modification-admission and Coding Mode view/carrier/plan-gate
-families stay source-only. N4 store-backed mixed journeys are live on
-`0.208.21`: file+archive+conversation+web+table identities project into
-Telegram MIXED when PROJECTED; exclusive DOCUMENT/ARCHIVE/RESEARCH
-remain otherwise.
+families stay source-only. N4 store-backed mixed journeys remain live
+through `0.208.22`: file+archive+conversation+web+table identities
+project into Telegram MIXED when PROJECTED; exclusive
+DOCUMENT/ARCHIVE/RESEARCH remain otherwise.
 
 - Production: immutable activation `phase=clear`; backend and Telegram bridge
   active; writer target `candidate`. Retention admission remains honestly
@@ -94,12 +95,13 @@ deployed; advice remains off until the observation-bound witness. S5 40k lease
 and S6 recovery/browse paths stay live.
 
 The live product queue is N1–N5. The shared operation-progress contract is
-live. Production `0.208.21` keeps ordinary Telegram `/chat` status,
+live. Production `0.208.22` keeps ordinary Telegram `/chat` status,
 Engineer status, file-album DOCUMENT status, Engineer FILE/ARCHIVE
 carrier, observed web/archive chat status, one-final-carrier packing,
-owner-private `/coding` static inspect and the dedicated `/coding`
-isolated-worker boundary through that projection, and adds store-backed
-mixed journeys (Telegram MIXED when PROJECTED).
+owner-private `/coding` static inspect, the dedicated `/coding`
+isolated-worker boundary, admitted in-memory archive extract into the
+isolated workspace, and store-backed mixed journeys (Telegram MIXED
+when PROJECTED).
 N2 currentness, evidence bundle,
 multi-query mission planner, provider fallback, source diversity,
 consumption, readiness and citation coverage, claim support, answer
@@ -112,16 +114,15 @@ invalid provider facts; `_web_search` and `_web_fetch` refuse
 `selected_provider_id` is present. File+web comparison and
 `POST /api/ingest/url` consume `BLOCKED_PRIVATE`. Other N2
 contracts stay observation-bound; do not fabricate witnesses. N3
-`/coding` static inspect and isolated-worker boundary remain live
-through `0.208.21`; execute claims fail closed; untrusted build/test of
-uploads remains fail-closed. Coding Mode intent, snapshot,
-execute-claim, plan-gate, carrier and view contracts are on
-`origin/main` and unwired. Project identity, archive extract admission,
-extract-plan family, prompt-to-small-project,
+`/coding` static inspect, isolated-worker boundary and admitted archive
+extract remain live through `0.208.22`; execute claims fail closed;
+untrusted build/test of uploads remains fail-closed. Coding Mode
+intent, snapshot, plan-gate, carrier and view contracts are on
+`origin/main` and unwired. Project identity, prompt-to-small-project,
 one-final source-archive plan, result-archive-pack family
 and upload-modification admission stay source-only. N4 shared
 operation/situation view, mixed-journey view, store-shaped projection
-and the live store observer are on `0.208.21`. N5
+and the live store observer remain on `0.208.22`. N5
 extracted the kernel web-consumption seam; maintainability follows. Physical Android, P0H deletion, off-machine
 mirror and provider-credential rotation remain owner-parked.
 
@@ -966,14 +967,14 @@ Do not fabricate those facts.
 ### N3 — Coding Mode
 
 Status: `/coding` static inspect and the dedicated isolated-worker
-boundary are live on `0.208.20`. Admitted in-memory archive extract
-into the isolated workspace lands on candidate `0.208.22`. Owner
+boundary remain live through `0.208.22`. Admitted in-memory archive
+extract into the isolated workspace is live on `0.208.22`. Owner
 private Telegram only; execute claims fail closed. Engineer
 bubblewrap is not a Coding Worker. Untrusted build/test of uploads
 remains fail-closed; that implement loop is the remaining N3 MVP
-checkbox. Prompt-to-small-project and one-final source-archive plan
-contracts stay unwired. Do not claim safe build/test of untrusted
-uploads.
+checkbox. Extract-only does not close it. Prompt-to-small-project and
+one-final source-archive plan contracts stay unwired. Do not claim
+safe build/test of untrusted uploads.
 
 - [x] Bare-source inspection contracts on `origin/main`
       (`coding_source_member.py`, `coding_source_tree.py`,
@@ -1001,8 +1002,8 @@ uploads.
       EMPTY / ADMITTED / BLOCKED from member metadata. Traversal,
       absolute paths, symlink/hardlink, device, size, bomb ratio,
       file count, nesting and case-fold collisions fail closed.
-      In-memory zip extract observer consumes this gate on the
-      `0.208.22` candidate; host paths are never opened.
+      In-memory zip extract observer consumes this gate live on
+      `0.208.22`; host paths are never opened.
 - [x] Archive extract-plan family on `origin/main`
       (`coding_archive_member_catalog.py`,
       `coding_archive_extract_plan.py`,
@@ -1010,7 +1011,7 @@ uploads.
       `coding_project_isolation_admission.py`,
       `coding_archive_overwrite_plan.py`). Catalog, relative
       destinations, project-root isolation are consumed by the
-      extract observer on the `0.208.22` candidate. Digest facts
+      extract observer live on `0.208.22`. Digest facts
       and overwrite/collision stay unwired. Untrusted execute
       remains fail-closed.
 - [x] One final source archive; restart, rollback and adversarial proof.
@@ -1030,8 +1031,8 @@ uploads.
       `coding_mode_carrier.py`, `coding_mode_view.py`). EMPTY /
       PROJECTED / BLOCKED from landed inspect/admission facts.
       Untrusted execute without an admitted worker fails closed.
-      Execute-claim is composed by `/coding` static_turn on the
-      `0.208.22` candidate; the process worker remains probe-only.
+      Execute-claim is composed by `/coding` static_turn live on
+      `0.208.22`; the process worker remains probe-only.
 
 Do not prebuild a compiler catalogue. Do not weaken Engineer Mode or
 primary release certification to create the worker.
@@ -1171,14 +1172,22 @@ checklist elsewhere. The Ctrl+T view is a compact projection of this list.
       one effect owner / one publisher; honest `UNKNOWN`; primary-only
       when secondary is absent. Mixed-journey is not a registered organ.
 
+### Closed on production `0.208.22`
+
+- [x] N3 admitted in-memory archive extract into the isolated
+      `/coding` workspace live on `0.208.22` (catalog + extract
+      admission + extract plan + project-root isolation; host paths
+      never opened; `ZipFile.extract` unused). Untrusted execute
+      remains fail-closed. Extract-only does not close the MVP
+      implement/build/test loop of untrusted uploads.
+
 ### Open and implementable
 
 - [ ] N3 Coding Mode MVP implement/build/test loop of untrusted
-      uploads; `/coding` static inspect and isolated-worker boundary
-      remain live through `0.208.21`. Admitted in-memory archive
-      extract into the isolated workspace lands on candidate
-      `0.208.22`. Untrusted execute remains fail-closed. Coding Mode
-      view composition, project identity, prompt-to-small-project,
+      uploads; `/coding` static inspect, isolated-worker boundary and
+      admitted archive extract remain live through `0.208.22`.
+      Untrusted execute remains fail-closed. Coding Mode view
+      composition, project identity, prompt-to-small-project,
       source-archive plan, result-archive-pack family, digest facts
       and overwrite-plan stay source-only.
 - [ ] N5 extract only touched seams from giant runtime modules;
