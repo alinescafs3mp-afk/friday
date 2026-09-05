@@ -129,6 +129,23 @@ def test_gate_starts_as_shadow_candidate_without_canary_authority() -> None:
     }
 
 
+def test_installed_live_attestation_is_absent_until_ready_and_after_revoke() -> None:
+    gate = V12ModelGate(
+        QWEN36_27B_V12_PROFILE,
+        endpoint_binding_sha256=_ENDPOINT_BINDING,
+        installation_context_tokens=8_192,
+    )
+    attestation = _attestation()
+
+    assert gate.installed_live_attestation() is None
+    assert gate.install_live(attestation) is True
+    installed = gate.installed_live_attestation()
+    assert installed is attestation
+    gate.revoke(ModelGateReason.ATTESTATION_REJECTED)
+    assert gate.installed_live_attestation() is None
+    assert gate.public_status()["status"] == "revoked"
+
+
 def test_available_context_is_exact_live_minimum_and_fails_closed() -> None:
     profile = QWEN38_27B_SGLANG_V12_PROFILE
     gate = V12ModelGate(

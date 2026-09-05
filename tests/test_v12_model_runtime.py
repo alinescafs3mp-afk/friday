@@ -604,6 +604,29 @@ def test_runtime_threads_the_strictest_installation_cap_into_the_measured_gate(
     assert runtime.public_status()["effective_context_tokens"] == 32_768
 
 
+@pytest.mark.asyncio
+async def test_attest_reuses_installed_live_result_without_a_second_probe(settings) -> None:
+    runtime, completion, metrics_transport = _runtime(settings)
+    _install_attestation(runtime)
+    completion.calls.clear()
+    metrics_transport.calls.clear()
+    metrics_transport.returned_bodies.clear()
+
+    reused = await runtime.attest(absolute_deadline=time.monotonic() + 5)
+
+    assert reused is runtime._gate.installed_live_attestation()  # noqa: SLF001
+    assert runtime.public_status()["status"] == "canary_ready"
+    assert completion.calls == []
+    assert metrics_transport.calls == []
+
+    runtime._gate.revoke()  # noqa: SLF001
+    with pytest.raises(V12ModelRuntimeError) as caught:
+        await runtime.attest(absolute_deadline=time.monotonic() + 0.2)
+    assert caught.value.code is V12ModelRuntimeFailure.LIVE_PROBE_REJECTED
+    assert runtime.public_status()["status"] == "revoked"
+    assert metrics_transport.calls or completion.calls
+
+
 def test_runtime_projects_only_strict_live_context_capacity(settings, monkeypatch) -> None:
     runtime, _completion, _metrics_transport = _runtime(settings)
 

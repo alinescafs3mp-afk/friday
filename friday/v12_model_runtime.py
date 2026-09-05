@@ -1638,6 +1638,13 @@ class AttestedV12ModelRuntime:
             )
             acquired = True
             self._seal.validate()
+            existing = self._gate.installed_live_attestation()
+            if existing is not None:
+                # Startup already installed a live grant. Re-running the
+                # all-or-nothing probe on an ordinary turn revokes that grant
+                # on any later busy/idle flake (except Exception always
+                # revokes). Epoch freshness is sampled at lease acquire.
+                return existing
             await self._client.verify_model_inventory(absolute_deadline=absolute_deadline)
             attestation = await run_v12_live_probe(
                 self._seal.profile,

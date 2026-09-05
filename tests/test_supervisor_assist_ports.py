@@ -725,20 +725,25 @@ class _LeasedPrimary(_Primary):
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    ("status", "fail", "expected"),
-    [("canary_ready", False, True), ("closed", False, False), ("canary_ready", True, False)],
+    ("status", "fail", "expected", "attest_calls"),
+    [
+        ("canary_ready", False, True, 0),
+        ("closed", False, False, 1),
+        ("canary_ready", True, True, 0),
+    ],
 )
 async def test_primary_preparation_requires_explicit_clear_attestation(
     status: str,
     fail: bool,
     expected: bool,
+    attest_calls: int,
 ) -> None:
     runtime = _Primary(status=status, fail=fail)
     prepared = await ports.AttestedPrimaryModel(cast(Any, runtime)).prepare_primary_model(
         absolute_deadline=time.monotonic() + 5,
     )
     assert prepared is expected
-    assert runtime.attest_calls == 1
+    assert runtime.attest_calls == attest_calls
 
 
 @pytest.mark.parametrize(

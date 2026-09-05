@@ -468,6 +468,23 @@ class V12ModelGate:
                 return 0
             return min(values)
 
+    def installed_live_attestation(self) -> V12LiveAttestation | None:
+        """Return the process-local grant, or None if canary is not live.
+
+        A later live probe that fails would revoke this grant. Callers that
+        already hold a canary-ready installation must reuse it instead of
+        starting another all-or-nothing probe on the same process.
+        """
+
+        with self._lock:
+            attestation = self._attestation
+            if (
+                self._status is not ModelGateStatus.CANARY_READY
+                or type(attestation) is not V12LiveAttestation
+            ):
+                return None
+            return attestation
+
     def _reject_locked(self, reason: ModelGateReason) -> None:
         self._generation += 1
         self._attestation = None

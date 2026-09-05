@@ -486,6 +486,13 @@ class AttestedPrimaryModel:
         if deadline is None:
             return False
         try:
+            status = self.runtime.public_status()
+            if (
+                isinstance(status, Mapping)
+                and status.get("status") == "canary_ready"
+                and self.available_context_tokens() > 0
+            ):
+                return _future_deadline(deadline) is not None
             async with asyncio.timeout(_remaining(deadline)):
                 await self.runtime.attest(absolute_deadline=deadline)
             status = self.runtime.public_status()

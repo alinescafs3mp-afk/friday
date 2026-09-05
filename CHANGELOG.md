@@ -1,3 +1,13 @@
+## 0.208.34 — 2026-09-05
+
+### Reuse installed live V12 attestation on promoted turns
+
+- Distinct sealed candidate for `semantic_supervisor_assist_to_shadow` after
+  live 0.208.33. Ordinary turns reuse the process-local `canary_ready` grant
+  instead of re-running the all-or-nothing live probe. Startup still probes.
+  SQLite remains at schema 50; exact `0.208.33` is the predecessor and
+  `0.207.90` the fallback.
+
 ## 0.208.33 — 2026-09-05
 
 ### No-product shadow_to_assist restore
