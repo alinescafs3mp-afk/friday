@@ -133,6 +133,12 @@ undeclared functions fail.
 ## Evidence and measurement
 
 Controller success creates `quality-gate-summary.json` in the requested directory.
+Coding saved-revision `check` is a syntax-only, non-importing compiler operation.
+Its native regression uses the same provisioned Bubblewrap/prlimit toolchain;
+the process-lifecycle regressions use explicit test-only launch substitutions.
+Neither a green syntax report nor mocked compilation certifies behavioral tests,
+live model quality, or the exact-host release boundary.
+
 The logging-privacy sweep uses unique source-relative module IDs, rather than
 ambiguous basenames. Its focused regression checks the actual parametrization
 against the closed inventory, so adding a Friday source module also requires an

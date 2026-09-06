@@ -1,6 +1,6 @@
 # Friday: canonical project backlog
 
-Updated: 2026-09-06 (reported production `0.208.55`; C1–C9 source corrections and whole-product reliability work active; historical S3 witness preserved; Pandora unchanged)
+Updated: 2026-09-06 (reported production `0.208.55`; C1–C10 source corrections and whole-product reliability work active; historical S3 witness preserved; Pandora unchanged)
 
 This is the project's only backlog and mutable status register. It owns the
 current production identity, execution order, acceptance gaps and owner actions.
@@ -544,6 +544,50 @@ Still open: behavioral build/test execution and bounded repair, natural/reply
 revision selection, real configured-model acceptance, qualified independent
 review and native/exact-host/UI release certification. Pandora, the Obsidian
 companion plugin and deployed production remain untouched.
+
+### C10: exact saved-revision Python syntax checks
+
+Status: author implementation on C9 `fc2ff1cd08921fe9ce20d88ba3b366e8b9bb5ea3`
+(source tree `f533b77752bd263ff52d490736e3efc07f2347fd`). This package closes
+the missing source-revision-to-compiler path, not behavioral verification or N3.
+
+- `check <message_id> <sha256>` / `проверь <message_id> <sha256>` selects only
+  that published revision in the owner's private Coding conversation. No latest
+  selection, upload mixing, model call, workspace recovery or source write occurs.
+  Ordinary upload-only `check`/`проверь` requests retain their existing static
+  inspection path; only explicit saved-message references reject mixed uploads.
+- Python bytes come from the existing authenticated durable revision reader and
+  travel through bounded stdin to one code-owned compiler program. No project
+  module is imported or executed; no source filename/body appears in process
+  arguments. The same Bubblewrap/prlimit toolchain hides the host, network,
+  database and owner roots. There is no direct-host compiler fallback.
+- The compiler accepts at most 256 Python files / 1 MiB source bytes, inherits
+  the remaining turn deadline (at most 30 seconds), and has hard 128 MiB address
+  space, 10-second CPU, descriptor, zero regular-file-write and core-dump limits.
+  These limits apply to trusted compilation only, not an arbitrary process tree.
+  Cancellation/timeout/overflow kill and reap the compiler before completion.
+- A bounded JSON report is bound to the exact stdin digest and revision. It
+  counts all syntax failures, exposes at most sixteen path/line/column locations
+  without source excerpts, and records the actual `/usr/bin/python3` version.
+  Empty or non-Python projects cannot silently pass. `verified=false` and
+  `behavior_tested=false` are explicit even after successful compilation.
+- Source and check replies share the existing message writer. The final file
+  publisher persists the report normally and reauthorizes its stored source
+  binding in the publication transaction. A revoke/archive during compilation
+  or before publication prevents the new report from becoming a durable handle.
+  Reports are not source revisions and cannot be restored as project code.
+
+Author tests cover exact selection rather than newest, restart without the
+workspace, invalid reports, deadlines, cancellation during process creation,
+bounded stdout, process reaping and two reauthorization boundaries. The native
+case uses the real declared Bubblewrap path and remains mandatory. Focused local
+results and hosted validation are recorded against the final source identity;
+local compilation-only tests do not attest native isolation.
+
+Still open: aggregate-limited behavioral execution, bounded repair, ordinary
+reply-based revision selection, live configured-model quality, independent review,
+and full native/exact-host release acceptance. Existing untrusted TEST/EXECUTE
+admission is not relaxed. No schema, version, production or Pandora changes.
 
 ### P0G — canonical Gate Diet
 

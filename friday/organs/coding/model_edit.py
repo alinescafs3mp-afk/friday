@@ -359,6 +359,27 @@ async def handle_coding_turn(
         message.encode("utf-8")
     except UnicodeError:
         raise ValueError("Coding message must be valid UTF-8") from None
+    from friday.organs.coding.check import check_requested, prepare_revision_check
+
+    if check_requested(message, has_attachments=bool(attachments)):
+        checked = await prepare_revision_check(
+            storage=storage,
+            user_id=user_id,
+            actor=actor,
+            message=message,
+            conversation_id=conversation_id,
+            attachments=attachments,
+            turn_deadline=turn_deadline,
+        )
+        return handle_coding_static_turn(
+            storage=storage,
+            user_id=user_id,
+            actor=actor,
+            message=message,
+            conversation_id=conversation_id,
+            attachments=attachments,
+            revision_check=checked,
+        )
     proposal = None
     creation = None
     if model_edit_requested(message):

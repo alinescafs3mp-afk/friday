@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
+import base64
 import hashlib
 import json
 import re
 import secrets
 from collections.abc import Mapping, Sequence
-from contextlib import suppress
+from contextlib import nullcontext, suppress
 from dataclasses import replace
 from pathlib import Path
 from typing import Any
@@ -29,6 +30,7 @@ from friday.orchestration.coding_mode_snapshot import build_coding_mode_snapshot
 from friday.orchestration.coding_mode_view import build_coding_mode_view
 from friday.orchestration.coding_project_identity import build_coding_project_identity
 from friday.orchestration.coding_worker_admission import CodingWorkerAdmissionState
+from friday.organs.coding.check import CodingRevisionCheck, check_requested, reauthorize_revision_check
 from friday.organs.coding.create import (
     CodingCreateObserveState,
     create_requested,
@@ -275,6 +277,162 @@ def _ensure_conversation(
     return str(conversation["id"])
 
 
+def _persist_coding_messages(
+    storage: Any,
+    *,
+    person_id: str,
+    conversation_id: str | None,
+    message: str,
+    text: str,
+    had_attachments: bool,
+    metadata: dict[str, Any],
+) -> tuple[str | None, str | None]:
+    """The same message writer for source operations and their check reports."""
+    persisted_id = _ensure_conversation(
+        storage,
+        person_id=person_id,
+        conversation_id=conversation_id,
+        message=message,
+    )
+    assistant_id = None
+    if storage is not None and persisted_id:
+        storage.store_message(
+            persisted_id,
+            person_id,
+            "user",
+            message or "",
+            metadata={
+                "interaction_mode": "coding",
+                "tools_enabled": False,
+                "had_attachments": had_attachments,
+            },
+        )
+        assistant = storage.store_message(
+            persisted_id,
+            person_id,
+            "assistant",
+            text,
+            metadata={
+                "interaction_mode": "coding",
+                **metadata,
+            },
+        )
+        assistant_id = assistant.get("id")
+    return persisted_id, assistant_id
+
+
+def _finish_revision_check(
+    storage: Any,
+    *,
+    person_id: str,
+    tenant_id: str,
+    conversation_id: str | None,
+    message: str,
+    attachments: list[dict[str, Any]] | None,
+    checked: CodingRevisionCheck | None,
+) -> dict[str, Any]:
+    state = "invalid_request"
+    binding = None
+    report = None
+    if type(checked) is CodingRevisionCheck and checked.message == message and not attachments:
+        state = checked.state
+        if checked.report is not None and state in {"syntax_passed", "syntax_failed"}:
+            binding = {
+                "message_id": checked.source_message_id,
+                "revision_sha256": checked.revision_sha256,
+                "project_id": checked.project_id,
+            }
+            report = checked.report
+    # Reauthorize after the compiler await, then keep one transaction through
+    # message preparation. The ordinary artifact publisher checks again at commit.
+    transaction = storage.transaction() if storage is not None else nullcontext()
+    with transaction:
+        if report is not None:
+            try:
+                if storage is None or not conversation_id:
+                    raise CodingRevisionUnavailable("check source unavailable")
+                reauthorize_revision_check(
+                    storage,
+                    storage.settings.files_dir,
+                    binding=binding,
+                    conversation_id=conversation_id,
+                    person_id=person_id,
+                    tenant_id=tenant_id,
+                )
+            except CodingRevisionUnavailable:
+                report = binding = None
+                state = "source_unavailable"
+        files = []
+        if report is not None:
+            encoded = json.dumps(report, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode()
+            files = [
+                {
+                    "filename": "friday-python-check.json",
+                    "mime_type": "application/json",
+                    "content_base64": base64.b64encode(encoded).decode("ascii"),
+                }
+            ]
+            text = (
+                f"Синтаксис Python проверен для точной сохранённой ревизии. Файлов: {report['checked_files']}. "
+                + (
+                    "Синтаксических ошибок не найдено. "
+                    if state == "syntax_passed"
+                    else f"Файлов с синтаксическими ошибками: {report['error_count']}. Подробности в отчёте. "
+                )
+                + "Исходники не изменялись и не исполнялись; тесты поведения не запускались. "
+                "Успешная компиляция не подтверждает правильность программы."
+            )
+        else:
+            detail = {
+                "compiler_unavailable": "Изолированный компилятор недоступен или завершился без проверяемого результата.",
+                "deadline": "Бюджет времени проверки исчерпан.",
+                "no_python_sources": "В выбранной ревизии нет исходников Python; другие языки эта проверка не проверяет.",
+                "input_rejected": "Исходники превышают ограничение этой проверки.",
+                "report_rejected": "Результат компилятора не соответствует выбранным исходникам.",
+                "source_unavailable": "Выбранная ревизия недоступна или её целостность не подтверждена.",
+            }.get(
+                state,
+                "Нужна точная ревизия из этого Coding-диалога: check (или проверь) <message_id> <sha256>, без вложений.",
+            )
+            text = (
+                "Проверка исходников не выполнена. "
+                + detail
+                + " Другая версия не подставлялась; код не исполнялся."
+            )
+        context = {
+            "interaction_mode": "coding",
+            "coding_revision_check": state,
+            "coding_execution_attempted": False,
+            "coding_behavior_tested": False,
+            **({"coding_checked_source": binding} if binding else {}),
+        }
+        persisted_id, assistant_id = _persist_coding_messages(
+            storage,
+            person_id=person_id,
+            conversation_id=conversation_id,
+            message=message,
+            text=text,
+            had_attachments=bool(attachments),
+            metadata=context,
+        )
+    return {
+        "conversation_id": persisted_id or conversation_id or "",
+        "message_id": assistant_id,
+        "message": text,
+        "message_format": "plain",
+        "verified": False,
+        "citations": [],
+        "tools_used": [],
+        "files": files,
+        "voice": None,
+        "web_evidence_status": "none",
+        "web_evidence_scope": "none",
+        "web_sources": [],
+        "attachment_context_available": False,
+        "context": context,
+    }
+
+
 def handle_coding_static_turn(
     *,
     storage: Any,
@@ -288,6 +446,7 @@ def handle_coding_static_turn(
     spawn_runner: CodingWorkerRunner | None = None,
     model_edit: CodingModelEditProposal | None = None,
     model_create: CodingModelCreateProposal | None = None,
+    revision_check: CodingRevisionCheck | None = None,
 ) -> dict[str, Any]:
     """Inspect, create or edit an explicit source revision. Never run revision edits."""
 
@@ -296,6 +455,16 @@ def handle_coding_static_turn(
     if not actor.shared_tenant and actor.user_id != user_id and not actor.is_owner:
         raise PermissionError("actor cannot chat as another user")
     person_id = actor.own_id if actor.shared_tenant else user_id
+    if check_requested(message, has_attachments=bool(attachments)):
+        return _finish_revision_check(
+            storage,
+            person_id=person_id,
+            tenant_id=actor.user_id,
+            conversation_id=conversation_id,
+            message=message,
+            attachments=attachments,
+            checked=revision_check,
+        )
     members = _members_from_attachments(attachments)
     report_id = "coding-inspect-" + secrets.token_hex(8)
     turn_id = "coding-turn-" + secrets.token_hex(8)
@@ -663,42 +832,23 @@ def handle_coding_static_turn(
         if source_record and restored is not None and selection is not None
         else None
     )
-    persisted_id = _ensure_conversation(
+    persisted_id, assistant_id = _persist_coding_messages(
         storage,
         person_id=person_id,
         conversation_id=conversation_id,
         message=message,
+        text=text,
+        had_attachments=bool(members),
+        metadata={
+            "coding_inspect_report": report.report.value,
+            "coding_inspect_reason": report.reason.value,
+            "coding_worker_admission": admission.admission.value,
+            "coding_worker_admission_reason": admission.reason.value,
+            **model_metadata,
+            **({"coding_source_revision": source_record} if source_record else {}),
+            **({"coding_source_parent": source_parent} if source_parent else {}),
+        },
     )
-    assistant_id = None
-    if storage is not None and persisted_id:
-        storage.store_message(
-            persisted_id,
-            person_id,
-            "user",
-            message or "",
-            metadata={
-                "interaction_mode": "coding",
-                "tools_enabled": False,
-                "had_attachments": bool(members),
-            },
-        )
-        assistant = storage.store_message(
-            persisted_id,
-            person_id,
-            "assistant",
-            text,
-            metadata={
-                "interaction_mode": "coding",
-                "coding_inspect_report": report.report.value,
-                "coding_inspect_reason": report.reason.value,
-                "coding_worker_admission": admission.admission.value,
-                "coding_worker_admission_reason": admission.reason.value,
-                **model_metadata,
-                **({"coding_source_revision": source_record} if source_record else {}),
-                **({"coding_source_parent": source_parent} if source_parent else {}),
-            },
-        )
-        assistant_id = assistant.get("id")
     context: dict[str, Any] = {
         "interaction_mode": "coding",
         "coding_inspect_report": report.report.value,

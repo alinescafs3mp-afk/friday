@@ -534,6 +534,23 @@ def _attach_descriptors_to_message(
                 )
             except CodingRevisionUnavailable as exc:
                 raise GeneratedFilePersistenceError("Coding source revision is no longer authorized") from exc
+        if "coding_checked_source" in metadata:
+            from friday.organs.coding.check import reauthorize_revision_check
+            from friday.organs.coding.revision import CodingRevisionUnavailable
+
+            try:
+                if metadata.get("interaction_mode") != "coding":
+                    raise CodingRevisionUnavailable("check source unavailable")
+                reauthorize_revision_check(
+                    storage,
+                    files_root,
+                    binding=metadata["coding_checked_source"],
+                    conversation_id=row["conversation_id"],
+                    person_id=person_id,
+                    tenant_id=tenant_id,
+                )
+            except CodingRevisionUnavailable as exc:
+                raise GeneratedFilePersistenceError("Coding check source is no longer authorized") from exc
         metadata["generated_files"] = descriptors
         encoded = json.dumps(metadata, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
         if len(encoded.encode("utf-8")) > _MESSAGE_METADATA_MAX_BYTES:
