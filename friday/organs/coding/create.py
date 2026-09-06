@@ -7,6 +7,7 @@ already-admitted isolated workspace.  Never executes the generated program.
 from __future__ import annotations
 
 import hashlib
+import json
 import re
 from dataclasses import dataclass
 from enum import StrEnum
@@ -17,7 +18,7 @@ from friday.orchestration.coding_create_admission import (
     CodingCreateAdmissionV1,
     build_coding_create_admission,
 )
-from friday.orchestration.coding_implementation_plan import build_coding_implementation_plan
+from friday.orchestration.coding_implementation_plan import MAX_STEPS, build_coding_implementation_plan
 from friday.orchestration.coding_project_identity import (
     CodingProjectIdentityState,
     CodingProjectIdentityV1,
@@ -29,9 +30,13 @@ from friday.orchestration.coding_project_isolation_admission import (
 )
 from friday.orchestration.coding_project_scaffold import build_coding_project_scaffold
 from friday.orchestration.coding_prompt_normalization import (
+    MAX_TITLE_CHARS,
     CodingPromptNormalizationState,
+    CodingPromptNormalizationV1,
     build_coding_prompt_normalization,
 )
+from friday.organs.coding.modify import MAX_REVISION_EDIT_BYTES, _unique_edit_fields, prepare_source_revision
+from friday.organs.coding.revision import CodingSourceRevision
 from friday.organs.coding.workspace_io import publish_members, source_revision_sha256
 
 _CREATE_RE = re.compile(
@@ -63,6 +68,7 @@ class CodingCreateObserveReason(StrEnum):
     WORKER_NOT_ADMITTED = "worker_not_admitted"
     ISOLATION_NOT_GRANTED = "isolation_not_granted"
     WRITE_FAILED = "write_failed"
+    PROPOSAL_INVALID = "proposal_invalid"
 
 
 @dataclass(frozen=True, slots=True)
@@ -122,6 +128,35 @@ def _bodies(title: str, goal: str, source_name: str) -> dict[str, bytes]:
     return files
 
 
+def creation_prompt(turn_id: str, message: str) -> CodingPromptNormalizationV1:
+    """Keep the existing bounded planning projection; model input is NOT this projection."""
+
+    goal = " ".join(message.split())[:500].rstrip()
+    hint, _ = _language(goal)
+    return build_coding_prompt_normalization(
+        f"{turn_id}-prompt", turn_id, title=goal[:MAX_TITLE_CHARS].rstrip(), goal=goal, language_hint=hint
+    )
+
+
+def prepare_coding_creation(payload: str) -> CodingSourceRevision:
+    """Decode complete proposed files and reuse the immutable-edit source validator."""
+
+    if type(payload) is not str or len(payload) > MAX_REVISION_EDIT_BYTES:
+        raise ValueError("creation payload exceeds its bound")
+    if len(payload.encode("utf-8")) > MAX_REVISION_EDIT_BYTES:
+        raise ValueError("creation payload exceeds its bound")
+    fields = json.loads(payload, object_pairs_hook=_unique_edit_fields)
+    if type(fields) is not dict or set(fields) != {"files"}:
+        raise ValueError("invalid creation fields")
+    files = fields["files"]
+    # The existing create-plan gate admits at most sixteen complete files.
+    if type(files) is not dict or not 0 < len(files) <= MAX_STEPS:
+        raise ValueError("invalid creation file inventory")
+    if any(type(name) is not str or type(text) is not str for name, text in files.items()):
+        raise ValueError("creation requires complete UTF-8 source text")
+    return prepare_source_revision("coding-new", {name: text.encode("utf-8") for name, text in files.items()})
+
+
 def _empty(turn_id: str, reason: CodingCreateObserveReason) -> CodingCreateObserveV1:
     return CodingCreateObserveV1(
         CodingCreateObserveState.EMPTY,
@@ -160,20 +195,28 @@ def observe_coding_create(
     workspace: Path,
     worker_admitted: bool,
     has_members: bool,
+    model_required: bool = False,
+    model_payload: str | None = None,
 ) -> CodingCreateObserveV1:
     """Admit a bounded scaffold and write it.  Never run the generated program."""
 
+    if model_required and (has_members or model_payload is None):
+        return _blocked(turn_id, CodingCreateObserveReason.PROPOSAL_INVALID)
     if not create_requested(message, has_members=has_members):
         return _empty(turn_id, CodingCreateObserveReason.NOT_CREATE)
     goal = (message or "").strip()[:500]
     if not goal:
         return _empty(turn_id, CodingCreateObserveReason.NO_PROMPT)
     hint, source_name = _language(goal)
-    prompt = build_coding_prompt_normalization(
-        f"{turn_id}-prompt",
-        turn_id,
-        goal=goal,
-        language_hint=hint,
+    prompt = (
+        creation_prompt(turn_id, message)
+        if model_required
+        else build_coding_prompt_normalization(
+            f"{turn_id}-prompt",
+            turn_id,
+            goal=goal,
+            language_hint=hint,
+        )
     )
     if (
         prompt.prompt is not CodingPromptNormalizationState.NORMALIZED
@@ -196,7 +239,15 @@ def observe_coding_create(
             admission=admission,
             identity=build_coding_project_identity(f"{turn_id}-ident", turn_id),
         )
-    bodies = _bodies(prompt.title, prompt.goal, source_name)
+    if model_required:
+        try:
+            if model_payload is None:
+                raise ValueError("missing creation proposal")
+            bodies = dict(prepare_coding_creation(model_payload).members)
+        except (ValueError, TypeError, RecursionError):
+            return _blocked(turn_id, CodingCreateObserveReason.PROPOSAL_INVALID)
+    else:
+        bodies = _bodies(prompt.title, prompt.goal, source_name)
     paths = tuple(sorted(bodies))
     steps = tuple(
         {

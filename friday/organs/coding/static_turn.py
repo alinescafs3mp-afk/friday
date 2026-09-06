@@ -48,8 +48,10 @@ from friday.organs.coding.loop import (
     observe_coding_isolated_loop,
 )
 from friday.organs.coding.model_edit import (
+    CodingModelCreateProposal,
     CodingModelEditProposal,
     CodingModelEditState,
+    coding_conversation_active,
     model_edit_requested,
     parse_model_edit_request,
 )
@@ -285,6 +287,7 @@ def handle_coding_static_turn(
     worker_boundary: CodingWorkerBoundaryV1 | None = None,
     spawn_runner: CodingWorkerRunner | None = None,
     model_edit: CodingModelEditProposal | None = None,
+    model_create: CodingModelCreateProposal | None = None,
 ) -> dict[str, Any]:
     """Inspect, create or edit an explicit source revision. Never run revision edits."""
 
@@ -302,6 +305,7 @@ def handle_coding_static_turn(
     model_editing = not restoring and model_edit_requested(message or "")
     editing = model_editing or (not restoring and _EDIT_PREFIX_RE.match((message or "").strip()) is not None)
     revision_operation = restoring or editing
+    model_creating = model_create is not None and not revision_operation
     restore_state = "blocked" if restoring else "empty"
     edit_state = "blocked" if editing else "empty"
     restored = None
@@ -332,6 +336,8 @@ def handle_coding_static_turn(
             and selected is not None
         ):
             selection = ("", selected[0], selected[1], model_edit.payload)
+    if model_editing and not coding_conversation_active(storage, conversation_id, person_id):
+        selection = None
     if selection and storage is not None and conversation_id and not attachments:
         try:
             restored = load_coding_revision(
@@ -383,7 +389,9 @@ def handle_coding_static_turn(
         boundary=boundary,
     )
     worker_admitted = admission.admission is CodingWorkerAdmissionState.ADMITTED
-    creating = not revision_operation and create_requested(message, has_members=bool(members))
+    creating = not revision_operation and (
+        model_creating or create_requested(message, has_members=bool(members))
+    )
     modifying = editing or (not restoring and modify_requested(message, has_members=bool(members)))
     if creating:
         intent = build_coding_mode_intent(f"{turn_id}-intent", turn_id, prompt=message)
@@ -394,7 +402,7 @@ def handle_coding_static_turn(
     execute_claimed, execute_claim = _compose_execute_claim(
         turn_id=turn_id,
         intent=intent,
-        message="" if revision_operation else message,
+        message="" if revision_operation or model_creating else message,
         admission=admission,
     )
     workspace = Path(boundary.worker_root) / boundary.workspace_path
@@ -406,6 +414,13 @@ def handle_coding_static_turn(
             pass
         else:
             restore_state = "restored"
+    if model_creating and not coding_conversation_active(storage, conversation_id, person_id):
+        # Archive/removal while awaiting the primary cancels new source writes.
+        model_create = CodingModelCreateProposal(
+            message,
+            CodingModelEditState.INVALID_REQUEST,
+            model_create.calls if type(model_create) is CodingModelCreateProposal else 0,
+        )
     created = observe_coding_create(
         turn_id=turn_id,
         project_id=project_id,
@@ -413,6 +428,14 @@ def handle_coding_static_turn(
         workspace=workspace,
         worker_admitted=worker_admitted,
         has_members=bool(members),
+        model_required=model_creating,
+        model_payload=(
+            model_create.payload
+            if type(model_create) is CodingModelCreateProposal
+            and model_create.message == message
+            and model_create.state is CodingModelEditState.PREPARED
+            else None
+        ),
     )
     modified = observe_coding_upload_modification(
         turn_id=turn_id,
@@ -617,6 +640,24 @@ def handle_coding_static_turn(
         if model_editing
         else {}
     )
+    if model_creating:
+        model_metadata = (
+            {"coding_model_create": model_create.state.value, "coding_model_calls": model_create.calls}
+            if type(model_create) is CodingModelCreateProposal and model_create.message == message
+            else {"coding_model_create": "output_rejected", "coding_model_calls": 0}
+        )
+        if created.state is CodingCreateObserveState.WRITTEN and source_record:
+            text = (
+                "Исходники нового проекта подготовлены моделью по текстовому заданию и сохранены "
+                "в отдельной рабочей папке. Сборка и тесты не запускались; "
+                "корректность поведения ещё не подтверждена."
+            )
+        else:
+            text = (
+                "Создание проекта по текстовому заданию заблокировано: ответ модели, условия записи "
+                "или целостность результата не подтверждены. Заготовка вместо программы не подставлялась. "
+                "Код не исполнялся; сборка и тесты не запускались."
+            )
     source_parent = (
         {"message_id": selection[1], "revision_sha256": restored.revision_sha256}
         if source_record and restored is not None and selection is not None
@@ -691,7 +732,7 @@ def handle_coding_static_turn(
         "coding_result_restart": result_archive.restart_state,
         "coding_result_rollback": result_archive.rollback_state,
         **model_metadata,
-        "llm_failed": model_metadata.get("coding_model_edit")
+        "llm_failed": model_metadata.get("coding_model_edit", model_metadata.get("coding_model_create"))
         in {
             "model_unavailable",
             "model_failed",

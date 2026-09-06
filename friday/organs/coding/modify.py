@@ -275,6 +275,25 @@ def prepare_revision_edit(
         candidate[path] = body.encode("utf-8")
     if candidate == before:
         raise ValueError("edit has no source changes")
+    return prepare_source_revision(source.project_id, candidate), tuple(targets)
+
+
+def prepare_source_revision(project_id: str, candidate: dict[str, bytes]) -> CodingSourceRevision:
+    """Validate complete in-memory sources identically for creation and revision edits.
+
+    This is validation, not filesystem, model or execution authority. Reuse the
+    existing snapshot, export and inspection contracts for every member.
+    """
+
+    if type(candidate) is not dict or not 0 < len(candidate) <= MAX_SNAPSHOT_MEMBERS:
+        raise ValueError("invalid candidate source inventory")
+    if any(type(path) is not str or type(body) is not bytes for path, body in candidate.items()):
+        raise ValueError("invalid candidate source members")
+    if any(
+        not is_exportable_source_path(path) or path.count("/") > MAX_ARCHIVE_NESTING_DEPTH
+        for path in candidate
+    ):
+        raise ValueError("candidate path cannot be published")
     if sum(map(len, candidate.values())) > MAX_OPERATION_RESULT_ARCHIVE_BYTES:
         raise ValueError("candidate source bytes exceed the export bound")
     digests = {path: hashlib.sha256(body).hexdigest() for path, body in candidate.items()}
@@ -309,6 +328,4 @@ def prepare_revision_edit(
         or inspected.hazards.hazards.value != "clear"
     ):
         raise ValueError("candidate source inspection blocked")
-    return CodingSourceRevision(
-        source.project_id, source_revision_sha256(digests), tuple(sorted(candidate.items()))
-    ), tuple(targets)
+    return CodingSourceRevision(project_id, source_revision_sha256(digests), tuple(sorted(candidate.items())))

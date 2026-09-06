@@ -1,6 +1,6 @@
 # Friday: canonical project backlog
 
-Updated: 2026-09-06 (reported production `0.208.55`; C1–C6 source corrections and whole-product reliability work active; historical S3 witness preserved; Pandora unchanged)
+Updated: 2026-09-06 (reported production `0.208.55`; C1–C9 source corrections and whole-product reliability work active; historical S3 witness preserved; Pandora unchanged)
 
 This is the project's only backlog and mutable status register. It owns the
 current production identity, execution order, acceptance gaps and owner actions.
@@ -494,6 +494,56 @@ and journal cases pass; the retained exact-host case requires provisioned Ubuntu
 Python-3.14 Unicode cases; their declarations are deliberately retained. Hosted
 remeasurement, independent review and exact-release/native acceptance are separate.
 No product source, version, schema, Pandora content or production state changes.
+
+### C9 — primary-model source creation through the existing Coding boundary
+
+Status: implemented on the integrated C8 source tree
+`579cbfc941beec168f44571a3e42d481d0a0a13c` (`main` `ff646e6078a814ff8f5316bf4e718c9f648f208c`).
+This is author implementation, not live-model quality evidence, independent
+acceptance, release certification or production activation.
+
+- An ordinary Coding creation request (`создай`, `напиши`, `сделай проект`,
+  `новый проект`, `create`, `generate`) now asks the existing primary model for
+  complete new source files instead of silently substituting a fixed scaffold.
+  Explicit `scaffold` and the lower-level static scaffold API remain model-free.
+  Empty tasks, mixed uploads and unavailable or archived conversations fail
+  before model dispatch; no implicit modification of uploaded projects occurs.
+- Creation and exact revision editing share one primary-call budget, complete
+  context admission, cancellation/deadline handling and strict response checks.
+  The full user task (up to 16 KiB), including its tail and newlines, reaches the
+  primary. The short title/goal remains only a planning/display projection;
+  truncation ending at whitespace must not invalidate that projection.
+- Output is a closed `files` JSON object with at most sixteen complete UTF-8
+  files. The existing source snapshot, export and inspect validator now also
+  validates creation. Duplicate/unsafe/colliding paths, excluded artifacts,
+  invalid encodings, credentials, oversized and truncated responses are blocked
+  before writes. Failed generation never falls back to a successful placeholder.
+- The synchronous Coding owner revalidates the proposal and uses the same
+  exclusive descriptor-relative writer and exact-digest exporter. The ordinary
+  final publisher retains durable source bytes and revision identity. No new
+  store, runtime, provider, permission, schema or effect owner is introduced.
+- Archiving a conversation during a model await prevents new creation and edit
+  writes. Previously published revisions remain readable under their existing
+  authorization. Cancellation propagates without a new persisted turn; code or
+  task words such as `run` and `pytest` do not grant execution authority.
+- New and edited revisions use the same durable publisher and survive database
+  reopen and loss of their workspaces. Output remains `verified=false` and the
+  response explicitly states that build and behavior tests have not run.
+
+Author regressions first reproduced that creation never called the primary,
+then exercised 57 new cases, including full-task preservation, strict malformed
+outputs, cancellation, late replies, failed writes, changed snapshots, archived
+conversations, both AgentRuntime entrances and create-to-revise persistence.
+The primary is controlled in these tests; no live quality witness is invented.
+Inventory adds sixteen functions using existing policies (280 MiB of explicit
+scratch) while preserving all prior exact parameter sets and Python-3.14 cases.
+Hosted validation and final change-gate results are separate, commit-bound
+records, not evidence that this entire N3 milestone is closed.
+
+Still open: behavioral build/test execution and bounded repair, natural/reply
+revision selection, real configured-model acceptance, qualified independent
+review and native/exact-host/UI release certification. Pandora, the Obsidian
+companion plugin and deployed production remain untouched.
 
 ### P0G — canonical Gate Diet
 
