@@ -129,6 +129,7 @@ class CurrentFileWebPartialReason(StrEnum):
     WEB_SOURCE_TRUNCATED = "web_source_truncated"
     WEB_PROJECTION_TRUNCATED = "web_projection_truncated"
     LOCAL_CONTEXT_TRUNCATED = "local_context_truncated"
+    OUTPUT_TRUNCATED = "output_truncated"
 
 
 _PARTIAL_REASON_TEXT = {
@@ -138,6 +139,7 @@ _PARTIAL_REASON_TEXT = {
     CurrentFileWebPartialReason.WEB_SOURCE_TRUNCATED: "веб-источник был усечён выше по потоку",
     CurrentFileWebPartialReason.WEB_PROJECTION_TRUNCATED: "веб-проекция была локально ограничена",
     CurrentFileWebPartialReason.LOCAL_CONTEXT_TRUNCATED: "проекция для модели была усечена по лимиту",
+    CurrentFileWebPartialReason.OUTPUT_TRUNCATED: "ответ достиг лимита вывода и может быть незавершён",
 }
 
 
@@ -193,13 +195,12 @@ def _answer_json_utf8_budget(
     *,
     for_acceptance: bool = False,
 ) -> int:
-    """Return the reserved or accepted JSON-byte cap at one measured tier.
+    """Return the minimum reservation or maximum accepted answer wire budget.
 
-    8192 stays 1328 so the default comparison still fits that attested
-    input. Higher tiers scale the same ratio. Verifier reserve stays capped
-    at 5312 so a full Q38 projection still fits. Post-synthesis acceptance
-    may use the 40960-linear 6640; the actual verifier is then checked
-    against attested input.
+    Budgets charge the answer's *nested* JSON contribution, including two
+    logical quotes.  The 40960 tier guarantees 5312 bytes when fitting evidence;
+    it may use up to 6640 only when the exact verifier has that much headroom.
+    The same serializer is used for final answer acceptance, after rendering.
     """
 
     if type(required_context_tokens) is not int or required_context_tokens not in _CONTEXT_TOKEN_TIERS:
@@ -211,14 +212,30 @@ def _answer_json_utf8_budget(
     return scaled
 
 
+def _answer_wire_utf8_bytes(answer: str) -> int:
+    """Charge exactly the nested JSON delta plus the two logical string quotes.
+
+    The answer is encoded inside build_file_verifier_prompt, then that prompt
+    is encoded as a message's content.  Quoting/backslashes must be paid twice.
+    Subtract the four fixed outer/escaped quotes; an empty answer costs two.
+    """
+
+    inner = json.dumps(answer, ensure_ascii=False)
+    return len(json.dumps(inner, ensure_ascii=False).encode("utf-8")) - 4
+
+
 def _reserved_verifier_utf8_bytes(empty_verifier_bytes: int, required_context_tokens: int) -> int:
-    budget = _answer_json_utf8_budget(required_context_tokens)
-    if budget <= 0 or type(empty_verifier_bytes) is not int or empty_verifier_bytes < 0:
+    minimum = _answer_json_utf8_budget(required_context_tokens)
+    maximum = _answer_json_utf8_budget(required_context_tokens, for_acceptance=True)
+    if minimum <= 0 or type(empty_verifier_bytes) is not int or empty_verifier_bytes < 0:
         return 0
-    # The verifier prompt contains the answer JSON string once. Reserve only
-    # the exact delta from the empty answer; doubling it needlessly trims an
-    # upstream-partial Q38 projection that already fits the attested input.
-    return empty_verifier_bytes + (budget - _empty_answer_json_utf8_bytes())
+    empty_answer_bytes = _empty_answer_json_utf8_bytes()
+    headroom = _attested_input_max_bytes(required_context_tokens) - empty_verifier_bytes + empty_answer_bytes
+    # If minimum does not fit, return an over-budget reservation so projection
+    # fitting must reduce evidence.  Otherwise reserve the exact usable budget,
+    # never a smaller cap than the one later used to accept the rendered answer.
+    budget = min(maximum, max(minimum, headroom))
+    return empty_verifier_bytes + budget - empty_answer_bytes
 
 
 def _comparison_requirements(
@@ -863,7 +880,16 @@ def _validate_answer(
     normalized = answer.strip()
     if not normalized:
         raise _AnswerRejected("comparison answer is empty", code="empty")
-    encoded = len(json.dumps(normalized, ensure_ascii=False).encode("utf-8"))
+    # Bound work before normalization, then measure the final nested encoding.
+    if len(normalized) > max_utf8_bytes:
+        raise _AnswerRejected(
+            "comparison answer exceeds the json budget",
+            code="json_budget",
+            encoded=len(normalized),
+            max_utf8_bytes=max_utf8_bytes,
+        )
+    normalized = _normalize_owned_citation_tokens(normalized, expected_labels)
+    encoded = _answer_wire_utf8_bytes(normalized)
     if encoded > max_utf8_bytes:
         raise _AnswerRejected(
             f"comparison answer exceeds the json budget encoded={encoded} max={max_utf8_bytes}",
@@ -884,10 +910,8 @@ def _validate_answer(
             "comparison answer is unsafe or has invalid citations",
             code="secrets",
         )
-    normalized = _normalize_owned_citation_tokens(normalized, expected_labels)
-    normalized = re.sub(r"\[[^\]]*\Z", "", normalized).rstrip()
-    if not normalized:
-        raise _AnswerRejected("comparison answer is empty", code="empty")
+    # An unfinished bracket may contain a substantive qualifier, not a citation.
+    # Never delete it to turn an incomplete answer into an accepted conclusion.
     found_labels = tuple(_CITATION_RE.findall(normalized))
     if set(found_labels) != set(expected_labels):
         raise _AnswerRejected(
@@ -1099,6 +1123,7 @@ async def _call_model_once(
     deadline: float,
     parent_context: AuthenticatedTurnContext | None,
     on_dispatch: Callable[[], None],
+    allow_length: bool = False,
 ) -> dict[str, Any]:
     if not secondary_model_messages_are_secret_free(messages) or not _messages_fit_attested_context(
         messages,
@@ -1129,7 +1154,9 @@ async def _call_model_once(
     if not isinstance(response, dict):
         raise _ModelResponseError("model returned a non-object response")
     finish_reason = response.get("finish_reason")
-    if response.get("tool_calls") not in (None, []) or finish_reason not in {"stop", "length"}:
+    if response.get("tool_calls") not in (None, []) or (
+        finish_reason != "stop" and not (allow_length and finish_reason == "length")
+    ):
         raise _ModelResponseError("model response was incomplete or effectful")
     if type(response.get("content")) is not str:
         raise _ModelResponseError("model response has no exact text")
@@ -1263,14 +1290,6 @@ async def compare_current_file_with_web(
             failure_stage=FailureStage.CAPABILITY,
             failure_reason=FailureReason.BUDGET_EXHAUSTED,
         )
-    binding_sha256 = current_file_web_comparison_binding_sha256(
-        accepted_plan_sha256=accepted_plan_sha256,
-        source_evidence_sha256=source_sha256,
-        model_evidence_sha256=model_evidence_sha256,
-        status=status,
-        partial_reasons=partial_reasons,
-        requirements=requirements,
-    )
     model_calls = 0
 
     def record_dispatch() -> None:
@@ -1308,6 +1327,7 @@ async def compare_current_file_with_web(
             lease,
             requirements,
             synthesis_messages,
+            allow_length=True,
             max_tokens=synthesis_max_tokens,
             deadline=deadline,
             parent_context=parent_context,
@@ -1353,10 +1373,14 @@ async def compare_current_file_with_web(
             failure_reason=FailureReason.PROVIDER_FAILURE,
             synthesis_outcome=OutcomeStatus.UNAVAILABLE,
         ) from None
-    answer_budget = _answer_json_utf8_budget(
-        requirements.required_context_tokens,
-        for_acceptance=True,
+    answer_budget = (
+        _reserved_verifier_utf8_bytes(empty_verifier_bytes, requirements.required_context_tokens)
+        - empty_verifier_bytes
+        + _empty_answer_json_utf8_bytes()
     )
+    if synthesis["finish_reason"] == "length":
+        partial_reasons = (*partial_reasons, CurrentFileWebPartialReason.OUTPUT_TRUNCATED)
+        status = CurrentFileWebComparisonStatus.PARTIAL
     try:
         answer = _validate_answer(
             synthesis["content"],
@@ -1525,6 +1549,14 @@ async def compare_current_file_with_web(
             verification_outcome=OutcomeStatus.SUCCEEDED,
         )
 
+    binding_sha256 = current_file_web_comparison_binding_sha256(
+        accepted_plan_sha256=accepted_plan_sha256,
+        source_evidence_sha256=source_sha256,
+        model_evidence_sha256=model_evidence_sha256,
+        status=status,
+        partial_reasons=partial_reasons,
+        requirements=requirements,
+    )
     identity = _result_identity_payload(
         answer=answer,
         status=status,

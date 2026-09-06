@@ -9,7 +9,6 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from typing import Any
-from urllib.parse import urlsplit
 
 from friday.execution_kernel.web_consumption import (
     _KERNEL_WEB_RESEARCH_CONSUMPTION_ID,
@@ -45,6 +44,7 @@ from friday.orchestration.web_research_mission import (
 from friday.orchestration.web_research_readiness import build_web_research_readiness
 from friday.orchestration.web_source_date_coverage import build_web_source_date_coverage
 from friday.orchestration.web_source_diversity import build_web_source_diversity
+from friday.public_web_url import canonical_public_web_url_key
 from friday.web_research_contract import MAX_RESEARCH_SOURCES
 
 _MISSION_ID = "kernel.web_research.mission"
@@ -204,6 +204,8 @@ def merge_unique_research_sources(
 ) -> None:
     """Append unique public source rows without exceeding the caller bound."""
 
+    if type(bound) is not int or not 1 <= bound <= MAX_RESEARCH_SOURCES:
+        return
     raw = report.get("sources")
     if not isinstance(raw, list):
         return
@@ -211,10 +213,11 @@ def merge_unique_research_sources(
     for item in raw:
         if not isinstance(item, Mapping):
             continue
-        url = item.get("url")
-        if isinstance(url, str) and url.strip():
-            host = (urlsplit(url).hostname or "").rstrip(".").casefold()
-            seen.add(f"{host}|{urlsplit(url).path}")
+        # A malformed upstream row must not crash the entire research turn.
+        # Keep the row for downstream failure accounting, but not as an identity.
+        identity = canonical_public_web_url_key(item.get("url"))
+        if identity:
+            seen.add(identity)
     for item in extra_sources:
         if len(raw) >= bound:
             break
@@ -229,13 +232,15 @@ def merge_unique_research_sources(
             validate_public_web_url(url, field="source_url")
         except (TypeError, ValueError, WebProviderPolicyError):
             continue
-        identity = f"{(urlsplit(url).hostname or '').rstrip('.').casefold()}|{urlsplit(url).path}"
-        if identity in seen:
+        # Reuse the shared source identity, preserving query, scheme and port.
+        # URL identity is not DNS/redirect admission or content deduplication.
+        identity = canonical_public_web_url_key(url)
+        if not identity or identity in seen:
             continue
         seen.add(identity)
         raw.append(dict(item))
     report["sources"] = raw
-    if "completed_sources" in report and isinstance(report.get("completed_sources"), int):
+    if "completed_sources" in report and type(report.get("completed_sources")) is int:
         report["completed_sources"] = len(raw)
         failed = report.get("failed_sources")
         timed_out = report.get("timed_out_sources")

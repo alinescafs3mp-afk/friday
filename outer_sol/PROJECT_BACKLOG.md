@@ -1,6 +1,6 @@
 # Friday: canonical project backlog
 
-Updated: 2026-09-06 (live `0.208.55` assist; S3 consumed witness closed; extra-hop restore landed; Gemini parked in Pandora; N1–N5 live; N5 ratchet standing; remaining owner-end is Pandora)
+Updated: 2026-09-06 (reported production `0.208.55`; C1 source corrections and whole-product reliability work active; historical S3 witness preserved; Pandora unchanged)
 
 This is the project's only backlog and mutable status register. It owns the
 current production identity, execution order, acceptance gaps and owner actions.
@@ -12,27 +12,17 @@ kept in Git history, not in the working tree. A task discovered anywhere else is
 either merged here or discarded before that source is removed.
 
 The 2026-09-03 post-backlog audit snapshot (`main` `43a16c8b`, source
-`0.208.4`, recorded production `0.208.1`) is expired. Independent re-audit of
-the live host and current `origin/main` is the source of the identity below.
-Do not copy that snapshot's release claims forward.
+`0.208.4`, recorded production `0.208.1`) is expired. The later repository record below supersedes it. C1 has not re-probed the
+live host, the laptop or Telegram. Do not copy historical release claims
+forward or treat a source correction as a deployed release.
 
-## Current production identity
+## Current production identity (last repository-reported)
 
-- Branch: `main`
-- Deployed implementation head: `8b6a8c13ce54b8b07192cb6f5b820953da4efcb5`.
-- Live: Friday `0.208.1` / `8b6a8c13ce54b8b07192cb6f5b820953da4efcb5`;
-  tree `5587e4c3dd45e2b85191b8d39dd0268dc7fbf046526761af6d485297d2be8f82`;
-  wheel `1cadf5769b87f9cdc152729183ddf3a1d6ef4a8ff3192d48d1a5b538e856872f`.
-- Immediate runtime predecessor: Friday `0.208.0` /
-  `75b165a23809dfcc7445311e2dc896c98ce3df00`; tree
-  `9d1c49da576e58e73ec1570d3e4c7e1ea7ebca2d44cc1e7482ef418c9ec89315`.
-  Schema-capable fallback: Friday `0.207.90` /
-  `7abb3c5e3fb29bdc7c53bf923f8b218fa26f07e9`; tree
-  `c1c29331db489ad1c56080d70a8c37d4051b4752f1309dba9c0a012099ebcae5`.
-- Database schema: 50 in deployed production and the fallback.
+Branch: `main`. Source corrections below are not a sealed or deployed release.
 
-Golden-journey receipts stay bound to that `0.208.1` root until rebound. The
-running sealed sibling is Friday `0.208.55` at
+Golden-journey receipts remain bound to the historical `0.208.1` root below
+until validly rebound. The last reported running sealed sibling is Friday
+`0.208.55` at
 `e60860eaa89827bc5fc58d7c4f1c47514caaf2d4` (tree-file
 `706aee22e4b1a435e6ae4969d41936f603cd9863ac1e2c2535e1cfe878bb80b7`, wheel
 `c834a45cc3159ea082cf002ec1dd6e0b263c87047ea1b54fe6e29683633daf1a`, journal
@@ -92,7 +82,28 @@ extract is closed, the maintainability ratchet remains standing.
   restart-safe production backfill remains active and keeps every unfinished
   projection explicitly `backfill_pending`.
 
+### Historical golden-journey receipt root
+
+- Historical implementation head: `8b6a8c13ce54b8b07192cb6f5b820953da4efcb5`.
+- Historical receipt root: Friday `0.208.1` / `8b6a8c13ce54b8b07192cb6f5b820953da4efcb5`;
+  tree `5587e4c3dd45e2b85191b8d39dd0268dc7fbf046526761af6d485297d2be8f82`;
+  wheel `1cadf5769b87f9cdc152729183ddf3a1d6ef4a8ff3192d48d1a5b538e856872f`.
+- That root's runtime predecessor: Friday `0.208.0` /
+  `75b165a23809dfcc7445311e2dc896c98ce3df00`; tree
+  `9d1c49da576e58e73ec1570d3e4c7e1ea7ebca2d44cc1e7482ef418c9ec89315`.
+  Schema-capable fallback: Friday `0.207.90` /
+  `7abb3c5e3fb29bdc7c53bf923f8b218fa26f07e9`; tree
+  `c1c29331db489ad1c56080d70a8c37d4051b4752f1309dba9c0a012099ebcae5`.
+- Recorded schema: 50. These are historical receipt identities, not current-host observations.
+
 ## Active package
+
+The owner extended this mission on 2026-09-06: repair existing capabilities,
+improve their real composition and reliability, and continue the implementable
+backlog. Do not expand the feature catalogue merely to add components. Pandora
+is excluded. The dated live summaries below describe implemented layers, not
+acceptance of all N1–N5 user outcomes. C1 is the current source-only package.
+
 
 The old S0–S6 implementation queue has converged on production `0.208.11`.
 S4-R8 formal cutover is code-owned `accepted`: dialogue offers `archive_search`;
@@ -156,6 +167,66 @@ owner-parked.
   its evidence is captured. Keep the path short enough for Unix sockets.
 
 ## Priority order
+
+### C1 — source correctness, containment and import-order stability
+
+Status: implemented in this source revision; independent review, exact-release
+certification and deployment remain pending. Version/schema are deliberately
+unchanged: this is not another sealed `0.208.55` artifact. The release captain
+must choose the next free version and follow the existing activation procedure.
+
+- S3 charges final normalized output using the exact nested verifier JSON cost.
+  The same affordable output budget is reserved and accepted. The fitting Q38
+  projection remains covered, while escape-heavy output cannot consume an
+  unreserved verifier budget. Repeated owned citations remain valid; unfinished
+  bracketed qualifiers are rejected rather than deleted. Length-limited synthesis
+  is honestly partial; a length-limited verifier cannot certify an answer.
+- Research merging uses the shared public URL identity, retaining meaningful
+  query parameters, scheme and non-default ports. Malformed existing sources
+  remain visible to later anomaly handling without crashing the merge.
+- Supervisor baseline counts malformed joined JSON and malformed assistant
+  trace metadata instead of hiding rows. Duplicate JSON keys and unhashable
+  task fields cannot silently pass or crash the diagnostic path. Historical
+  promoted events and the 05:25Z S3 witness are not removed or recreated.
+- The default Coding runner mounts only the current operation's workspace/export,
+  binds a probe to one admission and directory identity, applies admitted hard
+  memory/CPU limits to trusted probe/compilation, discards unbounded process
+  output, and kills/reaps its supervisor on cancellation/timeout. These are not
+  aggregate untrusted-process-tree guarantees. Default uploaded unittest execution
+  is therefore explicitly blocked until that boundary is implemented and proved.
+  Discovery finding zero tests does not claim that uploaded modules were never
+  imported. Engineer Mode's separate owner-authorized boundary is unchanged.
+- Orchestration contracts no longer eagerly import the complete router. This
+  removes a real Coding↔orchestration import cycle; fresh-interpreter tests also
+  preserve the public router exports and clean-wheel import origin.
+
+Verification at the 2026-09-06 source checkpoint: locked Python 3.13.5 author
+checks ran all 1322 affected change-tier cases: **1318 passed, 4 failed**.
+The four retained native bubblewrap tests fail because `/usr/bin/bwrap` is
+unavailable in this author environment; they are neither skipped nor certified.
+A 135-case source regression subset also passes. Complete collection before the
+two added receipt-root tests contained 26733 nodes; both new tests pass. The
+Python 3.14 inventory additionally retains its two native Unicode cases.
+Repository Ruff lint, the canonical 1564-file formatting scope and Mypy over
+528 source files pass. These are author checks, not independent review, the
+canonical hosted change gate, exact-release certification or production acceptance.
+The historical receipt-root parser was updated together with the documentation:
+a newer production summary cannot silently rebind old golden-journey receipts.
+
+Next actionable work, in order:
+
+1. Obtain native boundary results and independent review of this exact source
+   range. Keep unsafe uploaded execution disabled while proving a real aggregate
+   memory/CPU/process/output/disk boundary; never confuse a probe with that proof.
+2. Repair Coding export/snapshot consistency: current packing writes ZIP wall-clock
+   timestamps, can include compiler caches, and uses unbounded path-based reads.
+   Make the existing source carrier deterministic and bounded, with one exact
+   snapshot for manifest/digests/output; preserve one file versus one archive.
+3. Wire real N2 answer/task evidence consumption, then a functional N3 Python
+   create/modify/test/repair/persistent-revision journey, and measured N1/N4 mixed
+   journeys. Existing scaffolds, observers and empty claim sets are not completion.
+4. Revisit S3 minimum-tier selection and the extra-hop activation lifecycle only
+   with compatibility/restart/replay tests and independent review. No gate bypass.
 
 ### P0G — canonical Gate Diet
 
@@ -872,7 +943,8 @@ one editable Friday status → one final result carrier. Reuse
 
 ### N2 — Deep Web Research and Automatic Knowledge-Gap Search
 
-Status: live on `0.208.26`. `_web_research` plans a 2–8 complementary
+Status: research I/O/observers are reported live on `0.208.26`; N2 product
+completion is open. `_web_research` plans a 2–8 complementary
 public-query mission, executes those queries on fact-bearing public
 sources, and observes remaining N2 gates on the already-admitted
 report. Empty research does not attach observation keys.
@@ -885,6 +957,13 @@ and `_web_fetch` refuse `BLOCKED_PRIVATE`. File+web comparison and
 self-score is Friday's own gates, not Gemini parity. Do not claim
 Gemini parity without a paired scored set. Do not fabricate
 witnesses.
+
+The checkboxes below acknowledge those specific contracts/observers only.
+- [ ] The requesting answer or task consumes an exact admitted evidence bundle.
+      Validate claims/citations from the actual result, not an empty claim set;
+      unsupported/current-sensitive/contradictory evidence must affect publication.
+- [ ] Automatic currentness and configured-provider fallback reach a real consumer,
+      without private queries or new provider credentials.
 
 - [x] Automatic currentness / knowledge-gap policy module on `origin/main`
       (`friday/orchestration/web_currentness_policy.py`). Not wired into
@@ -969,7 +1048,8 @@ witnesses.
 
 ### N3 — Coding Mode
 
-Status: `/coding` static inspect, isolated-worker boundary, admitted
+Status: N3 product completion remains open. Previously deployed `/coding`
+static inspect, isolated-worker boundary, admitted
 archive extract, isolated untrusted `py_compile` / unittest,
 prompt-to-small-project, one-final `friday-source.zip` pack, digest
 and overwrite observation on extract, Coding Mode
@@ -988,9 +1068,15 @@ not claim safe build/test of untrusted uploads.
       rebuild, no file I/O, filename-suffix hints only. Live as
       `/coding` static inspect on `0.208.19`. Isolated-worker boundary
       live on `0.208.20`.
-- [x] Prompt-to-small-project live on `0.208.26`
-      (`friday/organs/coding/create.py`). Unbounded «всё» fail-closed;
-      no execute.
+- [x] Prompt-to-scaffold groundwork reported live on `0.208.26`
+      (`friday/organs/coding/create.py`). This writes a fixed no-op template,
+      not an implementation of the requested application. No execute.
+- [ ] Functional application creation with an independent behavior oracle.
+- [ ] Real edits to an immutable uploaded-project revision, bounded tests/repair,
+      durable accepted revision and exact follow-up/rollback. The existing
+      `applied=False` modification observer does not satisfy this requirement.
+- [ ] Aggregate resource enforcement and native acceptance for uploaded tests.
+      C1 deliberately blocks the default TEST path until then.
 - [x] Upload-modification EMPTY observer live on `0.208.27`
       (`friday/organs/coding/modify.py`). Composes
       `coding_upload_modification_admission` from inspect, isolation,
@@ -1024,7 +1110,7 @@ not claim safe build/test of untrusted uploads.
       extract observer live on `0.208.22`. Digest facts and
       overwrite/collision are observed on extract live on `0.208.26`.
       Untrusted execute remains fail-closed.
-- [x] One final source archive; restart, rollback and adversarial proof.
+- [x] One final source archive and restart/rollback contract groundwork.
       TEXT/FILE/ARCHIVE plan, manifest, pack admission, publication,
       restart, rollback and uncertainty contracts are on `origin/main`
       (`coding_result_archive_plan.py`,
@@ -1054,11 +1140,17 @@ primary release certification to create the worker.
 
 ### N4 — Whole-Organism Coherence
 
-Status: live on `0.208.21`. Durable organs, the shared view, the
+Status: mixed-journey projections are reported live on `0.208.21`; complete
+N4 execution/consumption acceptance remains open. Durable organs, the shared view, the
 store-shaped projection and the store observer derive mixed journeys
 from already-durable identities. Telegram MIXED is PROJECTED-only.
 Primary and secondary share one operation identity. New modes compose
 existing primitives. Mixed-journey is not a registered organ.
+
+- [ ] A real file + authorized archive + public web task produces a grounded
+      comparison/table through the existing runtime and one final publisher.
+- [ ] Prove actual status/final transport, cancellation, restart, duplicate input
+      and uncertain-send behavior for that composed task, not just its projection.
 
 - [x] Read-only `SharedOperationViewV1` / `AgentSituationProjectionV1`
       on `origin/main` from already-supplied facts. No new execution
@@ -1420,11 +1512,11 @@ record the owner required in this audit commit, not a failure dump):
 
 ### Open and implementable
 
-No closeable product sibling remains without owner. Do not extra-hop.
-Do not fabricate S3 traffic. Owner-ordered total audit of Friday with
-Luna-1 and Luna-2 is recorded in Closed on production `0.208.55`.
-Honest residual of the 05:25Z witness (`partial_evidence`) stays an
-audit finding, not an S3 reopen. Do not invent busywork.
+C1 correctness/containment and the existing N1–N5 product-completion work above
+are implementable and active under the owner's extended reliability mission.
+The prior audit/activation narrative is historical, not a blanket acceptance of
+those user outcomes. Preserve the 05:25Z S3 witness and its honest partial evidence;
+do not fabricate traffic, issue no-product hops for bookkeeping, or touch Pandora.
 
 ### Open and blocked
 

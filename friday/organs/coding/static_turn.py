@@ -189,8 +189,10 @@ def _russian_inspect_reply(
         )
     elif loop.state is CodingIsolatedLoopState.TESTED:
         refused = "Изолированный тест выполнен. Это не сертификат безопасности."
+    elif loop.reason is CodingIsolatedLoopReason.RESOURCE_ENFORCEMENT_UNAVAILABLE:
+        refused = "Запуск тестов загруженного проекта заблокирован: изоляция ресурсов дерева процессов ещё не подтверждена."
     elif loop.reason is CodingIsolatedLoopReason.NO_TESTS:
-        refused = "Изолированный тест не нашёл тестов. Исполнение программы не допущено."
+        refused = "Поиск тестов не нашёл тестовых случаев. Модули проекта могли быть импортированы."
     elif loop.reason is CodingIsolatedLoopReason.BUILD_FAILED:
         refused = "Изолированная компиляция не удалась. Код не исполнялся."
     elif loop.reason is CodingIsolatedLoopReason.TEST_FAILED:

@@ -1,17 +1,19 @@
-"""Admit, then spawn, an isolated Coding worker.  Never execute uploads.
+"""Admit and bound code-owned Coding probes and compilation in bubblewrap.
 
-Spawn is gated on ``build_coding_worker_admission``.  The default runner uses a
-Coding-specific bubblewrap profile (not Engineer sandbox, not Docker) and only
-runs a closed isolation probe.
+Only the current operation's workspace/export are mounted. Uploaded unittest
+execution is not admitted by this default runner: per-process rlimits do not
+constitute aggregate limits for an untrusted process tree.
 """
 
 from __future__ import annotations
 
 import os
+import signal
 import subprocess
 from collections.abc import Callable
-from dataclasses import dataclass
-from pathlib import Path
+from contextlib import suppress
+from dataclasses import dataclass, field
+from pathlib import Path, PurePosixPath
 
 from friday.orchestration.coding_worker_admission import (
     CodingWorkerAdmissionState,
@@ -24,33 +26,31 @@ from friday.organs.coding.worker_boundary import (
     coding_worker_hazard_paths,
     observe_coding_worker_isolation,
 )
+from friday.organs.coding.worker_programs import BUILD, PROBE
 from friday.private_fs import ensure_private_directory
 
 BWRAP_EXECUTABLE = "/usr/bin/bwrap"
 PYTHON_EXECUTABLE = "/usr/bin/python3"
+PRLIMIT_EXECUTABLE = "/usr/bin/prlimit"
 CODING_WORKER_MOUNT = "/work"
 DEFAULT_WALL_CLOCK_SEC = 60
 DEFAULT_MEMORY_BYTES = 64 * 1024 * 1024
 DEFAULT_CPU_SEC = 30
-
-_PROBE = (
-    "import os,sys;"
-    "work,export,*hazards=sys.argv[1:];"
-    "sys.exit(3 if not (os.path.isdir(work) and os.path.isdir(export)) else "
-    "1 if any(os.path.exists(path) for path in hazards) else 0)"
-)
+MAX_WORKER_FILE_BYTES = 64 * 1024 * 1024
 
 CodingWorkerRunner = Callable[[tuple[str, ...], int], int]
 
 
 @dataclass(frozen=True, slots=True)
 class CodingWorkerSpawnV1:
-    """Closed spawn outcome.  Untrusted execute is never attempted here."""
+    """Process-local probe outcome bound to one admission and directory pair."""
 
     spawned: bool
     admission: CodingWorkerAdmissionState
     probe: str
     untrusted_execute: bool = False
+    _admission: CodingWorkerAdmissionV1 | None = field(default=None, repr=False, compare=False)
+    _scope: tuple[int, ...] | None = field(default=None, repr=False, compare=False)
 
 
 def compose_coding_worker_admission(
@@ -72,9 +72,12 @@ def compose_coding_worker_admission(
     if (
         not boundary.network_disabled
         or boundary.host_network
-        or wall_clock_sec > MAX_WALL_CLOCK_SEC
-        or memory_bytes > MAX_MEMORY_BYTES
-        or cpu_sec > MAX_CPU_SEC
+        or type(wall_clock_sec) is not int
+        or not 1 <= wall_clock_sec <= MAX_WALL_CLOCK_SEC
+        or type(memory_bytes) is not int
+        or not 1 <= memory_bytes <= MAX_MEMORY_BYTES
+        or type(cpu_sec) is not int
+        or not 1 <= cpu_sec <= MAX_CPU_SEC
     ):
         network: dict[str, object] = {"policy": "disabled", "host_network": True, "unbounded": False}
     else:
@@ -106,6 +109,60 @@ def compose_coding_worker_admission(
     )
 
 
+def _worker_bind_paths(worker_root: str, workspace_path: str, export_path: str) -> tuple[Path, Path]:
+    root = PurePosixPath(worker_root)
+    if not root.is_absolute() or str(root) != worker_root or worker_root == "/" or ".." in root.parts:
+        raise ValueError("invalid Coding root")
+    paths = []
+    for value in (workspace_path, export_path):
+        relative = PurePosixPath(value)
+        if (
+            not value
+            or str(relative) != value
+            or relative.is_absolute()
+            or any(part in {".", ".."} for part in relative.parts)
+            or "\\" in value
+            or any(ord(character) < 32 or ord(character) == 127 for character in value)
+        ):
+            raise ValueError("invalid Coding operation path")
+        path = Path(root / relative)
+        # Check existing ancestors as well as the leaf, including dangling links.
+        if any(part.is_symlink() for part in (path, *path.parents)):
+            raise ValueError("Coding operation path traverses a symlink")
+        paths.append(path)
+    workspace, export = paths
+    if workspace == export or workspace in export.parents or export in workspace.parents:
+        raise ValueError("Coding workspace and export must be disjoint")
+    return workspace, export
+
+
+def coding_worker_scope(
+    admission: CodingWorkerAdmissionV1, boundary: CodingWorkerBoundaryV1
+) -> tuple[int, ...]:
+    """Recheck the same admitted namespace and pin operation-directory identities."""
+
+    workspace = admission.workspace
+    if (
+        admission.admission is not CodingWorkerAdmissionState.ADMITTED
+        or workspace is None
+        or workspace.project_root != boundary.worker_root
+        or workspace.workspace_path != boundary.workspace_path
+        or workspace.export_path != boundary.export_path
+        or boundary.network_disabled is not True
+        or boundary.host_network is not False
+        or any(observe_coding_worker_isolation(boundary).values())
+    ):
+        raise ValueError("Coding boundary changed after admission")
+    directories = _worker_bind_paths(boundary.worker_root, boundary.workspace_path, boundary.export_path)
+    identities: list[int] = []
+    for directory in directories:
+        if not directory.is_dir():
+            raise ValueError("Coding operation directory is unavailable")
+        info = directory.stat(follow_symlinks=False)
+        identities.extend((info.st_dev, info.st_ino))
+    return tuple(identities)
+
+
 def coding_worker_bwrap_argv(
     *,
     worker_root: str,
@@ -114,12 +171,19 @@ def coding_worker_bwrap_argv(
     hazards: tuple[str, ...],
     uid: int,
     gid: int,
+    memory_bytes: int = DEFAULT_MEMORY_BYTES,
+    cpu_sec: int = DEFAULT_CPU_SEC,
     python_c: str | None = None,
     python_args: tuple[str, ...] | None = None,
 ) -> tuple[str, ...]:
-    """Return the Coding-specific bwrap argv.  Hazards are probe args, not binds."""
+    """Mount only this operation and apply hard rlimits before starting Python."""
 
-    source = _PROBE if python_c is None else python_c
+    if type(memory_bytes) is not int or not 1 <= memory_bytes <= MAX_MEMORY_BYTES:
+        raise ValueError("invalid Coding memory limit")
+    if type(cpu_sec) is not int or not 1 <= cpu_sec <= MAX_CPU_SEC:
+        raise ValueError("invalid Coding CPU limit")
+    workspace, export = _worker_bind_paths(worker_root, workspace_path, export_path)
+    source = PROBE if python_c is None else python_c
     args = (workspace_path, export_path, *hazards) if python_args is None else python_args
     return (
         BWRAP_EXECUTABLE,
@@ -151,13 +215,26 @@ def coding_worker_bwrap_argv(
         "/tmp",
         "--dir",
         "/run",
-        "--bind",
-        worker_root,
+        "--dir",
         CODING_WORKER_MOUNT,
+        "--bind",
+        str(workspace),
+        str(PurePosixPath(CODING_WORKER_MOUNT) / workspace_path),
+        "--bind",
+        str(export),
+        str(PurePosixPath(CODING_WORKER_MOUNT) / export_path),
         "--chdir",
         CODING_WORKER_MOUNT,
         "--",
+        PRLIMIT_EXECUTABLE,
+        f"--as={memory_bytes}:{memory_bytes}",
+        f"--cpu={cpu_sec}:{cpu_sec}",
+        "--nofile=128:128",
+        f"--fsize={MAX_WORKER_FILE_BYTES}:{MAX_WORKER_FILE_BYTES}",
+        "--core=0:0",
+        "--",
         PYTHON_EXECUTABLE,
+        "-I",
         "-c",
         source,
         *args,
@@ -165,21 +242,47 @@ def coding_worker_bwrap_argv(
 
 
 def default_coding_worker_runner(argv: tuple[str, ...], timeout_sec: int) -> int:
-    """Run the isolation probe.  Never executes uploaded project code."""
+    """Run only trusted probe/compiler code; never capture unbounded child output."""
 
-    if not argv or argv[0] != BWRAP_EXECUTABLE:
+    if (
+        not argv
+        or argv[0] != BWRAP_EXECUTABLE
+        or type(timeout_sec) is not int
+        or not 1 <= timeout_sec <= MAX_WALL_CLOCK_SEC
+    ):
         return 126
     try:
-        completed = subprocess.run(
+        source_index = argv.index("-c") + 1
+        if (
+            argv[source_index] not in (PROBE, BUILD)
+            or argv[source_index - 3 : source_index] != (PYTHON_EXECUTABLE, "-I", "-c")
+            or PRLIMIT_EXECUTABLE not in argv
+        ):
+            return 126
+    except (ValueError, IndexError):
+        return 126
+    try:
+        process = subprocess.Popen(
             argv,
-            check=False,
-            timeout=max(1, timeout_sec),
-            capture_output=True,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            start_new_session=True,
             env={"PATH": "/usr/bin:/bin", "HOME": CODING_WORKER_MOUNT, "LANG": "C"},
         )
-    except (OSError, subprocess.TimeoutExpired):
+    except (OSError, ValueError):
+        return 126
+    try:
+        return process.wait(timeout=timeout_sec)
+    except subprocess.TimeoutExpired:
         return 124
-    return completed.returncode
+    finally:
+        # Killing the bwrap supervisor also kills the PID namespace through
+        # --die-with-parent + --unshare-all. Reap even on interruption/error.
+        if process.poll() is None:
+            with suppress(ProcessLookupError):
+                os.killpg(process.pid, signal.SIGKILL)
+            process.wait()
 
 
 def spawn_coding_worker(
@@ -188,38 +291,50 @@ def spawn_coding_worker(
     *,
     runner: CodingWorkerRunner | None = None,
 ) -> CodingWorkerSpawnV1:
-    """Spawn the isolation probe only after admission.  Never execute uploads."""
+    """Spawn the closed probe only after admission and fresh path validation."""
 
     if admission.admission is not CodingWorkerAdmissionState.ADMITTED:
-        return CodingWorkerSpawnV1(False, admission.admission, "skipped", False)
+        return CodingWorkerSpawnV1(False, admission.admission, "skipped")
     workspace = admission.workspace
     limits = admission.limits
     if (
         workspace is None
         or limits is None
         or limits.wall_clock_sec is None
-        or workspace.project_root is None
-        or workspace.workspace_path is None
-        or workspace.export_path is None
+        or limits.memory_bytes is None
+        or limits.cpu_sec is None
     ):
-        return CodingWorkerSpawnV1(False, admission.admission, "skipped", False)
-    project_root = workspace.project_root
-    workspace_path = workspace.workspace_path
-    export_path = workspace.export_path
-    timeout_sec = limits.wall_clock_sec
+        return CodingWorkerSpawnV1(False, admission.admission, "skipped")
     try:
-        ensure_private_directory(Path(project_root) / workspace_path)
-        ensure_private_directory(Path(project_root) / export_path)
-    except (OSError, ValueError):
-        return CodingWorkerSpawnV1(False, admission.admission, "failed", False)
-    argv = coding_worker_bwrap_argv(
-        worker_root=project_root,
-        workspace_path=workspace_path,
-        export_path=export_path,
-        hazards=coding_worker_hazard_paths(boundary),
-        uid=os.geteuid(),
-        gid=os.getegid(),
+        # Do not create anything at a boundary that differs from the admission.
+        if (
+            workspace.project_root != boundary.worker_root
+            or workspace.workspace_path != boundary.workspace_path
+            or workspace.export_path != boundary.export_path
+            or boundary.network_disabled is not True
+            or boundary.host_network is not False
+            or any(observe_coding_worker_isolation(boundary).values())
+        ):
+            raise ValueError("Coding boundary changed after admission")
+        for path in _worker_bind_paths(boundary.worker_root, boundary.workspace_path, boundary.export_path):
+            ensure_private_directory(path)
+        scope = coding_worker_scope(admission, boundary)
+        argv = coding_worker_bwrap_argv(
+            worker_root=boundary.worker_root,
+            workspace_path=boundary.workspace_path,
+            export_path=boundary.export_path,
+            hazards=coding_worker_hazard_paths(boundary),
+            uid=os.geteuid(),
+            gid=os.getegid(),
+            memory_bytes=limits.memory_bytes,
+            cpu_sec=limits.cpu_sec,
+        )
+        execute = runner or default_coding_worker_runner
+        code = execute(argv, limits.wall_clock_sec)
+        if type(code) is not int or scope != coding_worker_scope(admission, boundary):
+            raise ValueError("Coding probe did not return the admitted scope")
+    except (OSError, ValueError, TimeoutError):
+        return CodingWorkerSpawnV1(False, admission.admission, "failed")
+    return CodingWorkerSpawnV1(
+        code != 126, admission.admission, "confirmed" if code == 0 else "failed", False, admission, scope
     )
-    execute = runner or default_coding_worker_runner
-    code = execute(argv, timeout_sec)
-    return CodingWorkerSpawnV1(True, admission.admission, "confirmed" if code == 0 else "failed", False)

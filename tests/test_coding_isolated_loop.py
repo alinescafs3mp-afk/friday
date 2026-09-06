@@ -175,7 +175,7 @@ def test_build_compiles_without_executing_upload(tmp_path: Path) -> None:
     assert "main.py" not in calls[1]
 
 
-def test_test_without_tests_is_blocked_without_execute(tmp_path: Path) -> None:
+def test_test_without_tests_keeps_import_execution_uncertainty(tmp_path: Path) -> None:
     boundary = _boundary(tmp_path)
     admission = _admission(tmp_path, boundary)
 
@@ -199,7 +199,7 @@ def test_test_without_tests_is_blocked_without_execute(tmp_path: Path) -> None:
     )
     assert result.state is CodingIsolatedLoopState.BLOCKED
     assert result.reason is CodingIsolatedLoopReason.NO_TESTS
-    assert result.untrusted_execute is False
+    assert result.untrusted_execute is True
 
 
 def test_admitted_unittest_sets_untrusted_execute(tmp_path: Path) -> None:
@@ -252,7 +252,7 @@ def test_real_bwrap_compiles_extracted_python(tmp_path: Path) -> None:
     assert result.untrusted_execute is False
 
 
-def test_real_bwrap_unittest_of_extracted_tests(tmp_path: Path) -> None:
+def test_real_bwrap_probe_does_not_authorize_unbounded_uploaded_unittest(tmp_path: Path) -> None:
     boundary = _boundary(tmp_path)
     admission = _admission(tmp_path, boundary)
     spawn = spawn_coding_worker(admission, boundary)
@@ -269,8 +269,10 @@ def test_real_bwrap_unittest_of_extracted_tests(tmp_path: Path) -> None:
         extract=_extracted(),
         operation=CodingModeExecuteOperation.TEST,
     )
-    assert result.state is CodingIsolatedLoopState.TESTED
-    assert result.untrusted_execute is True
+    assert spawn.probe == "confirmed"
+    assert result.state is CodingIsolatedLoopState.BLOCKED
+    assert result.reason is CodingIsolatedLoopReason.RESOURCE_ENFORCEMENT_UNAVAILABLE
+    assert result.untrusted_execute is False
 
 
 def test_syntax_error_build_is_blocked(tmp_path: Path) -> None:
@@ -307,3 +309,56 @@ def test_host_network_boundary_does_not_reach_loop(tmp_path: Path) -> None:
     assert admission.admission is CodingWorkerAdmissionState.BLOCKED
     assert result.reason is CodingIsolatedLoopReason.WORKER_NOT_ADMITTED
     assert result.untrusted_execute is False
+
+
+def test_default_test_is_blocked_even_after_a_confirmed_namespace_probe(tmp_path: Path) -> None:
+    boundary = _boundary(tmp_path)
+    admission = _admission(tmp_path, boundary)
+    spawn = spawn_coding_worker(admission, boundary, runner=lambda argv, timeout: 0)
+    result = observe_coding_isolated_loop(
+        admission=admission,
+        boundary=boundary,
+        spawn=spawn,
+        extract=_extracted(),
+        operation=CodingModeExecuteOperation.TEST,
+    )
+    assert result.reason is CodingIsolatedLoopReason.RESOURCE_ENFORCEMENT_UNAVAILABLE
+    assert result.state is CodingIsolatedLoopState.BLOCKED
+    assert result.untrusted_execute is False
+
+
+def test_probe_of_another_admission_cannot_authorize_build(tmp_path: Path) -> None:
+    boundary = _boundary(tmp_path)
+    admission = _admission(tmp_path, boundary)
+    spawn = spawn_coding_worker(admission, boundary, runner=lambda argv, timeout: 0)
+    calls = []
+    result = observe_coding_isolated_loop(
+        admission=replace(admission, admission_id="another-admission"),
+        boundary=boundary,
+        spawn=spawn,
+        extract=_extracted(),
+        operation=CodingModeExecuteOperation.BUILD,
+        runner=lambda argv, timeout: calls.append(argv) or 0,
+    )
+    assert result.reason is CodingIsolatedLoopReason.PROBE_NOT_CONFIRMED
+    assert calls == []
+
+
+def test_directory_replacement_invalidates_the_probe(tmp_path: Path) -> None:
+    boundary = _boundary(tmp_path)
+    admission = _admission(tmp_path, boundary)
+    spawn = spawn_coding_worker(admission, boundary, runner=lambda argv, timeout: 0)
+    workspace = Path(boundary.worker_root) / boundary.workspace_path
+    workspace.rename(workspace.with_name("old-workspace"))
+    workspace.mkdir()
+    calls = []
+    result = observe_coding_isolated_loop(
+        admission=admission,
+        boundary=boundary,
+        spawn=spawn,
+        extract=_extracted(),
+        operation=CodingModeExecuteOperation.BUILD,
+        runner=lambda argv, timeout: calls.append(argv) or 0,
+    )
+    assert result.reason is CodingIsolatedLoopReason.PROBE_NOT_CONFIRMED
+    assert calls == []

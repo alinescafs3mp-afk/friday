@@ -99,7 +99,7 @@ def test_admitted_admission_spawns_probe_once(tmp_path: Path) -> None:
     assert "--unshare-all" in argv
     text = " ".join(argv)
     assert "/var/run/docker.sock" in text
-    assert argv[argv.index("--bind") + 1] == str(tmp_path / "friday-coding-worker")
+    assert argv[argv.index("--bind") + 1] == str(tmp_path / "friday-coding-worker" / boundary.workspace_path)
     assert "/var/run/docker.sock" not in argv[argv.index("--bind") + 1]
 
 
@@ -118,7 +118,8 @@ def test_bwrap_argv_does_not_bind_host_hazards(tmp_path: Path) -> None:
         gid=1000,
     )
     bind_target = argv[argv.index("--bind") + 1]
-    assert bind_target == root
+    assert bind_target == str(Path(root) / "work/operation.1")
+    assert root not in argv
     assert "docker.sock" not in bind_target
     assert argv[0] == BWRAP_EXECUTABLE
     assert "friday.organs.engineer" not in " ".join(argv)
@@ -141,3 +142,75 @@ def test_host_network_boundary_is_blocked(tmp_path: Path) -> None:
 
     assert result.admission is CodingWorkerAdmissionState.BLOCKED
     assert result.network is None
+
+
+def test_only_the_current_operation_directories_are_mounted(tmp_path: Path) -> None:
+    boundary = _boundary(tmp_path)
+    admission = _admission(tmp_path, boundary)
+    calls = []
+    result = spawn_coding_worker(admission, boundary, runner=lambda argv, timeout: calls.append(argv) or 0)
+    assert result.probe == "confirmed"
+    argv = calls[0]
+    binds = [(argv[index + 1], argv[index + 2]) for index, value in enumerate(argv) if value == "--bind"]
+    assert binds == [
+        (str(Path(boundary.worker_root) / boundary.workspace_path), "/work/work/operation.1"),
+        (str(Path(boundary.worker_root) / boundary.export_path), "/work/out/operation.1"),
+    ]
+    assert boundary.worker_root not in argv
+
+
+def test_changed_boundary_is_rejected_before_creating_directories(tmp_path: Path) -> None:
+    boundary = _boundary(tmp_path)
+    admission = _admission(tmp_path, boundary)
+    changed = replace(boundary, worker_root=str(tmp_path / "other-worker"))
+    calls = []
+    result = spawn_coding_worker(admission, changed, runner=lambda argv, timeout: calls.append(argv) or 0)
+    assert result.probe == "failed"
+    assert calls == []
+    assert not Path(changed.worker_root).exists()
+
+
+def test_symlink_ancestor_is_not_followed_by_probe_preparation(tmp_path: Path) -> None:
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    boundary = _boundary(tmp_path)
+    root = Path(boundary.worker_root)
+    root.mkdir()
+    (root / "work").symlink_to(outside, target_is_directory=True)
+    result = spawn_coding_worker(_admission(tmp_path, boundary), boundary, runner=lambda argv, timeout: 0)
+    assert result.probe == "failed"
+    assert list(outside.iterdir()) == []
+
+
+def test_resource_limits_from_admission_reach_the_actual_python_invocation(tmp_path: Path) -> None:
+    boundary = _boundary(tmp_path)
+    admission = compose_coding_worker_admission(
+        admission_id="admission.limited",
+        authenticated_turn_id="turn.1",
+        worker_id="worker.1",
+        operation_id="operation.1",
+        project_id="project.1",
+        revision_selector=SNAPSHOT,
+        boundary=boundary,
+        memory_bytes=80 * 1024 * 1024,
+        cpu_sec=7,
+        wall_clock_sec=9,
+    )
+    calls = []
+    result = spawn_coding_worker(
+        admission, boundary, runner=lambda argv, timeout: calls.append((argv, timeout)) or 0
+    )
+    assert result.probe == "confirmed"
+    argv, timeout = calls[0]
+    assert "--as=83886080:83886080" in argv
+    assert "--cpu=7:7" in argv
+    assert "--core=0:0" in argv
+    assert timeout == 9
+    assert argv[argv.index("-c") - 2 : argv.index("-c")] == ("/usr/bin/python3", "-I")
+
+
+def test_boolean_return_code_is_not_a_successful_probe(tmp_path: Path) -> None:
+    boundary = _boundary(tmp_path)
+    result = spawn_coding_worker(_admission(tmp_path, boundary), boundary, runner=lambda argv, timeout: False)
+    assert result.probe == "failed"
+    assert result.spawned is False

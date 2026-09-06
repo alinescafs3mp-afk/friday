@@ -222,8 +222,12 @@ def _bounded_json(value: object) -> Mapping[str, Any] | None:
     if not encoded or len(encoded) > _MAX_JSON_BYTES:
         return None
     try:
-        decoded = json.loads(value)
-    except (json.JSONDecodeError, UnicodeError, RecursionError):
+        decoded = json.loads(
+            value,
+            object_pairs_hook=_closed_json_object,
+            parse_constant=_reject_json_constant,
+        )
+    except (json.JSONDecodeError, UnicodeError, RecursionError, SupervisorBaselineError):
         return None
     return decoded if isinstance(decoded, Mapping) else None
 
@@ -272,7 +276,7 @@ def _closed_string(value: object, allowed: frozenset[str], *, fallback: str) -> 
 
 
 def _safe_task_class(value: object) -> str:
-    if value in {
+    if isinstance(value, str) and value in {
         "compare_current_file_with_current_web",
         "compare_archive_with_current_web",
     }:
@@ -302,11 +306,14 @@ def _load_turn_traces(conn: sqlite3.Connection, *, limit: int) -> tuple[list[Tur
     malformed = 0
     traces: list[TurnTrace] = []
     rows = conn.execute(
-        """SELECT json_extract(metadata_json, '$.interaction_trace') AS trace_json
+        """SELECT CASE WHEN json_valid(metadata_json)
+                       THEN json_extract(metadata_json, '$.interaction_trace')
+                       ELSE NULL END AS trace_json
              FROM messages
             WHERE role='assistant'
-              AND json_valid(metadata_json)
-              AND json_type(metadata_json, '$.interaction_trace')='object'
+              AND CASE WHEN json_valid(metadata_json)
+                       THEN json_type(metadata_json, '$.interaction_trace') IS NOT NULL
+                       ELSE 1 END
             ORDER BY rowid DESC
             LIMIT ?""",
         (limit,),
@@ -333,7 +340,7 @@ def _load_joined_events(
     events: list[Mapping[str, Any]] = []
     rows = conn.execute(
         """SELECT payload FROM runtime_events
-            WHERE event_type=? AND json_valid(payload)
+            WHERE event_type=?
             ORDER BY rowid DESC
             LIMIT ?""",
         (SUPERVISOR_TRACE_EVENT, limit),

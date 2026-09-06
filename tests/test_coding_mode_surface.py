@@ -162,7 +162,7 @@ def _zip_attachment(members: dict[str, bytes]) -> dict[str, Any]:
     }
 
 
-def test_execute_claim_extracts_admitted_archive_without_running_it(
+def test_extract_and_empty_discovery_preserve_execution_truth(
     tmp_path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     from friday.organs.coding.worker_boundary import default_coding_worker_boundary
@@ -199,14 +199,14 @@ def test_execute_claim_extracts_admitted_archive_without_running_it(
         spawn_runner=_runner,
     )
     extracted = list(worker_root.glob("work/*/src/main.py"))
-    assert result["context"]["coding_execution_attempted"] is False
+    assert result["context"]["coding_execution_attempted"] is True
     assert result["context"]["coding_archive_extract"] == "extracted"
     assert result["context"]["coding_archive_extracted_count"] == 1
     assert result["context"]["coding_loop"] == "blocked"
     assert result["context"]["coding_loop_reason"] == "no_tests"
     assert result["context"]["coding_worker_spawned"] is True
     assert "архив распакован" in result["message"].casefold()
-    assert "не допущен" in result["message"].casefold()
+    assert "могли быть импортированы" in result["message"].casefold()
     assert len(extracted) == 1
     assert extracted[0].read_bytes() == b"print(1)\n"
     assert len(spawned) == 2

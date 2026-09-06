@@ -351,19 +351,54 @@ def _require_committed_evidence(path_text: str, raw: bytes) -> None:
 
 
 def _release_identity(markdown: str) -> ReleaseIdentity:
-    commit = re.search(r"Deployed implementation head: `([0-9a-f]{40})`", markdown)
+    """Bind registry receipts to their explicit root, never a later live sibling.
+
+    Updating the production summary must not relabel old receipts as acceptance
+    of the newly running release. The canonical backlog owns both identities.
+    """
+
+    heading = "### Historical golden-journey receipt root"
+    if markdown.count(heading) != 1:
+        raise RegistryValidationError("canonical receipt root is missing or ambiguous")
+    section = markdown.split(heading, 1)[1]
+    section = re.split(r"^#{1,3} ", section, maxsplit=1, flags=re.MULTILINE)[0]
+    commit = re.search(r"Historical implementation head: `([0-9a-f]{40})`", section)
     live = re.search(
-        r"- Live: Friday [^\n]* / `([0-9a-f]{40})`;\s*"
+        r"- Historical receipt root: Friday [^\n]* / `([0-9a-f]{40})`;\s*"
         r"tree `([0-9a-f]{64})`;\s*wheel `([0-9a-f]{64})`",
-        markdown,
+        section,
         flags=re.DOTALL,
     )
-    schema = re.search(r"- Database schema: ([0-9]+)", markdown)
+    schema = re.search(r"- Recorded schema: ([0-9]+)", section)
     if commit is None or live is None or schema is None:
-        raise RegistryValidationError("canonical current release identity is incomplete")
+        raise RegistryValidationError("canonical receipt root identity is incomplete")
     if commit.group(1) != live.group(1):
-        raise RegistryValidationError("deployed head and live commit identity diverge")
+        raise RegistryValidationError("receipt head and receipt commit identity diverge")
     return ReleaseIdentity(commit.group(1), live.group(2), live.group(3), int(schema.group(1)))
+
+
+def test_golden_receipt_root_is_not_rebound_by_a_new_production_summary() -> None:
+    markdown = STATUS_PATH.read_text(encoding="utf-8")
+    expected = _release_identity(markdown)
+    newer = (
+        f"Deployed implementation head: `{'f' * 40}`\n"
+        f"- Live: Friday newer / `{'f' * 40}`; tree `{'e' * 64}`; wheel `{'d' * 64}`\n"
+        "- Database schema: 999\n"
+    )
+    assert _release_identity(newer + markdown) == expected
+    assert expected.source_commit != "f" * 40
+
+
+def test_golden_receipt_root_must_be_unique_and_complete() -> None:
+    markdown = STATUS_PATH.read_text(encoding="utf-8")
+    heading = "### Historical golden-journey receipt root"
+    for invalid in (
+        markdown.replace(heading, "### Missing receipt root"),
+        markdown + "\n" + heading + "\n",
+        markdown.replace("Historical implementation head:", "Missing implementation head:"),
+    ):
+        with pytest.raises(RegistryValidationError, match="receipt root"):
+            _release_identity(invalid)
 
 
 def _parse_claim(cell: str) -> EvidenceClaim:
@@ -1936,7 +1971,7 @@ def test_canonical_golden_journey_registry_is_closed_current_and_privacy_safe(
         f"/ `{'0' * 40}`;",
         1,
     )
-    with pytest.raises(RegistryValidationError, match="live commit identity diverge"):
+    with pytest.raises(RegistryValidationError, match="receipt commit identity diverge"):
         _release_identity(mismatched_live)
     current_only_proof = (
         "tests/test_golden_journey_registry.py::"

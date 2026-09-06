@@ -631,7 +631,7 @@ async def test_tool_call_from_synthesis_or_verifier_is_rejected(
 
 
 @pytest.mark.asyncio
-async def test_length_finished_synthesis_is_accepted_when_answer_validates() -> None:
+async def test_length_finished_synthesis_is_honestly_partial_when_answer_validates() -> None:
     model = _ComparisonModel(synthesis_finish_reason="length")
     result = await compare_current_file_with_web(
         model,
@@ -641,8 +641,12 @@ async def test_length_finished_synthesis_is_accepted_when_answer_validates() -> 
         web_evidence=_full_web(),
         absolute_deadline=time.monotonic() + 10,
     )
-    assert result.status is CurrentFileWebComparisonStatus.COMPLETE
-    assert result.answer == _DEFAULT_ANSWER
+    assert result.status is CurrentFileWebComparisonStatus.PARTIAL
+    assert result.partial_reasons == (CurrentFileWebPartialReason.OUTPUT_TRUNCATED,)
+    assert result.answer.endswith(_DEFAULT_ANSWER)
+    assert "ответ достиг лимита вывода" in result.answer
+    assert model.verifier_answer == result.answer
+    assert current_file_web_comparison_is_process_owned(result)
     assert result.citation_labels == ("F1", "W1", "W2", "W3")
     assert result.model_calls == len(model.calls) == 2
 
@@ -845,7 +849,7 @@ def test_q38_dual_upstream_partial_projection_keeps_fitting_evidence_full() -> N
     assert reasons == base_reasons
 
 
-def test_answer_json_budget_stays_1328_at_8192_and_caps_at_5312() -> None:
+def test_answer_wire_budget_preserves_minimum_and_reserves_usable_maximum() -> None:
     assert comparison_module._answer_json_utf8_budget(8_192) == 1_328
     assert comparison_module._answer_json_utf8_budget(16_384) == 2_656
     assert comparison_module._answer_json_utf8_budget(24_576) == 3_984
@@ -855,7 +859,7 @@ def test_answer_json_budget_stays_1328_at_8192_and_caps_at_5312() -> None:
     assert comparison_module._answer_json_utf8_budget(32_768, for_acceptance=True) == 5_312
     assert comparison_module._answer_json_utf8_budget(40_960, for_acceptance=True) == 6_640
     assert comparison_module._answer_json_utf8_budget(0) == 0
-    assert comparison_module._reserved_verifier_utf8_bytes(1_000, 40_960) == 6_310
+    assert comparison_module._reserved_verifier_utf8_bytes(1_000, 40_960) == 7_638
 
 
 @pytest.mark.asyncio
@@ -1007,7 +1011,9 @@ async def test_validate_answer_closed_reject_codes_are_logged_without_bodies(
     assert "[W2]" in live_normalized
     assert "[W3]" in live_normalized
     truncated = cited + " Метки: [F"
-    assert validate(truncated, labels, max_utf8_bytes=budget) == cited + " Метки:"
+    with pytest.raises(reject) as captured:
+        validate(truncated, labels, max_utf8_bytes=budget)
+    assert captured.value.code == "unowned_brackets"
 
     logger_name = comparison_module.LOGGER.name
     q38_oversize = _cited_answer_of_json_bytes(6_641)
@@ -1431,3 +1437,126 @@ def test_public_api_has_no_effect_storage_tool_or_publication_handle() -> None:
         }
     )
     assert inspect.iscoroutinefunction(compare_current_file_with_web)
+
+
+@pytest.mark.parametrize("tier", (8_192, 16_384, 24_576, 32_768, 40_960))
+def test_verifier_reservation_covers_exact_nested_answer_cost(tier: int) -> None:
+    evidence = {"file": {"text": 'Файл "α".'}, "web": {"sources": []}}
+
+    def messages(answer: str):
+        return comparison_module._verifier_messages(  # noqa: PLC2701
+            request=_REQUEST, evidence=evidence, answer=answer
+        )
+
+    def encoded(value: object) -> int:
+        return len(json.dumps(value, ensure_ascii=False, separators=(",", ":")).encode("utf-8"))
+
+    empty = encoded(messages(""))
+    reserved = comparison_module._reserved_verifier_utf8_bytes(empty, tier)  # noqa: PLC2701
+    budget = reserved - empty + 2
+    samples = ("обычный текст ", '"quoted" ', r"back\slash ", "line\nnext ", "α🙂漢字 ", "\t\r\x00 ")
+    for fragment in samples:
+        for size in (0, 1, 10, 80, 160, 320):
+            answer = "Сведения [F1]. " + fragment * size
+            cost = comparison_module._answer_wire_utf8_bytes(answer)  # noqa: PLC2701
+            actual = encoded(messages(answer))
+            assert actual - empty == cost - 2
+            if cost <= budget:
+                assert actual <= reserved <= comparison_module._attested_input_max_bytes(tier)  # noqa: PLC2701
+
+
+def test_budget_cannot_expand_after_bare_citation_normalization() -> None:
+    answer = "Факт F1."
+    original_size = len(json.dumps(answer, ensure_ascii=False).encode("utf-8"))
+    with pytest.raises(comparison_module._AnswerRejected) as captured:  # noqa: PLC2701
+        comparison_module._validate_answer(answer, ("F1",), max_utf8_bytes=original_size)  # noqa: PLC2701
+    assert captured.value.code == "json_budget"
+    assert captured.value.encoded > original_size
+
+
+@pytest.mark.parametrize(
+    "suffix", (" [except when consent is withdrawn", " [F", " [W9", " [", " [important exception")
+)
+def test_unfinished_qualifier_is_never_removed_to_pass_citations(suffix: str) -> None:
+    with pytest.raises(comparison_module._AnswerRejected):  # noqa: PLC2701
+        comparison_module._validate_answer(  # noqa: PLC2701
+            _DEFAULT_ANSWER + suffix, ("F1", "W1", "W2", "W3"), max_utf8_bytes=6_640
+        )
+
+
+@pytest.mark.asyncio
+async def test_escape_heavy_output_cannot_spend_unreserved_verifier_bytes() -> None:
+    # The original inner-only 1328-byte check accepted this, although the answer
+    # consumes considerably more in the actual, nested verifier messages.
+    answer = _DEFAULT_ANSWER + ' "\\' * 200
+    assert len(json.dumps(answer, ensure_ascii=False).encode("utf-8")) <= 1_328
+    model = _ComparisonModel(answer=answer)
+    with pytest.raises(CurrentFileWebComparisonError) as captured:
+        await compare_current_file_with_web(
+            model,
+            request=_REQUEST,
+            accepted_plan_sha256=_PLAN_SHA256,
+            prepared_file=_prepared_file(),
+            web_evidence=_full_web(),
+            absolute_deadline=time.monotonic() + 10,
+        )
+    assert captured.value.synthesis_outcome is OutcomeStatus.FAILED
+    assert captured.value.model_calls == len(model.calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_valid_escaped_answer_is_verified_without_rewriting_its_content() -> None:
+    answer = _DEFAULT_ANSWER + ' Точное имя "a\\b".\nСледующий абзац.'
+    model = _ComparisonModel(answer=answer)
+    result = await compare_current_file_with_web(
+        model,
+        request=_REQUEST,
+        accepted_plan_sha256=_PLAN_SHA256,
+        prepared_file=_prepared_file(),
+        web_evidence=_full_web(),
+        absolute_deadline=time.monotonic() + 10,
+    )
+    assert result.answer == model.verifier_answer == answer
+    assert current_file_web_comparison_is_process_owned(result)
+
+
+@pytest.mark.asyncio
+async def test_length_finished_verifier_cannot_certify_an_answer() -> None:
+    class TruncatedVerifier(_ComparisonModel):
+        async def complete(self, *args, **kwargs):
+            response = await super().complete(*args, **kwargs)
+            if len(self.calls) == 2:
+                response["finish_reason"] = "length"
+            return response
+
+    model = TruncatedVerifier()
+    with pytest.raises(CurrentFileWebComparisonError) as captured:
+        await compare_current_file_with_web(
+            model,
+            request=_REQUEST,
+            accepted_plan_sha256=_PLAN_SHA256,
+            prepared_file=_prepared_file(),
+            web_evidence=_full_web(),
+            absolute_deadline=time.monotonic() + 10,
+        )
+    assert captured.value.verification_outcome is OutcomeStatus.FAILED
+    assert captured.value.model_calls == len(model.calls) == 2
+
+
+@pytest.mark.asyncio
+async def test_output_truncation_composes_with_upstream_partial_without_losing_seal() -> None:
+    model = _ComparisonModel(synthesis_finish_reason="length")
+    result = await compare_current_file_with_web(
+        model,
+        request=_REQUEST,
+        accepted_plan_sha256=_PLAN_SHA256,
+        prepared_file=_prepared_file(projected=True),
+        web_evidence=_full_web(),
+        absolute_deadline=time.monotonic() + 10,
+    )
+    assert result.partial_reasons == (
+        CurrentFileWebPartialReason.FILE_PROJECTION,
+        CurrentFileWebPartialReason.OUTPUT_TRUNCATED,
+    )
+    assert model.verifier_answer == result.answer
+    assert current_file_web_comparison_is_process_owned(result)
