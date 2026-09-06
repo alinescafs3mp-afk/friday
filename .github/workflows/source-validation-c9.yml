@@ -1,0 +1,188 @@
+name: C9 source validation
+on:
+  push:
+    branches: [main]
+    paths: [.github/workflows/source-validation-c9.yml]
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: friday-c9-source-validation
+  cancel-in-progress: false
+jobs:
+  validate:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - name: Reconstruct the exact author-tested source without branch publication
+        env:
+          GH_SOURCE_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          umask 077
+          install -d -m 0700 "$RUNNER_TEMP/c9-evidence"
+          python3 - <<'PY'
+          import base64, hashlib, json, lzma, os, subprocess, urllib.request
+          def git(*args, data=None):
+              return subprocess.check_output(['/usr/bin/git', *args], input=data)
+          repo = 'alinescafs3mp-afk/friday'
+          base = 'ff646e6078a814ff8f5316bf4e718c9f648f208c'
+          workflow = '.github/workflows/source-validation-c9.yml'
+          expected = 'f533b77752bd263ff52d490736e3efc07f2347fd'
+          if os.environ['GITHUB_REPOSITORY'] != repo or git('rev-parse', 'HEAD').decode().strip() != os.environ['GITHUB_SHA']:
+              raise SystemExit('source identity mismatch')
+          git('merge-base', '--is-ancestor', base, 'HEAD')
+          git('diff', '--exit-code', base, 'HEAD', '--', '.', ':(exclude)' + workflow)
+          git('diff', '--exit-code')
+          git('diff', '--cached', '--exit-code')
+          request = urllib.request.Request(
+              f'https://api.github.com/repos/{repo}/git/blobs/d6d6cf6a9300316d8ff1d451afba1e9823899a72',
+              headers={'Authorization': 'Bearer ' + os.environ['GH_SOURCE_TOKEN'], 'Accept': 'application/vnd.github+json'},
+          )
+          with urllib.request.urlopen(request, timeout=30) as response:
+              value = json.loads(response.read(49153))
+          if value.get('encoding') != 'base64' or value.get('size') != 13664:
+              raise SystemExit('invalid source packet')
+          packed = base64.b64decode(''.join(value['content'].split()), validate=True)
+          if len(packed) != 13664 or hashlib.sha256(packed).hexdigest() != 'b62b5888327e12ae7c6de56c28668e72234873bc510edf5e15d4ba9894f0f273':
+              raise SystemExit('source packet checksum mismatch')
+          decoder = lzma.LZMADecompressor(memlimit=268435456)
+          patch = decoder.decompress(packed, max_length=51615)
+          if not decoder.eof or decoder.unused_data or len(patch) != 51614 or hashlib.sha256(patch).hexdigest() != 'bdf8ee6b3d1818806feda68cca06b1cb67876dff29a7e46e6014c74541128bbf':
+              raise SystemExit('patch checksum mismatch')
+          git('apply', '--index', '--check', '-', data=patch)
+          git('apply', '--index', '-', data=patch)
+          git('rm', '--', workflow)
+          git('diff', '--cached', '--check')
+          if git('write-tree').decode().strip() != expected:
+              raise SystemExit('candidate tree mismatch')
+          git('config', 'user.name', 'Friday source validation')
+          git('config', 'user.email', '41898282+github-actions[bot]@users.noreply.github.com')
+          git('commit', '-m', 'feat(coding): exact C9 author-tested candidate; not a release')
+          print('Exact C9 candidate tree:', expected)
+          PY
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.14.4'
+      - name: Install locked development dependencies
+        run: |
+          set -euo pipefail
+          python -m venv .venv
+          .venv/bin/python -m pip install --upgrade --constraint requirements-dev.lock pip setuptools wheel
+          .venv/bin/python -m pip install --no-build-isolation --constraint requirements.lock --constraint requirements-dev.lock -e '.[dev,vectors]'
+      - name: Static checks and complete Python 3.14 inventory
+        run: |
+          set -euo pipefail
+          .venv/bin/python -m ruff check .
+          .venv/bin/python -m ruff format --check friday friday_host_agent friday_package_broker deploy/host-control tests tools
+          .venv/bin/python -m mypy friday friday_host_agent friday_package_broker deploy/host-control
+          .venv/bin/python -m bandit -q -r friday/organs/coding -lll
+          .venv/bin/python -I -B tools/quality_gate.py --inventory-collection "$RUNNER_TEMP/c9-evidence/all-tests.json" 2>&1 | tee "$RUNNER_TEMP/c9-evidence/collection.log"
+          .venv/bin/python -I -B tools/quality_gate_inventory.py --collection "$RUNNER_TEMP/c9-evidence/all-tests.json" --check
+          .venv/bin/python - <<'PY'
+          import os
+          from pathlib import Path
+          from tools.quality_gate_inventory import load_collection
+          nodes = load_collection(Path(os.environ['RUNNER_TEMP']) / 'c9-evidence/all-tests.json')
+          if len(nodes) != 27013:
+              raise SystemExit('authoritative collection differs from reviewed inventory')
+          print('27013 exact inventory nodes; every prior declaration retained.')
+          PY
+      - name: Exercise creation, revision continuity and primary publication boundaries
+        run: |
+          set -euo pipefail
+          scratch="$(mktemp -d /var/tmp/fq-c9-XXXXXXXX)"
+          trap 'rm -rf -- "$scratch"' EXIT
+          .venv/bin/python -m pytest -q -n 4 --basetemp="$scratch/pytest" \
+            tests/test_coding_model_create.py \
+            tests/test_coding_model_edit.py \
+            tests/test_coding_revision_edit.py \
+            tests/test_coding_revision_continuity.py \
+            tests/test_coding_mode_surface.py \
+            tests/test_coding_extract_transaction.py \
+            tests/test_coding_result_export.py \
+            tests/test_generated_file_delivery.py \
+            tests/test_operation_result_carrier.py \
+            tests/test_orchestration_import_boundaries.py \
+            tests/test_quality_gate_inventory.py \
+            tests/test_turn_context.py \
+            tests/test_turn_context_adversarial.py \
+            tests/test_turn_context_effect_guard.py \
+            tests/test_turn_context_ingestion_guard.py \
+            tests/test_turn_context_ingress.py \
+            tests/test_turn_context_outer_supervisor_propagation.py \
+            tests/test_turn_context_publication_guard.py \
+            tests/test_turn_context_router_supervisor_propagation.py \
+            tests/test_turn_context_runtime.py \
+            tests/test_llm_runtime.py \
+            tests/test_v12_router_pending_durable.py \
+            tests/test_the_journal_does_not_read_the_conversation.py \
+            --junitxml="$RUNNER_TEMP/c9-evidence/focused.xml" \
+            2>&1 | tee "$RUNNER_TEMP/c9-evidence/focused.log"
+          .venv/bin/python - <<'PY'
+          import os, xml.etree.ElementTree as ET
+          from pathlib import Path
+          cases = list(ET.parse(Path(os.environ['RUNNER_TEMP']) / 'c9-evidence/focused.xml').getroot().iter('testcase'))
+          if len(cases) != 1111 or any(child.tag in {'skipped', 'failure', 'error'} for case in cases for child in case):
+              raise SystemExit('missing or nonpassing focused source cases')
+          print('1111/1111 source cases passed; live model, behavior execution and release remain separate.')
+          PY
+      - name: Preserve exact checked source and store only ordinary Git objects
+        env:
+          GH_TREE_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          .venv/bin/python - <<'PY'
+          import hashlib, json, os, pathlib, subprocess, sys, urllib.request
+          def git(*args):
+              return subprocess.check_output(['/usr/bin/git', *args]).decode('utf-8')
+          base = 'ff646e6078a814ff8f5316bf4e718c9f648f208c'
+          expected = 'f533b77752bd263ff52d490736e3efc07f2347fd'
+          if git('rev-parse', 'HEAD^{tree}').strip() != expected:
+              raise SystemExit('checked source tree changed')
+          git('diff', '--exit-code')
+          git('diff', '--cached', '--exit-code')
+          out = pathlib.Path(os.environ['RUNNER_TEMP']) / 'c9-evidence'
+          receipt = {'trigger': os.environ['GITHUB_SHA'], 'candidate': git('rev-parse', 'HEAD').strip(), 'source_tree': expected, 'python': sys.version.split()[0], 'inventory_nodes': 27013, 'focused_cases_passed': 1111, 'live_model_tested': False, 'canonical_full_change_gate': 'separate_run_not_attested', 'exact_release_gate': 'not_run', 'independent_review': 'pending', 'branch_updated': False, 'production_deployed': False}
+          (out / 'source-tree.json').write_text(json.dumps(receipt, sort_keys=True) + '\n')
+          git('bundle', 'create', str(out / 'source.bundle'), 'HEAD')
+          sums = []
+          for path in sorted(out.iterdir()):
+              if path.is_file():
+                  with path.open('rb') as stream:
+                      sums.append(hashlib.file_digest(stream, 'sha256').hexdigest() + '  ' + path.name + '\n')
+          (out / 'SHA256SUMS').write_text(''.join(sums))
+          entries = []
+          for path in git('diff', '--name-only', '--no-renames', '-z', base, 'HEAD').split('\0'):
+              if not path:
+                  continue
+              if path.startswith('.github/'):
+                  raise SystemExit('workflow changes are not ordinary source transport')
+              row = git('ls-tree', 'HEAD', '--', path).strip()
+              if not row.startswith('100644 blob '):
+                  raise SystemExit('unexpected source file mode')
+              entries.append({'path': path, 'mode': '100644', 'type': 'blob', 'content': git('show', 'HEAD:' + path)})
+          if len(entries) != 8:
+              raise SystemExit('unexpected source file set')
+          payload = json.dumps({'base_tree': git('rev-parse', base + '^{tree}').strip(), 'tree': entries}, ensure_ascii=False).encode()
+          request = urllib.request.Request('https://api.github.com/repos/alinescafs3mp-afk/friday/git/trees', data=payload, method='POST', headers={'Authorization': 'Bearer ' + os.environ['GH_TREE_TOKEN'], 'Accept': 'application/vnd.github+json', 'Content-Type': 'application/json'})
+          with urllib.request.urlopen(request, timeout=90) as response:
+              value = json.load(response)
+          if value.get('sha') != expected:
+              raise SystemExit('stored source tree mismatch')
+          print(json.dumps(receipt, sort_keys=True))
+          PY
+      - name: Preserve source and validation evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: c9-source-${{ github.sha }}
+          path: ${{ runner.temp }}/c9-evidence
+          if-no-files-found: error
+          retention-days: 7
