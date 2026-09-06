@@ -52,9 +52,7 @@ def test_secure_delete_content_delete_rebuild_keeps_integrity_and_remaining_hits
     try:
         conn.execute("BEGIN")
         conn.execute("INSERT INTO raw_fts(raw_fts, rank) VALUES('secure-delete', 1)")
-        enabled = conn.execute(
-            "SELECT v AS value FROM raw_fts_config WHERE k='secure-delete'"
-        ).fetchone()
+        enabled = conn.execute("SELECT v AS value FROM raw_fts_config WHERE k='secure-delete'").fetchone()
         assert enabled is not None and int(enabled["value"]) == 1
         conn.execute("DELETE FROM raw_objects WHERE id=1")
         conn.execute("INSERT INTO raw_fts(raw_fts) VALUES('rebuild')")
