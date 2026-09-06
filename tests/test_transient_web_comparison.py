@@ -56,16 +56,24 @@ class _RecordingWeb:
         return report
 
 
-def _source(index: int, *, text: str | None = None) -> dict[str, object]:
+def _source(
+    index: int,
+    *,
+    text: str | None = None,
+    title: str | None = None,
+    text_length: int | None = None,
+    truncated: bool = False,
+    url: str | None = None,
+) -> dict[str, object]:
     body = text if text is not None else f"Current public fact from source {index}."
     return {
-        "url": f"https://public-{index}.example.com/report",
-        "title": f"Public source {index}",
+        "url": url if url is not None else f"https://public-{index}.example.com/report",
+        "title": f"Public source {index}" if title is None else title,
         "text": body,
-        "text_length": len(body),
+        "text_length": len(body) if text_length is None else text_length,
         "status_code": 200,
         "error": "",
-        "truncated": False,
+        "truncated": truncated,
     }
 
 
@@ -258,6 +266,137 @@ async def test_projection_is_clamped_to_three_canonical_sources(storage) -> None
     assert [source["label"] for source in sources] == ["W1", "W2", "W3"]
     assert evidence.projection_truncated is True
     assert web.calls == [("current public policy announcements 2026", 3)]
+
+
+@pytest.mark.anyio
+async def test_projection_preserves_public_url_for_honest_empty_title_and_truncation_signals(storage) -> None:
+    actor = _actor(storage)
+    authorization = _grant(storage, actor)
+    message = _message()
+    plan = seal_explicit_public_web_query(
+        current_user_message=message,
+        actor=actor,
+        conversation_id="conversation-1",
+    )
+    web = _RecordingWeb(
+        _report(
+            _source(1),
+            _source(2, truncated=True),
+            _source(3, title="", text_length=100),
+        )
+    )
+
+    evidence = await TransientWebComparisonAdapter(authorization, web).research(
+        plan=plan,
+        actor=actor,
+        conversation_id="conversation-1",
+        current_user_message=message,
+    )
+
+    assert [source.label for source in evidence.sources] == ["W1", "W2", "W3"]
+    assert [source.truncated for source in evidence.sources] == [False, True, True]
+    assert [citation.payload() for citation in evidence.public_citations()] == [
+        {
+            "label": "W1",
+            "url": "https://public-1.example.com/report",
+            "title": "Public source 1",
+        },
+        {
+            "label": "W2",
+            "url": "https://public-2.example.com/report",
+            "title": "Public source 2",
+        },
+        {
+            "label": "W3",
+            "url": "https://public-3.example.com/report",
+            "title": "",
+        },
+    ]
+
+
+@pytest.mark.anyio
+async def test_projection_deduplicates_canonical_public_urls_and_marks_projection_truncated(storage) -> None:
+    actor = _actor(storage)
+    authorization = _grant(storage, actor)
+    message = _message()
+    plan = seal_explicit_public_web_query(
+        current_user_message=message,
+        actor=actor,
+        conversation_id="conversation-1",
+    )
+    web = _RecordingWeb(
+        _report(
+            _source(1),
+            _source(2, url="https://public-1.example.com/report#fragment"),
+        )
+    )
+
+    evidence = await TransientWebComparisonAdapter(authorization, web).research(
+        plan=plan,
+        actor=actor,
+        conversation_id="conversation-1",
+        current_user_message=message,
+    )
+
+    assert [source.label for source in evidence.sources] == ["W1"]
+    assert evidence.projection_truncated is True
+    assert [citation.payload() for citation in evidence.public_citations()] == [
+        {
+            "label": "W1",
+            "url": "https://public-1.example.com/report",
+            "title": "Public source 1",
+        }
+    ]
+
+
+@pytest.mark.anyio
+async def test_projection_marks_utf8_local_truncation_without_raising_the_bound(storage) -> None:
+    actor = _actor(storage)
+    authorization = _grant(storage, actor)
+    message = _message()
+    plan = seal_explicit_public_web_query(
+        current_user_message=message,
+        actor=actor,
+        conversation_id="conversation-1",
+    )
+    body = "я" * 7_000
+    evidence = await TransientWebComparisonAdapter(
+        authorization,
+        _RecordingWeb(_report(_source(1, text=body))),
+    ).research(
+        plan=plan,
+        actor=actor,
+        conversation_id="conversation-1",
+        current_user_message=message,
+    )
+
+    projected_text = evidence.to_synthesis_payload()["sources"][0]["text"]
+    assert isinstance(projected_text, str)
+    assert len(projected_text.encode("utf-8")) == 12_000
+    assert evidence.sources[0].truncated is True
+
+
+@pytest.mark.anyio
+async def test_projection_rejects_oversize_utf8_source_before_retaining_body(storage) -> None:
+    actor = _actor(storage)
+    authorization = _grant(storage, actor)
+    message = _message()
+    plan = seal_explicit_public_web_query(
+        current_user_message=message,
+        actor=actor,
+        conversation_id="conversation-1",
+    )
+    body = "я" * 32_001
+    web = _RecordingWeb(_report(_source(1, text=body)))
+
+    with pytest.raises(TransientWebComparisonError, match="closed bound"):
+        await TransientWebComparisonAdapter(authorization, web).research(
+            plan=plan,
+            actor=actor,
+            conversation_id="conversation-1",
+            current_user_message=message,
+        )
+    assert len(web.calls) == 1
 
 
 @pytest.mark.anyio

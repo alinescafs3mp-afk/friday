@@ -26,6 +26,7 @@ import re
 import secrets
 import urllib.parse
 from collections.abc import Mapping
+from contextlib import suppress
 from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Any, Protocol
@@ -615,12 +616,19 @@ def _report_source_urls(raw_sources: object) -> tuple[str, ...]:
     if type(raw_sources) is not list:
         return ()
     urls: list[str] = []
+    seen_urls: set[str] = set()
     for item in raw_sources:
         if not isinstance(item, Mapping):
             continue
         url = item.get("url")
         if isinstance(url, str) and url.strip():
-            urls.append(url)
+            # Keep malformed/private observations visible to the provider
+            # policy so they fail closed instead of disappearing here.
+            with suppress(TransientWebComparisonError):
+                url = _public_url(url)
+            if url not in seen_urls:
+                seen_urls.add(url)
+                urls.append(url)
     return tuple(urls)
 
 
