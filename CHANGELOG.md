@@ -1,3 +1,22 @@
+## 0.208.50 — 2026-09-06
+
+### Accept legal unbracketed and repeated F1/Wn file+web citations
+
+- Distinct sealed candidate for `semantic_supervisor_assist_to_shadow` after
+  live 0.208.49. File+web still generates up to 768 tokens and still accepts
+  `finish_reason=stop` or `length` with no tool calls. Live V12 on 0.208.49
+  admitted the hamster plan, completed file+web, then rejected a 506-token
+  `stop` synthesis as `citation_labels` because the dispatcher named F1/W1…W3
+  in prose and repeated them. Synthesis now pins `citation_tokens` as the
+  exact `[F1]`/`[W1]`…`[W3]` strings, wraps whole-word owned labels that
+  arrived without ASCII brackets, accepts the expected label *set* (repeats
+  and reorder allowed), and strips a trailing incomplete `[…` leftover from
+  length truncation. Missing expected labels still fail `citation_labels`;
+  `[W4]`, `[нет]`, and leftover unicode brackets still fail
+  `unowned_brackets`. 8192 stays 1328. Verifier reserve stays 5312.
+  Post-synthesis acceptance at 40960 stays 6640. SQLite remains at schema 50;
+  exact `0.208.49` is the predecessor and `0.207.90` the fallback.
+
 ## 0.208.49 — 2026-09-06
 
 ### No-product shadow_to_assist restore

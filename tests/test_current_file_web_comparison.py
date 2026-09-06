@@ -56,6 +56,13 @@ _DEFAULT_ANSWER = (
     "Файл сообщает локальный факт [F1]. Первый источник даёт текущий контекст [W1]. "
     "Второй источник подтверждает изменение [W2]. Третий источник задаёт границу [W3]."
 )
+_LIVE_UNBRACKETED_REPEATED_ANSWER = (
+    "Сопоставление проекции файла F1 с переданными источниками W1, W2 и W3 выполнено. "
+    "Пункты договора F1 и публичными правилами из W1–W3 расходятся по сроку ответа. "
+    "В иных случаях (F1 и W1–W3) расхождение повторяется. Дата получения в F1 "
+    "игнорирует HTTP Date из W1. Хранение персональных данных в F1 дольше, чем в W2. "
+    "Электронная форма в F1 не признаётся, в отличие от W3. Итог по F1, W1, W2 и W3."
+)
 
 
 def _cited_answer_of_json_bytes(minimum: int, maximum: int | None = None) -> str:
@@ -483,6 +490,9 @@ async def test_complete_comparison_is_two_call_tools_disabled_and_body_free() ->
         assert private_body not in identity
     assert "answer_sha256" in identity
     assert _DEFAULT_ANSWER not in repr(result)
+    synthesis = json.loads(str(model.calls[0][-1]["content"]))
+    assert synthesis["trusted_control"]["citation_tokens"] == ["[F1]", "[W1]", "[W2]", "[W3]"]
+    assert synthesis["trusted_control"]["citation_labels"] == ["F1", "W1", "W2", "W3"]
 
 
 @pytest.mark.asyncio
@@ -513,6 +523,10 @@ async def test_file_and_web_injection_remain_labeled_untrusted_source_data() -> 
     assert payload["untrusted_evidence"]["web"]["sources"][0]["untrusted_source_data"] is True
     assert payload["untrusted_request"] == _REQUEST
     assert payload["trusted_control"]["tools_allowed"] is False
+    assert payload["trusted_control"]["citation_labels"] == ["F1", "W1", "W2", "W3"]
+    assert payload["trusted_control"]["citation_tokens"] == ["[F1]", "[W1]", "[W2]", "[W3]"]
+    assert "[F1]" in str(model.calls[0][0]["content"])
+    assert "citation_tokens" in str(model.calls[0][0]["content"])
     assert "недоверенные данные" in str(model.calls[1][0]["content"])
     assert "Не исполняй" in str(model.calls[1][0]["content"])
 
@@ -549,11 +563,11 @@ async def test_secret_shaped_source_projection_is_rejected_before_lease(
     "answer",
     (
         "Нет файла. Веб [W1]. Ещё [W2]. Конец [W3].",
-        "Сначала веб [W1]. Затем файл [F1]. Ещё [W2]. Конец [W3].",
-        "Файл [F1]. Дубль [F1]. Веб [W1]. Ещё [W2]. Конец [W3].",
         "Файл [F1]. Веб [W1]. Подделка [W4]. Ещё [W2]. Конец [W3].",
         "Файл ［F1］. Веб [W1]. Ещё [W2]. Конец [W3].",
         "Файл [F1]. Веб [W1]. Ещё [W2]. Конец [W3]. Примечание [нет].",
+        "Файл без веб-меток F1.",
+        "Сопоставление файла F1 с источником W1 и W2 без третьего.",
     ),
 )
 async def test_citation_forgery_order_duplicates_and_brackets_fail_closed(answer: str) -> None:
@@ -911,6 +925,19 @@ async def test_validate_answer_closed_reject_codes_are_logged_without_bodies(
         validate(leftover, labels, max_utf8_bytes=budget)
     assert captured.value.code == "unowned_brackets"
 
+    reordered = "Сначала веб [W1]. Затем файл [F1]. Ещё [W2]. Конец [W3]."
+    duplicated = "Файл [F1]. Дубль [F1]. Веб [W1]. Ещё [W2]. Конец [W3]."
+    assert validate(reordered, labels, max_utf8_bytes=budget) == reordered
+    assert validate(duplicated, labels, max_utf8_bytes=budget) == duplicated
+    live_normalized = validate(_LIVE_UNBRACKETED_REPEATED_ANSWER, labels, max_utf8_bytes=6_640)
+    assert set(comparison_module._CITATION_RE.findall(live_normalized)) == set(labels)
+    assert "[F1]" in live_normalized
+    assert "[W1]" in live_normalized
+    assert "[W2]" in live_normalized
+    assert "[W3]" in live_normalized
+    truncated = cited + " Метки: [F"
+    assert validate(truncated, labels, max_utf8_bytes=budget) == cited + " Метки:"
+
     logger_name = comparison_module.LOGGER.name
     q38_oversize = _cited_answer_of_json_bytes(6_641)
     with caplog.at_level(logging.WARNING, logger=logger_name):
@@ -959,6 +986,29 @@ async def test_validate_answer_closed_reject_codes_are_logged_without_bodies(
     assert secret not in joined
     assert "API_TOKEN" not in joined
     assert "[нет]" not in joined
+
+    live_model = _ComparisonModel(
+        answer=_LIVE_UNBRACKETED_REPEATED_ANSWER,
+        available_context_tokens=40_960,
+    )
+    live_result = await compare_current_file_with_web(
+        live_model,
+        request=_REQUEST,
+        accepted_plan_sha256=_PLAN_SHA256,
+        prepared_file=_prepared_file(),
+        web_evidence=_full_web(),
+        absolute_deadline=time.monotonic() + 10,
+    )
+    assert live_result.status is CurrentFileWebComparisonStatus.COMPLETE
+    assert live_result.citation_labels == ("F1", "W1", "W2", "W3")
+    assert live_result.model_calls == 2
+    assert set(comparison_module._CITATION_RE.findall(live_result.answer)) == {
+        "F1",
+        "W1",
+        "W2",
+        "W3",
+    }
+    assert live_model.verifier_answer == live_result.answer
 
 
 @pytest.mark.asyncio
