@@ -1,0 +1,35 @@
+name: Audit source snapshot
+
+on:
+  push:
+    branches: [main]
+    paths: [.github/workflows/audit-source-snapshot.yml]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  source:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: Export only tracked public source, not credentials or runtime state
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -m 700 "$RUNNER_TEMP/audit-source"
+          git archive --format=tar HEAD > "$RUNNER_TEMP/audit-source/source.tar"
+          git rev-parse HEAD > "$RUNNER_TEMP/audit-source/commit.txt"
+          git rev-parse HEAD^{tree} > "$RUNNER_TEMP/audit-source/tree.txt"
+          cd "$RUNNER_TEMP/audit-source"
+          sha256sum source.tar > source.tar.sha256
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: audit-source-${{ github.sha }}
+          path: ${{ runner.temp }}/audit-source
+          if-no-files-found: error
+          retention-days: 1
