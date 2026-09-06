@@ -38,22 +38,24 @@ jobs:
               raise SystemExit('source identity mismatch')
           git('merge-base', '--is-ancestor', base, 'HEAD')
           git('diff', '--exit-code', base, 'HEAD', '--', '.', ':(exclude)' + workflow)
-          request = urllib.request.Request(
-              f'https://api.github.com/repos/{repo}/git/blobs/d8e1ee1787ab7632b98b6ea12217fc93481c6172',
-              headers={'Authorization': 'Bearer ' + os.environ['GH_SOURCE_TOKEN'], 'Accept': 'application/vnd.github+json'},
+          packets = (
+              ('d8e1ee1787ab7632b98b6ea12217fc93481c6172', 8602, '96eae46eb11d8a983c4b8678021a91c9c8239f1233b6cae2b4b378b149e4b4be'),
+              ('ca412c2f16d0e04b64e2ddd8df3b07c32f0b0816', 3612, '6e10ae462bd3782906b2d3b95ad5b20ada9d244c7cd70ca6f2e5a57110354b91'),
           )
-          with urllib.request.urlopen(request, timeout=30) as response:
-              value = json.loads(response.read(32768))
-          if value.get('encoding') != 'base64' or value.get('size') != 8602:
-              raise SystemExit('unexpected patch packet')
-          patch = base64.b64decode(''.join(value['content'].split()), validate=True)
-          if len(patch) != 8602 or hashlib.sha256(patch).hexdigest() != '96eae46eb11d8a983c4b8678021a91c9c8239f1233b6cae2b4b378b149e4b4be':
-              raise SystemExit('patch checksum mismatch')
-          git('apply', '--unidiff-zero', '--index', '--check', '-', data=patch)
-          git('apply', '--unidiff-zero', '--index', '-', data=patch)
+          for blob, size, digest in packets:
+              request = urllib.request.Request(f'https://api.github.com/repos/{repo}/git/blobs/{blob}', headers={'Authorization': 'Bearer ' + os.environ['GH_SOURCE_TOKEN'], 'Accept': 'application/vnd.github+json'})
+              with urllib.request.urlopen(request, timeout=30) as response:
+                  value = json.loads(response.read(32768))
+              if value.get('encoding') != 'base64' or value.get('size') != size:
+                  raise SystemExit('unexpected patch packet')
+              patch = base64.b64decode(''.join(value['content'].split()), validate=True)
+              if len(patch) != size or hashlib.sha256(patch).hexdigest() != digest:
+                  raise SystemExit('patch checksum mismatch')
+              git('apply', '--unidiff-zero', '--index', '--check', '-', data=patch)
+              git('apply', '--unidiff-zero', '--index', '-', data=patch)
           git('rm', '--', workflow)
           git('diff', '--cached', '--check')
-          if git('write-tree').decode().strip() != '0dc810bb6b1e1bd2958ae5aff1d177367989360b':
+          if git('write-tree').decode().strip() != '579cbfc941beec168f44571a3e42d481d0a0a13c':
               raise SystemExit('candidate tree mismatch')
           git('config', 'user.name', 'Friday source validation')
           git('config', 'user.email', '41898282+github-actions[bot]@users.noreply.github.com')
@@ -126,10 +128,10 @@ jobs:
         run: |
           set -euo pipefail
           .venv/bin/python - <<'PY'
-          import hashlib, json, os, pathlib, subprocess, urllib.request
+          import hashlib, json, os, pathlib, subprocess, sys, urllib.request
           def git(*args):
               return subprocess.check_output(['/usr/bin/git', *args]).decode()
-          expected = '0dc810bb6b1e1bd2958ae5aff1d177367989360b'
+          expected = '579cbfc941beec168f44571a3e42d481d0a0a13c'
           if git('rev-parse', 'HEAD^{tree}').strip() != expected:
               raise SystemExit('checked tree drifted')
           git('diff', '--exit-code')
@@ -155,7 +157,7 @@ jobs:
           if result.get('sha') != expected:
               raise SystemExit('stored tree mismatch')
           out = pathlib.Path(os.environ['RUNNER_TEMP']) / 'c8-evidence'
-          receipt = {'trigger': trigger, 'candidate': git('rev-parse', 'HEAD').strip(), 'source_tree': expected, 'python': sys_version if (sys_version := __import__('sys').version.split()[0]) else '', 'collection_nodes': 26956, 'focused_cases_passed': 588, 'canonical_full_change_gate': 'not_run', 'exact_release_gate': 'not_run', 'independent_review': 'pending', 'branch_updated': False, 'production_deployed': False}
+          receipt = {'trigger': trigger, 'candidate': git('rev-parse', 'HEAD').strip(), 'source_tree': expected, 'python': sys.version.split()[0], 'collection_nodes': 26956, 'focused_cases_passed': 588, 'canonical_full_change_gate': 'not_run', 'exact_release_gate': 'not_run', 'independent_review': 'pending', 'branch_updated': False, 'production_deployed': False}
           (out / 'source-tree.json').write_text(json.dumps(receipt, sort_keys=True) + '\n')
           git('bundle', 'create', str(out / 'source.bundle'), 'HEAD')
           checksums = []
