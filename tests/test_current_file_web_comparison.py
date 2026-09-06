@@ -564,6 +564,7 @@ async def test_secret_shaped_source_projection_is_rejected_before_lease(
     (
         "Нет файла. Веб [W1]. Ещё [W2]. Конец [W3].",
         "Файл [F1]. Веб [W1]. Подделка [W4]. Ещё [W2]. Конец [W3].",
+        "Файл [F1]. Веб [W1]. Подделка [W9]. Ещё [W2]. Конец [W3].",
         "Файл ［F1］. Веб [W1]. Ещё [W2]. Конец [W3].",
         "Файл [F1]. Веб [W1]. Ещё [W2]. Конец [W3]. Примечание [нет].",
         "Файл без веб-меток F1.",
@@ -775,6 +776,75 @@ async def test_q38_keeps_the_full_projection_that_q36_must_truncate() -> None:
         )
 
 
+def test_q38_dual_upstream_partial_projection_keeps_fitting_evidence_full() -> None:
+    file_source = {
+        "display_name": "current.txt",
+        "label": "F1",
+        "media_type": "text/plain",
+        "text": "Файл. " * 10,
+    }
+    web_source = {
+        "query": "current public facts 2026",
+        "sources": [
+            {
+                "label": f"W{index}",
+                "url": f"https://s{index}.example.com/current",
+                "title": f"Public source {index}",
+                "text": "Публичный факт. " * 220,
+                "truncated": True,
+            }
+            for index in range(1, 4)
+        ],
+    }
+    labels = ("F1", "W1", "W2", "W3")
+    base_reasons = (CurrentFileWebPartialReason.WEB_SOURCE_TRUNCATED,)
+    full, locally_truncated = comparison_module._bounded_projection(  # noqa: PLC2701
+        file_source,
+        web_source,
+        character_cap=None,
+    )
+    assert locally_truncated is False
+    synthesis_bytes = len(
+        json.dumps(
+            comparison_module._synthesis_messages(  # noqa: PLC2701
+                request=_REQUEST,
+                evidence=full,
+                labels=labels,
+                partial_reasons=base_reasons,
+            ),
+            ensure_ascii=False,
+            separators=(",", ":"),
+        ).encode("utf-8")
+    )
+    empty_verifier_bytes = len(
+        json.dumps(
+            comparison_module._verifier_messages(  # noqa: PLC2701
+                request=_REQUEST,
+                evidence=full,
+                answer="",
+            ),
+            ensure_ascii=False,
+            separators=(",", ":"),
+        ).encode("utf-8")
+    )
+    assert synthesis_bytes <= comparison_module._attested_input_max_bytes(40_960)  # noqa: PLC2701
+    assert empty_verifier_bytes <= comparison_module._attested_input_max_bytes(40_960)  # noqa: PLC2701
+    assert comparison_module._reserved_verifier_utf8_bytes(  # noqa: PLC2701
+        empty_verifier_bytes,
+        40_960,
+    ) <= comparison_module._attested_input_max_bytes(40_960)  # noqa: PLC2701
+    projected, reasons = comparison_module._fit_projection(  # noqa: PLC2701
+        request=_REQUEST,
+        file_source=file_source,
+        web_source=web_source,
+        labels=labels,
+        base_reasons=base_reasons,
+        available_context_tokens=40_960,
+    )
+    assert projected == full
+    assert reasons == base_reasons
+
+
 def test_answer_json_budget_stays_1328_at_8192_and_caps_at_5312() -> None:
     assert comparison_module._answer_json_utf8_budget(8_192) == 1_328
     assert comparison_module._answer_json_utf8_budget(16_384) == 2_656
@@ -785,6 +855,7 @@ def test_answer_json_budget_stays_1328_at_8192_and_caps_at_5312() -> None:
     assert comparison_module._answer_json_utf8_budget(32_768, for_acceptance=True) == 5_312
     assert comparison_module._answer_json_utf8_budget(40_960, for_acceptance=True) == 6_640
     assert comparison_module._answer_json_utf8_budget(0) == 0
+    assert comparison_module._reserved_verifier_utf8_bytes(1_000, 40_960) == 6_310
 
 
 @pytest.mark.asyncio

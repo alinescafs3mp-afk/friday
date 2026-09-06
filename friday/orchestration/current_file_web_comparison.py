@@ -215,7 +215,10 @@ def _reserved_verifier_utf8_bytes(empty_verifier_bytes: int, required_context_to
     budget = _answer_json_utf8_budget(required_context_tokens)
     if budget <= 0 or type(empty_verifier_bytes) is not int or empty_verifier_bytes < 0:
         return 0
-    return empty_verifier_bytes + 2 * (budget - _empty_answer_json_utf8_bytes())
+    # The verifier prompt contains the answer JSON string once. Reserve only
+    # the exact delta from the empty answer; doubling it needlessly trims an
+    # upstream-partial Q38 projection that already fits the attested input.
+    return empty_verifier_bytes + (budget - _empty_answer_json_utf8_bytes())
 
 
 def _comparison_requirements(
