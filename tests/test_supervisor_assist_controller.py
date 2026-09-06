@@ -2436,6 +2436,12 @@ async def test_review_and_web_recovery_are_strictly_bounded(
     assert result.response is not None
     labels = [item["label"] for item in result.response["citations"]]
     assert labels == (["F1", "W1"] if max_review_rounds else ["F1"])
+    if max_review_rounds:
+        assert result.response["web_sources"] == [
+            {"url": "https://example.org/current", "title": "Public current source"}
+        ]
+    else:
+        assert "web_sources" not in result.response
 
 
 @pytest.mark.asyncio

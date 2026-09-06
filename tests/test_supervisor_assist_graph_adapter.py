@@ -934,6 +934,10 @@ def test_comparison_settlement_trace_assistant_receipt_and_closure_are_atomic(st
     )
     assert row["reply_to"] == graph.anchor_user_message_id
     assert web.sources[0]._text not in row["metadata_json"]  # noqa: SLF001
+    assert metadata["web_evidence_used"] is True
+    assert metadata["web_evidence_status"] == "sourced"
+    assert metadata["web_evidence_scope"] == "open_search"
+    assert metadata["web_sources"] == [{"url": "https://example.org/current", "title": "Public source"}]
 
 
 def test_cancel_rejects_wrong_request_effect_fence_atomically(storage) -> None:

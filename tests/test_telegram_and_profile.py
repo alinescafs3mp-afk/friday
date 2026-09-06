@@ -993,6 +993,24 @@ def test_search_quality_button_appears_only_with_citations(tmp_path):
     data_u = {b["callback_data"] for row in ungrounded["inline_keyboard"] for b in row}
     assert not any("search_off" in d for d in data_u)
     assert not any(item.startswith("doc:show:") for item in data_u)
+
+    assist_web = bridge._response_reply_markup(
+        {
+            "message_id": "msg_a",
+            "citations": [
+                {"label": "F1", "kind": "current_attachment", "attachment_ordinal": 1},
+                {
+                    "label": "W1",
+                    "url": "https://safe.synthetic.example.com/fact",
+                    "title": "",
+                },
+            ],
+        },
+        external_user_id="4242",
+    )
+    data_a = {b["callback_data"] for row in assist_web["inline_keyboard"] for b in row}
+    assert not any("search_off" in d for d in data_a)
+    assert not any(item.startswith("doc:show:") for item in data_a)
     bridge._inbox.close()
 
 

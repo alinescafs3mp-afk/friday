@@ -2500,6 +2500,7 @@ class SupervisorAssistController:
         ):
             raise SupervisorAssistControllerError("committed publication is malformed")
         citations: list[dict[str, object]] = []
+        web_sources: list[dict[str, str]] = []
         if include_file_citation:
             citations.append(
                 {
@@ -2512,7 +2513,14 @@ class SupervisorAssistController:
             payload = citation.payload()
             if type(payload) is not dict or set(payload) != {"label", "url", "title"}:
                 raise SupervisorAssistControllerError("public citation projection is malformed")
+            url = payload["url"]
+            title = payload["title"]
+            if type(url) is not str or type(title) is not str:
+                raise SupervisorAssistControllerError("public citation projection is malformed")
             citations.append(dict(payload))
+            # Telegram last hop renders clickable sources from this ledger.
+            # Empty titles stay empty here; the hop shows the destination host.
+            web_sources.append({"url": url, "title": title})
         response: dict[str, Any] = {
             "user_id": graph.user_id,
             "message": publication.content,
@@ -2524,6 +2532,8 @@ class SupervisorAssistController:
         }
         if citations:
             response["citations"] = citations
+        if web_sources:
+            response["web_sources"] = web_sources
         self._replace_graph(record, graph)
         self._publication_total += 1
         if graph.state is CompareCurrentFileWebGraphState.TERMINAL:

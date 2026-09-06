@@ -1191,6 +1191,33 @@ def test_code_owned_source_title_cannot_disguise_the_destination_host() -> None:
     assert "evil.synthetic.example.com" in rendered
 
 
+def test_empty_web_source_title_still_exposes_the_destination_host() -> None:
+    from friday.telegram_bridge import TelegramBridge
+    from friday.telegram_bridge._markup import to_telegram_html
+
+    url = "https://safe.synthetic.example.com/fact"
+    citations_only = TelegramBridge._format_response_message(  # noqa: SLF001
+        {
+            "message": "Сравнение.",
+            "citations": [{"label": "W1", "url": url, "title": ""}],
+        }
+    )
+    assert "Источники:" not in citations_only
+    assert "safe.synthetic.example.com" not in citations_only
+
+    rendered = to_telegram_html(
+        TelegramBridge._format_response_message(  # noqa: SLF001
+            {
+                "message": "Сравнение.",
+                "web_sources": [{"title": "", "url": url}],
+            }
+        )
+    )
+    assert rendered.count("<a href=") == 1
+    assert 'href="https://safe.synthetic.example.com/fact"' in rendered
+    assert "safe.synthetic.example.com" in rendered
+
+
 def test_telegram_neutralizes_every_unowned_autolink_but_keeps_dotted_filenames_visible() -> None:
     from friday.telegram_bridge import TelegramBridge
     from friday.telegram_bridge._markup import to_telegram_html

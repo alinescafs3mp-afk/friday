@@ -1361,14 +1361,13 @@ class CallbacksMixin(BridgeShared):
             {"text": "👍", "callback_data": f"feedback:up:{message_id}"},
             {"text": "👎", "callback_data": f"feedback:down:{message_id}"},
         ]
-        # When the answer cited stored records, the user can judge retrieval
-        # quality separately from answer usefulness — the only user-facing
-        # source of search_quality feedback for the ranking loop.
         citations = response.get("citations")
-        if isinstance(citations, list) and citations:
+        source_buttons = CallbacksMixin._citation_open_buttons(citations)
+        # search_quality is for stored-record retrieval (doc:show / knowledge_id),
+        # not file+web URL citations from supervisor assist.
+        if source_buttons:
             row.append({"text": "🔎 Поиск мимо", "callback_data": f"feedback:search_off:{message_id}"})
         keyboard: list[list[dict[str, str]]] = [row]
-        source_buttons = CallbacksMixin._citation_open_buttons(citations)
         # По четыре в ряд — как у поиска и хроники: восемь «K#» в одну строку
         # Telegram сжимает в нечитаемое.
         for index in range(0, len(source_buttons), 4):

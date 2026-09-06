@@ -1309,10 +1309,21 @@ class SupervisorAssistGraphAdapter:
                 authority_rechecked=True,
             )
             metadata = self._base_metadata(settled, verified=True)
+            public_citations = web.public_citations()
             metadata["citations"] = [
                 {"label": "F1", "title": "Текущий файл"},
-                *(citation.payload() for citation in web.public_citations()),
+                *(citation.payload() for citation in public_citations),
             ]
+            web_sources = [{"url": citation.url, "title": citation.title} for citation in public_citations]
+            if web_sources:
+                # Same durable ledger ordinary web answers persist, so a later
+                # "какие источники?" follow-up can replay URLs without a model.
+                metadata["web_sources"] = web_sources
+                metadata["web_evidence_used"] = True
+                metadata["web_evidence_status"] = (
+                    "partial" if comparison.status is CurrentFileWebComparisonStatus.PARTIAL else "sourced"
+                )
+                metadata["web_evidence_scope"] = "open_search"
             metadata["comparison"] = comparison.identity_payload()
             if not attach_trace_to_metadata(metadata, trace):
                 raise SupervisorAssistGraphAdapterError("assist trace does not fit assistant metadata")
