@@ -1,6 +1,6 @@
 # Friday: canonical project backlog
 
-Updated: 2026-09-06 (reported production `0.208.55`; C1–C10 source corrections and whole-product reliability work active; historical S3 witness preserved; Pandora unchanged)
+Updated: 2026-09-06 (reported production `0.208.55`; C1–C11 source corrections and whole-product reliability work active; historical S3 witness preserved; Pandora unchanged)
 
 This is the project's only backlog and mutable status register. It owns the
 current production identity, execution order, acceptance gaps and owner actions.
@@ -588,6 +588,43 @@ Still open: aggregate-limited behavioral execution, bounded repair, ordinary
 reply-based revision selection, live configured-model quality, independent review,
 and full native/exact-host release acceptance. Existing untrusted TEST/EXECUTE
 admission is not relaxed. No schema, version, production or Pandora changes.
+
+### C11: composable privacy SQL on the hosted SQLite runtime
+
+Status: source correction on C10 `394ac7e121ed0203724f41783760ca583d86d822`
+(tree `c5476be235d72350afb1c7f8a7f493824c1698be`). Not a release or independent
+acceptance. Full-gate failures take priority over adding more Coding features.
+
+The C8 full change log (run `34056278405`) recorded 24,115 passes and 214
+failures. Its 149 rows containing `parser stack overflow` share deeply nested
+privacy predicates composed inside reviewed and superseding graph relations.
+Reproduction against the package-owned SQLite 3.45.1 library from the Ubuntu
+24.04 runner fails seven of eight existing temporal graph cases; the same
+source passes all eight on local SQLite 3.46.1. The latter runtime can grow its
+parser stack, so earlier local passes did not establish hosted compatibility.
+
+Replace nested CASE guards in the existing JSON/relation predicate builders
+with ordered, flat CASE arms. Size still precedes JSON validity, validity
+precedes type/JSON traversal, and NULL remains denied. Candidate provenance,
+private entity/knowledge dependencies, tenant checks and the exact own-reminder
+exception remain unchanged. Do not catch SQL failure and return empty graphs,
+relax a privacy predicate, change the schema, or require a newer SQLite merely
+to hide this reproduction. No new view, cache, store or dependency is added.
+
+All 149 recorded parser-failure node IDs passed locally using that exact 3.45.1
+library after the change. Added 41 cases cover lazy bounded JSON guards, NULL
+and malformed shapes, review intent, limits and a genuinely reviewed replacement
+whose evidence later becomes private. The new replacement case fails against
+the old implementation on the same library. All 946 cases in 35 affected modules
+then passed locally on that library, including 178 of the 214 recorded failing
+node IDs (the extra failures were downstream symptoms). Forty-three focused
+privacy cases also pass on SQLite 3.46.1. Hosted and full canonical-gate results
+remain separate records bound to the final source tree.
+The remaining failure groups are still open, including FTS backup integrity,
+Engineer host preflight and unrelated runtime/expectation failures. Do not infer
+that 149 corrected recorded failures make the entire current suite green.
+
+No deployed runtime, version, schema, Pandora item or companion plugin changes.
 
 ### P0G — canonical Gate Diet
 

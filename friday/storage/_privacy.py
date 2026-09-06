@@ -957,11 +957,13 @@ def _not_private_bounded_json_dependency(
 ) -> str:
     """Validate one public JSON object and every durable private dependency in it.
 
-    Expressions and paths are code-owned SQL fragments.  The nested ``CASE`` is
-    intentional: SQLite JSON functions raise on malformed input, so validity and
-    size have to be established before either ``json_tree`` or ``json_extract``
-    is evaluated.  Hidden entity names are treated as dependencies too; an
-    evidence excerpt is another copy of the private fact, not harmless metadata.
+    Expressions and paths are code-owned SQL fragments. Ordered ``CASE`` arms
+    establish size, validity and type before any JSON walk or extraction. Keep
+    them at one level: nesting this predicate inside reviewed-candidate and
+    superseding-relation checks exhausted SQLite 3.45's fixed parser stack.
+    A neighbouring WHERE/AND guard is not an evaluation-order guarantee. Hidden
+    entity names are dependencies too; an evidence excerpt is another copy of
+    the private fact, not harmless metadata.
     """
 
     if expected_json_type not in {"array", "object"}:
@@ -1017,10 +1019,11 @@ def _not_private_bounded_json_dependency(
         )"""
     return f"""(
         CASE
-          WHEN length(CAST(COALESCE({json_expression},'') AS BLOB))<={max(1, int(max_bytes))}
-          THEN CASE WHEN json_valid({json_expression})
-            THEN CASE WHEN json_type({json_expression})='{expected_json_type}'
-              THEN CASE WHEN
+          WHEN length(CAST(COALESCE({json_expression},'') AS BLOB))>{max(1, int(max_bytes))}
+            THEN 0
+          WHEN COALESCE(json_valid({json_expression}),0)=0 THEN 0
+          WHEN json_type({json_expression}) IS NOT '{expected_json_type}' THEN 0
+          WHEN
                 {anchors}
                 AND {nested_json_guard}
                 AND NOT EXISTS (
@@ -1048,10 +1051,7 @@ def _not_private_bounded_json_dependency(
                        AND NOT {_own_tenant_reminder_identity("embedded_private_entity.id", user_expression)}
                 )
                 AND {embedded_knowledge_guard}
-              THEN 1 ELSE 0 END
-            ELSE 0 END
-          ELSE 0 END
-        ELSE 0 END
+          THEN 1 ELSE 0 END
     )"""
 
 
@@ -1134,15 +1134,12 @@ def _not_private_relation_dependency(alias: str = "r") -> str:
     return f"""(
         CASE
           WHEN length(CAST(COALESCE({metadata},'') AS BLOB))
-                   <={_RELATION_PUBLIC_JSON_MAX_BYTES}
-          THEN CASE WHEN json_valid({metadata})
-            THEN CASE WHEN json_type({metadata})='object'
-              THEN CASE WHEN {review_intent}
-                        THEN CASE WHEN {trusted_review} THEN {strict_review} ELSE 0 END
-                        ELSE 1 END
-            ELSE 0 END
+                   >{_RELATION_PUBLIC_JSON_MAX_BYTES} THEN 0
+          WHEN COALESCE(json_valid({metadata}),0)=0 THEN 0
+          WHEN json_type({metadata}) IS NOT 'object' THEN 0
+          WHEN COALESCE({review_intent},0)=0 THEN 1
+          WHEN {trusted_review} THEN {strict_review}
           ELSE 0 END
-        ELSE 0 END
     )"""
 
 

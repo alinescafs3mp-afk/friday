@@ -150,3 +150,130 @@ def test_entity_history_and_container_parent_follow_material_carrier_quarantine(
     assert carrier.id not in by_id
     assert endpoint.id in by_id
     assert by_id[endpoint.id]["parent_id"] is None
+
+
+@pytest.mark.parametrize(
+    "material,json_allowed,relation_allowed",
+    [
+        pytest.param(None, 0, 0, id="sql-null"),
+        pytest.param("", 0, 0, id="empty"),
+        pytest.param("{", 0, 0, id="malformed"),
+        pytest.param('{"bad":}', 0, 0, id="malformed-value"),
+        pytest.param("null", 0, 0, id="json-null"),
+        pytest.param("[]", 0, 0, id="array"),
+        pytest.param("42", 0, 0, id="number"),
+        pytest.param('"text"', 0, 0, id="string"),
+        pytest.param("true", 0, 0, id="boolean"),
+        pytest.param("{}", 1, 1, id="empty-object"),
+        pytest.param('{"note":"public"}', 1, 1, id="public"),
+        pytest.param('{"origin":null}', 1, 1, id="absent-review"),
+        pytest.param('{"origin":"manual"}', 1, 1, id="manual"),
+        pytest.param('{"origin":"review"}', 1, 0, id="incomplete-review"),
+        pytest.param('{"source":"reviewed_relation_candidate"}', 1, 0, id="incomplete-source"),
+        pytest.param('{"nested":"[1]"}', 0, 1, id="opaque-nested"),
+        pytest.param('{"note":"' + "a" * 53 + '"}', 1, 1, id="exact-bound"),
+        pytest.param('{"note":"' + "a" * 54 + '"}', 0, 0, id="over-bound"),
+        pytest.param("{" + "x" * 64, 0, 0, id="oversize-malformed"),
+    ],
+)
+@pytest.mark.parametrize("kind", ["json", "relation"])
+def test_composed_json_guards_are_total_and_preserve_review_intent(
+    storage, monkeypatch, material, json_allowed, relation_allowed, kind
+) -> None:
+    """Flat CASE arms must retain lazy guards, NULL semantics and review denial."""
+    import friday.storage._privacy as privacy
+
+    monkeypatch.setattr(privacy, "_RELATION_PUBLIC_JSON_MAX_BYTES", 64)
+    predicate = (
+        privacy._not_private_bounded_json_dependency(
+            "r.metadata_json", "r.user_id", max_bytes=64, reject_nested_json=True
+        )
+        if kind == "json"
+        else privacy._not_private_relation_dependency("r")
+    )
+    # Values are bound, including malformed legacy JSON. The generated fragment
+    # and column names are code-owned. Do not let JSON errors break another row.
+    row = storage.execute(
+        f"""WITH r AS (
+                SELECT ? AS metadata_json, 'alice' AS user_id,
+                       'source' AS source_entity_id, 'target' AS target_entity_id,
+                       'related_to' AS relation_type
+            ) SELECT {predicate} AS visible FROM r""",  # nosec B608
+        (material,),
+    ).fetchone()
+    assert row["visible"] == (json_allowed if kind == "json" else relation_allowed)
+
+
+@pytest.mark.parametrize("kind", ["json", "relation"])
+def test_composed_json_size_guard_precedes_even_json_validation(storage, monkeypatch, kind) -> None:
+    """A bounded guard must short-circuit parsing, not merely reject afterwards."""
+    import friday.storage._privacy as privacy
+
+    monkeypatch.setattr(privacy, "_RELATION_PUBLIC_JSON_MAX_BYTES", 64)
+    predicate = (
+        privacy._not_private_bounded_json_dependency("r.metadata_json", "r.user_id", max_bytes=64)
+        if kind == "json"
+        else privacy._not_private_relation_dependency("r")
+    )
+    calls = []
+
+    def forbidden_validation(value):
+        calls.append(value)
+        raise AssertionError("oversized material reached the JSON parser")
+
+    # Override only this fixture's connection, never the application globally.
+    storage.conn.create_function("json_valid", 1, forbidden_validation)
+    row = storage.execute(
+        f"""WITH r AS (
+                SELECT ? AS metadata_json, 'alice' AS user_id,
+                       'source' AS source_entity_id, 'target' AS target_entity_id,
+                       'related_to' AS relation_type
+            ) SELECT {predicate} AS visible FROM r""",  # nosec B608
+        ("{" + "x" * 64,),
+    ).fetchone()
+    assert row["visible"] == 0
+    assert calls == []
+
+
+def test_reviewed_replacement_is_visible_only_while_its_evidence_is_public(storage) -> None:
+    """Compose real reviewed/superseding SQL even on SQLite's fixed parser stack."""
+    from friday.storage._graph import _visible_superseding_relation_id
+    from friday.storage._privacy import _not_private_relation_dependency
+
+    storage.ensure_user("alice")
+    private = Entity(new_id("ent"), "alice", "PRIVATE SOURCE 83c7", EntityType.EVENT)
+    source = Entity(new_id("ent"), "alice", "Source", EntityType.PROJECT)
+    target = Entity(new_id("ent"), "alice", "Target", EntityType.PROJECT)
+    for entity in (private, source, target):
+        storage.create_entity(entity)
+    candidate = storage.store_relation_candidate(
+        "alice",
+        source.id,
+        target.id,
+        "related_to",
+        confidence=0.8,
+        evidence={"span": private.name},
+    )
+    assert storage.review_relation_candidate("alice", candidate["id"], "accepted", reviewed_by="alice")
+    replacement = storage.execute(
+        "SELECT id FROM relations WHERE user_id=? AND source_entity_id=? AND relation_type='related_to'",
+        ("alice", source.id),
+    ).fetchone()["id"]
+    original = storage.create_relation(
+        Relation(new_id("rel"), "alice", source.id, target.id, RelationType.PART_OF)
+    )
+    assert storage.invalidate_relation("alice", original.id, superseded_by=replacement)
+    sql = f"""SELECT {_visible_superseding_relation_id("r")} AS replacement
+                FROM relations r WHERE r.id=? AND r.user_id=?
+                AND {_not_private_relation_dependency("r")}"""  # nosec B608
+    assert storage.execute(sql, (original.id, "alice")).fetchone()["replacement"] == replacement
+    assert storage.execute(sql, (original.id, "bob")).fetchone() is None
+    assert storage.get_entity_relations(source.id, "alice")
+
+    _quarantine(storage, private)
+    # Neither endpoint was quarantined: the evidence alone revokes the derived
+    # edge and its historical replacement pointer. A manual fact remains visible.
+    assert storage.get_entity(source.id, "alice") is not None
+    assert storage.get_entity(target.id, "alice") is not None
+    assert storage.execute(sql, (original.id, "alice")).fetchone()["replacement"] is None
+    assert all(row["id"] != replacement for row in storage.get_entity_relations(source.id, "alice"))
