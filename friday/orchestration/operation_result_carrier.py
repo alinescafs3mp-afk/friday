@@ -22,6 +22,7 @@ from friday.orchestration.engineer_result_carrier import (
     EngineerResultCarrierPlan,
     EngineerResultFile,
     EngineerResultPolicyError,
+    is_internal_result_file,
     select_engineer_result_carrier,
     select_user_result_files,
     validate_engineer_result_carrier,
@@ -100,15 +101,39 @@ def pack_operation_result_archive(
     ):
         raise EngineerResultPolicyError("result_archive_limit_invalid")
     archive_limit = min(max_archive_bytes, MAX_OPERATION_RESULT_ARCHIVE_BYTES)
-    selected = select_user_result_files(
-        tuple({"relative_path": path, "size_bytes": len(payload)} for path, payload in members)
-    )
-    if len(selected) > MAX_OPERATION_RESULT_FILES:
+    if isinstance(members, (str, bytes, bytearray)) or not isinstance(members, Sequence):
+        raise EngineerResultPolicyError("result_files_invalid")
+    if len(members) > MAX_OPERATION_RESULT_FILES:
         raise EngineerResultPolicyError("result_file_count_limit")
+    checked: list[tuple[str, bytes]] = []
+    for member in members:
+        if (
+            not isinstance(member, (tuple, list))
+            or len(member) != 2
+            or not isinstance(member[0], str)
+            or type(member[1]) is not bytes
+        ):
+            raise EngineerResultPolicyError("result_file_invalid")
+        checked.append((member[0], member[1]))
+    selected = select_user_result_files(
+        tuple({"relative_path": path, "size_bytes": len(payload)} for path, payload in checked)
+    )
     plan = select_operation_result_carrier(selected, include_internal=True)
     if plan.carrier is not EngineerResultCarrierKind.ARCHIVE:
         raise EngineerResultPolicyError("result_archive_requires_multiple_files")
-    by_path = {path: payload for path, payload in members}
+    by_path = dict(checked)
+    # This seekable ZIP_STORED writer emits 30-byte local headers, 46-byte
+    # central headers and one 22-byte end record; no extras, comments or Zip64.
+    # Bound allocation before writing, including both copies of each UTF-8 name.
+    try:
+        predicted_size = 22 + sum(
+            76 + 2 * len(item.relative_path.encode("utf-8")) + len(by_path[item.relative_path])
+            for item in plan.files
+        )
+    except UnicodeError as exc:
+        raise EngineerResultPolicyError("result_path_invalid") from exc
+    if predicted_size > archive_limit:
+        raise EngineerResultPolicyError("result_archive_size_limit")
     buffer = io.BytesIO()
     try:
         with zipfile.ZipFile(
@@ -121,18 +146,21 @@ def pack_operation_result_archive(
             archive.comment = b""
             for item in plan.files:
                 payload = by_path[item.relative_path]
-                if not payload:
-                    raise EngineerResultPolicyError("result_file_empty")
+                # Empty package markers (for example __init__.py) are real
+                # source members, not an empty final archive.
                 info = zipfile.ZipInfo(filename=item.relative_path, date_time=(1980, 1, 1, 0, 0, 0))
                 info.compress_type = zipfile.ZIP_STORED
-                info.external_attr = 0o644 << 16
+                info.create_system = 3
+                info.external_attr = 0o100644 << 16
+                info.extra = b""
+                info.comment = b""
                 archive.writestr(info, payload)
     except EngineerResultPolicyError:
         raise
     except (OSError, OverflowError, ValueError, zipfile.BadZipFile, zipfile.LargeZipFile) as exc:
         raise EngineerResultPolicyError("result_archive_write_failed") from exc
     payload = buffer.getvalue()
-    if not payload or len(payload) > archive_limit:
+    if len(payload) != predicted_size or len(payload) > archive_limit:
         raise EngineerResultPolicyError("result_archive_size_limit")
     return payload
 
@@ -143,47 +171,65 @@ def plan_generated_file_documents(
     """Admit chat/tool `files` into one TEXT, FILE or ARCHIVE document list."""
 
     if files is None:
-        raw_items: tuple[object, ...] = ()
+        raw_items: Sequence[object] = ()
     elif isinstance(files, Mapping):
         raw_items = (files,)
     elif isinstance(files, Sequence) and not isinstance(files, (str, bytes, bytearray)):
-        raw_items = tuple(files)
+        raw_items = files
     else:
         raise EngineerResultPolicyError("result_files_invalid")
+    if len(raw_items) > MAX_OPERATION_RESULT_FILES:
+        raise EngineerResultPolicyError("result_file_count_limit")
     decoded: list[tuple[str, str, str, bytes]] = []
+    remaining = MAX_OPERATION_RESULT_ARCHIVE_BYTES
     for item in raw_items:
         if not isinstance(item, Mapping):
             continue
         encoded = item.get("content_base64")
         payload = item.get("payload")
-        if isinstance(payload, bytes):
-            body = payload
-        elif isinstance(encoded, str) and encoded:
-            try:
-                body = base64.b64decode(encoded, validate=True)
-            except (ValueError, TypeError):
-                continue
-        else:
-            continue
-        if not body:
+        if not isinstance(payload, bytes) and not (isinstance(encoded, str) and encoded):
             continue
         filename = item.get("filename") or item.get("relative_path") or item.get("path")
         if not isinstance(filename, str) or not filename.strip():
             continue
+        filename = filename.strip()
+        # Filter by the same policy before decoding, and bind final selection
+        # to this path. Position in the unfiltered input is not authority.
+        internal = item.get("internal", False)
+        if not isinstance(internal, bool):
+            raise EngineerResultPolicyError("result_internal_flag_invalid")
+        if internal or is_internal_result_file(filename):
+            continue
+        if isinstance(payload, bytes):
+            body = payload
+        else:
+            assert isinstance(encoded, str)
+            if len(encoded) > 4 * ((remaining + 2) // 3):
+                raise EngineerResultPolicyError("result_archive_size_limit")
+            try:
+                body = base64.b64decode(encoded, validate=True)
+            except (ValueError, TypeError):
+                continue
+        if not body:
+            continue
+        if len(body) > remaining:
+            raise EngineerResultPolicyError("result_archive_size_limit")
+        remaining -= len(body)
         mime_type = item.get("mime_type")
         if not isinstance(mime_type, str) or not mime_type.strip():
             mime_type = "application/octet-stream"
         artifact_id = item.get("id") or item.get("artifact_id")
         if not isinstance(artifact_id, str) or not artifact_id.strip():
             artifact_id = filename
-        decoded.append((artifact_id.strip(), filename.strip(), mime_type.strip(), body))
-    if len(decoded) > MAX_OPERATION_RESULT_FILES:
-        raise EngineerResultPolicyError("result_file_count_limit")
-    plan = select_operation_result_carrier(tuple(name for _, name, _, _ in decoded))
+        decoded.append((artifact_id.strip(), filename, mime_type.strip(), body))
+    plan = select_operation_result_carrier(
+        tuple(EngineerResultFile(name, mime, len(body)) for _, name, mime, body in decoded)
+    )
     if plan.carrier is EngineerResultCarrierKind.TEXT:
         return plan, ()
     if plan.carrier is EngineerResultCarrierKind.FILE:
-        artifact_id, filename, mime_type, body = decoded[0]
+        selected_path = plan.files[0].relative_path
+        artifact_id, filename, mime_type, body = next(row for row in decoded if row[1] == selected_path)
         return plan, (OperationResultDocument(artifact_id, filename, mime_type, body),)
     packed = pack_operation_result_archive(tuple((name, body) for _, name, _, body in decoded))
     digest = hashlib.sha256(packed).hexdigest()

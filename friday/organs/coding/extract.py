@@ -10,13 +10,23 @@ import base64
 import binascii
 import hashlib
 import io
+import os
+import stat
 import zipfile
 from collections.abc import Mapping, Sequence
+from contextlib import suppress
 from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
 
-from friday.private_fs import ensure_private_directory, prepare_private_file, restrict_private_file
+from friday.orchestration.coding_archive_extract_admission import MAX_ARCHIVE_COMPRESSED_SIZE
+from friday.organs.coding.workspace_io import (
+    entry_stamp,
+    open_directory,
+    open_relative_directory,
+)
+
+MAX_INPUT_ARCHIVE_BYTES = MAX_ARCHIVE_COMPRESSED_SIZE
 
 _ZIP_LOCAL = b"PK\x03\x04"
 _ZIP_EMPTY = b"PK\x05\x06"
@@ -114,19 +124,19 @@ def archive_bytes_from_attachment(item: object) -> bytes | None:
     if raw is None:
         raw = item.get("bytes")
     if type(raw) is bytes:
-        return raw if raw else None
+        return raw if 0 < len(raw) <= MAX_INPUT_ARCHIVE_BYTES else None
     encoded = item.get("content_b64")
-    if type(encoded) is not str or not encoded:
+    if type(encoded) is not str or not encoded or len(encoded) > 4 * ((MAX_INPUT_ARCHIVE_BYTES + 2) // 3):
         return None
     try:
         decoded = base64.b64decode(encoded, validate=True)
     except (binascii.Error, ValueError):
         return None
-    return decoded or None
+    return decoded if 0 < len(decoded) <= MAX_INPUT_ARCHIVE_BYTES else None
 
 
 def _zip_payload(raw: bytes) -> zipfile.ZipFile | None:
-    if not (raw.startswith(_ZIP_LOCAL) or raw.startswith(_ZIP_EMPTY)):
+    if len(raw) > MAX_INPUT_ARCHIVE_BYTES or not (raw.startswith(_ZIP_LOCAL) or raw.startswith(_ZIP_EMPTY)):
         return None
     try:
         archive = zipfile.ZipFile(io.BytesIO(raw), mode="r")
@@ -149,17 +159,127 @@ def _empty() -> CodingArchiveExtractObserveV1:
     )
 
 
-def _safe_destination(workspace: Path, relative: str) -> Path | None:
+def _existing_destinations(workspace: Path, paths: tuple[str, ...]) -> tuple[bool, ...]:
+    """Do not follow aliases or change permissions while checking collisions."""
+
     try:
-        root = workspace.resolve()
-        dest = (workspace / relative).resolve()
-    except (OSError, RuntimeError, ValueError):
-        return None
-    try:
-        dest.relative_to(root)
-    except ValueError:
-        return None
-    return dest
+        with open_directory(workspace) as root:
+            result = []
+            for path in paths:
+                parts = tuple(path.split("/"))
+                try:
+                    with open_relative_directory(root, parts[:-1]) as parent:
+                        os.stat(parts[-1], dir_fd=parent, follow_symlinks=False)
+                except FileNotFoundError:
+                    result.append(False)
+                else:
+                    result.append(True)
+            return tuple(result)
+    except FileNotFoundError:
+        return (False,) * len(paths)
+
+
+def _rollback_members(
+    root: int,
+    files: list[tuple[tuple[str, ...], tuple[int, int]]],
+    directories: list[tuple[tuple[str, ...], tuple[int, int]]],
+) -> None:
+    """Remove only our exact new inodes, never another writer's replacements."""
+
+    for rows, directory in ((files, False), (directories, True)):
+        for parts, identity in reversed(rows):
+            with (
+                suppress(OSError, ValueError),
+                open_relative_directory(root, parts[:-1]) as parent,
+            ):
+                info = os.stat(parts[-1], dir_fd=parent, follow_symlinks=False)
+                if (info.st_dev, info.st_ino) != identity:
+                    continue
+                if directory:
+                    os.rmdir(parts[-1], dir_fd=parent)
+                else:
+                    os.unlink(parts[-1], dir_fd=parent)
+                os.fsync(parent)
+
+
+def _publish_members(workspace: Path, pending: list[tuple[str, bytes | None]]) -> None:
+    """Create admitted files exclusively; rollback controlled failures.
+
+    Keep the workspace inode stable for the worker's already-admitted mount.
+    This is not an atomic directory replacement or a crash-recovery receipt.
+    """
+
+    directories: set[tuple[str, ...]] = set()
+    for path, body in pending:
+        parts = tuple(path.split("/"))
+        directories.update(parts[:index] for index in range(1, len(parts)))
+        if body is None:
+            directories.add(parts)
+    new_directories: list[tuple[tuple[str, ...], tuple[int, int]]] = []
+    new_files: list[tuple[tuple[str, ...], tuple[int, int]]] = []
+    completed: list[tuple[tuple[str, ...], tuple[int, ...]]] = []
+    with open_directory(workspace, create=True) as root:
+        root_info = os.fstat(root)
+        try:
+            for parts in sorted(directories, key=lambda item: (len(item), item)):
+                with open_relative_directory(root, parts[:-1]) as parent:
+                    created = False
+                    try:
+                        os.mkdir(parts[-1], 0o700, dir_fd=parent)
+                        created = True
+                    except FileExistsError:
+                        pass
+                    info = os.stat(parts[-1], dir_fd=parent, follow_symlinks=False)
+                    if not stat.S_ISDIR(info.st_mode):
+                        raise ValueError("source destination parent is not a directory")
+                    if created:
+                        new_directories.append((parts, (info.st_dev, info.st_ino)))
+            for path, body in pending:
+                if body is None:
+                    continue
+                parts = tuple(path.split("/"))
+                with open_relative_directory(root, parts[:-1]) as parent:
+                    descriptor = os.open(
+                        parts[-1],
+                        os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | os.O_CLOEXEC,
+                        0o600,
+                        dir_fd=parent,
+                    )
+                    try:
+                        info = os.fstat(descriptor)
+                        new_files.append((parts, (info.st_dev, info.st_ino)))
+                        if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1:
+                            raise ValueError("source destination is not a unique regular file")
+                        view = memoryview(body)
+                        while view:
+                            written = os.write(descriptor, view)
+                            if written <= 0:
+                                raise OSError("short source write")
+                            view = view[written:]
+                        os.fsync(descriptor)
+                        current = os.fstat(descriptor)
+                        if current.st_size != len(body) or current.st_nlink != 1:
+                            raise ValueError("source destination changed during write")
+                        completed.append((parts, entry_stamp(current)))
+                    finally:
+                        os.close(descriptor)
+            for parts, expected in completed:
+                with open_relative_directory(root, parts[:-1]) as parent:
+                    current = os.stat(parts[-1], dir_fd=parent, follow_symlinks=False)
+                    if entry_stamp(current) != expected:
+                        raise ValueError("source destination changed before completion")
+                    os.fsync(parent)
+            for parts in sorted(directories, key=len, reverse=True):
+                with open_relative_directory(root, parts) as directory:
+                    os.fsync(directory)
+            with open_directory(workspace) as current_root:
+                current = os.fstat(current_root)
+                if (current.st_dev, current.st_ino) != (root_info.st_dev, root_info.st_ino):
+                    raise ValueError("source root changed before completion")
+            os.fsync(root)
+        except BaseException:
+            _rollback_members(root, new_files, new_directories)
+            raise
 
 
 def observe_coding_archive_extract(
@@ -169,10 +289,17 @@ def observe_coding_archive_extract(
     workspace: Path,
     raw: bytes | None,
 ) -> CodingArchiveExtractObserveV1:
-    """Catalog, admit, plan, isolate, then extract.  Write nothing if blocked."""
+    """Admit all input before writing; never replace a destination.
 
-    if raw is None or not raw:
+    Controlled write failures remove only this invocation's exact inodes. A
+    process/power loss is not a committed workspace: any leftover files block
+    a same-workspace retry, and no EXTRACTED result or execution grant exists.
+    """
+
+    if raw is None or raw == b"":
         return _empty()
+    if type(raw) is not bytes or len(raw) > MAX_INPUT_ARCHIVE_BYTES:
+        return _blocked(CodingArchiveExtractObserveReason.INVALID_ARCHIVE)
     if not (raw.startswith(_ZIP_LOCAL) or raw.startswith(_ZIP_EMPTY)):
         return _empty()
     from friday.orchestration.coding_archive_extract_admission import (
@@ -270,12 +397,10 @@ def observe_coding_archive_extract(
                     digest_facts.digest_state.value,
                     "empty",
                 )
+            existing_flags = _existing_destinations(workspace, plan.destination_paths)
             existing = tuple(
-                CodingArchiveExistingDestinationFactV1(
-                    path=destination,
-                    exists=(workspace / destination).exists(),
-                )
-                for destination in plan.destination_paths
+                CodingArchiveExistingDestinationFactV1(path=destination, exists=exists)
+                for destination, exists in zip(plan.destination_paths, existing_flags, strict=True)
             )
             overwrite = build_coding_archive_overwrite_plan(
                 extract_id + "-ow",
@@ -292,13 +417,8 @@ def observe_coding_archive_extract(
                     digest_facts.digest_state.value,
                     overwrite.plan.value,
                 )
-            try:
-                ensure_private_directory(workspace)
-                root_path = workspace.resolve()
-            except (OSError, ValueError):
-                return _blocked(CodingArchiveExtractObserveReason.WRITE_FAILED)
-            root = str(root_path)
-            pending: list[tuple[Path, bytes | None]] = []
+            root = str(Path(workspace).absolute())
+            pending: list[tuple[str, bytes | None]] = []
             for index, destination in enumerate(plan.destination_paths):
                 isolation = build_coding_project_isolation_admission(
                     extract_id + "-i" + str(index),
@@ -309,32 +429,24 @@ def observe_coding_archive_extract(
                 if isolation.admission is not CodingProjectIsolationAdmissionState.ADMITTED:
                     return _blocked(CodingArchiveExtractObserveReason.ISOLATION_NOT_GRANTED)
                 zip_info = by_path.get(destination)
-                dest = _safe_destination(root_path, destination)
-                if zip_info is None or dest is None:
+                if zip_info is None:
                     return _blocked(CodingArchiveExtractObserveReason.ISOLATION_NOT_GRANTED)
                 member = _member_from_zip(zip_info)
                 if member is None:
                     return _blocked(CodingArchiveExtractObserveReason.INVALID_ARCHIVE)
                 if member.file_kind is CodingArchiveFileKind.DIRECTORY:
-                    pending.append((dest, None))
+                    pending.append((destination, None))
                     continue
                 try:
                     with archive.open(zip_info, "r") as handle:
-                        payload = handle.read()
+                        payload = handle.read(member.uncompressed_size + 1)
                 except (OSError, RuntimeError, ValueError, zipfile.BadZipFile):
                     return _blocked(CodingArchiveExtractObserveReason.WRITE_FAILED)
                 if len(payload) != member.uncompressed_size:
                     return _blocked(CodingArchiveExtractObserveReason.INVALID_ARCHIVE)
-                pending.append((dest, payload))
+                pending.append((destination, payload))
             try:
-                for dest, body in pending:
-                    if body is None:
-                        ensure_private_directory(dest)
-                        continue
-                    ensure_private_directory(dest.parent)
-                    prepare_private_file(dest)
-                    dest.write_bytes(body)
-                    restrict_private_file(dest)
+                _publish_members(workspace, pending)
             except (OSError, ValueError):
                 return _blocked(CodingArchiveExtractObserveReason.WRITE_FAILED)
             return CodingArchiveExtractObserveV1(

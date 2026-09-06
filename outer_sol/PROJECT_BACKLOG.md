@@ -1,6 +1,6 @@
 # Friday: canonical project backlog
 
-Updated: 2026-09-06 (reported production `0.208.55`; C1 source corrections and whole-product reliability work active; historical S3 witness preserved; Pandora unchanged)
+Updated: 2026-09-06 (reported production `0.208.55`; C1–C3 source corrections and whole-product reliability work active; historical S3 witness preserved; Pandora unchanged)
 
 This is the project's only backlog and mutable status register. It owns the
 current production identity, execution order, acceptance gaps and owner actions.
@@ -102,7 +102,7 @@ The owner extended this mission on 2026-09-06: repair existing capabilities,
 improve their real composition and reliability, and continue the implementable
 backlog. Do not expand the feature catalogue merely to add components. Pandora
 is excluded. The dated live summaries below describe implemented layers, not
-acceptance of all N1–N5 user outcomes. C1 is the current source-only package.
+acceptance of all N1–N5 user outcomes. C1–C3 are source-only packages, not production activations.
 
 
 The old S0–S6 implementation queue has converged on production `0.208.11`.
@@ -218,15 +218,92 @@ Next actionable work, in order:
 1. Obtain native boundary results and independent review of this exact source
    range. Keep unsafe uploaded execution disabled while proving a real aggregate
    memory/CPU/process/output/disk boundary; never confuse a probe with that proof.
-2. Repair Coding export/snapshot consistency: current packing writes ZIP wall-clock
-   timestamps, can include compiler caches, and uses unbounded path-based reads.
-   Make the existing source carrier deterministic and bounded, with one exact
-   snapshot for manifest/digests/output; preserve one file versus one archive.
+2. Verify the C2 shared carrier/export implementation below and continue the
+   remaining input/extraction transaction boundary. Default uploaded execution
+   remains blocked; source export is not aggregate worker isolation acceptance.
 3. Wire real N2 answer/task evidence consumption, then a functional N3 Python
    create/modify/test/repair/persistent-revision journey, and measured N1/N4 mixed
    journeys. Existing scaffolds, observers and empty claim sets are not completion.
 4. Revisit S3 minimum-tier selection and the extra-hop activation lifecycle only
    with compatibility/restart/replay tests and independent review. No gate bypass.
+
+### C2 — coherent final carriers and bounded immutable source export
+
+Status: implemented in this source revision; author-tested, not independently
+accepted, release-certified or deployed. No new store, publisher, execution
+owner, model authority, version, schema or Pandora work is introduced.
+
+- Generated-file publication binds the one FILE carrier to the selected user
+  path, not index zero of the unfiltered input. Explicit internal metadata and
+  internal filenames are filtered before decoding; malformed flags fail closed.
+  This repairs a reproduced case that delivered a receipt instead of the report.
+- The existing shared ZIP writer is also the Coding source packer. Both consume
+  the same admitted bytes, preserve empty Python package members, use fixed
+  timestamps/permissions and reject portable duplicate or non-UTF-8 names.
+  Final archive allocation is bounded before ZIP creation, including UTF-8
+  headers; aggregate input count and decoded bytes are bounded before decoding.
+- Coding source export obtains one bounded descriptor-relative snapshot. Aliases,
+  nonregular files, outside hardlinks, concurrent inode/name/content changes,
+  excessive depth/count/size and overlapping source/export roots fail closed.
+  VCS metadata, compiler caches and secret/internal paths are not source results.
+  Digests, manifest, exported file and returned attachment use exactly those
+  captured bytes rather than separately reopening mutable paths.
+- Export publication is private, fsynced and atomic without replacement. A retry
+  accepts only byte-identical prior output; a different revision, alias or racing
+  writer is never overwritten. Failures do not publish a partial temporary file.
+  This is source export only, not a claim that create/modify implements a task.
+
+Verification at this source checkpoint: **125 author tests passed**, including
+41 new carrier/export cases and existing Engineer publication, Telegram progress,
+Coding mode and archive-plan tests. The initial export regressions reproduced
+18 failures in 22 cases before the repair; four additional internal-metadata
+regressions also failed before their correction. All original test policies and
+Python 3.14 Unicode parameter sets remain unchanged in the canonical inventory.
+Whole-project Ruff, the 1565-file canonical formatting scope and Mypy over 528
+source files pass. Hosted change, native exact-release, independent review and
+real production/Telegram observations remain separate pending evidence.
+
+Remaining coherence work: atomic authorized archive extraction, real N2 evidence
+consumption and N3 implementation/revision continuity, aggregate worker limits,
+then mixed-journey publication/restart checks. A user project file named
+`manifest.json` or `cache.py` still intersects the inherited internal-name policy;
+resolve that by explicit source provenance, not by globally disabling filtering.
+
+### C3 — no-clobber archive input and shared descriptor-relative I/O
+
+Status: implemented and author-tested in this source revision; independent
+review, hosted change evidence, native release certification and deployment
+remain pending. The workspace inode stays stable for the existing worker scope.
+
+- Extraction preflight does not follow root/ancestor/member aliases or silently
+  ignore broken destination links. Existing owner files and their permissions
+  are preserved on collision. The actual file creation uses exclusive no-follow
+  descriptors, so a new file appearing after preflight cannot be overwritten.
+- Controlled write, sync and interruption failures remove only newly created
+  members whose device/inode still belongs to this invocation. A replacement
+  created by another writer is not deleted. Short writes are handled explicitly;
+  completed files and directories are synced before reporting EXTRACTED.
+- Compressed input and base64 allocation are bounded by the existing archive
+  limit before parsing/decoding; member decompression has an explicit declared
+  size bound. All member bytes are validated before the first output file write.
+- Input and output share one narrow `workspace_io` module for no-alias directory
+  traversal and inode identity. This replaces duplicated path semantics, not the
+  operation owner, admission contracts, runtime or storage architecture.
+
+Verification: **226 author tests passed** across C2/C3, existing extraction and
+publication/admission contracts, Telegram/Coding surfaces and fresh-interpreter
+import boundaries. C3 includes 26 new cases for collisions, aliases, bounded input,
+partial writes, sync errors, interrupts and ownership-preserving cleanup. Initial
+C3 tests reproduced the overwrite/ancestor-alias defects and missing input/read
+bounds. Whole-project Ruff, canonical formatting (1567 files) and Mypy (529 source
+files) pass. No test inventory policy or native/external case was removed.
+
+Not claimed: atomic publication of an entire directory or power-loss rollback.
+A killed process can leave a private incomplete workspace; it has no EXTRACTED
+return/execute grant, and existing paths fail the next same-workspace extraction
+closed. Durable recovery/revision continuation still needs its real acceptance
+slice. Aggregate untrusted execution, real N2/N3 outcomes and final release gates
+remain open. Pandora and the separate Engineer authority boundary are unchanged.
 
 ### P0G — canonical Gate Diet
 

@@ -8,6 +8,7 @@ evidence is not a user result unless the caller explicitly opts it in.
 from __future__ import annotations
 
 import re
+import unicodedata
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from enum import StrEnum
@@ -89,6 +90,10 @@ _ABSOLUTE_RESULT_PATH_RE = re.compile(r"^(?:/|[A-Za-z]:[\\/])")
 def _validate_result_path(value: object) -> str:
     if not isinstance(value, str) or not value or len(value) > 1024:
         raise EngineerResultPolicyError("result_path_invalid")
+    try:
+        value.encode("utf-8", errors="strict")
+    except UnicodeError as exc:
+        raise EngineerResultPolicyError("result_path_invalid") from exc
     if _ABSOLUTE_RESULT_PATH_RE.match(value) or "\\" in value or "\x00" in value:
         raise EngineerResultPolicyError("result_path_invalid")
     parts = value.split("/")
@@ -129,14 +134,14 @@ def _normalise_result_file(value: object) -> EngineerResultFile:
         mime_type = value.get("mime_type", "application/octet-stream")
         size_bytes = value.get("size_bytes")
         explicit_internal = value.get("internal", False)
-        if not isinstance(explicit_internal, bool):
-            raise EngineerResultPolicyError("result_internal_flag_invalid")
     else:
         raise EngineerResultPolicyError("result_file_invalid")
+    if not isinstance(explicit_internal, bool):
+        raise EngineerResultPolicyError("result_internal_flag_invalid")
     if (
         not isinstance(mime_type, str)
         or not mime_type.strip()
-        or any(ord(character) < 32 for character in mime_type)
+        or any(ord(character) < 32 or ord(character) == 127 for character in mime_type)
     ):
         raise EngineerResultPolicyError("result_mime_type_invalid")
     if size_bytes is not None and (
@@ -170,7 +175,7 @@ def _normalise_result_files(
     normalised = tuple(_normalise_result_file(item) for item in raw_files)
     seen: set[str] = set()
     for item in normalised:
-        portable = item.relative_path.casefold()
+        portable = unicodedata.normalize("NFC", item.relative_path).casefold()
         if portable in seen:
             raise EngineerResultPolicyError("result_file_duplicate")
         seen.add(portable)
