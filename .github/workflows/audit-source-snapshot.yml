@@ -1,116 +1,52 @@
-name: C1 corrective source validation
+name: Audit source snapshot
 
 on:
   push:
     branches: [main]
     paths: [.github/workflows/audit-source-snapshot.yml]
+  workflow_dispatch:
 
 permissions:
   contents: read
 
 jobs:
-  validate:
+  source:
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
-          fetch-depth: 0
           persist-credentials: false
+          fetch-depth: 0
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
         with:
-          python-version: '3.14.4'
-      - name: Reconstruct exact candidate, removing temporary transport
+          python-version: '3.13.5'
+      - name: Export tracked source and preserve the previous unintegrated patch
+        shell: bash
         run: |
           set -euo pipefail
           umask 077
-          mkdir -p "$RUNNER_TEMP/c1-evidence"
-          python .github/audit-c1.py prepare | tee "$RUNNER_TEMP/c1-evidence/identity.log"
-      - name: Install locked validation dependencies and native sandbox
-        run: |
-          set -euo pipefail
-          sudo apt-get update -qq
-          sudo apt-get install -y bubblewrap
-          python -m venv .venv
-          .venv/bin/python -m pip install --upgrade --constraint requirements-dev.lock pip setuptools wheel
-          .venv/bin/python -m pip install --no-build-isolation --constraint requirements.lock --constraint requirements-dev.lock -e '.[dev,vectors]'
-      - name: Diagnose only code-owned native probes on disposable paths
-        run: |
-          set -euo pipefail
-          .venv/bin/python - <<'PY' | tee "$RUNNER_TEMP/c1-evidence/native-probe.log"
-          import json, os, runpy, subprocess, tempfile
-          from pathlib import Path
-          from friday.organs.coding.worker_spawn import spawn_coding_worker
-          env = {"PATH": "/usr/bin:/bin", "HOME": "/work", "LANG": "C"}
-          def run(argv, timeout=5):
-              result = subprocess.run(argv, stdin=subprocess.DEVNULL, capture_output=True, timeout=timeout, check=False, start_new_session=True, env=env)
-              print(json.dumps({"executable": argv[0], "code": result.returncode, "stderr": result.stderr.decode(errors="replace")[:4096], "stdout": result.stdout.decode(errors="replace")[:4096]}))
-              return result.returncode
-          run(["/usr/bin/bwrap", "--version"])
-          for name in ("/proc/sys/kernel/apparmor_restrict_unprivileged_userns", "/proc/sys/kernel/unprivileged_userns_clone"):
-              p=Path(name)
-              print(name, p.read_text().strip() if p.exists() else "absent")
-          run(["/usr/bin/bwrap", "--unshare-all", "--ro-bind", "/usr", "/usr", "--ro-bind-try", "/lib", "/lib", "--ro-bind-try", "/lib64", "/lib64", "--", "/usr/bin/true"])
-          namespace = runpy.run_path("tests/test_coding_worker_spawn.py")
-          with tempfile.TemporaryDirectory(prefix="c1-probe-", dir="/var/tmp") as name:
-              root = Path(name)
-              boundary = namespace["_boundary"](root)
-              admission = namespace["_admission"](root, boundary)
-              outcome = spawn_coding_worker(admission, boundary, runner=run)
-              print("closed_probe_outcome", outcome.probe)
-          PY
-      - name: Static checks and full inventory agreement
-        run: |
-          set -euo pipefail
-          .venv/bin/ruff check . > "$RUNNER_TEMP/c1-evidence/ruff.log"
-          .venv/bin/ruff format --check friday friday_host_agent friday_package_broker tests tools deploy/host-control > "$RUNNER_TEMP/c1-evidence/format.log"
-          .venv/bin/mypy friday friday_host_agent friday_package_broker deploy/host-control > "$RUNNER_TEMP/c1-evidence/mypy.log"
-          .venv/bin/bandit -r friday friday_host_agent friday_package_broker deploy/host-control -q --severity-level high > "$RUNNER_TEMP/c1-evidence/bandit.log" 2>&1
-          .venv/bin/python -I -B tools/quality_gate.py --inventory-collection "$RUNNER_TEMP/c1-evidence/collection.json" > "$RUNNER_TEMP/c1-evidence/collection.log" 2>&1
-          .venv/bin/python tools/quality_gate_inventory.py --check --collection "$RUNNER_TEMP/c1-evidence/collection.json" > "$RUNNER_TEMP/c1-evidence/inventory.log" 2>&1
-      - name: Focused regressions including native bubblewrap
-        run: |
-          set -euo pipefail
-          .venv/bin/python -m pytest -o addopts= -n 4 --dist loadfile -q \
-            tests/test_coding_*.py \
-            tests/test_current_file_web_comparison.py tests/test_transient_web_comparison.py \
-            tests/test_supervisor_assist_graph_adapter.py tests/test_supervisor_assist_controller.py \
-            tests/test_supervisor_assist_production.py tests/test_supervisor_assist_ingress.py \
-            tests/test_orchestration_import_boundaries.py tests/test_audit_research_baseline_regressions.py \
-            tests/test_semantic_supervisor_production_baseline.py tests/test_semantic_supervisor_representative_window_attestation.py \
-            tests/test_v12_orchestration.py tests/test_v12_archive_router.py tests/test_v12_file_read_handler.py \
-            tests/test_v12_router_pending_durable.py tests/test_turn_context_router_supervisor_propagation.py \
-            tests/test_turn_context_outer_supervisor_propagation.py tests/test_web_search_filters.py \
-            tests/test_web_research_consumption.py tests/test_web_provider_policy.py tests/test_web_source_diversity.py \
-            --junitxml="$RUNNER_TEMP/c1-evidence/focused.xml" | tee "$RUNNER_TEMP/c1-evidence/focused.log"
-          python -c 'import os,xml.etree.ElementTree as E; r=E.parse(os.environ["RUNNER_TEMP"]+"/c1-evidence/focused.xml"); c=list(r.iter("testcase")); assert len(c)==1122 and all(x.find(t) is None for x in c for t in ("failure","error","skipped")), "incomplete focused evidence"'
-          git diff --exit-code
-          test "$(git write-tree)" = a50411aeacf8b7f6c9b2c0352d112b19dfb55af4
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
-        if: always()
-        with:
-          name: c1-validation-${{ github.sha }}
-          path: ${{ runner.temp }}/c1-evidence
-          if-no-files-found: error
-          retention-days: 7
-  tree:
-    needs: validate
-    runs-on: ubuntu-24.04
-    timeout-minutes: 5
-    permissions:
-      contents: write
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-        with:
-          fetch-depth: 0
-          persist-credentials: false
-      - name: Upload exact unreferenced tree only, never move main
-        env:
-          GH_TREE_TOKEN: ${{ github.token }}
-        run: python3 .github/audit-c1.py upload
+          out="$RUNNER_TEMP/audit-source"
+          install -d -m 0700 "$out"
+          git archive --format=tar HEAD > "$out/source.tar"
+          git bundle create "$out/source.bundle" HEAD
+          git rev-parse HEAD > "$out/commit.txt"
+          git rev-parse HEAD^{tree} > "$out/tree.txt"
+          git show 2143388e0c23a46623713e0e572313f254ccb0f7:.github/audit-c1.patch.xz.b64 > "$out/previous-c1.patch.xz.b64"
+          python -m pip download --only-binary=:all: \
+            --constraint requirements.lock --constraint requirements-dev.lock \
+            --dest "$out/wheels" \
+            beautifulsoup4 cryptography fastapi httpcore httpx lxml mcp \
+            openpyxl Pillow pydantic pypdf pypdfium2 python-docx \
+            python-multipart python-pptx py7zr pyzipper rarfile reportlab \
+            striprtf 'uvicorn[standard]' websockets zstandard numpy \
+            bandit build mypy playwright pytest pytest-asyncio pytest-cov \
+            pytest-xdist ruff wheel setuptools
+          cd "$out"
+          sha256sum source.tar source.bundle previous-c1.patch.xz.b64 wheels/* > SHA256SUMS
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: c1-tree-${{ github.sha }}
-          path: ${{ runner.temp }}/c1-tree
+          name: audit-source-${{ github.sha }}
+          path: ${{ runner.temp }}/audit-source
           if-no-files-found: error
-          retention-days: 7
+          retention-days: 1
