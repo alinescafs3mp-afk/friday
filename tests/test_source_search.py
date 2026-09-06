@@ -1426,6 +1426,7 @@ def test_the_index_is_only_ever_read_through_filtered_storage_helpers():
     assert maintenance_literals == {
         "INSERT INTO raw_fts(raw_fts, rank) VALUES('secure-delete', 1)",
         "SELECT v AS value FROM raw_fts_config WHERE k='secure-delete'",
+        "INSERT INTO raw_fts(raw_fts) VALUES('rebuild')",
     }
     readers = {
         name: ast.get_source_segment(intake, node) or ""

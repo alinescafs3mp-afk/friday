@@ -2881,6 +2881,10 @@ class IntakeMixin(StorageShared):
                 or any(int(remnants[key]) != 0 for key in remnants)
             ):
                 raise RuntimeError("secondary product witness purge was not atomic")
+            # SQLite 3.45.1 FTS5 corrupts the inverted index when secure-delete
+            # is on during the external-content DELETE trigger. Remaining
+            # raw_objects are the authority; rebuild cannot revive the purged row.
+            conn.execute("INSERT INTO raw_fts(raw_fts) VALUES('rebuild')")
             residues = {
                 "raw_residue": int(remnants["raw_count"]),
                 "inbox_residue": int(remnants["inbox_count"]),
