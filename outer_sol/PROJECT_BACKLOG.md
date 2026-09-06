@@ -404,6 +404,67 @@ selection, model-backed create/modify, behavioral verification and bounded
 repair remain open, as do qualified independent review and exact-host/native/UI
 release acceptance. Pandora and deployed production remain unchanged.
 
+### C7 — primary-model proposals for exact revision edits
+
+Status: implemented and author-tested against the integrated C6 tree
+`77240ae1aa68e0e7bd89d39387fcbcf80132bf0b` at main
+`c976ff5ff712a8c13ab5880bc3f9fb3242cdec88`. Not an independently accepted
+release, deployment, or live-model quality claim.
+
+- The real Coding route accepts `revise <message_id> <sha256>` (Russian alias
+  `доработай`), followed by a newline and an ordinary textual change request.
+  Selection remains exact and same-person/tenant/Coding-conversation, with no
+  mixed uploads, implicit latest, second model, history replay or new store.
+  Existing `edit` JSON and `restore` commands remain model-free and unchanged.
+- The existing configured primary `LLMRouter` receives one effect-free request.
+  It keeps its own semaphore, credentials, endpoint and transport. Tools are
+  explicitly empty, retries are disabled, thinking is disabled for this bounded
+  code-output call, and the earlier of the inherited deadline and a 90-second
+  stage limit is passed through. Require complete context; never silently trim
+  source files or forward work to a secondary/cloud provider.
+- Send only the task and complete UTF-8 source members, not storage paths,
+  person/tenant/message identifiers, source handles or conversation history.
+  Enforce 16 KiB task, 128 KiB serialized input, 64 KiB output and 8192 output
+  tokens. Reuse the existing stronger credential predicate on raw source text
+  as well as its serialized projection. Binary/oversized/secret-bearing source
+  input is blocked rather than guessed, decoded lossily, or partially forwarded.
+- A complete model answer is a proposal, never authority: validate its strict
+  replace/add/delete JSON using the C6 preparer, including path, count, digest,
+  no-op, collision and export rules. Reject truncation, effect/tool calls,
+  duplicate keys, prose, invalid encodings and secret-bearing candidates. Only
+  an exact standalone JSON fence may be removed; do not repair malformed JSON.
+- The existing synchronous Coding owner reloads the exact authorized parent
+  after the model await, then applies the validated proposal to a new workspace.
+  Cancellation propagates before turn/workspace writes. Timeouts and transport
+  failures yield a blocked result with no retry/fallback. A late valid response
+  is not applied, even when a transport suppresses cancellation at its deadline.
+- Preserve the original human task in the normal conversation, not a synthetic
+  assistant-written edit command. Add only a closed outcome and model invocation
+  count to diagnostics. No response body, private exception or reasoning trace
+  enters diagnostic metadata. The unchanged durable publisher reauthorizes the
+  parent in its existing transaction before committing result handles.
+- Both thin AgentRuntime entry points and the orchestration Coding route call
+  the same organ helper. No new product logic is added to the giant runtime.
+
+Author evidence: the new real-route regression failed on C6 (`editing` remained
+empty; no proposal was requested). 49 new cases now exercise model proposals,
+publication/reopen, both AgentRuntime modes, static-path parity, scope refusal,
+credential hygiene, invalid/truncated outputs, cancellation, deadline expiry,
+revocation during the await and revocation at final publication. The primary
+transport is simulated in these deterministic tests, not a live model witness.
+270 focused Coding/source/publication/inventory cases and 276 existing
+turn-context/primary-transport/pending-durable cases pass locally. Whole-source
+Ruff, canonical formatting and Mypy pass. Inventory adds only the 16 new test
+functions (49 exact cases), reuses existing policies and adds 225 MiB of declared
+scratch; every prior test policy, parameter declaration and native gate remains
+unchanged. Pandora content and production are unchanged.
+
+Still open: natural/reply-based selection UX, full model-backed creation,
+behavioral build/test verification, bounded repair, real configured-model
+acceptance, independent review and exact-host/native/UI release certification.
+Generated edits explicitly remain unexecuted and `verified=false`; do not call
+this a passing program, a completed N3 milestone, or a safe executable.
+
 ### P0G — canonical Gate Diet
 
 Status: complete on `main` through implementation head

@@ -47,6 +47,12 @@ from friday.organs.coding.loop import (
     CodingIsolatedLoopV1,
     observe_coding_isolated_loop,
 )
+from friday.organs.coding.model_edit import (
+    CodingModelEditProposal,
+    CodingModelEditState,
+    model_edit_requested,
+    parse_model_edit_request,
+)
 from friday.organs.coding.modify import (
     modify_requested,
     observe_coding_upload_modification,
@@ -278,6 +284,7 @@ def handle_coding_static_turn(
     enable_tools: bool = False,
     worker_boundary: CodingWorkerBoundaryV1 | None = None,
     spawn_runner: CodingWorkerRunner | None = None,
+    model_edit: CodingModelEditProposal | None = None,
 ) -> dict[str, Any]:
     """Inspect, create or edit an explicit source revision. Never run revision edits."""
 
@@ -292,20 +299,39 @@ def handle_coding_static_turn(
     operation_id = "coding-op-" + secrets.token_hex(8)
     project_id = "coding-p-" + secrets.token_hex(8)
     restoring = _RESTORE_PREFIX_RE.match((message or "").strip()) is not None
-    editing = not restoring and _EDIT_PREFIX_RE.match((message or "").strip()) is not None
+    model_editing = not restoring and model_edit_requested(message or "")
+    editing = model_editing or (not restoring and _EDIT_PREFIX_RE.match((message or "").strip()) is not None)
     revision_operation = restoring or editing
     restore_state = "blocked" if restoring else "empty"
     edit_state = "blocked" if editing else "empty"
     restored = None
     candidate = None
     edit_targets = None
-    selection = (
+    selection: re.Match[str] | tuple[str, str, str, str] | None = (
         _RESTORE_RE.fullmatch((message or "").strip())
         if restoring
         else _EDIT_RE.fullmatch((message or "").strip())
         if editing
         else None
     )
+    if model_editing:
+        # A model proposal is data bound to this exact owner request. The source
+        # and all write admissions are rechecked here, after the model await.
+        try:
+            selected = parse_model_edit_request(message)
+        except UnicodeError:
+            selected = None
+        selection = None
+        if selected is not None:
+            selection = ("", selected[0], selected[1], "")
+        if (
+            type(model_edit) is CodingModelEditProposal
+            and model_edit.message == message
+            and model_edit.state is CodingModelEditState.PREPARED
+            and type(model_edit.payload) is str
+            and selected is not None
+        ):
+            selection = ("", selected[0], selected[1], model_edit.payload)
     if selection and storage is not None and conversation_id and not attachments:
         try:
             restored = load_coding_revision(
@@ -570,6 +596,27 @@ def handle_coding_static_turn(
                 "Используй edit <message_id> <sha256>, затем с новой строки JSON с replace/add/delete, без вложений. "
                 "Исходная версия не менялась; другая версия не подставлялась; код не исполнялся."
             )
+    if model_editing:
+        if edit_state == "applied":
+            text = (
+                "Изменения по текстовому заданию подготовлены моделью и применены к отдельной копии "
+                "точно выбранной ревизии. Исходная версия сохранена. "
+                "Код не исполнялся; сборка и тесты не запускались. Корректность поведения ещё не подтверждена."
+            )
+        else:
+            text = (
+                "Изменение по текстовому заданию заблокировано: выбранные исходники, ответ модели "
+                "или целостность результата не подтверждены. Используй revise (или доработай) "
+                "<message_id> <sha256>, затем с новой строки задание, без вложений. "
+                "Исходная версия не менялась; другая модель или ревизия не подставлялась. Код не исполнялся."
+            )
+    model_metadata = (
+        {"coding_model_edit": model_edit.state.value, "coding_model_calls": model_edit.calls}
+        if model_editing and type(model_edit) is CodingModelEditProposal and model_edit.message == message
+        else {"coding_model_edit": "model_unavailable", "coding_model_calls": 0}
+        if model_editing
+        else {}
+    )
     source_parent = (
         {"message_id": selection[1], "revision_sha256": restored.revision_sha256}
         if source_record and restored is not None and selection is not None
@@ -605,6 +652,7 @@ def handle_coding_static_turn(
                 "coding_inspect_reason": report.reason.value,
                 "coding_worker_admission": admission.admission.value,
                 "coding_worker_admission_reason": admission.reason.value,
+                **model_metadata,
                 **({"coding_source_revision": source_record} if source_record else {}),
                 **({"coding_source_parent": source_parent} if source_parent else {}),
             },
@@ -642,7 +690,14 @@ def handle_coding_static_turn(
         "coding_carrier": result_archive.carrier.carrier.value,
         "coding_result_restart": result_archive.restart_state,
         "coding_result_rollback": result_archive.rollback_state,
-        "llm_failed": False,
+        **model_metadata,
+        "llm_failed": model_metadata.get("coding_model_edit")
+        in {
+            "model_unavailable",
+            "model_failed",
+            "deadline",
+            "output_rejected",
+        },
     }
     if report.report is not CodingInspectReportState.BLOCKED:
         context["coding_member_count"] = report.member_count

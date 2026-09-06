@@ -49879,12 +49879,14 @@ class AgentRuntime:
                 turn_deadline = turn_started + float(configured_budget)
         clean_message = (message or "").strip()
         if str(mode or "").strip().casefold().replace("-", "_") == "coding":
-            from friday.organs.coding.static_turn import handle_coding_static_turn
+            from friday.organs.coding.model_edit import handle_coding_turn
 
             if not actor.shared_tenant and actor.user_id != user_id and not actor.is_owner:
                 raise PermissionError("actor cannot chat as another user")
-            return handle_coding_static_turn(
+            return await handle_coding_turn(
                 storage=self.storage,
+                model=getattr(self, "llm", None),
+                turn_deadline=turn_deadline,
                 user_id=(actor.own_id if actor.shared_tenant else user_id),
                 actor=actor,
                 message=clean_message,
@@ -50025,10 +50027,12 @@ class AgentRuntime:
             else "dialogue"
         )
         if (requested_mode or persisted_mode) == "coding":
-            from friday.organs.coding.static_turn import handle_coding_static_turn
+            from friday.organs.coding.model_edit import handle_coding_turn
 
-            return handle_coding_static_turn(
+            return await handle_coding_turn(
                 storage=self.storage,
+                model=getattr(self, "llm", None),
+                turn_deadline=turn_deadline,
                 user_id=user_id,
                 actor=actor,
                 message=clean_message,

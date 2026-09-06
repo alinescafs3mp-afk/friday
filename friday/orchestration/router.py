@@ -43,7 +43,7 @@ from friday.orchestration.turn_context_runtime import (
     current_primary_authenticated_turn_context,
     reserve_authenticated_advisory_call,
 )
-from friday.organs.coding.static_turn import handle_coding_static_turn
+from friday.organs.coding.model_edit import handle_coding_turn
 from friday.pending_durable_turn import (
     PendingDurableAdmissionState,
     PendingDurableTurnAdmission,
@@ -879,8 +879,10 @@ class OrchestrationRouter:
 
         requested_mode = str(mode or "").strip().casefold().replace("-", "_")
         if requested_mode == "coding":
-            return handle_coding_static_turn(
+            return await handle_coding_turn(
                 storage=getattr(self._legacy, "storage", None),
+                model=getattr(self._legacy, "llm", None),
+                turn_deadline=effective_turn_deadline,
                 user_id=user_id,
                 actor=actor,
                 message=message,
