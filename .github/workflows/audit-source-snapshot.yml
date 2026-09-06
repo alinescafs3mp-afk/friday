@@ -42,7 +42,7 @@ jobs:
           .venv/bin/mypy friday friday_host_agent friday_package_broker deploy/host-control > "$RUNNER_TEMP/c1-evidence/mypy.log"
           .venv/bin/bandit -r friday friday_host_agent friday_package_broker deploy/host-control -q --severity-level high > "$RUNNER_TEMP/c1-evidence/bandit.log" 2>&1
           .venv/bin/python -I -B tools/quality_gate.py --inventory-collection "$RUNNER_TEMP/c1-evidence/collection.json" > "$RUNNER_TEMP/c1-evidence/collection.log" 2>&1
-          .venv/bin/python tools/quality_gate_inventory.py --check --collection "$RUNNER_TEMP/c1-evidence/collection.json" > "$RUNNER_TEMP/c1-evidence/inventory.log"
+          .venv/bin/python tools/quality_gate_inventory.py --check --collection "$RUNNER_TEMP/c1-evidence/collection.json" > "$RUNNER_TEMP/c1-evidence/inventory.log" 2>&1
       - name: Focused regressions including native bubblewrap
         run: |
           set -euo pipefail
@@ -60,7 +60,7 @@ jobs:
             --junitxml="$RUNNER_TEMP/c1-evidence/focused.xml" | tee "$RUNNER_TEMP/c1-evidence/focused.log"
           python -c 'import os,xml.etree.ElementTree as E; r=E.parse(os.environ["RUNNER_TEMP"]+"/c1-evidence/focused.xml"); c=list(r.iter("testcase")); assert len(c)==1122 and all(x.find(t) is None for x in c for t in ("failure","error","skipped")), "incomplete focused evidence"'
           git diff --exit-code
-          test "$(git write-tree)" = 20c58bdd0ee07fb0262d624af58f3e2ba24abbf9
+          test "$(git write-tree)" = a50411aeacf8b7f6c9b2c0352d112b19dfb55af4
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         if: always()
         with:
@@ -77,7 +77,7 @@ jobs:
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
-          fetch-depth: 2
+          fetch-depth: 0
           persist-credentials: false
       - name: Upload exact unreferenced tree only, never move main
         env:

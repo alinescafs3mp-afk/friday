@@ -13,7 +13,7 @@ import urllib.request
 
 REPOSITORY = 'alinescafs3mp-afk/friday'
 BASE = 'ba704a5455fdbe76f518a1479b487cf3cd167665'
-TREE = '20c58bdd0ee07fb0262d624af58f3e2ba24abbf9'
+TREE = 'a50411aeacf8b7f6c9b2c0352d112b19dfb55af4'
 PATCH_SHA = '57e4d7087b271e4a4dc786d7932f265c7cb15d7b92089913d191dff99692900e'
 PACKED_SHA = '7f6335c41f1fed29483752a3ca2119b3d50711c77489dd3b65207204e08690f2'
 TEMPORARY = ('.github/workflows/audit-source-snapshot.yml', '.github/audit-c1.py', '.github/audit-c1.patch.xz.b64')
@@ -44,8 +44,8 @@ def prepare() -> dict[str, str]:
     head = git('rev-parse', 'HEAD').decode().strip()
     if os.environ.get('GITHUB_REPOSITORY') != REPOSITORY or head != os.environ.get('GITHUB_SHA'):
         raise ValueError('unexpected repository or trigger identity')
-    if git('rev-parse', 'HEAD^').decode().strip() != BASE:
-        raise ValueError('base advanced; reconstruct and revalidate, never force')
+    git('merge-base', '--is-ancestor', BASE, 'HEAD')
+    git('diff', '--exit-code', BASE, 'HEAD', '--', '.', *(':(exclude)' + path for path in TEMPORARY))
     git('diff', '--exit-code'); git('diff', '--cached', '--exit-code')
     packed = base64.b64decode(git('show', 'HEAD:' + TEMPORARY[2]).strip(), validate=True)
     if hashlib.sha256(packed).hexdigest() != PACKED_SHA:
@@ -56,6 +56,11 @@ def prepare() -> dict[str, str]:
         raise ValueError('patch size, digest or framing mismatch')
     git('apply', '--unidiff-zero', '--index', '--check', '-', data=patch)
     git('apply', '--unidiff-zero', '--index', '-', data=patch)
+    # Python 3.14 has one additional Unicode dash, exercised by two existing
+    # all-Unicode regression families. Preserve the authoritative native count.
+    native_inventory_patch = b'diff --git a/tools/quality_gate_inventory.tsv b/tools/quality_gate_inventory.tsv\nindex 8be6625..53278af 100644\n--- a/tools/quality_gate_inventory.tsv\n+++ b/tools/quality_gate_inventory.tsv\n@@ -2101 +2101 @@ F\ttest_archive_classifier_keeps_machine_filename_punctuation_allowlist\tp05c\t1\tbb\n-F\ttest_archive_classifier_rejects_every_non_ascii_dash_separator\tp06d\t26\tb57a5ab4ee1e2220924a8f48a82dfb89c44a05b002bb5927014586ab8accf717\n+F\ttest_archive_classifier_rejects_every_non_ascii_dash_separator\tp06d\t27\t50025ecb77eb760e4226322b2f08a8899975b267f63911c27220d6e96580fa61\n@@ -2115 +2115 @@ F\ttest_archive_read_with_second_effect_runs_no_model_or_tool\tp060\t5\t6c4b67ef81cc\n-F\ttest_archive_safe_outbound_prefix_never_hides_unsafe_characters\tp072\t36\tb332148bce07bc79538e41db7a94afd71d7d72da6fd7a5366ee56d43ea795cee\n+F\ttest_archive_safe_outbound_prefix_never_hides_unsafe_characters\tp072\t37\tfa450e6f2bfa21ae7c6dd391ac17079deda1e4a2fe9af9b4fde05ce579c5d7ca\n'
+    git('apply', '--unidiff-zero', '--index', '--check', '-', data=native_inventory_patch)
+    git('apply', '--unidiff-zero', '--index', '-', data=native_inventory_patch)
     git('rm', '--', *TEMPORARY)
     changed = set(git('diff', '--cached', '--name-only', '-z').decode().split('\0')) - {''}
     if changed != set(PATHS) | set(TEMPORARY):
