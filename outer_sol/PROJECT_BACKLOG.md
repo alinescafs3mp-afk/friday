@@ -305,6 +305,53 @@ closed. Durable recovery/revision continuation still needs its real acceptance
 slice. Aggregate untrusted execution, real N2/N3 outcomes and final release gates
 remain open. Pandora and the separate Engineer authority boundary are unchanged.
 
+### C4/C5 — one source revision, durable bytes and exact restoration
+
+Status: author-tested source correction, not independently accepted, released
+or deployed. Reconstructed on `6ad812559f53466b405f88195121857dd69445cd`;
+prior local-only `c983137d` / `3129accd` are NOT claimed recovered or integrated.
+The implementation below replaces their unavailable local checkpoints.
+
+- Creation, extraction and restoration share the existing descriptor-relative
+  no-clobber writer. Existing files, symlinks and hardlinks are never overwritten;
+  controlled failures remove only this invocation's surviving new inodes.
+- Carrier bytes, the source card and revision hashes consume one export snapshot.
+  Creation checks that export still matches its prepared revision before output.
+  Removed the unbounded second workspace read and silent 32-file truncation.
+- Assistant metadata stores a bounded source-hash manifest and exact carrier
+  digest. The existing generated-file publisher stores the bytes and descriptor;
+  no additional database, table, migration or source-body field was introduced.
+  An interrupted/missing publication does not create a usable revision.
+- `restore <message_id> <sha256>` (also `восстанови`) in the same owner's private
+  Coding chat restores exactly that response's sources into a new admitted work
+  directory. It requires an exact lowercase digest, the same person/tenant/chat,
+  matching durable descriptor and file bytes, then validates every ZIP member
+  before writes. No latest/HEAD fallback, source execution, applied edit, or
+  independent acceptance is implied. New attachments cannot be mixed into it.
+- The restore entry point uses the exact `message_id` in the prior API response
+  and `context.coding_source_revision.revision_sha256`. Natural-language/reply
+  selection and UI copy affordances remain follow-up work, not secretly fuzzy
+  resolution. Functional create/modify/test/repair remains open in N3.
+
+Evidence: 45 new regression cases; 167 affected source/export/generated-file,
+Coding-surface and import-order tests passed on isolated Python 3.13.5. A wider
+pre-final-additions run passed 547/551; four native bwrap tests failed because
+this execution environment does not provide `/usr/bin/bwrap`. They remain
+unchanged and mandatory. Exact Ubuntu 26.04 host evidence also remains external
+to this environment. Source Ruff/type checks pass; canonical inventory retains
+all old function/node declarations and adds the exact new cases.
+
+Two test-accounting repairs are explicit: the mandatory scratch-total assertion
+now includes C1-C3 and the new revision fixtures; descriptor-leak testing drains
+unrelated collectable API resources BEFORE its baseline and disables GC only
+for its probe. The same exact FD equality assertion is retained. No acceptance,
+parameter, native host requirement, or adversarial check is removed.
+
+Next: qualified review, natural source-revision selection, actual model-backed
+application implementation and bounded upload edits/repair, followed by exact
+native/UI release evidence. Do not infer that a restored scaffold satisfies N3.
+Pandora, primary/secondary authority and production are unchanged.
+
 ### P0G — canonical Gate Diet
 
 Status: complete on `main` through implementation head

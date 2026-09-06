@@ -26,6 +26,7 @@ from friday.orchestration.coding_mode_intent import build_coding_mode_intent
 from friday.orchestration.coding_mode_plan_gate import build_coding_mode_plan_gate
 from friday.orchestration.coding_mode_snapshot import build_coding_mode_snapshot
 from friday.orchestration.coding_mode_view import build_coding_mode_view
+from friday.orchestration.coding_project_identity import build_coding_project_identity
 from friday.orchestration.coding_worker_admission import CodingWorkerAdmissionState
 from friday.organs.coding.create import (
     CodingCreateObserveState,
@@ -50,6 +51,7 @@ from friday.organs.coding.modify import (
     observe_coding_upload_modification,
 )
 from friday.organs.coding.result_archive import observe_coding_result_archive
+from friday.organs.coding.revision import CodingRevisionUnavailable, load_coding_revision, revision_record
 from friday.organs.coding.worker_boundary import (
     CodingWorkerBoundaryV1,
     default_coding_worker_boundary,
@@ -60,7 +62,11 @@ from friday.organs.coding.worker_spawn import (
     compose_coding_worker_admission,
     spawn_coding_worker,
 )
+from friday.organs.coding.workspace_io import publish_members
 from friday.permissions import ActorContext, AuthorizationError
+
+_RESTORE_PREFIX_RE = re.compile(r"(?i)^(?:restore|восстанови)(?:\s|$)")
+_RESTORE_RE = re.compile(r"(?i)^(?:restore|восстанови) (msg_[0-9a-f]{16}) ([0-9a-f]{64})$")
 
 _TEST_CLAIM_RE = re.compile(r"(?i)(?:\b(?:pytest|py\.test)\b|\bgo\s+test\b|прогон)")
 _BUILD_CLAIM_RE = re.compile(r"(?i)(?:\b(?:compile|rebuild|build)\b|скомпилир|пересобери)")
@@ -148,29 +154,6 @@ def _homes() -> tuple[str, str, str]:
     return str(home), str(Path.home()), str(home / "data" / "state")
 
 
-def _workspace_snapshot(workspace: Path) -> dict[str, str]:
-    bound: dict[str, str] = {}
-    if not workspace.is_dir():
-        return bound
-    try:
-        root = workspace.resolve()
-    except (OSError, RuntimeError, ValueError):
-        return bound
-    for item in sorted(root.rglob("*")):
-        if item.is_symlink() or not item.is_file():
-            continue
-        try:
-            relative = item.resolve().relative_to(root).as_posix()
-        except ValueError:
-            continue
-        if not relative or ".." in relative.split("/"):
-            continue
-        bound[relative] = hashlib.sha256(item.read_bytes()).hexdigest()
-        if len(bound) >= 32:
-            break
-    return bound
-
-
 def _russian_inspect_reply(
     report: CodingInspectReportV1,
     *,
@@ -228,6 +211,10 @@ def _russian_inspect_reply(
         refused = refused + " Итоговый архив исходников подготовлен."
     elif archive_state == "file":
         refused = refused + " Итоговый файл исходников подготовлен."
+    elif archive_state == "blocked":
+        refused = (
+            refused + " Выдача исходников заблокирована: состав или целостность результата не подтверждены."
+        )
     if plan_gate == "blocked":
         refused = refused + " План Coding не допущен."
     if report.report is CodingInspectReportState.EMPTY:
@@ -299,7 +286,36 @@ def handle_coding_static_turn(
     turn_id = "coding-turn-" + secrets.token_hex(8)
     operation_id = "coding-op-" + secrets.token_hex(8)
     project_id = "coding-p-" + secrets.token_hex(8)
-    snapshot = _snapshot_sha256(members)
+    restoring = _RESTORE_PREFIX_RE.match((message or "").strip()) is not None
+    restore_state = "blocked" if restoring else "empty"
+    restored = None
+    selection = _RESTORE_RE.fullmatch((message or "").strip()) if restoring else None
+    if selection and storage is not None and conversation_id and not attachments:
+        try:
+            restored = load_coding_revision(
+                storage,
+                storage.settings.files_dir,
+                person_id=person_id,
+                tenant_id=actor.user_id,
+                conversation_id=conversation_id,
+                message_id=selection[1],
+                revision_sha256=selection[2],
+            )
+        except CodingRevisionUnavailable:
+            pass
+        else:
+            project_id = restored.project_id
+            members = [
+                {
+                    "relative_path": name,
+                    "size": len(body),
+                    "file_kind": "regular_file",
+                    "executable": False,
+                    "link_kind": "none",
+                }
+                for name, body in restored.members
+            ]
+    snapshot = restored.revision_sha256 if restored is not None else _snapshot_sha256(members)
     report = build_coding_inspect_report(report_id, turn_id, members=members)
     friday_home, owner_home, database_path = _homes()
     boundary = worker_boundary or default_coding_worker_boundary(
@@ -322,8 +338,8 @@ def handle_coding_static_turn(
         boundary=boundary,
     )
     worker_admitted = admission.admission is CodingWorkerAdmissionState.ADMITTED
-    creating = create_requested(message, has_members=bool(members))
-    modifying = modify_requested(message, has_members=bool(members))
+    creating = not restoring and create_requested(message, has_members=bool(members))
+    modifying = not restoring and modify_requested(message, has_members=bool(members))
     if creating:
         intent = build_coding_mode_intent(f"{turn_id}-intent", turn_id, prompt=message)
     elif modifying:
@@ -333,15 +349,22 @@ def handle_coding_static_turn(
     execute_claimed, execute_claim = _compose_execute_claim(
         turn_id=turn_id,
         intent=intent,
-        message=message,
+        message="" if restoring else message,
         admission=admission,
     )
     workspace = Path(boundary.worker_root) / boundary.workspace_path
     export_path = Path(boundary.worker_root) / boundary.export_path
+    if restored is not None and worker_admitted:
+        try:
+            publish_members(workspace, list(restored.members))
+        except (OSError, ValueError):
+            pass
+        else:
+            restore_state = "restored"
     created = observe_coding_create(
         turn_id=turn_id,
         project_id=project_id,
-        message=message,
+        message="" if restoring else message,
         workspace=workspace,
         worker_admitted=worker_admitted,
         has_members=bool(members),
@@ -350,7 +373,7 @@ def handle_coding_static_turn(
         turn_id=turn_id,
         project_id=project_id,
         revision_selector=snapshot,
-        message=message,
+        message="" if restoring else message,
         workspace=workspace,
         inspect_report=report,
         members=members,
@@ -407,12 +430,20 @@ def handle_coding_static_turn(
     ready = (
         created.state is CodingCreateObserveState.WRITTEN
         or extract.state is CodingArchiveExtractObserveState.EXTRACTED
+        or restore_state == "restored"
     )
     result_archive = observe_coding_result_archive(
         turn_id=turn_id,
         workspace=workspace,
         export_path=export_path,
         ready=ready,
+        expected_revision=(
+            restored.revision_sha256
+            if restored is not None
+            else created.identity.revision_selector
+            if created.state is CodingCreateObserveState.WRITTEN
+            else None
+        ),
     )
     create_admission = created.admission if creating else None
     modification_admission = modified.admission if modifying else None
@@ -425,7 +456,8 @@ def handle_coding_static_turn(
         modification_admission=modification_admission,
         worker_admission=admission,
     )
-    snapshot_members = _workspace_snapshot(workspace) if ready else None
+    source_record = revision_record(project_id, result_archive)
+    snapshot_members = dict(result_archive.source_digests) if source_record else None
     snapshot_view = (
         build_coding_mode_snapshot(f"{turn_id}-snap", turn_id, snapshot_members)
         if snapshot_members
@@ -441,7 +473,16 @@ def handle_coding_static_turn(
         carrier=result_archive.carrier,
         inspect_report=report,
         worker_admission=admission,
-        project_identity=created.identity,
+        project_identity=(
+            build_coding_project_identity(
+                f"{turn_id}-result-ident",
+                turn_id,
+                project_id=project_id,
+                revision_selector=result_archive.source_revision,
+            )
+            if source_record
+            else None
+        ),
     )
     text = _russian_inspect_reply(
         report,
@@ -454,6 +495,16 @@ def handle_coding_static_turn(
         plan_gate=plan_gate.gate.value,
         modify_state=modified.state.value,
     )
+    if restoring:
+        if restore_state == "restored" and source_record:
+            text = "Исходники указанной ревизии восстановлены в отдельную рабочую папку. Код не исполнялся и не изменялся."
+        else:
+            restore_state = "blocked"
+            text = (
+                "Указанная ревизия недоступна или её целостность не подтверждена. "
+                "Используй restore <message_id> <sha256> для точного результата из этого Coding-диалога, без вложений. "
+                "Другая версия не подставлялась; код не исполнялся."
+            )
     persisted_id = _ensure_conversation(
         storage,
         person_id=person_id,
@@ -484,6 +535,7 @@ def handle_coding_static_turn(
                 "coding_inspect_reason": report.reason.value,
                 "coding_worker_admission": admission.admission.value,
                 "coding_worker_admission_reason": admission.reason.value,
+                **({"coding_source_revision": source_record} if source_record else {}),
             },
         )
         assistant_id = assistant.get("id")
@@ -512,6 +564,8 @@ def handle_coding_static_turn(
         "coding_plan_gate": plan_gate.gate.value,
         "coding_mode_view": view.state.value,
         "coding_result_archive": result_archive.state.value,
+        "coding_revision_restore": restore_state,
+        **({"coding_source_revision": source_record} if source_record else {}),
         "coding_carrier": result_archive.carrier.carrier.value,
         "coding_result_restart": result_archive.restart_state,
         "coding_result_rollback": result_archive.rollback_state,

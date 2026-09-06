@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+import gc
 import io
 import os
 import stat
@@ -340,10 +341,20 @@ def test_alias_swap_between_inventory_and_open_does_not_read_outside(tmp_path, m
 
 def test_source_snapshot_closes_all_descriptors_on_repeated_rejection(tmp_path) -> None:
     root = _workspace(tmp_path, {f"file-{n}.py": b"x" for n in range(33)})
-    before = len(os.listdir("/proc/self/fd"))
-    for _ in range(10):
-        assert _pack(root, tmp_path / "out").state is export.CodingResultArchiveObserveState.BLOCKED
-    assert len(os.listdir("/proc/self/fd")) == before
+    # Prior API tests may leave collectable SQLite/socket wrappers. Reclaim
+    # those before the baseline and keep GC from changing unrelated FD counts
+    # mid-probe. Exact equality still proves our explicit rejection cleanup.
+    gc.collect()
+    was_enabled = gc.isenabled()
+    gc.disable()
+    try:
+        before = len(os.listdir("/proc/self/fd"))
+        for _ in range(10):
+            assert _pack(root, tmp_path / "out").state is export.CodingResultArchiveObserveState.BLOCKED
+        assert len(os.listdir("/proc/self/fd")) == before
+    finally:
+        if was_enabled:
+            gc.enable()
 
 
 def test_directory_inventory_is_bounded_before_collecting_unlimited_entries(tmp_path, monkeypatch) -> None:

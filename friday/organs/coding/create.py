@@ -7,7 +7,6 @@ already-admitted isolated workspace.  Never executes the generated program.
 from __future__ import annotations
 
 import hashlib
-import json
 import re
 from dataclasses import dataclass
 from enum import StrEnum
@@ -33,7 +32,7 @@ from friday.orchestration.coding_prompt_normalization import (
     CodingPromptNormalizationState,
     build_coding_prompt_normalization,
 )
-from friday.private_fs import ensure_private_directory, prepare_private_file, restrict_private_file
+from friday.organs.coding.workspace_io import publish_members, source_revision_sha256
 
 _CREATE_RE = re.compile(
     r"(?i)(?:"
@@ -215,11 +214,7 @@ def observe_coding_create(
         if seen[key] > 1:
             step = {**step, "step_id": f"{key}_{seen[key]}"}
         unique_steps.append(step)
-    revision = hashlib.sha256(
-        json.dumps(
-            {path: hashlib.sha256(bodies[path]).hexdigest() for path in paths}, sort_keys=True
-        ).encode()
-    ).hexdigest()
+    revision = source_revision_sha256({path: hashlib.sha256(bodies[path]).hexdigest() for path in paths})
     identity = build_coding_project_identity(
         f"{turn_id}-ident",
         turn_id,
@@ -253,13 +248,12 @@ def observe_coding_create(
             identity=identity,
         )
     try:
-        ensure_private_directory(workspace)
-        root = str(workspace.resolve())
+        root = str(Path(workspace).absolute())
     except (OSError, ValueError):
         return _blocked(
             turn_id, CodingCreateObserveReason.WRITE_FAILED, admission=admission, identity=identity
         )
-    pending: list[tuple[Path, bytes]] = []
+    pending: list[tuple[str, bytes | None]] = []
     for path in paths:
         isolation = build_coding_project_isolation_admission(
             f"{turn_id}-i-{path.replace('/', '-').replace('.', '-')}",
@@ -274,23 +268,9 @@ def observe_coding_create(
                 admission=admission,
                 identity=identity,
             )
-        dest = (workspace / path).resolve()
-        try:
-            dest.relative_to(workspace.resolve())
-        except ValueError:
-            return _blocked(
-                turn_id,
-                CodingCreateObserveReason.ISOLATION_NOT_GRANTED,
-                admission=admission,
-                identity=identity,
-            )
-        pending.append((dest, bodies[path]))
+        pending.append((path, bodies[path]))
     try:
-        for dest, body in pending:
-            ensure_private_directory(dest.parent)
-            prepare_private_file(dest)
-            dest.write_bytes(body)
-            restrict_private_file(dest)
+        publish_members(workspace, pending)
     except (OSError, ValueError):
         return _blocked(
             turn_id, CodingCreateObserveReason.WRITE_FAILED, admission=admission, identity=identity

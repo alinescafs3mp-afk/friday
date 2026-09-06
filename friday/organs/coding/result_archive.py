@@ -58,6 +58,7 @@ from friday.orchestration.operation_result_carrier import (
 from friday.organs.coding.workspace_io import entry_stamp as _stamp
 from friday.organs.coding.workspace_io import open_directory as _directory
 from friday.organs.coding.workspace_io import open_relative_directory as _relative_directory
+from friday.organs.coding.workspace_io import source_revision_sha256
 
 MAX_RESULT_FILES = MAX_OPERATION_RESULT_FILES
 MAX_RESULT_INPUT_BYTES = MAX_OPERATION_RESULT_ARCHIVE_BYTES
@@ -110,6 +111,8 @@ class CodingResultArchiveObserveV1:
     untrusted_execute: bool = False
     restart_state: str = "empty"
     rollback_state: str = "empty"
+    source_digests: tuple[tuple[str, str], ...] = ()
+    source_revision: str | None = None
 
 
 def _empty(turn_id: str) -> CodingResultArchiveObserveV1:
@@ -343,6 +346,7 @@ def observe_coding_result_archive(
     workspace: Path,
     export_path: Path,
     ready: bool,
+    expected_revision: str | None = None,
 ) -> CodingResultArchiveObserveV1:
     """Plan, admit, and pack one FILE or ARCHIVE carrier.  Never execute sources.
 
@@ -369,9 +373,12 @@ def observe_coding_result_archive(
     if plan.plan not in {CodingResultArchivePlanState.FILE, CodingResultArchivePlanState.ARCHIVE}:
         return _blocked(turn_id, CodingResultArchiveObserveReason.PLAN_NOT_GRANTED)
     members = {relative: snapshot[relative] for relative in plan.files}
+    digest_map = {name: hashlib.sha256(body).hexdigest() for name, body in members.items()}
+    revision = source_revision_sha256(digest_map)
+    if expected_revision is not None and revision != expected_revision:
+        return _blocked(turn_id, CodingResultArchiveObserveReason.PACK_NOT_GRANTED)
     pack = None
     if plan.plan is CodingResultArchivePlanState.ARCHIVE:
-        digest_map = {name: hashlib.sha256(body).hexdigest() for name, body in members.items()}
         manifest = build_coding_result_archive_manifest(f"{turn_id}-manifest", turn_id, digest_map)
         if manifest.manifest is not CodingResultArchiveManifestState.LISTED:
             return _blocked(turn_id, CodingResultArchiveObserveReason.PACK_NOT_GRANTED)
@@ -428,4 +435,6 @@ def observe_coding_result_archive(
         False,
         restart.admission.value,
         rollback.admission.value,
+        tuple(sorted(digest_map.items())),
+        revision,
     )
