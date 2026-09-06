@@ -1,6 +1,6 @@
 # Friday: canonical project backlog
 
-Updated: 2026-09-05 (live `0.208.28`; N1 one-final-carrier live; N2 research mission/gates live on `_web_research`; N3 `/coding` create/archive/view and upload-modification EMPTY observer live; execute/run of uploaded programs fail-closed; N4 store-backed mixed journeys live; N5 implementable seam closed, ratchet standing)
+Updated: 2026-09-06 (live `0.208.51`; S3 consumed witness closed; Gemini parked in Pandora; N1–N5 live; N5 ratchet standing; remaining owner-end is Pandora)
 
 This is the project's only backlog and mutable status register. It owns the
 current production identity, execution order, acceptance gaps and owner actions.
@@ -32,17 +32,21 @@ Do not copy that snapshot's release claims forward.
 - Database schema: 50 in deployed production and the fallback.
 
 Golden-journey receipts stay bound to that `0.208.1` root until rebound. The
-running sealed sibling is Friday `0.208.28` at
-`71833028e735e94b9020a1aa2a92c97ca141f0bf` (tree-file
-`ec18064695bd5116c052539907721e7e8c188535c26feb8c23575d36479a38d9`, wheel
-`f81cce01960bf1508eaa673e3076469197e0f479cd5cf5db9506f15c041c98fe`, journal
-`clear`, predecessor `0.208.27` /
-`e5a25c4a9b988f5f4959b3c69eca4358a0bb6770`). Trusted-CA health reports
-`version=0.208.28`. S3: `requested_mode=shadow`, `effective_mode=shadow`,
-`promotion_admitted=false`, `activation.reason=default_off`. Advice
-stays off until a genuine eligible witness; do not fabricate traffic.
-Do not re-activate `71833028` or `e5a25c4a`. Next product sibling that
-changes friday sources is `shadow_to_assist`. N1 Telegram surfaces and
+running sealed sibling is Friday `0.208.51` at
+`1b01a59ceb59180abbff9ab4cc48453a770db652` (tree-file
+`10f4be3b6d5d1667ef09ded4b7ebb56f89c26552e26e9e11e93fab767cf5bd6d`, wheel
+`426695fc04df01870e55f88d7a08aff6b0f34d8dac8f1b7cbeb165823db9cf5b`, journal
+`clear`, predecessor `0.208.50` /
+`705dbe20a664a449f00e23c45ab25921e82b607c`). Trusted-CA health reports
+`version=0.208.51`. S3 consumed witness landed 2026-09-06T05:25Z on
+live assist (user `msg_d145ce5796b54ae1`, assistant
+`msg_df97d09e4d2b4a2f`, graph `graph_866d37c2794dcc1a`). Compact health
+after the turn is `requested_mode=assist`, `effective_mode=off`
+(`material_loaded_not_accepted`), `invoked_total=1`,
+`publication_total=1`, `event_success_total=1`,
+`last_promotion_reason=admitted`. Do not re-activate `1b01a59c` or
+`705dbe20`. Next product sibling that changes friday sources is
+`assist_to_shadow`. N1 Telegram surfaces and
 one-final-carrier packing remain live. N2 live `_web_research` plans a
 2–8 query public mission, executes complementary queries on
 fact-bearing public sources, and observes remaining N2 gates on the
@@ -57,10 +61,10 @@ archive extract, isolated untrusted `py_compile` / unittest,
 prompt-to-small-project, one-final `friday-source.zip` pack, digest
 and overwrite observation on extract, Coding Mode
 view/plan-gate/carrier, and upload-modification EMPTY observer remain
-live through `0.208.28`. Execute/run of uploaded programs stay
+live through `0.208.51`. Execute/run of uploaded programs stay
 fail-closed. This is not a safety certification. Upload-modification
 apply never rewrites uploaded project files. N4 store-backed mixed
-journeys remain live through `0.208.28`. N5 implementable seam
+journeys remain live through `0.208.51`. N5 implementable seam
 extract is closed, the maintainability ratchet remains standing.
 
 - Production: immutable activation `phase=clear`; backend and Telegram bridge
@@ -68,17 +72,13 @@ extract is closed, the maintainability ratchet remains standing.
   `review_required` and grants no apply/delete authority. V12 `canary_ready`
   with verified, installation and effective context all exactly `40960`.
 - Secondary: accepted/live GPT-OSS profile `gptoss20b-2335df…`; after the
-  `0.208.28` cutover `state=cooldown`, `mode=assist`,
-  `available=false` until Friday's process-epoch health window is
-  fresh. `0.208.28` retries the detached startup probe once after
-  cooldown so a live laptop is visible without waiting for the next
-  activate. `/api/health` `cooldown` is the in-process circuit, not
-  laptop Docker liveness; laptop-local generation does not refresh
-  that window. Compact health still hides `circuit_retry_after_sec`
-  and `last_failure`; use `GET /api/admin/diagnostics`. Supervisor
-  advice stays off until a genuine eligible current-file-plus-public-web
-  consumed witness; no traffic is fabricated. Primary-only behavior is
-  preserved when the laptop is absent.
+  `0.208.51` cutover `state=healthy`, `mode=assist`,
+  `available=false`, supervisor `closed_reason=admitted`. `/api/health`
+  `cooldown` is the in-process circuit, not laptop Docker liveness.
+  Compact health still hides `circuit_retry_after_sec` and
+  `last_failure`; use `GET /api/admin/diagnostics`. S3 consumed
+  witness exists; do not fabricate additional traffic. Primary-only
+  behavior is preserved when the laptop is absent.
 - The reader-first body-free document-passage contour is fully converged: 1,720
   current parents and 16,359 child passages, with no pending v3 backfill. The two
   formerly invalid sparse-text v2 sources were repaired by the released v3
@@ -95,11 +95,12 @@ S4-R8 formal cutover is code-owned `accepted`: dialogue offers `archive_search`;
 `memory_search` / `source_search` / `message_search` remain internal. Exact
 window, temporal and graph lanes dispatch through that facade; a generic
 continuation cannot mint a fresh exact selector. S3 assist-controller is
-deployed; advice remains off until the observation-bound witness. S5 40k lease
+deployed; the observation-bound consumed witness landed on live
+`0.208.51` assist. S5 40k lease
 and S6 recovery/browse paths stay live.
 
 The live product queue is N1–N5. The shared operation-progress contract is
-live. Production `0.208.28` keeps ordinary Telegram `/chat` status,
+live. Production `0.208.51` keeps ordinary Telegram `/chat` status,
 Engineer status, file-album DOCUMENT status, Engineer FILE/ARCHIVE
 carrier, observed web/archive chat status, one-final-carrier packing,
 owner-private `/coding` static inspect, isolated-worker boundary,
@@ -112,8 +113,8 @@ view/plan-gate/carrier, upload-modification EMPTY observer, live
 re-probe after cooldown. Execute/run of uploaded programs stay
 fail-closed. This is not a safety certification.
 Upload-modification apply never rewrites uploaded project files.
-Gemini parity is not claimed. S3 advice stays off until a genuine
-eligible witness. N5 ratchet stays standing. Physical Android, P0H
+Gemini parity is not claimed; it stays parked in Pandora. S3 consumed
+witness is closed on live `0.208.51`. N5 ratchet stays standing. Physical Android, P0H
 deletion, off-machine mirror and provider-credential rotation remain
 owner-parked.
 
@@ -402,8 +403,11 @@ attachment traffic was inserted into the live owner conversation.
 
 Status: readiness and authenticated bounded-advisor path deployed in `0.207.71`;
 on-demand runtime admission refresh deployed in `0.207.82`; assist-controller
-cutover deployed in `0.208.11`. Advice remains observation-bound: requested
-assist, effective off, `promotion_admitted=false`.
+cutover deployed in `0.208.11`. Observation-bound consumed witness landed
+2026-09-06T05:25Z on live `0.208.51` assist. Compact health after that
+turn is `requested_mode=assist`, `effective_mode=off`
+(`material_loaded_not_accepted`); that is process-epoch compact, not a
+missing witness.
 
 - Keep the primary as sole tool caller, effect owner and publisher. Secondary
   and Semantic Supervisor receive the shared turn contract and return bounded
@@ -421,23 +425,20 @@ clear and two clean wheels were byte-identical. Immutable activation retained
 schema 46 and the distinct schema-capable fallback, created verified
 SQLite/inbox/Obsidian/Engineer recovery receipts and ended `clear`; signed
 private-owner identity returned `200`. A real consumed representative-window
-witness is still absent, so assist correctly remains off instead of trusting a
-file, prompt claim or fabricated observation.
-
-Remaining promotion work is observation-bound, not implementation-bound.
-The `0.208.11` controller consume is done; `promotion_admitted` still requires
-a genuine eligible current-file-plus-public-web consumed witness. Do not
-fabricate traffic. Assist still does not change the sealed query, does not
-own synthesis, and does not expand into coding or research until this
-journey demonstrates non-regressive value.
+witness now exists on live `0.208.51` (see Closed on production `0.208.51`).
+Do not fabricate additional traffic. Assist still does not change the sealed
+query, does not own synthesis, and does not expand into coding or research
+as a new journey. Honest residual of that witness is `partial_evidence`
+(`web_source_truncated`, `local_context_truncated`) — an audit finding,
+not an S3 reopen.
 
 The primary keeps files local and sends only an independent sealed public-web
 topic. Current files (one or several), a restored prior file, and an unused
 current upload no longer veto an independent public-web clause. Same-sentence
 summarize without a sealable public topic stays local and skips web instead of
 refusing the whole turn. File-as-query and leftover file nouns still fail
-closed for the outbound query. Advice stays off until a genuine consumed
-representative-window witness exists.
+closed for the outbound query. The genuine consumed representative-window
+witness exists; do not fabricate additional traffic.
 
 Demand-refresh acceptance: every static eligibility, evidence, actor and
 capability gate is evaluated before secondary traffic; only a genuine eligible
@@ -815,16 +816,18 @@ checks.
 ### N0 — Post-backlog baseline reconciliation
 
 Status: live identity reconciled 2026-09-04. Production, `main` and the
-sealed sibling are `0.208.11` / `6b61987a`. S3 assist-controller consume is
-done. Remaining N0 row is the observation-bound promotion witness, which
-stays in Owner/external and must not block N1.
+sealed sibling were `0.208.11` / `6b61987a` at that reconciliation. S3
+assist-controller consume is done. The observation-bound promotion
+witness closed on live `0.208.51` (2026-09-06T05:25Z). N0 does not
+block N1.
 
 - [x] Reconcile source candidate, production, fallback, journals and evidence.
 - [x] Deploy or explicitly supersede the `0.208.2`–`0.208.10` candidate chain.
 - [x] Record exact live identity in this register (`0.208.11`, schema 50,
       predecessor `0.208.10`, activation `clear`).
-- [ ] S3 advice on a genuine eligible turn — observation-bound, not an
-      implementation package. Do not fabricate traffic.
+- [x] S3 advice on a genuine eligible turn — observation-bound consumed
+      witness on live `0.208.51` assist, 2026-09-06T05:25Z. Independent
+      classification, not owner appearance. Do not fabricate traffic.
 
 ### N1 — Universal Operation Progress and Two-Message UX
 
@@ -1131,8 +1134,10 @@ checkbox is closed on `0.208.25`; this chapter stays in force.
 
 ## Owner/external actions
 
-- S3 Supervisor promotion remains observation-bound: one genuine eligible
-  current-file-plus-public-web consumed witness. Do not fabricate traffic.
+- S3 consumed witness is closed on live `0.208.51`. Remaining owner-end
+  is the Pandora box (P0H apply/delete, Android/Obsidian device,
+  off-machine backup, provider-credential rotation). Gemini parity
+  stays parked inside Pandora, visible as parked, not `[x]`.
 
 ## Standing lead-architect checklist
 
@@ -1154,7 +1159,8 @@ checklist elsewhere. The Ctrl+T view is a compact projection of this list.
 - [x] S5 measured cognition and exact 40k lease
 - [x] S6-R0..R4 mission/reminder/Telegram recovery, browse-to-document, journey evidence
 - [x] S3 assist-controller cutover on `0.208.11` (`requested=assist`,
-      `effective=off` until the consumed witness)
+      `effective=off` until the consumed witness; witness later closed
+      on live `0.208.51`)
 - [x] N0 identity reconciliation: `main` = production = `6b61987a` /
       `0.208.11`; candidate chain `0.208.2`–`0.208.10` superseded
 
@@ -1288,10 +1294,65 @@ checklist elsewhere. The Ctrl+T view is a compact projection of this list.
       `shadow_to_assist`. Compact `/api/health` `cooldown` remains the
       in-process circuit, not laptop Docker liveness.
 
+### Closed on production `0.208.51`
+
+- [x] S3 Supervisor advice on a genuine eligible current-file-plus-public-web
+      Telegram turn. Independent classification of live `0.208.51` assist
+      2026-09-06T05:25Z: user `msg_d145ce5796b54ae1`, assistant
+      `msg_df97d09e4d2b4a2f` (2452 chars, not the canned 58-char
+      `step_failed`), graph `graph_866d37c2794dcc1a`. Canonical file
+      sha256 `d8b64d6c1152058e715d9d0f13f7e16f5c0887c4bd506f9d223697c98a93f42b`,
+      caption 73 chars / 134 UTF-8. `answer_mode=semantic_supervisor_assist`,
+      plan `82d3ddce1177e39c43f40f70bb07ab4fcd891f8af5641653bca9c65ecf291f8b`
+      admitted, `read_current_file` complete+verified,
+      `read_current_web` complete+verified, `primary_synthesis`
+      partial+verified, graph `partial_evidence`
+      (`web_source_truncated`, `local_context_truncated`).
+      `verified=true`, `verification.status=passed`, `score=1.0`,
+      citations `[F1] [W1] [W2] [W3]`. Controller compact health:
+      `invoked_total=1`, `publication_total=1`,
+      `event_success_total=1`, `last_promotion_reason=admitted`,
+      `fallback_total=0`. Owner appearance is not this close.
+      Live identity `1b01a59ceb59180abbff9ab4cc48453a770db652`
+      (tree-file
+      `10f4be3b6d5d1667ef09ded4b7ebb56f89c26552e26e9e11e93fab767cf5bd6d`,
+      wheel
+      `426695fc04df01870e55f88d7a08aff6b0f34d8dac8f1b7cbeb165823db9cf5b`),
+      predecessor `0.208.50` /
+      `705dbe20a664a449f00e23c45ab25921e82b607c`, journal `clear`,
+      DR index_revision 252. Do not re-activate `1b01a59c` or
+      `705dbe20`. Next product sibling that changes friday sources is
+      `assist_to_shadow`. Honest residual `partial_evidence` stays an
+      audit finding, not an S3 reopen.
+
+Decision chain of this attempt (body-free; this is the success-path
+record the owner required in the audit commit, not a failure dump):
+
+1. `0.208.47` 02:54Z (`msg_0f4fe2d233b44903` /
+   `msg_dcae55874ecc4762`): `plan_not_admitted`,
+   `answer_mode=general_conversation`. GPT-OSS invented a
+   length-legal `manifest_id`; parser/policy fail-closed.
+2. Pin owned `manifest_id` + `budget_sha256` as schema enum.
+   Product `0.208.48` (`f7e74e9a` / dense `34b3cdbc`); extra-hop
+   `0.208.49` (`86f94cc5`).
+3. `0.208.49` 04:06Z (`msg_889d6a8978dc4da0` /
+   `msg_ad5db81a23e745a5` / `graph_65a66eeeffd06bf7`): plan
+   admitted, file+web complete+verified, `_validate_answer`
+   `_AnswerRejected(code=citation_labels)` after a 506-token
+   `stop`, canned 58-char `step_failed`.
+4. Local repro of that reject class. Product `0.208.50`
+   (`ce6b0a49` / dense `705dbe20`, `assist_to_shadow`); extra-hop
+   `0.208.51` (`1b01a59c`, `shadow_to_assist`).
+5. `0.208.51` 05:25Z consume witness above. Independent
+   classification, not owner appearance. S3 `[x]`. Gemini stays
+   parked in Pandora. Remaining owner-end: Pandora.
+
 ### Open and implementable
 
 No closeable product sibling remains without owner. Do not extra-hop.
-Do not invent a Luna packet. Do not fabricate S3 traffic.
+Do not fabricate S3 traffic. Owner-ordered total audit of Friday with
+Luna-1 and Luna-2 (especially S3) is in force; findings land only here.
+Do not invent busywork outside that audit.
 
 ### Open and blocked
 
@@ -1300,15 +1361,14 @@ Do not invent a Luna packet. Do not fabricate S3 traffic.
       Owner-parked into Pandora 2026-09-05 (P0W cancelled; no Google billing;
       Gemini API Search grounding unavailable). Evidence:
       `handoffs/SolGoodman/P0W-CANCELLED-BY-USER-001.md`. Not `[x]`.
-- [ ] S3 Supervisor advice on live turns — observation-bound. Need a genuine
-      eligible current-file-plus-public-web consumed witness. Do not
-      fabricate traffic.
 
 ### Operating invariants (never "done", always in force)
 
 - Keep deployed P0/P1 paths green; do not expand `EngineerWorkItem v1`.
-- Keep S3 advice off until the exact production witness exists. The
-  assist-controller may already be requested; that is not promotion.
+- S3 consumed witness exists on live `0.208.51`. Do not fabricate
+  additional S3 traffic. Compact health after a turn may still show
+  `effective=off` (`material_loaded_not_accepted`); that is not a
+  missing witness.
 - Primary-only path when the laptop/secondary is absent.
 - One turn / one effect owner / one final publisher. No new orchestrator.
 - Do not use Docker to certify primary Friday.
