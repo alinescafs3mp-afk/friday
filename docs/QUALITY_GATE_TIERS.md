@@ -21,6 +21,16 @@ Exact host nodes require the provisioned Ubuntu 26.04 release host with package-
 `/usr/bin/{printf,yes,sleep,true,test}`. The controller observes this fixed contour;
 it never installs packages, loads policy or weakens global userns hardening.
 
+The public Ubuntu 24.04 workflow installs package-owned Bubblewrap before
+collection, loads the unmodified `apparmor-profiles` package's restrictive
+`bwrap-userns-restrict` policy, and checks the enforced child profile stack with
+an unprivileged, network-isolated smoke probe. Existing
+Coding native probe/compilation cases remain in `change`; they are not skipped
+or moved to an operator-only tier. No global user-namespace or AppArmor setting
+is disabled. This hosted preparation does not attest the Ubuntu 26.04 release
+contour above. A failing gate retains its console log as an Actions artifact;
+`pipefail` preserves failure and the canonical summary is still success-only.
+
 `exact-release` always executes both its `change` and exact buckets. It cannot import
 a prior summary or receipt as proof that either bucket ran. Diagnostic `--phase` and
 `--dry-run` selections are not tier evidence.
@@ -123,6 +133,13 @@ undeclared functions fail.
 ## Evidence and measurement
 
 Controller success creates `quality-gate-summary.json` in the requested directory.
+The logging-privacy sweep uses unique source-relative module IDs, rather than
+ambiguous basenames. Its focused regression checks the actual parametrization
+against the closed inventory, so adding a Friday source module also requires an
+explicit inventory update. Run authoritative maintenance on the pinned Python
+3.14 toolchain: a 3.13 collection lacks two Unicode-derived cases and must not
+replace their 3.14 declarations.
+
 The canonical summary binds candidate/base/tier, inventory digest, wheel digest,
 the full classified partition, exact executed node durations, wall and CPU time,
 peak RSS, peak scratch bytes, retries and worker topology. Failed, errored or skipped

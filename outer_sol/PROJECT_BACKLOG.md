@@ -465,6 +465,36 @@ acceptance, independent review and exact-host/native/UI release certification.
 Generated edits explicitly remain unexecuted and `verified=false`; do not call
 this a passing program, a completed N3 milestone, or a safe executable.
 
+### C8 — repair hosted CI prerequisites and source-sweep inventory
+
+Status: source/CI correction on the C7 tree `8e34e49a5e2dbd23667147f2c2890eb359cc062c`.
+Not independent acceptance, release certification or production activation.
+
+- The C6 hosted log failed at the closed collection: the journal privacy sweep
+  expected 503 modules but current source has 506. This is distinct from the
+  missing Bubblewrap observed in the author environment. Use source-relative
+  test IDs so repeated module basenames cannot renumber unrelated cases.
+- Add a focused regression against the real sweep parametrization. It fails
+  on the stale declaration and passes after the explicit inventory correction.
+  Preserve every existing function, tier, policy, resource allowance and both
+  Python-3.14 Unicode-derived cases. No runtime inventory regeneration in CI.
+- Hosted smoke reproduced a second prerequisite: Bubblewrap alone hits
+  `Failed RTM_NEWADDR: Operation not permitted`. Load the distribution's
+  package-verified restrictive AppArmor profile, confirm userns hardening stays
+  enabled and verify the enforced child stack as the ordinary runner.
+  Keep the existing Coding native cases in the change tier. Do not disable
+  AppArmor/userns hardening, run test payloads as root, or grant shared networking.
+- Preserve failing gate console output with an always-run artifact upload;
+  pipefail keeps nonzero status. Failure logs are diagnostics, never a passing
+  summary or a substitute for the exact-host release evidence.
+
+Local Python 3.13 author checkpoint: 562 of 563 selected inventory, controller
+and journal cases pass; the retained exact-host case requires provisioned Ubuntu
+26.04 and fails here. The complete local collection also lacks the two expected
+Python-3.14 Unicode cases; their declarations are deliberately retained. Hosted
+remeasurement, independent review and exact-release/native acceptance are separate.
+No product source, version, schema, Pandora content or production state changes.
+
 ### P0G — canonical Gate Diet
 
 Status: complete on `main` through implementation head

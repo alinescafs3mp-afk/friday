@@ -81,7 +81,7 @@ def _mentions_human_text(node: ast.AST) -> str:
     return ""
 
 
-@pytest.mark.parametrize("path", sorted(ROOT.rglob("*.py")), ids=lambda p: str(p.name))
+@pytest.mark.parametrize("path", sorted(ROOT.rglob("*.py")), ids=lambda p: p.relative_to(ROOT).as_posix())
 def test_no_module_logs_what_a_person_wrote(path):
     """Мутация: вернуть `LOGGER.info(..., message[:80])` — тест краснеет.
 
@@ -95,3 +95,23 @@ def test_no_module_logs_what_a_person_wrote(path):
         if name:
             offenders.append(f"{path.name}:{call.lineno} — в журнал уходит `{name}`")
     assert not offenders, "\n".join(offenders)
+
+
+def test_logging_sweep_inventory_covers_the_current_source_tree() -> None:
+    """New source modules must not silently stale the closed CI collection."""
+    from tools.quality_gate_inventory import GateInventory, load_inventory
+
+    function = f"tests/{pathlib.Path(__file__).name}::test_no_module_logs_what_a_person_wrote"
+    # Read the real parametrization, not a second maintained module list. Relative
+    # paths keep identically named modules distinct without pytest's renumbering.
+    marks = [
+        mark for mark in test_no_module_logs_what_a_person_wrote.pytestmark if mark.name == "parametrize"
+    ]
+    assert len(marks) == 1 and marks[0].args[0] == "path"
+    paths = tuple(marks[0].args[1])
+    assert paths == tuple(sorted(ROOT.rglob("*.py")))
+    nodeids = tuple(f"{function}[{marks[0].kwargs['ids'](path)}]" for path in paths)
+    assert len(nodeids) == len(set(nodeids))
+    rule = next(rule for rule in load_inventory().rules if rule.function_id == function)
+    assert (rule.tier, rule.execution_kind) == ("change", "unit")
+    assert len(GateInventory((rule,)).classify(nodeids)) == len(paths)

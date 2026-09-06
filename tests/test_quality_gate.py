@@ -526,6 +526,29 @@ def test_clean_workflow_pins_the_zero_skip_toolchain() -> None:
     assert "cancel-in-progress: false" in workflow and "fetch-depth: 0" in workflow
     assert "$(nproc) >= 4" in workflow and "--workers 4" in workflow and "--ui-workers 1" in workflow
     assert "8 * 1024 * 1024 * 1024" in workflow
+    provision = workflow.split("- name: Install Coding worker prerequisites\n", 1)[1].split("- name:", 1)[0]
+    assert "apt-get install --yes --no-install-recommends bubblewrap" in provision
+    assert "/usr/bin/timeout 15 /usr/bin/bwrap" in provision
+    assert "--unshare-all --unshare-user" in provision and "--disable-userns" in provision
+    assert "--cap-drop ALL" in provision and "-- /usr/bin/cat /proc/self/attr/current" in provision
+    assert "bubblewrap apparmor-profiles" in provision
+    assert "/usr/share/apparmor/extra-profiles/bwrap-userns-restrict" in provision
+    assert 'dpkg-query -S "$profile"' in provision and "dpkg --verify apparmor-profiles" in provision
+    assert '/usr/sbin/apparmor_parser --replace "$profile"' in provision
+    assert 'test "$profile_stack" = "bwrap//&unpriv_bwrap (enforce)"' in provision
+    assert provision.count('test "$(cat /proc/sys/kernel/apparmor_restrict_unprivileged_userns)" = 1') == 2
+    assert workflow.index("Install Coding worker prerequisites") < workflow.index(
+        "Run closed synthetic change gate"
+    )
+    assert not any(
+        value in workflow
+        for value in ("sysctl -w", "--share-net", "sudo /usr/bin/bwrap", "continue-on-error:")
+    )
+    gate = workflow.split("- name: Run closed synthetic change gate\n", 1)[1].split("- name:", 1)[0]
+    assert "set -euo pipefail" in gate and '2>&1 | tee "$RUNNER_TEMP/quality-gate.log"' in gate
+    upload = workflow.split("- name: Upload change-gate evidence\n", 1)[1]
+    assert "if: always()" in upload and "${{ runner.temp }}/quality-gate.log" in upload
+    assert "if-no-files-found: error" in upload
     assert all(
         value not in workflow
         for value in (

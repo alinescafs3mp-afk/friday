@@ -47,6 +47,30 @@ jobs:
           .venv/bin/python -m pip install --upgrade --constraint requirements-dev.lock pip setuptools wheel
           .venv/bin/python -m pip install --no-build-isolation --constraint requirements.lock --constraint requirements-dev.lock -e ".[dev,vectors]"
 
+      - name: Install Coding worker prerequisites
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends bubblewrap apparmor-profiles
+          test -x /usr/bin/bwrap
+          test -x /usr/bin/prlimit
+          # Load only the distribution's restrictive bwrap profile on this disposable VM.
+          profile=/usr/share/apparmor/extra-profiles/bwrap-userns-restrict
+          test -f "$profile" && test ! -L "$profile"
+          dpkg-query -S "$profile" | grep -Fx "apparmor-profiles: $profile"
+          test -z "$(sudo dpkg --verify apparmor-profiles)"
+          test "$(cat /sys/module/apparmor/parameters/enabled)" = Y
+          test "$(cat /proc/sys/kernel/apparmor_restrict_unprivileged_userns)" = 1
+          sudo /usr/sbin/apparmor_parser --replace "$profile"
+          # Probe as the ordinary runner, never as root or with shared namespaces.
+          profile_stack="$(/usr/bin/timeout 15 /usr/bin/bwrap \
+            --unshare-all --unshare-user --uid "$(id -u)" --gid "$(id -g)" \
+            --cap-drop ALL --disable-userns --die-with-parent --new-session \
+            --ro-bind /usr /usr --ro-bind-try /lib /lib --ro-bind-try /lib64 /lib64 \
+            --proc /proc --dev /dev -- /usr/bin/cat /proc/self/attr/current)"
+          test "$profile_stack" = "bwrap//&unpriv_bwrap (enforce)"
+          test "$(cat /proc/sys/kernel/apparmor_restrict_unprivileged_userns)" = 1
+
       - name: Install Playwright Chromium
         run: .venv/bin/python -m playwright install --with-deps chromium
 
@@ -73,13 +97,15 @@ jobs:
             --base-sha "$base_sha" \
             --evidence-dir "$evidence_dir" \
             --workers 4 \
-            --ui-workers 1
+            --ui-workers 1 2>&1 | tee "$RUNNER_TEMP/quality-gate.log"
 
       - name: Upload change-gate evidence
-        if: success()
+        if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: quality-change-${{ github.sha }}
-          path: ${{ runner.temp }}/quality-gate-evidence
+          path: |
+            ${{ runner.temp }}/quality-gate-evidence
+            ${{ runner.temp }}/quality-gate.log
           if-no-files-found: error
           retention-days: 14
