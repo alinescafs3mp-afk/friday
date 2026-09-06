@@ -544,7 +544,7 @@ def test_inventory_intent_does_not_hijack_a_document_content_question() -> None:
 
 
 def test_today_inventory_window_stops_at_local_now(settings, storage, monkeypatch) -> None:
-    runtime = AgentRuntime(settings, storage)
+    runtime = AgentRuntime(replace(settings, local_timezone="Europe/Moscow"), storage)
     fixed = datetime(2026, 8, 9, 12, 34, 56)
     monkeypatch.setattr(runtime, "_local_now", lambda: fixed)
     monkeypatch.setattr(runtime, "_local_today", lambda: fixed.date())
@@ -557,12 +557,58 @@ def test_today_inventory_window_stops_at_local_now(settings, storage, monkeypatc
     assert complete is False
 
 
+@pytest.mark.parametrize(
+    ("timezone_name", "since_prefix", "until_prefix"),
+    [
+        ("UTC", "2026-08-09T00:00:00", "2026-08-09T12:34:56"),
+        ("America/New_York", "2026-08-09T04:00:00", "2026-08-09T16:34:56"),
+        ("Pacific/Honolulu", "2026-08-09T10:00:00", "2026-08-09T22:34:56"),
+        ("Europe/Moscow", "2026-08-08T21:00:00", "2026-08-09T09:34:56"),
+    ],
+)
+def test_today_inventory_window_follows_configured_timezone_not_host(
+    settings,
+    storage,
+    monkeypatch,
+    timezone_name: str,
+    since_prefix: str,
+    until_prefix: str,
+) -> None:
+    runtime = AgentRuntime(replace(settings, local_timezone=timezone_name), storage)
+    fixed = datetime(2026, 8, 9, 12, 34, 56)
+    monkeypatch.setattr(runtime, "_local_now", lambda: fixed)
+    monkeypatch.setattr(runtime, "_local_today", lambda: fixed.date())
+
+    since, until, label, complete = runtime._closed_document_day_window("сегодня")  # noqa: SLF001
+
+    assert since.startswith(since_prefix)
+    assert until.startswith(until_prefix)
+    assert label == "2026-08-09 по состоянию на 12:34"
+    assert complete is False
+
+
+def test_closed_day_window_survives_spring_forward(settings, storage, monkeypatch) -> None:
+    runtime = AgentRuntime(replace(settings, local_timezone="America/New_York"), storage)
+    fixed = datetime(2026, 3, 10, 12, 0, 0)
+    monkeypatch.setattr(runtime, "_local_now", lambda: fixed)
+    monkeypatch.setattr(runtime, "_local_today", lambda: fixed.date())
+
+    since, until, label, complete = runtime._closed_document_day_window(  # noqa: SLF001
+        "Какие я документы 8 числа скидывал?"
+    )
+
+    assert since.startswith("2026-03-08T05:00:00")
+    assert until.startswith("2026-03-09T03:59:59.999999")
+    assert label == "2026-03-08"
+    assert complete is True
+
+
 def test_bare_day_of_month_inventory_resolves_the_latest_past_local_day(
     settings,
     storage,
     monkeypatch,
 ) -> None:
-    runtime = AgentRuntime(settings, storage)
+    runtime = AgentRuntime(replace(settings, local_timezone="Europe/Moscow"), storage)
     fixed = datetime(2026, 8, 17, 16, 25, 54)
     monkeypatch.setattr(runtime, "_local_now", lambda: fixed)
     monkeypatch.setattr(runtime, "_local_today", lambda: fixed.date())
@@ -586,7 +632,7 @@ async def test_live_wording_for_my_files_on_the_thirteenth_never_widens_to_all_t
     storage.ensure_user("alice", preset_key="owner", display_name="Owner")
     kernel = _InventoryKernel(person_name="Owner")
     runtime = AgentRuntime(
-        replace(settings, verify_answers=False),
+        replace(settings, verify_answers=False, local_timezone="Europe/Moscow"),
         storage,
         llm=_NeverModel(),
         kernel=kernel,

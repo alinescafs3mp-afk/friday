@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import json
 import re
+from dataclasses import replace
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -1415,7 +1416,7 @@ async def test_upcoming_today_excludes_elapsed_exact_times_but_keeps_all_day_row
             source="document:synthetic",
         )
 
-    kernel = ExecutionKernel(settings=settings)
+    kernel = ExecutionKernel(settings=replace(settings, local_timezone="Europe/Moscow"))
     kernel.storage = storage
     kernel.kg = object()  # type: ignore[assignment]
     kernel.web_surfer = object()  # type: ignore[assignment]

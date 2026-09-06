@@ -61,6 +61,9 @@ apply never rewrites uploaded project files. N4 store-backed mixed
 journeys remain live through `0.208.55`. N5 implementable seam
 extract is closed, the maintainability ratchet remains standing.
 
+- Database schema: 50. Live production, this source tree and the journal
+  fallback currently open schema 50. C11 did not change schema and is not a
+  deployed release. The historical receipt root below also recorded schema 50.
 - Production: immutable activation `phase=clear`; backend and Telegram bridge
   active; writer target `candidate`. Retention admission remains honestly
   `review_required` and grants no apply/delete authority. V12 `canary_ready`

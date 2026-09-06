@@ -326,7 +326,7 @@ async def test_six_turn_inventory_is_filled_by_handle_then_rerun_for_corrected_d
     _seed_people(storage)
     kernel = _ExactInventoryKernel()
     runtime = AgentRuntime(
-        replace(settings, verify_answers=False),
+        replace(settings, verify_answers=False, local_timezone="Europe/Moscow"),
         storage,
         llm=_NeverModel(),
         kernel=kernel,

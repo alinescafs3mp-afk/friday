@@ -306,6 +306,7 @@ def test_message_search_tool_scopes_to_actor(settings):
 
 
 def test_closed_message_windows_are_complete_chronological_and_before_current(settings):
+    settings = replace(settings, local_timezone="Europe/Moscow")
     storage = init_storage(settings)
     try:
         storage.ensure_user("alice", preset_key="user")
@@ -433,6 +434,7 @@ def test_closed_message_windows_are_complete_chronological_and_before_current(se
 
 @pytest.mark.asyncio
 async def test_exact_day_history_renders_96_of_96_without_model_variation(settings, monkeypatch) -> None:
+    settings = replace(settings, local_timezone="Europe/Moscow")
     storage = init_storage(settings)
     try:
         storage.ensure_user("alice", preset_key="user")
