@@ -571,6 +571,45 @@ def test_server_rejects_mixed_predecessor_mode_and_policy_identity(
         )
 
 
+def test_assist_issue_allows_historical_promoted_journey_from_prior_assist_epoch() -> None:
+    storage = _Storage()
+    _seed_shadow(storage)
+    prior = PromotedSupervisorProductObservation(
+        mode=SupervisorMode.ASSIST,
+        task_class=TaskClass.COMPARE_CURRENT_FILE_WITH_CURRENT_WEB,
+        eligibility=PromotedObservationEligibility.PROMOTED_JOURNEY,
+        primary_trace_sha256=canonical_sha256(_trace(0).to_payload()),
+        promotion_evidence_sha256=PRECURSOR,
+        execution_receipt_sha256=hashlib.sha256(b"prior-assist-receipt").hexdigest(),
+        supervisor_invoked=True,
+        user_visible_outcome=PromotedUserVisibleOutcome.NOT_EVALUATED,
+    )
+    storage.conn.execute(
+        "INSERT INTO runtime_events(id,event_type,payload) VALUES(?,?,?)",
+        (
+            "evt_prior_assist_0001",
+            SUPERVISOR_PROMOTED_PRODUCT_EVENT,
+            json.dumps(prior.payload()),
+        ),
+    )
+    storage.conn.commit()
+
+    request = _issue_request(storage, SupervisorMode.ASSIST)
+    assert request["baseline"]["sample"]["promoted_product_events"] == 1
+    assert request["baseline"]["product_windows"]["shadow_readiness"]["actual_promoted_execution"] is False
+
+    issue = issue_representative_window_attestation(
+        storage,
+        user_id="usr_owner",
+        request_value=request,
+        current_server_identity=_identity(),
+        now=NOW,
+    )
+    assert issue["status"] == "unused"
+    assert issue["server_attestation"]["target_mode"] == SupervisorMode.ASSIST.value
+    assert issue["server_attestation"]["observed_mode"] == SupervisorMode.SHADOW.value
+
+
 def test_candidate_cannot_self_attest_synthetic_drift_or_wrong_bindings() -> None:
     storage = _Storage()
     _seed_shadow(storage, count=0)

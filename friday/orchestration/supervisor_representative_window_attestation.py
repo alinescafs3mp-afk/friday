@@ -811,10 +811,15 @@ def _representative_window_facts(
     ):
         raise RepresentativeWindowAttestationError("shadow readiness window is not representative")
     if target_mode is SupervisorMode.ASSIST:
-        if precursor_assist_promotion_evidence_sha256 is not None or promoted != 0:
+        if precursor_assist_promotion_evidence_sha256 is not None:
             raise RepresentativeWindowAttestationError(
                 "assist readiness cannot claim promoted or precursor evidence"
             )
+        # sample.promoted_product_events may still list journeys from a previous
+        # live assist epoch. After assist_to_shadow those rows remain in the
+        # database; they must not block a later shadow→assist extra-hop.
+        # Current-window promoted execution still fails closed via
+        # shadow.actual_promoted_execution.
         return {
             "observed_mode": SupervisorMode.SHADOW.value,
             "sample_limit": limit,
