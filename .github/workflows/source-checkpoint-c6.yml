@@ -1,0 +1,36 @@
+name: C6 source checkpoint
+on:
+  push:
+    branches: [main]
+    paths: [.github/workflows/source-checkpoint-c6.yml]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  source:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - name: Export the exact integrated source and Git history
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          out="$RUNNER_TEMP/source-checkpoint"
+          mkdir -m 700 "$out"
+          git archive --format=tar 26076c10250b14cf8122f4d81e86cef8aa8f8804 > "$out/source.tar"
+          git bundle create "$out/source.bundle" HEAD
+          git rev-parse HEAD > "$out/commit.txt"
+          git rev-parse 26076c10250b14cf8122f4d81e86cef8aa8f8804^{tree} > "$out/tree.txt"
+          cd "$out"
+          sha256sum source.tar source.bundle > SHA256SUMS
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: friday-c5-source-${{ github.sha }}
+          path: ${{ runner.temp }}/source-checkpoint
+          if-no-files-found: error
+          retention-days: 7
