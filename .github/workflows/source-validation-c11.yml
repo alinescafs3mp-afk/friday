@@ -1,4 +1,4 @@
-name: C11 SQLite diagnostics
+name: C11 source validation
 on:
   push:
     branches: [main]
@@ -7,39 +7,191 @@ on:
 permissions:
   contents: read
 jobs:
-  diagnose:
+  validate:
     runs-on: ubuntu-24.04
-    timeout-minutes: 5
+    timeout-minutes: 20
+    permissions:
+      contents: write
     steps:
-      - name: Export the exact hosted SQLite runtime for isolated reproduction
-        shell: bash
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.14.4'
+      - name: Reconstruct exact checked source without branch publication
+        env:
+          GH_SOURCE_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           umask 077
-          out="$RUNNER_TEMP/c11-sqlite"
-          install -d -m 0700 "$out"
-          library=/usr/lib/x86_64-linux-gnu/libsqlite3.so.0
-          dpkg-query -S "$(readlink -f "$library")" > "$out/package.txt"
-          cp --dereference "$library" "$out/libsqlite3.so.0"
-          python3 - <<'PY' > "$out/identity.json"
-          import ctypes, json
-          lib = ctypes.CDLL('/usr/lib/x86_64-linux-gnu/libsqlite3.so.0')
-          lib.sqlite3_libversion.restype = ctypes.c_char_p
-          lib.sqlite3_sourceid.restype = ctypes.c_char_p
-          lib.sqlite3_compileoption_get.restype = ctypes.c_char_p
-          opts=[]
-          for i in range(1000):
-              value=lib.sqlite3_compileoption_get(i)
-              if value is None:
-                  break
-              opts.append(value.decode())
-          print(json.dumps({'version':lib.sqlite3_libversion().decode(), 'source_id':lib.sqlite3_sourceid().decode(), 'compile_options':opts},sort_keys=True))
+          install -d -m 0700 "$RUNNER_TEMP/c11-evidence"
+          python - <<'PY'
+          import base64, hashlib, json, os, subprocess, urllib.request
+          def git(*args, data=None):
+              return subprocess.check_output(['/usr/bin/git', *args], input=data)
+          repo = 'alinescafs3mp-afk/friday'
+          base = '394ac7e121ed0203724f41783760ca583d86d822'
+          workflow = '.github/workflows/source-validation-c11.yml'
+          if os.environ['GITHUB_REPOSITORY'] != repo or git('rev-parse', 'HEAD').decode().strip() != os.environ['GITHUB_SHA']:
+              raise SystemExit('source identity mismatch')
+          git('merge-base', '--is-ancestor', base, 'HEAD')
+          git('diff', '--exit-code', base, 'HEAD', '--', '.', ':(exclude)' + workflow)
+          request = urllib.request.Request(f'https://api.github.com/repos/{repo}/git/blobs/11ad5dfa473060a840689953be02360f3ed86440', headers={'Authorization': 'Bearer ' + os.environ['GH_SOURCE_TOKEN'], 'Accept': 'application/vnd.github+json'})
+          with urllib.request.urlopen(request, timeout=30) as response:
+              value = json.loads(response.read(32769))
+          if value.get('encoding') != 'base64' or value.get('size') != 13959:
+              raise SystemExit('invalid transport')
+          wire = base64.b64decode(''.join(value['content'].split()), validate=True)
+          if len(wire) != 13959 or hashlib.sha256(wire).hexdigest() != '8498f87d480ede074f327592d7e4e06508771e5ad465fdcbe6c49039afe050cf':
+              raise SystemExit('transport checksum mismatch')
+          # Remove exactly four transport-only header indents; verify canonical patch bytes.
+          if wire.count(b'\n diff --git ') != 4:
+              raise SystemExit('unexpected header transport')
+          patch = wire.replace(b'\n diff --git ', b'\ndiff --git ')
+          if len(patch) != 13955 or hashlib.sha256(patch).hexdigest() != '3ff18e48c456156d4377c3e9193ed21b556f9011aa805103cd43323a314618eb':
+              raise SystemExit('patch checksum mismatch')
+          git('apply', '--unidiff-zero', '--index', '--check', '-', data=patch)
+          git('apply', '--unidiff-zero', '--index', '-', data=patch)
+          git('rm', '--', workflow)
+          git('diff', '--cached', '--check')
+          if git('write-tree').decode().strip() != '02168eb181abf562784b34b23de37871af23e687':
+              raise SystemExit('candidate tree mismatch')
+          git('config', 'user.name', 'Friday source validation')
+          git('config', 'user.email', '41898282+github-actions[bot]@users.noreply.github.com')
+          git('commit', '-m', 'fix(storage): exact C11 source candidate; not a release')
           PY
-          cd "$out"
-          sha256sum libsqlite3.so.0 package.txt identity.json > SHA256SUMS
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+      - name: Install locked development dependencies
+        run: |
+          set -euo pipefail
+          python -m venv .venv
+          .venv/bin/python -m pip install --upgrade --constraint requirements-dev.lock pip setuptools wheel
+          .venv/bin/python -m pip install --no-build-isolation --constraint requirements.lock --constraint requirements-dev.lock -e '.[dev,vectors]'
+      - name: Reproduce the new regression against the unmodified C10 predicate
+        run: |
+          set -euo pipefail
+          .venv/bin/python - <<'PY'
+          import json, os, pathlib, sqlite3, subprocess, sys, xml.etree.ElementTree as ET
+          if sqlite3.sqlite_version != '3.45.1':
+              raise SystemExit('reproduction needs the original hosted SQLite runtime')
+          out = pathlib.Path(os.environ['RUNNER_TEMP']) / 'c11-evidence'
+          with sqlite3.connect(':memory:') as conn:
+              identity = {'python':sys.version.split()[0], 'sqlite':sqlite3.sqlite_version, 'sqlite_source_id':conn.execute('SELECT sqlite_source_id()').fetchone()[0]}
+          (out / 'runtime.json').write_text(json.dumps(identity, sort_keys=True) + '\n')
+          path = pathlib.Path('friday/storage/_privacy.py')
+          candidate = path.read_bytes()
+          try:
+              path.write_bytes(subprocess.check_output(['/usr/bin/git','show','394ac7e121ed0203724f41783760ca583d86d822:friday/storage/_privacy.py']))
+              with (out / 'before.log').open('wb') as log:
+                  result = subprocess.run([sys.executable,'-m','pytest','-q','-n','0','tests/test_private_material_carrier_boundaries.py::test_reviewed_replacement_is_visible_only_while_its_evidence_is_public','--junitxml='+str(out/'before.xml')],stdout=log,stderr=subprocess.STDOUT,timeout=90)
+              cases = list(ET.parse(out / 'before.xml').getroot().iter('testcase'))
+              if result.returncode != 1 or len(cases) != 1 or 'parser stack overflow' not in (out / 'before.xml').read_text():
+                  raise SystemExit('original regression was not reproduced')
+          finally:
+              path.write_bytes(candidate)
+          subprocess.run(['/usr/bin/git','diff','--exit-code'],check=True)
+          print('The original C10 predicate fails with parser stack overflow on SQLite 3.45.1.')
+          PY
+      - name: Static checks and exact full collection
+        run: |
+          set -euo pipefail
+          .venv/bin/python -m ruff check .
+          .venv/bin/python -m ruff format --check friday friday_host_agent friday_package_broker deploy/host-control tests tools
+          .venv/bin/python -m mypy friday friday_host_agent friday_package_broker deploy/host-control
+          .venv/bin/python -m bandit -q -r friday/storage/_privacy.py -lll
+          .venv/bin/python -I -B tools/quality_gate.py --inventory-collection "$RUNNER_TEMP/c11-evidence/all-tests.json" 2>&1 | tee "$RUNNER_TEMP/c11-evidence/collection.log"
+          .venv/bin/python -I -B tools/quality_gate_inventory.py --collection "$RUNNER_TEMP/c11-evidence/all-tests.json" --check
+          .venv/bin/python - <<'PY'
+          import os
+          from pathlib import Path
+          from tools.quality_gate_inventory import load_collection
+          if len(load_collection(Path(os.environ['RUNNER_TEMP'])/'c11-evidence/all-tests.json')) != 27122:
+              raise SystemExit('unexpected authoritative collection')
+          PY
+      - name: Run all affected graph and privacy modules
+        run: |
+          set -euo pipefail
+          .venv/bin/python -m pytest -q -n 4 \
+            tests/test_a_relation_that_ended_is_not_a_relation_that_never_was.py \
+            tests/test_audit_hardening.py tests/test_containers_browse.py \
+            tests/test_conversations_stay_private_in_a_shared_archive.py \
+            tests/test_demo_screens_tell_the_truth.py tests/test_entity_edits_are_reversible.py \
+            tests/test_entity_merge_can_be_undone.py tests/test_entity_merge_time_undo.py \
+            tests/test_entity_profile.py tests/test_entity_profile_does_not_block_other_users.py \
+            tests/test_entity_resolution.py tests/test_event_timeline.py \
+            tests/test_export_private_reminder_isolation.py tests/test_feedback_eval_private_dependency.py \
+            tests/test_graph_corroboration.py tests/test_graph_frontier_batching.py \
+            tests/test_graph_path_invariants.py tests/test_graph_runtime_log_privacy.py \
+            tests/test_graph_snapshot_reaches_agent.py tests/test_known_at_graph_http.py \
+            tests/test_memory_exact_internal.py tests/test_memory_exact_internal_adversarial.py \
+            tests/test_merge_history_privacy_closure.py tests/test_private_material_cache_integrity.py \
+            tests/test_private_material_carrier_boundaries.py tests/test_product_quality.py \
+            tests/test_relation_history_migration.py tests/test_relation_provenance.py \
+            tests/test_relation_transaction_time.py tests/test_retrieval_graph_snapshot.py \
+            tests/test_temporal_relational_gold_set.py \
+            tests/test_the_graph_answers_for_a_date_and_a_confidence.py \
+            tests/test_the_graph_answers_how_two_things_are_connected.py \
+            tests/test_the_neighbourhood_shows_the_same_fabric.py tests/test_time_is_a_first_class_fact.py \
+            tests/test_quality_gate_inventory.py \
+            --basetemp="$RUNNER_TEMP/c11-pytest" \
+            --junitxml="$RUNNER_TEMP/c11-evidence/after.xml" \
+            2>&1 | tee "$RUNNER_TEMP/c11-evidence/after.log"
+          .venv/bin/python - <<'PY'
+          import os, pathlib, xml.etree.ElementTree as ET
+          root = pathlib.Path(os.environ['RUNNER_TEMP'])/'c11-evidence'
+          cases = list(ET.parse(root/'after.xml').getroot().iter('testcase'))
+          if len(cases) != 949 or any(child.tag in {'skipped','failure','error'} for case in cases for child in case):
+              raise SystemExit('missing or nonpassing affected cases')
+          print('949/949 cases passed on unchanged SQLite 3.45.1.')
+          PY
+      - name: Preserve checked source and ordinary Git objects without moving refs
+        env:
+          GH_TREE_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          .venv/bin/python - <<'PY'
+          import hashlib, json, os, pathlib, subprocess, urllib.request
+          def git(*args):
+              return subprocess.check_output(['/usr/bin/git',*args]).decode()
+          base = '394ac7e121ed0203724f41783760ca583d86d822'
+          expected = '02168eb181abf562784b34b23de37871af23e687'
+          if git('rev-parse','HEAD^{tree}').strip() != expected:
+              raise SystemExit('checked tree changed')
+          git('diff','--exit-code')
+          git('diff','--cached','--exit-code')
+          out = pathlib.Path(os.environ['RUNNER_TEMP'])/'c11-evidence'
+          receipt = {'source_tree':expected,'candidate':git('rev-parse','HEAD').strip(),'trigger':os.environ['GITHUB_SHA'],'before_regression':'parser stack overflow','affected_cases_passed':949,'full_collection_nodes':27122,'full_change_gate':'not_attested','independent_review':'pending','production_deployed':False,'branch_updated':False}
+          (out/'source-tree.json').write_text(json.dumps(receipt,sort_keys=True)+'\n')
+          git('bundle','create',str(out/'source.bundle'),'HEAD')
+          sums=[]
+          for path in sorted(out.iterdir()):
+              if path.is_file():
+                  with path.open('rb') as stream:
+                      sums.append(hashlib.file_digest(stream,'sha256').hexdigest()+'  '+path.name+'\n')
+          (out/'SHA256SUMS').write_text(''.join(sums))
+          entries=[]
+          for path in git('diff','--name-only','--no-renames','-z',base,'HEAD').split('\0'):
+              if not path:
+                  continue
+              if path.startswith('.github/') or not git('ls-tree','HEAD','--',path).startswith('100644 blob '):
+                  raise SystemExit('unexpected source path or mode')
+              entries.append({'path':path,'mode':'100644','type':'blob','content':git('show','HEAD:'+path)})
+          if len(entries) != 5:
+              raise SystemExit('unexpected source set')
+          data=json.dumps({'base_tree':git('rev-parse',base+'^{tree}').strip(),'tree':entries},ensure_ascii=False).encode()
+          request=urllib.request.Request('https://api.github.com/repos/alinescafs3mp-afk/friday/git/trees',data=data,method='POST',headers={'Authorization':'Bearer '+os.environ['GH_TREE_TOKEN'],'Accept':'application/vnd.github+json','Content-Type':'application/json'})
+          with urllib.request.urlopen(request,timeout=90) as response:
+              value=json.load(response)
+          if value.get('sha') != expected:
+              raise SystemExit('stored tree differs')
+          print(json.dumps(receipt,sort_keys=True))
+          PY
+      - name: Preserve source and validation evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: c11-sqlite-${{ github.sha }}
-          path: ${{ runner.temp }}/c11-sqlite
+          name: c11-source-${{ github.sha }}
+          path: ${{ runner.temp }}/c11-evidence
           if-no-files-found: error
           retention-days: 7
