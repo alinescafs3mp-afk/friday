@@ -1,3 +1,23 @@
+## 0.208.52 — 2026-09-06
+
+### Publish file+web source ledger and keep dual-upstream projection
+
+- Distinct sealed candidate for `semantic_supervisor_assist_to_shadow` after
+  live 0.208.51. File+web still generates up to 768 tokens and still accepts
+  `finish_reason=stop` or `length` with no tool calls. Live V12 on 0.208.51
+  consumed the hamster comparison but the Telegram last hop had no
+  `Источники:` footer and a follow-up source question could not restore the
+  ledger. Assist now publishes `web_sources` from public citations, persists
+  `web_evidence_used` / `web_evidence_status` / `web_evidence_scope` /
+  `web_sources` on the durable comparison, and Telegram still links the
+  hostname when a title is empty. Web projection canonicalizes fragments
+  before policy, keeps duplicate-URL signals, and marks honest truncation.
+  Verifier reserve is 1× the prompt's single answer copy so a dual-upstream
+  partial projection is not truncated to make room for a second unused copy.
+  8192 stays 1328. Verifier reserve cap stays 5312. Post-synthesis acceptance
+  at 40960 stays 6640. SQLite remains at schema 50; exact `0.208.51` is the
+  predecessor and `0.207.90` the fallback.
+
 ## 0.208.51 — 2026-09-06
 
 ### No-product shadow_to_assist restore
