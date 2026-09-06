@@ -1,0 +1,45 @@
+name: C11 SQLite diagnostics
+on:
+  push:
+    branches: [main]
+    paths: [.github/workflows/source-validation-c11.yml]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  diagnose:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Export the exact hosted SQLite runtime for isolated reproduction
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          out="$RUNNER_TEMP/c11-sqlite"
+          install -d -m 0700 "$out"
+          library=/usr/lib/x86_64-linux-gnu/libsqlite3.so.0
+          dpkg-query -S "$(readlink -f "$library")" > "$out/package.txt"
+          cp --dereference "$library" "$out/libsqlite3.so.0"
+          python3 - <<'PY' > "$out/identity.json"
+          import ctypes, json
+          lib = ctypes.CDLL('/usr/lib/x86_64-linux-gnu/libsqlite3.so.0')
+          lib.sqlite3_libversion.restype = ctypes.c_char_p
+          lib.sqlite3_sourceid.restype = ctypes.c_char_p
+          lib.sqlite3_compileoption_get.restype = ctypes.c_char_p
+          opts=[]
+          for i in range(1000):
+              value=lib.sqlite3_compileoption_get(i)
+              if value is None:
+                  break
+              opts.append(value.decode())
+          print(json.dumps({'version':lib.sqlite3_libversion().decode(), 'source_id':lib.sqlite3_sourceid().decode(), 'compile_options':opts},sort_keys=True))
+          PY
+          cd "$out"
+          sha256sum libsqlite3.so.0 package.txt identity.json > SHA256SUMS
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: c11-sqlite-${{ github.sha }}
+          path: ${{ runner.temp }}/c11-sqlite
+          if-no-files-found: error
+          retention-days: 7
