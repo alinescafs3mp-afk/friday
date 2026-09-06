@@ -1,42 +1,91 @@
-name: Audit source snapshot
+name: C1 corrective source validation
 
 on:
   push:
     branches: [main]
     paths: [.github/workflows/audit-source-snapshot.yml]
-  workflow_dispatch:
 
 permissions:
   contents: read
 
 jobs:
-  source:
+  validate:
     runs-on: ubuntu-24.04
-    timeout-minutes: 15
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
+          fetch-depth: 0
           persist-credentials: false
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
         with:
-          python-version: "3.13.5"
-      - name: Export tracked public source and locked validation tools only
-        shell: bash
+          python-version: '3.14.4'
+      - name: Reconstruct exact candidate, removing temporary transport
         run: |
           set -euo pipefail
           umask 077
-          mkdir -m 700 "$RUNNER_TEMP/audit-source"
-          git archive --format=tar HEAD > "$RUNNER_TEMP/audit-source/source.tar"
-          git rev-parse HEAD > "$RUNNER_TEMP/audit-source/commit.txt"
-          git rev-parse HEAD^{tree} > "$RUNNER_TEMP/audit-source/tree.txt"
-          python -m pip download --only-binary=:all: \
-            --requirement requirements.lock --requirement requirements-dev.lock \
-            --dest "$RUNNER_TEMP/audit-source/wheels"
-          cd "$RUNNER_TEMP/audit-source"
-          sha256sum source.tar wheels/* > SHA256SUMS
+          mkdir -p "$RUNNER_TEMP/c1-evidence"
+          python .github/audit-c1.py prepare | tee "$RUNNER_TEMP/c1-evidence/identity.log"
+      - name: Install locked validation dependencies and native sandbox
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y bubblewrap
+          python -m venv .venv
+          .venv/bin/python -m pip install --upgrade --constraint requirements-dev.lock pip setuptools wheel
+          .venv/bin/python -m pip install --no-build-isolation --constraint requirements.lock --constraint requirements-dev.lock -e '.[dev,vectors]'
+      - name: Static checks and full inventory agreement
+        run: |
+          set -euo pipefail
+          .venv/bin/ruff check . > "$RUNNER_TEMP/c1-evidence/ruff.log"
+          .venv/bin/ruff format --check friday friday_host_agent friday_package_broker tests tools deploy/host-control > "$RUNNER_TEMP/c1-evidence/format.log"
+          .venv/bin/mypy friday friday_host_agent friday_package_broker deploy/host-control > "$RUNNER_TEMP/c1-evidence/mypy.log"
+          .venv/bin/bandit -r friday friday_host_agent friday_package_broker deploy/host-control -q --severity-level high > "$RUNNER_TEMP/c1-evidence/bandit.log" 2>&1
+          .venv/bin/python -I -B tools/quality_gate.py --inventory-collection "$RUNNER_TEMP/c1-evidence/collection.json" > "$RUNNER_TEMP/c1-evidence/collection.log" 2>&1
+          .venv/bin/python tools/quality_gate_inventory.py --check --collection "$RUNNER_TEMP/c1-evidence/collection.json" > "$RUNNER_TEMP/c1-evidence/inventory.log"
+      - name: Focused regressions including native bubblewrap
+        run: |
+          set -euo pipefail
+          .venv/bin/python -m pytest -o addopts= -n 4 --dist loadfile -q \
+            tests/test_coding_*.py \
+            tests/test_current_file_web_comparison.py tests/test_transient_web_comparison.py \
+            tests/test_supervisor_assist_graph_adapter.py tests/test_supervisor_assist_controller.py \
+            tests/test_supervisor_assist_production.py tests/test_supervisor_assist_ingress.py \
+            tests/test_orchestration_import_boundaries.py tests/test_audit_research_baseline_regressions.py \
+            tests/test_semantic_supervisor_production_baseline.py tests/test_semantic_supervisor_representative_window_attestation.py \
+            tests/test_v12_orchestration.py tests/test_v12_archive_router.py tests/test_v12_file_read_handler.py \
+            tests/test_v12_router_pending_durable.py tests/test_turn_context_router_supervisor_propagation.py \
+            tests/test_turn_context_outer_supervisor_propagation.py tests/test_web_search_filters.py \
+            tests/test_web_research_consumption.py tests/test_web_provider_policy.py tests/test_web_source_diversity.py \
+            --junitxml="$RUNNER_TEMP/c1-evidence/focused.xml" | tee "$RUNNER_TEMP/c1-evidence/focused.log"
+          python -c 'import os,xml.etree.ElementTree as E; r=E.parse(os.environ["RUNNER_TEMP"]+"/c1-evidence/focused.xml"); c=list(r.iter("testcase")); assert len(c)==1122 and all(x.find(t) is None for x in c for t in ("failure","error","skipped")), "incomplete focused evidence"'
+          git diff --exit-code
+          test "$(git write-tree)" = 20c58bdd0ee07fb0262d624af58f3e2ba24abbf9
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
+        with:
+          name: c1-validation-${{ github.sha }}
+          path: ${{ runner.temp }}/c1-evidence
+          if-no-files-found: error
+          retention-days: 7
+  tree:
+    needs: validate
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 2
+          persist-credentials: false
+      - name: Upload exact unreferenced tree only, never move main
+        env:
+          GH_TREE_TOKEN: ${{ github.token }}
+        run: python3 .github/audit-c1.py upload
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: audit-source-${{ github.sha }}
-          path: ${{ runner.temp }}/audit-source
+          name: c1-tree-${{ github.sha }}
+          path: ${{ runner.temp }}/c1-tree
           if-no-files-found: error
-          retention-days: 1
+          retention-days: 7
