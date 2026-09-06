@@ -1,3 +1,17 @@
+## 0.208.54 — 2026-09-06
+
+### Allow shadow→assist extra-hop after a prior assist epoch
+
+- Distinct sealed candidate after live 0.208.52. The unused 0.208.53 sibling
+  stays unused. The 0.208.51 consumed hamster left one
+  `semantic_supervisor.promoted_product` row; live 0.208.52 issue rejected
+  later `semantic_supervisor_shadow_to_assist` because
+  `promoted_product_events != 0`. Assist issue now keeps those historical
+  journeys in the sample and still fails closed on current-window promoted
+  execution via `actual_promoted_execution`. Lands in shadow so the live
+  issue path carries the fix before assist restore. SQLite remains at
+  schema 50; exact `0.208.52` is the predecessor and `0.207.90` the fallback.
+
 ## 0.208.53 — 2026-09-06
 
 ### No-product shadow_to_assist restore
