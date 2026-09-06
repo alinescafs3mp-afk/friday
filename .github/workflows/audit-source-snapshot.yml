@@ -30,9 +30,8 @@ jobs:
           git rev-parse HEAD > "$RUNNER_TEMP/audit-source/commit.txt"
           git rev-parse HEAD^{tree} > "$RUNNER_TEMP/audit-source/tree.txt"
           python -m pip download --only-binary=:all: \
-            --constraint requirements.lock --constraint requirements-dev.lock \
-            --dest "$RUNNER_TEMP/audit-source/wheels" \
-            ruff mcp pytest-xdist build mypy
+            --requirement requirements.lock --requirement requirements-dev.lock \
+            --dest "$RUNNER_TEMP/audit-source/wheels"
           cd "$RUNNER_TEMP/audit-source"
           sha256sum source.tar wheels/* > SHA256SUMS
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
