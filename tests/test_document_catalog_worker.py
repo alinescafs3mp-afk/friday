@@ -6,11 +6,13 @@ import asyncio
 import hashlib
 import inspect
 import logging
+import os
 import subprocess
 import sys
 import threading
 from collections.abc import Callable
 from dataclasses import replace
+from pathlib import Path
 
 import pytest
 
@@ -388,8 +390,15 @@ def test_catalog_worker_is_registered_immediately_with_a_short_timeout(settings)
 
 
 def test_worker_modules_import_in_a_clean_process_without_a_storage_cycle() -> None:
+    installed = os.environ.get("FRIDAY_QUALITY_GATE_INSTALLED_SITE")
+    root = Path(installed).resolve(strict=True) if installed else Path(__file__).resolve().parents[1]
+    code = "import importlib,sys;sys.path.insert(0,sys.argv[1]);importlib.import_module(sys.argv[2])"
     for module in ("friday.document_catalog.worker_state", "friday.account_deletion"):
-        subprocess.run([sys.executable, "-c", f"import {module}"], check=True)
+        subprocess.run(
+            [sys.executable, "-I", "-B", "-c", code, str(root), module],
+            check=True,
+            timeout=10,
+        )
 
 
 @pytest.mark.asyncio

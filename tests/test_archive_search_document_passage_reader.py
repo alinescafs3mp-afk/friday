@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -215,21 +216,25 @@ def _project_current(storage: Any, raw_id: str) -> None:
 
 def test_projection_contract_can_import_before_storage_reader_without_a_cycle() -> None:
     assert PASSAGE_INDEX_VERSION == LEGACY_DOCUMENT_PASSAGE_INDEX_VERSION
+    installed = os.environ.get("FRIDAY_QUALITY_GATE_INSTALLED_SITE")
+    root = Path(installed).resolve(strict=True) if installed else ROOT
     probe = """
-import friday.document_catalog.passage_projection as projection
-import friday.storage._archive_search_documents as reader
+import importlib, sys
+sys.path.insert(0, sys.argv[1])
+projection = importlib.import_module("friday.document_catalog.passage_projection")
+reader = importlib.import_module("friday.storage._archive_search_documents")
 assert projection.DOCUMENT_PASSAGE_INDEX_REVISION
-assert reader.PASSAGE_INDEX_VERSION == 'archive-storage-char-v1'
+assert reader.PASSAGE_INDEX_VERSION == "archive-storage-char-v1"
 assert reader.DOCUMENT_STORED_PASSAGE_INDEX_VERSION == (
-    'archive-storage-char-v2:document-chunk-spans-v3'
+    "archive-storage-char-v2:document-chunk-spans-v3"
 )
 """
     completed = subprocess.run(  # noqa: S603 - fixed interpreter and local import probe
-        [sys.executable, "-c", probe],
-        cwd=ROOT,
+        [sys.executable, "-I", "-B", "-c", probe, str(root)],
         check=False,
         capture_output=True,
         text=True,
+        timeout=10,
     )
     assert completed.returncode == 0, completed.stderr
 

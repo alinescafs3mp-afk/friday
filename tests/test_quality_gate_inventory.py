@@ -14,8 +14,9 @@ def test_checked_in_inventory_closes_semantics_tiers_parameters_and_host_boundar
     assert set(counts) == set(inventory.INVARIANT_CATALOG) and max(counts.values()) * 4 < len(value.rules)
     assert not any(word in key for key in counts for word in ("core", "default", "generic", "misc", "other"))
     # C1-C3 added 47 MiB to the historical 15,402 MiB; include the exact
-    # C4/C5 through C11 revision/model/privacy-fixture declarations as well. Keep a strict total.
-    assert sum(rule.scratch_mb for rule in value.rules if rule.tier != "nightly") == 16_527
+    # C4/C5 through C11 revision/model/privacy-fixture declarations as well.
+    # F.0/F.1 added four change-unit functions at 1 MiB each.
+    assert sum(rule.scratch_mb for rule in value.rules if rule.tier != "nightly") == 16_531
     assert nightly == {"tests/retrieval_benchmark/test_conversation_harness.py::test_manifest_is_one_closed_six_by_four_conversation_matrix", "tests/retrieval_benchmark/test_conversation_harness.py::test_second_offline_run_is_byte_identical_and_never_uses_network", "tests/retrieval_benchmark/test_document_harness.py::test_document_manifest_is_one_closed_five_class_corpus", "tests/retrieval_benchmark/test_document_harness.py::test_second_offline_document_run_is_byte_identical_and_network_forbidden", "tests/retrieval_benchmark/test_harness.py::test_ephemeral_manifest_has_at_least_twenty_cases_and_all_ten_classes", "tests/retrieval_benchmark/test_harness.py::test_two_offline_real_path_runs_are_byte_identical", "tests/test_obsidian_syncthing_live.py::test_pinned_syncthing_generates_and_accepts_the_managed_rest_contract", "tests/test_schema_migration_chain.py::test_every_real_backup_migrates_and_opens", "tests/test_windows_gateway_publish_recovery.py::test_native_powershell_projection_passes"}
     assert sum(rule.tier == "change" and any(name in rule.function_id for name in large) for rule in value.rules) == 27
     expected = {
