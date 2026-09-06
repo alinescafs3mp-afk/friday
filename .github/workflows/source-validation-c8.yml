@@ -1,0 +1,176 @@
+name: C8 source validation
+on:
+  push:
+    branches: [main]
+    paths: [.github/workflows/source-validation-c8.yml]
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: friday-c8-source-validation
+  cancel-in-progress: false
+jobs:
+  validate:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - name: Reconstruct exact candidate without publishing a branch
+        env:
+          GH_SOURCE_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          umask 077
+          install -d -m 0700 "$RUNNER_TEMP/c8-evidence"
+          python3 - <<'PY'
+          import base64, hashlib, json, os, subprocess, urllib.request
+          def git(*args, data=None):
+              return subprocess.check_output(['/usr/bin/git', *args], input=data)
+          repo = 'alinescafs3mp-afk/friday'
+          base = 'ac3d090b1487db3c320ab6af7ad986dbe342b2bf'
+          workflow = '.github/workflows/source-validation-c8.yml'
+          if os.environ['GITHUB_REPOSITORY'] != repo or git('rev-parse', 'HEAD').decode().strip() != os.environ['GITHUB_SHA']:
+              raise SystemExit('source identity mismatch')
+          git('merge-base', '--is-ancestor', base, 'HEAD')
+          git('diff', '--exit-code', base, 'HEAD', '--', '.', ':(exclude)' + workflow)
+          request = urllib.request.Request(
+              f'https://api.github.com/repos/{repo}/git/blobs/d8e1ee1787ab7632b98b6ea12217fc93481c6172',
+              headers={'Authorization': 'Bearer ' + os.environ['GH_SOURCE_TOKEN'], 'Accept': 'application/vnd.github+json'},
+          )
+          with urllib.request.urlopen(request, timeout=30) as response:
+              value = json.loads(response.read(32768))
+          if value.get('encoding') != 'base64' or value.get('size') != 8602:
+              raise SystemExit('unexpected patch packet')
+          patch = base64.b64decode(''.join(value['content'].split()), validate=True)
+          if len(patch) != 8602 or hashlib.sha256(patch).hexdigest() != '96eae46eb11d8a983c4b8678021a91c9c8239f1233b6cae2b4b378b149e4b4be':
+              raise SystemExit('patch checksum mismatch')
+          git('apply', '--unidiff-zero', '--index', '--check', '-', data=patch)
+          git('apply', '--unidiff-zero', '--index', '-', data=patch)
+          git('rm', '--', workflow)
+          git('diff', '--cached', '--check')
+          if git('write-tree').decode().strip() != '0dc810bb6b1e1bd2958ae5aff1d177367989360b':
+              raise SystemExit('candidate tree mismatch')
+          git('config', 'user.name', 'Friday source validation')
+          git('config', 'user.email', '41898282+github-actions[bot]@users.noreply.github.com')
+          git('commit', '-m', 'ci: exact C8 candidate; no release certification')
+          PY
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.14.4'
+      - name: Install locked development dependencies
+        run: |
+          set -euo pipefail
+          python -m venv .venv
+          .venv/bin/python -m pip install --upgrade --constraint requirements-dev.lock pip setuptools wheel
+          .venv/bin/python -m pip install --no-build-isolation --constraint requirements.lock --constraint requirements-dev.lock -e '.[dev,vectors]'
+      - name: Exercise the candidate hosted prerequisite block unchanged
+        run: |
+          set -euo pipefail
+          .venv/bin/python - <<'PY' 2>&1 | tee "$RUNNER_TEMP/c8-evidence/prerequisites.log"
+          import pathlib, subprocess, yaml
+          value = yaml.safe_load(pathlib.Path('.github/workflows/quality.yml').read_text())
+          steps = [step for step in value['jobs']['quality']['steps'] if step.get('name') == 'Install Coding worker prerequisites']
+          if len(steps) != 1:
+              raise SystemExit('missing unique prerequisite step')
+          subprocess.run(['/bin/bash', '-euo', 'pipefail', '-c', steps[0]['run']], check=True, timeout=300)
+          PY
+      - name: Static checks and exact Python 3.14 collection
+        run: |
+          set -euo pipefail
+          .venv/bin/python -m ruff check .
+          .venv/bin/python -m ruff format --check friday friday_host_agent friday_package_broker deploy/host-control tests tools
+          .venv/bin/python -m mypy friday friday_host_agent friday_package_broker deploy/host-control
+          .venv/bin/python -I -B tools/quality_gate.py --inventory-collection "$RUNNER_TEMP/c8-evidence/all-tests.json" 2>&1 | tee "$RUNNER_TEMP/c8-evidence/collection.log"
+          .venv/bin/python -I -B tools/quality_gate_inventory.py --collection "$RUNNER_TEMP/c8-evidence/all-tests.json" --check
+      - name: Run the affected change-tier cases including real Coding isolation
+        run: |
+          set -euo pipefail
+          .venv/bin/python - <<'PY' 2>&1 | tee "$RUNNER_TEMP/c8-evidence/focused.log"
+          import os, pathlib, sys, tempfile, xml.etree.ElementTree as ET
+          from tools import quality_gate as gate
+          from tools.quality_gate_inventory import load_collection, load_inventory
+          evidence = pathlib.Path(os.environ['RUNNER_TEMP']) / 'c8-evidence'
+          modules = ('tests/test_quality_gate.py', 'tests/test_quality_gate_inventory.py', 'tests/test_the_journal_does_not_read_the_conversation.py', 'tests/test_coding_isolated_loop.py', 'tests/test_coding_worker_spawn.py')
+          all_nodes = load_collection(evidence / 'all-tests.json')
+          classified = load_inventory().classify(all_nodes)
+          selected = tuple(node.nodeid for node in classified if node.tier == 'change' and node.module_path in modules)
+          if len(all_nodes) != 26956 or len(selected) != 588:
+              raise SystemExit('unexpected authoritative collection')
+          selection = evidence / 'selection.json'
+          gate._write_collection_manifest(str(selection), selected)
+          report = evidence / 'focused.xml'
+          completed = evidence / 'completed.json'
+          with tempfile.TemporaryDirectory(prefix='fq-c8-', dir='/var/tmp') as name:
+              scratch = pathlib.Path(name)
+              with gate._isolated_test_environment(scratch, prepare_schema_backups=False) as environment:
+                  command = gate._tier_pytest_command(name='C8 affected change-tier cases', python=sys.executable, environment=environment, report=report, collection=completed, selection=selection, modules=modules, workers=4, distribution='load', basetemp=scratch / 'pytest')
+                  result = gate.run_command(command)
+              if result:
+                  raise SystemExit(result)
+          gate.junit_summary(report)
+          cases = list(ET.parse(report).getroot().iter('testcase'))
+          if len(cases) != 588 or any(child.tag in {'skipped', 'failure', 'error'} for case in cases for child in case):
+              raise SystemExit('focused cases did not all pass')
+          if set(gate.collection_nodeids(completed)) != set(selected):
+              raise SystemExit('focused collection drift')
+          print('588/588 affected change-tier cases passed. Operator-only exact-host case remains separate.')
+          PY
+      - name: Store checked source objects without moving refs
+        env:
+          GH_TREE_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          .venv/bin/python - <<'PY'
+          import hashlib, json, os, pathlib, subprocess, urllib.request
+          def git(*args):
+              return subprocess.check_output(['/usr/bin/git', *args]).decode()
+          expected = '0dc810bb6b1e1bd2958ae5aff1d177367989360b'
+          if git('rev-parse', 'HEAD^{tree}').strip() != expected:
+              raise SystemExit('checked tree drifted')
+          git('diff', '--exit-code')
+          git('diff', '--cached', '--exit-code')
+          trigger = os.environ['GITHUB_SHA']
+          entries = []
+          for path in git('diff', '--name-only', '--no-renames', '-z', trigger, 'HEAD').split('\0'):
+              if not path:
+                  continue
+              row = git('ls-tree', 'HEAD', '--', path).strip()
+              entry = {'path': path, 'mode': '100644', 'type': 'blob'}
+              if row:
+                  if not row.startswith('100644 blob '):
+                      raise SystemExit('unexpected file mode')
+                  entry['content'] = git('show', 'HEAD:' + path)
+              else:
+                  entry['sha'] = None
+              entries.append(entry)
+          payload = json.dumps({'base_tree': git('rev-parse', trigger + '^{tree}').strip(), 'tree': entries}, ensure_ascii=False).encode()
+          request = urllib.request.Request('https://api.github.com/repos/alinescafs3mp-afk/friday/git/trees', data=payload, method='POST', headers={'Authorization': 'Bearer ' + os.environ['GH_TREE_TOKEN'], 'Accept': 'application/vnd.github+json', 'Content-Type': 'application/json'})
+          with urllib.request.urlopen(request, timeout=90) as response:
+              result = json.load(response)
+          if result.get('sha') != expected:
+              raise SystemExit('stored tree mismatch')
+          out = pathlib.Path(os.environ['RUNNER_TEMP']) / 'c8-evidence'
+          receipt = {'trigger': trigger, 'candidate': git('rev-parse', 'HEAD').strip(), 'source_tree': expected, 'python': sys_version if (sys_version := __import__('sys').version.split()[0]) else '', 'collection_nodes': 26956, 'focused_cases_passed': 588, 'canonical_full_change_gate': 'not_run', 'exact_release_gate': 'not_run', 'independent_review': 'pending', 'branch_updated': False, 'production_deployed': False}
+          (out / 'source-tree.json').write_text(json.dumps(receipt, sort_keys=True) + '\n')
+          git('bundle', 'create', str(out / 'source.bundle'), 'HEAD')
+          checksums = []
+          for path in sorted(out.iterdir()):
+              if path.is_file():
+                  with path.open('rb') as stream:
+                      checksums.append(hashlib.file_digest(stream, 'sha256').hexdigest() + '  ' + path.name + '\n')
+          (out / 'SHA256SUMS').write_text(''.join(checksums))
+          print(json.dumps(receipt, sort_keys=True))
+          PY
+      - name: Preserve validation evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: c8-source-${{ github.sha }}
+          path: ${{ runner.temp }}/c8-evidence
+          if-no-files-found: error
+          retention-days: 7
