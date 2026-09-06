@@ -683,7 +683,11 @@ def build_supervisor_request(
         effect_class=EffectClass.NONE,
         modality=ModelModality.TEXT,
         require_structured_output=True,
-        structured_output_schema=supervisor_proposal_json_schema(task_class=task),
+        structured_output_schema=supervisor_proposal_json_schema(
+            task_class=task,
+            manifest_id=supervisor_input.manifest.manifest_id,
+            budget_sha256=supervisor_input.budgets.canonical_sha256(),
+        ),
         require_independent_model=True,
         contains_private_text=True,
     )

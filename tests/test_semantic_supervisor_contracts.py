@@ -47,6 +47,7 @@ from friday.orchestration.supervisor_contracts import (
     SupervisorProposal,
     TaskClass,
     canonical_sha256,
+    supervisor_proposal_json_schema,
 )
 from friday.orchestration.supervisor_observation import SupervisorSkipReason
 from friday.orchestration.supervisor_plan_authority import (
@@ -936,6 +937,8 @@ def test_supervisor_messages_keep_untrusted_user_text_out_of_policy() -> None:
     schema = request.structured_output_schema
     assert schema is not None
     assert schema["properties"]["task_class"]["enum"] == ["compare_current_file_with_current_web"]
+    assert schema["properties"]["manifest_id"]["enum"] == [supervisor_input.manifest.manifest_id]
+    assert schema["properties"]["budget_sha256"]["enum"] == [supervisor_input.budgets.canonical_sha256()]
     assert schema["properties"]["steps"]["minItems"] == 3
     assert schema["properties"]["steps"]["maxItems"] == 3
     assert sum(len(item["content"].encode("utf-8")) for item in request.messages) < 3_100
@@ -949,6 +952,27 @@ def test_supervisor_messages_keep_untrusted_user_text_out_of_policy() -> None:
     )
     assert payload["max_tokens"] == 512
     assert payload["response_format"]["type"] == "json_schema"
+
+
+def test_proposal_schema_pins_owned_identity_digests_and_rejects_invented_ids() -> None:
+    unpinned = supervisor_proposal_json_schema()
+    assert "enum" not in unpinned["properties"]["manifest_id"]
+    assert "enum" not in unpinned["properties"]["budget_sha256"]
+    assert unpinned["properties"]["manifest_id"]["minLength"] == 71
+    assert unpinned["properties"]["budget_sha256"]["minLength"] == 64
+
+    supervisor_input = build_supervisor_input(_compare_turn(), _settings())
+    pinned = supervisor_proposal_json_schema(
+        task_class=TaskClass.COMPARE_CURRENT_FILE_WITH_CURRENT_WEB,
+        manifest_id=supervisor_input.manifest.manifest_id,
+        budget_sha256=supervisor_input.budgets.canonical_sha256(),
+    )
+    assert pinned["properties"]["manifest_id"]["enum"] == [supervisor_input.manifest.manifest_id]
+    assert pinned["properties"]["budget_sha256"]["enum"] == [supervisor_input.budgets.canonical_sha256()]
+    with pytest.raises(SupervisorContractError, match="manifest_id must be a lowercase SHA-256 digest"):
+        supervisor_proposal_json_schema(manifest_id="not-a-digest")
+    with pytest.raises(SupervisorContractError, match="manifest_id must be a lowercase SHA-256 digest"):
+        supervisor_proposal_json_schema(budget_sha256="sha256:not-a-digest")
 
 
 def test_assist_proposal_transport_and_kernel_bind_the_distinct_v2_policy() -> None:

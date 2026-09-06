@@ -1163,7 +1163,28 @@ def _required_completion_criteria(task_class: TaskClass) -> tuple[CompletionCrit
     raise SupervisorContractError("task_class has no admitted P1 proposal grammar")
 
 
-def supervisor_proposal_json_schema(*, task_class: TaskClass | None = None) -> dict[str, Any]:
+def _pinned_identity_schema(value: str | None, *, prefixed: bool) -> dict[str, Any]:
+    """Length-only identity grammar, or one exact digest when the request already owns it."""
+
+    if value is None:
+        size = 71 if prefixed else 64
+        return {"type": "string", "minLength": size, "maxLength": size}
+    digest = _manifest_digest_hex(value)
+    pinned = format_manifest_id(digest) if prefixed else digest
+    return {
+        "type": "string",
+        "minLength": len(pinned),
+        "maxLength": len(pinned),
+        "enum": [pinned],
+    }
+
+
+def supervisor_proposal_json_schema(
+    *,
+    task_class: TaskClass | None = None,
+    manifest_id: str | None = None,
+    budget_sha256: str | None = None,
+) -> dict[str, Any]:
     """Compact grammar for the accepted GPT-OSS structured-output transport."""
 
     admitted_task_classes = (
@@ -1197,8 +1218,8 @@ def supervisor_proposal_json_schema(*, task_class: TaskClass | None = None) -> d
         ],
         "properties": {
             "schema": {"type": "string", "enum": [SUPERVISOR_PROPOSAL_SCHEMA]},
-            "manifest_id": {"type": "string", "minLength": 71, "maxLength": 71},
-            "budget_sha256": {"type": "string", "minLength": 64, "maxLength": 64},
+            "manifest_id": _pinned_identity_schema(manifest_id, prefixed=True),
+            "budget_sha256": _pinned_identity_schema(budget_sha256, prefixed=False),
             "task_class": {"type": "string", "enum": admitted_task_classes},
             "goal": {"type": "string", "minLength": 1, "maxLength": _MAX_GOAL_CHARS},
             "continuation_decision": {

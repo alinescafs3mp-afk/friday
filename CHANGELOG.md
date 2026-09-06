@@ -1,3 +1,16 @@
+## 0.208.48 — 2026-09-06
+
+### Pin supervisor proposal identity digests in the JSON schema
+
+- Distinct sealed candidate for `semantic_supervisor_assist_to_shadow` after
+  live 0.208.47. Live 02:54Z hamster returned a 3604-char general-conversation
+  reply because GPT-OSS invented a length-legal `manifest_id` and admission
+  collapsed to `plan_not_admitted`. The proposal JSON schema now pins owned
+  `manifest_id` and `budget_sha256` as `enum: [owned digest]` when
+  `build_supervisor_request` already holds them. Length-only grammar remains
+  for unpinned callers. SQLite remains at schema 50; exact `0.208.47` is the
+  predecessor and `0.207.90` the fallback.
+
 ## 0.208.47 — 2026-09-05
 
 ### No-product shadow_to_assist restore
