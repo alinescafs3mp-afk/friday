@@ -34,7 +34,7 @@ jobs:
           repo = 'alinescafs3mp-afk/friday'
           base = 'fc2ff1cd08921fe9ce20d88ba3b366e8b9bb5ea3'
           workflow = '.github/workflows/source-validation-c10.yml'
-          expected = '0d78379debf9603563e26a3341a1b1a2e8d88f82'
+          expected = 'c5476be235d72350afb1c7f8a7f493824c1698be'
           if os.environ['GITHUB_REPOSITORY'] != repo or git('rev-parse', 'HEAD').decode().strip() != os.environ['GITHUB_SHA']:
               raise SystemExit('source identity mismatch')
           git('merge-base', '--is-ancestor', base, 'HEAD')
@@ -60,6 +60,16 @@ jobs:
               raise SystemExit('patch checksum mismatch')
           git('apply', '--index', '--check', '-', data=patch)
           git('apply', '--index', '-', data=patch)
+          request = urllib.request.Request(f'https://api.github.com/repos/{repo}/git/blobs/f25f6b4f9a1f9788f46a7bd97100bc54a01c28fc', headers={'Authorization': 'Bearer ' + os.environ['GH_SOURCE_TOKEN'], 'Accept': 'application/vnd.github+json'})
+          with urllib.request.urlopen(request, timeout=30) as response:
+              value = json.loads(response.read(24577))
+          if value.get('encoding') != 'base64' or value.get('size') != 4438:
+              raise SystemExit('invalid compatibility packet')
+          followup = base64.b64decode(''.join(value['content'].split()), validate=True)
+          if len(followup) != 4438 or hashlib.sha256(followup).hexdigest() != 'f4dca52b0fa2ba5c23d155f295c6bb53704002b289fbb725d89d4096ee743cf6':
+              raise SystemExit('compatibility checksum mismatch')
+          git('apply', '--unidiff-zero', '--index', '--check', '-', data=followup)
+          git('apply', '--unidiff-zero', '--index', '-', data=followup)
           git('rm', '--', workflow)
           git('diff', '--cached', '--check')
           if git('write-tree').decode().strip() != expected:
@@ -102,7 +112,7 @@ jobs:
           import os
           from pathlib import Path
           from tools.quality_gate_inventory import load_collection
-          if len(load_collection(Path(os.environ['RUNNER_TEMP']) / 'c10-evidence/all-tests.json')) != 27073:
+          if len(load_collection(Path(os.environ['RUNNER_TEMP']) / 'c10-evidence/all-tests.json')) != 27081:
               raise SystemExit('authoritative collection differs from reviewed inventory')
           PY
       - name: Exercise exact revisions, cancellation, publication and the real compiler
@@ -132,9 +142,9 @@ jobs:
           import os, xml.etree.ElementTree as ET
           from pathlib import Path
           cases = list(ET.parse(Path(os.environ['RUNNER_TEMP']) / 'c10-evidence/focused.xml').getroot().iter('testcase'))
-          if len(cases) != 1171 or any(child.tag in {'skipped', 'failure', 'error'} for case in cases for child in case):
+          if len(cases) != 1179 or any(child.tag in {'skipped', 'failure', 'error'} for case in cases for child in case):
               raise SystemExit('missing or nonpassing focused cases')
-          print('1171/1171 cases passed, including real isolated compilation. Project behavior and release acceptance remain separate.')
+          print('1179/1179 cases passed, including real isolated compilation. Project behavior and release acceptance remain separate.')
           PY
       - name: Preserve checked source and store only ordinary Git objects
         env:
@@ -146,13 +156,13 @@ jobs:
           def git(*args):
               return subprocess.check_output(['/usr/bin/git', *args]).decode('utf-8')
           base = 'fc2ff1cd08921fe9ce20d88ba3b366e8b9bb5ea3'
-          expected = '0d78379debf9603563e26a3341a1b1a2e8d88f82'
+          expected = 'c5476be235d72350afb1c7f8a7f493824c1698be'
           if git('rev-parse', 'HEAD^{tree}').strip() != expected:
               raise SystemExit('checked tree changed')
           git('diff', '--exit-code')
           git('diff', '--cached', '--exit-code')
           out = pathlib.Path(os.environ['RUNNER_TEMP']) / 'c10-evidence'
-          receipt = {'trigger': os.environ['GITHUB_SHA'], 'candidate': git('rev-parse', 'HEAD').strip(), 'source_tree': expected, 'python': sys.version.split()[0], 'inventory_nodes': 27073, 'focused_cases_passed': 1171, 'real_syntax_compiler_tested': True, 'project_behavior_tested': False, 'canonical_full_change_gate': 'not_attested', 'exact_release_gate': 'not_run', 'independent_review': 'pending', 'branch_updated': False, 'production_deployed': False}
+          receipt = {'trigger': os.environ['GITHUB_SHA'], 'candidate': git('rev-parse', 'HEAD').strip(), 'source_tree': expected, 'python': sys.version.split()[0], 'inventory_nodes': 27081, 'focused_cases_passed': 1179, 'real_syntax_compiler_tested': True, 'project_behavior_tested': False, 'canonical_full_change_gate': 'not_attested', 'exact_release_gate': 'not_run', 'independent_review': 'pending', 'branch_updated': False, 'production_deployed': False}
           (out / 'source-tree.json').write_text(json.dumps(receipt, sort_keys=True) + '\n')
           git('bundle', 'create', str(out / 'source.bundle'), 'HEAD')
           sums = []
