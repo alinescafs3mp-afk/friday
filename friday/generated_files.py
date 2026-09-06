@@ -309,6 +309,7 @@ def persist_generated_response_files(
                 tenant_id=str(tenant_id),
                 person_id=str(person_id),
                 descriptors=history_descriptors,
+                files_root=Path(files_root),
             ):
                 raise GeneratedFilePersistenceError("assistant message disappeared before artifact commit")
         except BaseException:
@@ -489,12 +490,13 @@ def _attach_descriptors_to_message(
     tenant_id: str,
     person_id: str,
     descriptors: list[dict[str, Any]],
+    files_root: Path,
 ) -> bool:
     """Merge artifact handles into the exact assistant message in one write lock."""
 
     with storage.transaction() as conn:
         row = conn.execute(
-            """SELECT metadata_json FROM messages
+            """SELECT metadata_json, conversation_id FROM messages
                  WHERE id=? AND user_id IN (?, ?) AND role='assistant'""",
             (message_id, person_id, tenant_id),
         ).fetchone()
@@ -512,6 +514,26 @@ def _attach_descriptors_to_message(
             raise GeneratedFilePersistenceError("assistant message metadata is invalid") from exc
         if not isinstance(metadata, dict):
             raise GeneratedFilePersistenceError("assistant message metadata is not an object")
+        if "coding_source_parent" in metadata:
+            # The source may have been revoked since the Coding turn read it.
+            # Recheck under this same write transaction before any handles commit.
+            from friday.organs.coding.revision import (
+                CodingRevisionUnavailable,
+                reauthorize_coding_source_parent,
+            )
+
+            try:
+                reauthorize_coding_source_parent(
+                    storage,
+                    files_root,
+                    metadata=metadata,
+                    conversation_id=row["conversation_id"],
+                    message_id=message_id,
+                    person_id=person_id,
+                    tenant_id=tenant_id,
+                )
+            except CodingRevisionUnavailable as exc:
+                raise GeneratedFilePersistenceError("Coding source revision is no longer authorized") from exc
         metadata["generated_files"] = descriptors
         encoded = json.dumps(metadata, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
         if len(encoded.encode("utf-8")) > _MESSAGE_METADATA_MAX_BYTES:

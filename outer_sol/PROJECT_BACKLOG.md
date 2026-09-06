@@ -1,6 +1,6 @@
 # Friday: canonical project backlog
 
-Updated: 2026-09-06 (reported production `0.208.55`; C1–C3 source corrections and whole-product reliability work active; historical S3 witness preserved; Pandora unchanged)
+Updated: 2026-09-06 (reported production `0.208.55`; C1–C6 source corrections and whole-product reliability work active; historical S3 witness preserved; Pandora unchanged)
 
 This is the project's only backlog and mutable status register. It owns the
 current production identity, execution order, acceptance gaps and owner actions.
@@ -351,6 +351,58 @@ Next: qualified review, natural source-revision selection, actual model-backed
 application implementation and bounded upload edits/repair, followed by exact
 native/UI release evidence. Do not infer that a restored scaffold satisfies N3.
 Pandora, primary/secondary authority and production are unchanged.
+
+### C6 — real immutable revision edits and publication-time source authority
+
+Status: implemented and author-tested on the C4/C5 integrated source
+`26076c10250b14cf8122f4d81e86cef8aa8f8804`. This is a source package, not an
+independently accepted release or a production deployment.
+
+- The existing owner-only Coding turn now accepts an exact source-edit request:
+  `edit <message_id> <sha256>` (also `modify` / `измени`), followed by a newline
+  and a JSON object. `replace` maps existing relative filenames to complete
+  UTF-8 text, `add` maps new names to text, and `delete` is a list of existing
+  filenames. Example body: `{"replace":{"main.py":"answer = 42\n"}}`.
+  Attachments cannot be mixed with this exact revision operation.
+- The parent is loaded through the existing same-person/tenant/conversation
+  durable revision reader. Its complete source digest is the precondition.
+  No latest selection, fuzzy patching, inferred filenames or source execution
+  occurs. The source-body text cannot become an execute/build/test command.
+- Validate the entire batch before writing: at most 16 operations and 1 MiB
+  of request JSON, with the existing 32-member / 36 MiB export limits. Reject
+  duplicate keys/paths, incompatible operations, missing replace/delete targets,
+  existing add targets, unsafe/internal/secret paths, case collisions, file vs
+  directory collisions, unchanged results and unpublishable empty inventories.
+- Apply the prepared bytes only after the existing modification and worker
+  admission gates pass. Use the existing exclusive descriptor-relative writer
+  in a fresh per-operation workspace, never mutate the selected source blob or
+  its former worktree. Packing must match the complete prepared candidate hash.
+- Preserve project identity and add a new content-based revision. The ordinary
+  final publisher remains the sole durable writer; its existing transaction
+  now reauthorizes the stored Coding parent binding before artifact handles
+  commit. Revocation between preparation and publication rolls the new artifact
+  back. This check also covers newly requested restores. No new store, table,
+  schema, final publisher, interpreter, or generic orchestration layer is added.
+- Parent message/digest is body-free metadata. Exact new and old sources remain
+  independently recoverable after database reopen and working-directory loss.
+  A failed/cancelled write or a changed output snapshot cannot be delivered as
+  an accepted revision; original sources remain untouched.
+
+Author evidence: the real turn previously failed the new functional revision
+edit regression; 54 new cases and 221 focused Coding/source/publication/inventory
+cases now pass locally on Python 3.13.5. All prior inventory policies and exact
+parameter declarations are preserved; the new fixtures add 296 MiB of declared
+scratch and the existing strict scratch-total assertion is updated accordingly.
+Whole-source Ruff passes; 1570 files pass the canonical formatting scope; Mypy
+passes on 530 files. An expanded 306-case local run passed 279; its 27 failures
+all report `bubblewrap_unavailable` in existing Engineer startup preflight.
+Those tests and their host requirements are unchanged, not skipped or waived.
+
+Remaining N3 work: this is an explicit source-edit primitive, NOT yet a model
+implementing an application from a natural-language request. Natural revision
+selection, model-backed create/modify, behavioral verification and bounded
+repair remain open, as do qualified independent review and exact-host/native/UI
+release acceptance. Pandora and deployed production remain unchanged.
 
 ### P0G — canonical Gate Diet
 

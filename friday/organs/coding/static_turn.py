@@ -7,6 +7,7 @@ import json
 import re
 import secrets
 from collections.abc import Mapping, Sequence
+from contextlib import suppress
 from dataclasses import replace
 from pathlib import Path
 from typing import Any
@@ -49,6 +50,7 @@ from friday.organs.coding.loop import (
 from friday.organs.coding.modify import (
     modify_requested,
     observe_coding_upload_modification,
+    prepare_revision_edit,
 )
 from friday.organs.coding.result_archive import observe_coding_result_archive
 from friday.organs.coding.revision import CodingRevisionUnavailable, load_coding_revision, revision_record
@@ -67,6 +69,9 @@ from friday.permissions import ActorContext, AuthorizationError
 
 _RESTORE_PREFIX_RE = re.compile(r"(?i)^(?:restore|восстанови)(?:\s|$)")
 _RESTORE_RE = re.compile(r"(?i)^(?:restore|восстанови) (msg_[0-9a-f]{16}) ([0-9a-f]{64})$")
+
+_EDIT_PREFIX_RE = re.compile(r"(?i)^(?:edit|modify|измени)\s+msg_")
+_EDIT_RE = re.compile(r"(?i)^(?:edit|modify|измени) (msg_[0-9a-f]{16}) ([0-9a-f]{64})\r?\n([\s\S]+)$")
 
 _TEST_CLAIM_RE = re.compile(r"(?i)(?:\b(?:pytest|py\.test)\b|\bgo\s+test\b|прогон)")
 _BUILD_CLAIM_RE = re.compile(r"(?i)(?:\b(?:compile|rebuild|build)\b|скомпилир|пересобери)")
@@ -274,7 +279,7 @@ def handle_coding_static_turn(
     worker_boundary: CodingWorkerBoundaryV1 | None = None,
     spawn_runner: CodingWorkerRunner | None = None,
 ) -> dict[str, Any]:
-    """Inspect, create, admit upload edits, extract, build/test. Never apply or run uploads."""
+    """Inspect, create or edit an explicit source revision. Never run revision edits."""
 
     del enable_tools
     _require_coding_actor(actor)
@@ -287,9 +292,20 @@ def handle_coding_static_turn(
     operation_id = "coding-op-" + secrets.token_hex(8)
     project_id = "coding-p-" + secrets.token_hex(8)
     restoring = _RESTORE_PREFIX_RE.match((message or "").strip()) is not None
+    editing = not restoring and _EDIT_PREFIX_RE.match((message or "").strip()) is not None
+    revision_operation = restoring or editing
     restore_state = "blocked" if restoring else "empty"
+    edit_state = "blocked" if editing else "empty"
     restored = None
-    selection = _RESTORE_RE.fullmatch((message or "").strip()) if restoring else None
+    candidate = None
+    edit_targets = None
+    selection = (
+        _RESTORE_RE.fullmatch((message or "").strip())
+        if restoring
+        else _EDIT_RE.fullmatch((message or "").strip())
+        if editing
+        else None
+    )
     if selection and storage is not None and conversation_id and not attachments:
         try:
             restored = load_coding_revision(
@@ -315,6 +331,9 @@ def handle_coding_static_turn(
                 }
                 for name, body in restored.members
             ]
+    if editing and restored is not None and selection is not None:
+        with suppress(ValueError, TypeError, RecursionError):
+            candidate, edit_targets = prepare_revision_edit(restored, selection[3])
     snapshot = restored.revision_sha256 if restored is not None else _snapshot_sha256(members)
     report = build_coding_inspect_report(report_id, turn_id, members=members)
     friday_home, owner_home, database_path = _homes()
@@ -338,8 +357,8 @@ def handle_coding_static_turn(
         boundary=boundary,
     )
     worker_admitted = admission.admission is CodingWorkerAdmissionState.ADMITTED
-    creating = not restoring and create_requested(message, has_members=bool(members))
-    modifying = not restoring and modify_requested(message, has_members=bool(members))
+    creating = not revision_operation and create_requested(message, has_members=bool(members))
+    modifying = editing or (not restoring and modify_requested(message, has_members=bool(members)))
     if creating:
         intent = build_coding_mode_intent(f"{turn_id}-intent", turn_id, prompt=message)
     elif modifying:
@@ -349,12 +368,12 @@ def handle_coding_static_turn(
     execute_claimed, execute_claim = _compose_execute_claim(
         turn_id=turn_id,
         intent=intent,
-        message="" if restoring else message,
+        message="" if revision_operation else message,
         admission=admission,
     )
     workspace = Path(boundary.worker_root) / boundary.workspace_path
     export_path = Path(boundary.worker_root) / boundary.export_path
-    if restored is not None and worker_admitted:
+    if restoring and restored is not None and worker_admitted:
         try:
             publish_members(workspace, list(restored.members))
         except (OSError, ValueError):
@@ -364,7 +383,7 @@ def handle_coding_static_turn(
     created = observe_coding_create(
         turn_id=turn_id,
         project_id=project_id,
-        message="" if restoring else message,
+        message="" if revision_operation else message,
         workspace=workspace,
         worker_admitted=worker_admitted,
         has_members=bool(members),
@@ -373,12 +392,41 @@ def handle_coding_static_turn(
         turn_id=turn_id,
         project_id=project_id,
         revision_selector=snapshot,
-        message="" if restoring else message,
+        message="edit" if editing and candidate is not None else "" if revision_operation else message,
         workspace=workspace,
         inspect_report=report,
         members=members,
         creating=creating,
+        target_paths=edit_targets,
     )
+    if editing and candidate is not None:
+        edit_gate = build_coding_mode_plan_gate(
+            f"{turn_id}-edit-gate",
+            turn_id,
+            intent,
+            execute_claim,
+            modification_admission=modified.admission,
+            worker_admission=admission,
+        )
+        if edit_gate.gate.value == "modify":
+            try:
+                publish_members(workspace, list(candidate.members))
+            except (OSError, ValueError):
+                pass
+            else:
+                edit_state = "written"
+                modified = replace(modified, applied=True)
+                members = [
+                    {
+                        "relative_path": name,
+                        "size": len(body),
+                        "file_kind": "regular_file",
+                        "executable": False,
+                        "link_kind": "none",
+                    }
+                    for name, body in candidate.members
+                ]
+                report = build_coding_inspect_report(report_id, turn_id, members=members)
     if created.state is CodingCreateObserveState.WRITTEN:
         written_members: list[dict[str, object]] = []
         for name in created.files:
@@ -431,6 +479,7 @@ def handle_coding_static_turn(
         created.state is CodingCreateObserveState.WRITTEN
         or extract.state is CodingArchiveExtractObserveState.EXTRACTED
         or restore_state == "restored"
+        or edit_state == "written"
     )
     result_archive = observe_coding_result_archive(
         turn_id=turn_id,
@@ -438,7 +487,9 @@ def handle_coding_static_turn(
         export_path=export_path,
         ready=ready,
         expected_revision=(
-            restored.revision_sha256
+            candidate.revision_sha256
+            if editing and candidate is not None
+            else restored.revision_sha256
             if restored is not None
             else created.identity.revision_selector
             if created.state is CodingCreateObserveState.WRITTEN
@@ -505,6 +556,25 @@ def handle_coding_static_turn(
                 "Используй restore <message_id> <sha256> для точного результата из этого Coding-диалога, без вложений. "
                 "Другая версия не подставлялась; код не исполнялся."
             )
+    if editing:
+        if edit_state == "written" and source_record:
+            edit_state = "applied"
+            text = (
+                "Правки применены к отдельной копии указанной ревизии. Новая версия исходников подготовлена; "
+                "исходная версия сохранена. Код не исполнялся; сборка и тесты не запускались."
+            )
+        else:
+            edit_state = "blocked"
+            text = (
+                "Правка ревизии заблокирована: выбор версии, изменения или целостность результата не подтверждены. "
+                "Используй edit <message_id> <sha256>, затем с новой строки JSON с replace/add/delete, без вложений. "
+                "Исходная версия не менялась; другая версия не подставлялась; код не исполнялся."
+            )
+    source_parent = (
+        {"message_id": selection[1], "revision_sha256": restored.revision_sha256}
+        if source_record and restored is not None and selection is not None
+        else None
+    )
     persisted_id = _ensure_conversation(
         storage,
         person_id=person_id,
@@ -536,6 +606,7 @@ def handle_coding_static_turn(
                 "coding_worker_admission": admission.admission.value,
                 "coding_worker_admission_reason": admission.reason.value,
                 **({"coding_source_revision": source_record} if source_record else {}),
+                **({"coding_source_parent": source_parent} if source_parent else {}),
             },
         )
         assistant_id = assistant.get("id")
@@ -565,6 +636,8 @@ def handle_coding_static_turn(
         "coding_mode_view": view.state.value,
         "coding_result_archive": result_archive.state.value,
         "coding_revision_restore": restore_state,
+        "coding_revision_edit": edit_state,
+        **({"coding_source_parent": source_parent} if source_parent else {}),
         **({"coding_source_revision": source_record} if source_record else {}),
         "coding_carrier": result_archive.carrier.carrier.value,
         "coding_result_restart": result_archive.restart_state,

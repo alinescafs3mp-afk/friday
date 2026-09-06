@@ -247,3 +247,45 @@ def load_coding_revision(
         zipfile.BadZipFile,
     ) as exc:
         raise CodingRevisionUnavailable("revision unavailable") from exc
+
+
+def reauthorize_coding_source_parent(
+    storage: Any,
+    files_root: Path,
+    *,
+    metadata: dict[str, Any],
+    conversation_id: str,
+    message_id: str,
+    person_id: str,
+    tenant_id: str,
+) -> None:
+    """Recheck source authority in the existing final-publication transaction.
+
+    Consume the stored assistant binding, not response context or model claims.
+    This neither publishes nor grants execution rights. Existing independent
+    revisions remain immutable; only this new publication is being authorized.
+    """
+
+    parent = metadata.get("coding_source_parent")
+    record = metadata.get("coding_source_revision")
+    if (
+        metadata.get("interaction_mode") != "coding"
+        or type(parent) is not dict
+        or set(parent) != {"message_id", "revision_sha256"}
+        or parent.get("message_id") == message_id
+        or type(record) is not dict
+        or set(record) != _RECORD_KEYS
+        or record.get("schema") != SCHEMA
+    ):
+        raise CodingRevisionUnavailable("revision unavailable")
+    source = load_coding_revision(
+        storage,
+        files_root,
+        person_id=person_id,
+        tenant_id=tenant_id,
+        conversation_id=conversation_id,
+        message_id=parent["message_id"],
+        revision_sha256=parent["revision_sha256"],
+    )
+    if source.project_id != record.get("project_id"):
+        raise CodingRevisionUnavailable("revision unavailable")

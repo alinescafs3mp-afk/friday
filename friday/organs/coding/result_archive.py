@@ -168,6 +168,21 @@ def _secret(relative: str) -> bool:
     )
 
 
+def is_exportable_source_path(relative: str) -> bool:
+    """Share exact output exclusions with revision edits; never drop requested edits."""
+
+    parts = relative.split("/")
+    return (
+        not _secret(relative)
+        and not any(part.casefold() in _GENERATED_COMPONENTS for part in parts)
+        and not relative.casefold().endswith((".pyc", ".pyo"))
+        and not is_internal_result_file(relative)
+        and not any(
+            is_internal_result_file("/".join(parts[:index]) + "/source.py") for index in range(1, len(parts))
+        )
+    )
+
+
 def _read_bounded(descriptor: int, budget: int) -> bytes:
     chunks: list[bytes] = []
     total = 0
@@ -223,7 +238,7 @@ def _snapshot(workspace: Path) -> dict[str, bytes]:
                                 raise ValueError("source directory changed")
                             walk(child, path)
                         continue
-                    if is_internal_result_file(relative) or entry.name.casefold().endswith((".pyc", ".pyo")):
+                    if not is_exportable_source_path(relative):
                         continue
                     if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1:
                         raise ValueError("source is not a unique regular file")
