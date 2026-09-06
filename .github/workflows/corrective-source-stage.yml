@@ -1,0 +1,188 @@
+name: Corrective source staging
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/corrective-source-stage.yml
+      - .github/c23-source.part0
+      - .github/c23-source.part1
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: friday-corrective-source-stage
+  cancel-in-progress: false
+
+jobs:
+  stage:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: '3.14.4'
+      - name: Reconstruct only the exact author-tested source trees
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          install -d -m 0700 "$RUNNER_TEMP/source-stage"
+          python - <<'PY'
+          import base64
+          import hashlib
+          import lzma
+          import os
+          import subprocess
+          from pathlib import Path
+
+          def git(*args, data=None):
+              return subprocess.check_output(['/usr/bin/git', *args], input=data)
+
+          temporary = (
+              '.github/workflows/audit-source-snapshot.yml',
+              '.github/c1-followup.patch.xz',
+              '.github/workflows/corrective-source-stage.yml',
+              '.github/c23-source.part0',
+              '.github/c23-source.part1',
+          )
+          if os.environ['GITHUB_REPOSITORY'] != 'alinescafs3mp-afk/friday':
+              raise SystemExit('unexpected repository')
+          if git('rev-parse', 'HEAD').decode().strip() != os.environ['GITHUB_SHA']:
+              raise SystemExit('trigger identity mismatch')
+          base = '46a32f355c185f5d99a30f3ed0594f3b145688a8'
+          git('merge-base', '--is-ancestor', base, 'HEAD')
+          git('diff', '--exit-code', base, 'HEAD', '--', '.', *(':(exclude)' + p for p in temporary))
+          git('diff', '--exit-code')
+          git('diff', '--cached', '--exit-code')
+          previous = git('show', '2143388e0c23a46623713e0e572313f254ccb0f7:.github/audit-c1.patch.xz.b64')
+          packets = (
+              (base64.b64decode(previous.strip(), validate=True), 82004, '57e4d7087b271e4a4dc786d7932f265c7cb15d7b92089913d191dff99692900e'),
+              (Path(temporary[1]).read_bytes(), 6837, '0b80278b77cddc517b58b222ccb90186773db87c7f403d76514b6c1683a91981'),
+              (Path(temporary[3]).read_bytes() + Path(temporary[4]).read_bytes(), 78839, '900330322ae5ce66489279b37393d96a41aab2bd3c8ad2d7d0eb3e30f91f5e95'),
+          )
+          for index, (packed, size, digest) in enumerate(packets):
+              decoder = lzma.LZMADecompressor()
+              patch = decoder.decompress(packed, max_length=size + 1)
+              if not decoder.eof or decoder.unused_data or len(patch) != size or hashlib.sha256(patch).hexdigest() != digest:
+                  raise SystemExit('patch integrity mismatch')
+              git('apply', '--index', '--check', '--unidiff-zero', '-', data=patch)
+              git('apply', '--index', '--unidiff-zero', '-', data=patch)
+              if index == 1:
+                  git('rm', '--', *temporary)
+                  if git('write-tree').decode().strip() != 'd4258fabb3d6694446e296c1021ef2ec57cb33b4':
+                      raise SystemExit('C1 tree mismatch')
+          git('diff', '--cached', '--check')
+          if git('write-tree').decode().strip() != '1a1758d304d179fb21e309cbf255ffd965356ef0':
+              raise SystemExit('C2/C3 tree mismatch')
+          git('config', 'user.name', 'Friday source staging')
+          git('config', 'user.email', '41898282+github-actions[bot]@users.noreply.github.com')
+          git('commit', '-m', 'fix(reliability): exact C1-C3 source candidate; unreleased')
+          PY
+      - name: Install the locked focused-validation toolchain
+        run: |
+          python -m venv .venv
+          .venv/bin/python -m pip install --upgrade --constraint requirements-dev.lock pip setuptools wheel
+          .venv/bin/python -m pip install --no-build-isolation --constraint requirements.lock --constraint requirements-dev.lock -e '.[dev,vectors]'
+      - name: Check the actual source and affected user-journey regressions
+        shell: bash
+        run: |
+          set -euo pipefail
+          .venv/bin/python -m ruff check .
+          .venv/bin/python -m pytest -q -o addopts='' \
+            --junitxml="$RUNNER_TEMP/source-stage/focused.xml" \
+            tests/test_coding_result_export.py \
+            tests/test_operation_result_carrier.py \
+            tests/test_coding_mode_surface.py \
+            tests/test_engineer_command_publication.py \
+            tests/test_telegram_engineer_progress.py \
+            tests/test_coding_result_archive_plan.py \
+            tests/test_coding_extract_transaction.py \
+            tests/test_coding_archive_extract.py \
+            tests/test_coding_archive_extract_admission.py \
+            tests/test_coding_archive_extract_plan.py \
+            tests/test_coding_archive_member_catalog.py \
+            tests/test_coding_archive_overwrite_plan.py \
+            tests/test_coding_project_isolation_admission.py \
+            tests/test_orchestration_import_boundaries.py \
+            tests/test_current_file_web_comparison.py \
+            tests/test_semantic_supervisor_production_baseline.py \
+            tests/test_audit_research_baseline_regressions.py \
+            tests/test_coding_worker_runner_regressions.py
+          python - <<'PY'
+          import os
+          import xml.etree.ElementTree as ET
+          from pathlib import Path
+          root = ET.parse(Path(os.environ['RUNNER_TEMP']) / 'source-stage/focused.xml').getroot()
+          cases = list(root.iter('testcase'))
+          if not cases or any(list(case) for case in cases if any(child.tag in {'skipped', 'failure', 'error'} for child in case)):
+              raise SystemExit('focused suite has missing or non-passing cases')
+          print('Focused source checks passed:', len(cases))
+          PY
+      - name: Store unreferenced source objects, never write a branch or release
+        env:
+          GH_TREE_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json
+          import os
+          import subprocess
+          import urllib.request
+          from pathlib import Path
+
+          def git(*args):
+              return subprocess.check_output(['/usr/bin/git', *args]).decode('utf-8')
+
+          trees = ('d4258fabb3d6694446e296c1021ef2ec57cb33b4', '1a1758d304d179fb21e309cbf255ffd965356ef0')
+          if git('rev-parse', 'HEAD^{tree}').strip() != trees[-1]:
+              raise SystemExit('tested source identity changed')
+          git('diff', '--exit-code')
+          git('diff', '--cached', '--exit-code')
+          trigger = os.environ['GITHUB_SHA']
+          for expected in trees:
+              entries = []
+              for path in git('diff', '--name-only', '--no-renames', '-z', trigger, expected).split('\0'):
+                  if not path:
+                      continue
+                  row = git('ls-tree', expected, '--', path).strip()
+                  entry = {'path': path, 'mode': '100644', 'type': 'blob'}
+                  if row:
+                      if not row.startswith('100644 blob '):
+                          raise SystemExit('unexpected object mode')
+                      entry['content'] = git('show', expected + ':' + path)
+                  else:
+                      entry['sha'] = None
+                  entries.append(entry)
+              payload = json.dumps({'base_tree': git('rev-parse', trigger + '^{tree}').strip(), 'tree': entries}, ensure_ascii=False).encode()
+              request = urllib.request.Request(
+                  'https://api.github.com/repos/alinescafs3mp-afk/friday/git/trees',
+                  data=payload, method='POST',
+                  headers={'Authorization': 'Bearer ' + os.environ['GH_TREE_TOKEN'], 'Accept': 'application/vnd.github+json', 'Content-Type': 'application/json', 'X-GitHub-Api-Version': '2022-11-28'},
+              )
+              with urllib.request.urlopen(request, timeout=120) as response:
+                  result = json.load(response)
+              if result.get('sha') != expected:
+                  raise SystemExit('uploaded source identity mismatch')
+          receipt = {'trigger': trigger, 'source_trees': trees, 'focused_source_checks': 'passed', 'canonical_full_gate': 'separate_run_not_attested_here', 'independent_review': 'pending', 'production_deployed': False, 'branch_updated': False}
+          out = Path(os.environ['RUNNER_TEMP']) / 'source-stage/source-objects.json'
+          out.write_text(json.dumps(receipt, sort_keys=True) + '\n')
+          print(json.dumps(receipt, sort_keys=True))
+          PY
+      - name: Preserve focused source evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: corrective-source-${{ github.sha }}
+          path: ${{ runner.temp }}/source-stage
+          if-no-files-found: warn
+          retention-days: 3
