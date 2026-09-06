@@ -34,6 +34,31 @@ jobs:
           python -m venv .venv
           .venv/bin/python -m pip install --upgrade --constraint requirements-dev.lock pip setuptools wheel
           .venv/bin/python -m pip install --no-build-isolation --constraint requirements.lock --constraint requirements-dev.lock -e '.[dev,vectors]'
+      - name: Diagnose only code-owned native probes on disposable paths
+        run: |
+          set -euo pipefail
+          .venv/bin/python - <<'PY' | tee "$RUNNER_TEMP/c1-evidence/native-probe.log"
+          import json, os, runpy, subprocess, tempfile
+          from pathlib import Path
+          from friday.organs.coding.worker_spawn import spawn_coding_worker
+          env = {"PATH": "/usr/bin:/bin", "HOME": "/work", "LANG": "C"}
+          def run(argv, timeout=5):
+              result = subprocess.run(argv, stdin=subprocess.DEVNULL, capture_output=True, timeout=timeout, check=False, start_new_session=True, env=env)
+              print(json.dumps({"executable": argv[0], "code": result.returncode, "stderr": result.stderr.decode(errors="replace")[:4096], "stdout": result.stdout.decode(errors="replace")[:4096]}))
+              return result.returncode
+          run(["/usr/bin/bwrap", "--version"])
+          for name in ("/proc/sys/kernel/apparmor_restrict_unprivileged_userns", "/proc/sys/kernel/unprivileged_userns_clone"):
+              p=Path(name)
+              print(name, p.read_text().strip() if p.exists() else "absent")
+          run(["/usr/bin/bwrap", "--unshare-all", "--ro-bind", "/usr", "/usr", "--ro-bind-try", "/lib", "/lib", "--ro-bind-try", "/lib64", "/lib64", "--", "/usr/bin/true"])
+          namespace = runpy.run_path("tests/test_coding_worker_spawn.py")
+          with tempfile.TemporaryDirectory(prefix="c1-probe-", dir="/var/tmp") as name:
+              root = Path(name)
+              boundary = namespace["_boundary"](root)
+              admission = namespace["_admission"](root, boundary)
+              outcome = spawn_coding_worker(admission, boundary, runner=run)
+              print("closed_probe_outcome", outcome.probe)
+          PY
       - name: Static checks and full inventory agreement
         run: |
           set -euo pipefail
