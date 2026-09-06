@@ -1,4 +1,4 @@
-name: C6 source checkpoint
+name: C6 source validation
 on:
   push:
     branches: [main]
@@ -6,31 +6,176 @@ on:
   workflow_dispatch:
 permissions:
   contents: read
+concurrency:
+  group: friday-c6-source-validation
+  cancel-in-progress: false
 jobs:
-  source:
+  validate:
     runs-on: ubuntu-24.04
-    timeout-minutes: 5
+    timeout-minutes: 20
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           persist-credentials: false
           fetch-depth: 0
-      - name: Export the exact integrated source and Git history
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.13.5'
+      - name: Reconstruct the exact reviewed source bytes without publishing
+        env:
+          GH_SOURCE_TOKEN: ${{ github.token }}
         shell: bash
         run: |
           set -euo pipefail
           umask 077
-          out="$RUNNER_TEMP/source-checkpoint"
-          mkdir -m 700 "$out"
-          git archive --format=tar 26076c10250b14cf8122f4d81e86cef8aa8f8804 > "$out/source.tar"
-          git bundle create "$out/source.bundle" HEAD
-          git rev-parse HEAD > "$out/commit.txt"
-          git rev-parse 26076c10250b14cf8122f4d81e86cef8aa8f8804^{tree} > "$out/tree.txt"
-          cd "$out"
-          sha256sum source.tar source.bundle > SHA256SUMS
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+          install -d -m 0700 "$RUNNER_TEMP/c6-evidence"
+          python - <<'PY'
+          import base64
+          import hashlib
+          import json
+          import lzma
+          import os
+          import subprocess
+          import urllib.request
+
+          def git(*args, data=None):
+              return subprocess.check_output(['/usr/bin/git', *args], input=data)
+
+          repo = 'alinescafs3mp-afk/friday'
+          base = '500b607ead43ccecd1d64ebbc9d25407ddd6d6cf'
+          workflow = '.github/workflows/source-checkpoint-c6.yml'
+          expected = '77240ae1aa68e0e7bd89d39387fcbcf80132bf0b'
+          blob = '380f0cd6e326da396c3e433b5e242fa5177cdf0a'
+          if os.environ['GITHUB_REPOSITORY'] != repo or git('rev-parse', 'HEAD').decode().strip() != os.environ['GITHUB_SHA']:
+              raise SystemExit('unexpected source identity')
+          git('merge-base', '--is-ancestor', base, 'HEAD')
+          git('diff', '--exit-code', base, 'HEAD', '--', '.', ':(exclude)' + workflow)
+          git('diff', '--exit-code')
+          git('diff', '--cached', '--exit-code')
+          request = urllib.request.Request(
+              f'https://api.github.com/repos/{repo}/git/blobs/{blob}',
+              headers={'Authorization': 'Bearer ' + os.environ['GH_SOURCE_TOKEN'], 'Accept': 'application/vnd.github+json', 'X-GitHub-Api-Version': '2022-11-28'},
+          )
+          with urllib.request.urlopen(request, timeout=30) as response:
+              value = json.loads(response.read(32769))
+          if value.get('encoding') != 'base64' or value.get('size') != 11384:
+              raise SystemExit('invalid source packet')
+          packed = base64.b64decode(''.join(value['content'].split()), validate=True)
+          if len(packed) != 11384 or hashlib.sha256(packed).hexdigest() != '224d8b558066f9a9112389b9ced7bf56f45f99b381df94f77055dd1bc74218bf':
+              raise SystemExit('source packet identity mismatch')
+          decoder = lzma.LZMADecompressor(memlimit=67108864)
+          patch = decoder.decompress(packed, max_length=42716)
+          if not decoder.eof or decoder.unused_data or len(patch) != 42715 or hashlib.sha256(patch).hexdigest() != 'e48ecff30c8b9bb00725df289ffb593fa363af7ab7bb06b6c0b09f9c9d2f58bf':
+              raise SystemExit('patch integrity mismatch')
+          git('apply', '--index', '--unidiff-zero', '--check', '-', data=patch)
+          git('apply', '--index', '--unidiff-zero', '-', data=patch)
+          git('rm', '--', workflow)
+          git('diff', '--cached', '--check')
+          if git('write-tree').decode().strip() != expected:
+              raise SystemExit('candidate tree mismatch')
+          git('config', 'user.name', 'Friday source validation')
+          git('config', 'user.email', '41898282+github-actions[bot]@users.noreply.github.com')
+          git('commit', '-m', 'fix(coding): exact C6 author-tested candidate; not a release')
+          print('Exact C6 candidate tree:', expected)
+          PY
+      - name: Install locked project test dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m venv .venv
+          .venv/bin/python -m pip install --upgrade --constraint requirements-dev.lock pip setuptools wheel
+          .venv/bin/python -m pip install --no-build-isolation --constraint requirements.lock --constraint requirements-dev.lock -e '.[dev,vectors]'
+      - name: Check source, exact revision journeys and unchanged gate inventory
+        shell: bash
+        run: |
+          set -euo pipefail
+          .venv/bin/python -m ruff check .
+          .venv/bin/python -m ruff format --check friday friday_host_agent friday_package_broker deploy/host-control tests tools
+          .venv/bin/python -m mypy friday friday_host_agent friday_package_broker
+          .venv/bin/python -m pytest -q -n 4 \
+            tests/test_coding_revision_edit.py \
+            tests/test_coding_revision_continuity.py \
+            tests/test_coding_mode_surface.py \
+            tests/test_coding_extract_transaction.py \
+            tests/test_coding_result_export.py \
+            tests/test_generated_file_delivery.py \
+            tests/test_operation_result_carrier.py \
+            tests/test_orchestration_import_boundaries.py \
+            tests/test_quality_gate_inventory.py \
+            --junitxml="$RUNNER_TEMP/c6-evidence/focused.xml"
+          python - <<'PY'
+          import os
+          import xml.etree.ElementTree as ET
+          from pathlib import Path
+          root = ET.parse(Path(os.environ['RUNNER_TEMP']) / 'c6-evidence/focused.xml').getroot()
+          cases = list(root.iter('testcase'))
+          if len(cases) != 221 or any(child.tag in {'skipped', 'failure', 'error'} for case in cases for child in case):
+              raise SystemExit('missing or nonpassing focused source cases')
+          print('All 221 focused cases passed. Native and independent acceptance remain separate.')
+          PY
+      - name: Store checked source objects only, never move a branch or deploy
+        env:
+          GH_TREE_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import hashlib
+          import json
+          import os
+          import subprocess
+          import urllib.request
+          from pathlib import Path
+
+          def git(*args):
+              return subprocess.check_output(['/usr/bin/git', *args]).decode('utf-8')
+
+          expected = '77240ae1aa68e0e7bd89d39387fcbcf80132bf0b'
+          if git('rev-parse', 'HEAD^{tree}').strip() != expected:
+              raise SystemExit('checked tree changed')
+          git('diff', '--exit-code')
+          git('diff', '--cached', '--exit-code')
+          trigger = os.environ['GITHUB_SHA']
+          entries = []
+          for path in git('diff', '--name-only', '--no-renames', '-z', trigger, 'HEAD').split('\0'):
+              if not path:
+                  continue
+              row = git('ls-tree', 'HEAD', '--', path).strip()
+              entry = {'path': path, 'mode': '100644', 'type': 'blob'}
+              if row:
+                  if not row.startswith('100644 blob '):
+                      raise SystemExit('unexpected source mode')
+                  entry['content'] = git('show', 'HEAD:' + path)
+              else:
+                  entry['sha'] = None
+              entries.append(entry)
+          payload = json.dumps({'base_tree': git('rev-parse', trigger + '^{tree}').strip(), 'tree': entries}, ensure_ascii=False).encode()
+          request = urllib.request.Request(
+              'https://api.github.com/repos/alinescafs3mp-afk/friday/git/trees',
+              data=payload, method='POST',
+              headers={'Authorization': 'Bearer ' + os.environ['GH_TREE_TOKEN'], 'Accept': 'application/vnd.github+json', 'Content-Type': 'application/json', 'X-GitHub-Api-Version': '2022-11-28'},
+          )
+          with urllib.request.urlopen(request, timeout=90) as response:
+              value = json.load(response)
+          if value.get('sha') != expected:
+              raise SystemExit('stored tree mismatch')
+          out = Path(os.environ['RUNNER_TEMP']) / 'c6-evidence'
+          receipt = {'trigger': trigger, 'candidate': git('rev-parse', 'HEAD').strip(), 'source_tree': expected, 'focused_cases_passed': 221, 'canonical_native_gate': 'not_attested', 'independent_review': 'pending', 'branch_updated': False, 'production_deployed': False}
+          (out / 'source-tree.json').write_text(json.dumps(receipt, sort_keys=True) + '\n')
+          git('bundle', 'create', str(out / 'source.bundle'), 'HEAD')
+          with (out / 'source.tar').open('wb') as stream:
+              subprocess.run(['/usr/bin/git', 'archive', '--format=tar', 'HEAD'], stdout=stream, check=True)
+          files = ('source.bundle', 'source.tar', 'source-tree.json', 'focused.xml')
+          (out / 'SHA256SUMS').write_text(''.join(hashlib.file_digest((out / name).open('rb'), 'sha256').hexdigest() + '  ' + name + '\n' for name in files))
+          print(json.dumps(receipt, sort_keys=True))
+          PY
+      - name: Preserve source and validation evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: friday-c5-source-${{ github.sha }}
-          path: ${{ runner.temp }}/source-checkpoint
-          if-no-files-found: error
+          name: c6-source-${{ github.sha }}
+          path: ${{ runner.temp }}/c6-evidence
+          if-no-files-found: warn
           retention-days: 7
