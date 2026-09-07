@@ -49930,6 +49930,24 @@ class AgentRuntime:
                 enable_tools=False,
                 reply_assistant_message_id=reply_assistant_message_id,
             )
+        from friday.orchestration.mixed_file_archive_web_query import mixed_file_archive_web_turn_is_admitted
+
+        if mixed_file_archive_web_turn_is_admitted(clean_message, attachments=attachments):
+            from friday.organs.mixed_journey.consume import handle_mixed_file_archive_web_turn
+
+            if not actor.shared_tenant and actor.user_id != user_id and not actor.is_owner:
+                raise PermissionError("actor cannot chat as another user")
+            return await handle_mixed_file_archive_web_turn(
+                storage=self.storage,
+                model=getattr(self, "llm", None),
+                turn_deadline=turn_deadline,
+                user_id=(actor.own_id if actor.shared_tenant else user_id),
+                actor=actor,
+                message=clean_message,
+                conversation_id=conversation_id,
+                attachments=attachments,
+                authenticated_turn_id=str(getattr(authenticated_turn_context, "turn_id", "") or "") or None,
+            )
         trusted_telegram_update_id = str(telegram_update_id or "").strip()
         if trusted_telegram_update_id and (
             actor.source != "telegram-bridge"
@@ -58311,6 +58329,8 @@ class AgentRuntime:
             and accepted_web_tool_names
             and response.get("_simple_public_news_owned") is not True
             and response.get("_obsidian_owned") is not True
+            and not prior_web_source_followup
+            and not isolated_current_file_web_compare_turn
         ):
             from friday.execution_kernel.web_consumption import observed_web_provider_selection
             from friday.orchestration.web_answer_evidence_consumption import (
@@ -58321,9 +58341,11 @@ class AgentRuntime:
             from friday.orchestration.web_currentness_policy import WebCurrentnessDecision
 
             # Consume this turn's research answer only.  A restored ledger /
-            # source-followup keeps its code-owned body.  Do not reclassify the
-            # raw user question: deictics such as «это все источники?» would
-            # SEARCH_BLOCKED_PRIVATE after the public search already ran.
+            # source-followup keeps its code-owned body.  Isolated file+web
+            # compare already bound citations through its own synthesizer.
+            # Do not reclassify the raw user question: deictics such as
+            # «это все источники?» would SEARCH_BLOCKED_PRIVATE after the
+            # public search already ran.
             spoken_prefix = f"{spoken}\n\n" if spoken else ""
             model_answer = (
                 content[len(spoken_prefix) :]
@@ -58332,43 +58354,44 @@ class AgentRuntime:
                 if spoken and content == spoken
                 else content
             )
-            auth = getattr(context, "_authenticated_turn_context", None)
-            turn_id = str(getattr(auth, "turn_id", "") or "")
-            if re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}", turn_id) is None:
-                turn_id = "runtime.web.answer"
-            admitted_urls = tuple(
-                str(item.get("url") or "")
-                for item in context.web_sources
-                if isinstance(item, Mapping) and str(item.get("url") or "").strip()
-            )
-            web_answer_consumption = consume_web_answer_evidence(
-                "runtime.web.answer",
-                turn_id,
-                answer=model_answer,
-                admitted_source_urls=admitted_urls,
-                currentness=WebCurrentnessDecision.SEARCH_REQUIRED,
-                current_sensitive=True,
-                provider_selection=observed_web_provider_selection(
-                    {
-                        "sources": [{"url": url} for url in admitted_urls],
-                        "selected_provider_id": context.web_selected_provider_id,
-                        "provider_primary_id": context.web_provider_primary_id,
-                        "provider_used_fallback": context.web_provider_used_fallback,
-                    }
-                ),
-            )
-            if web_answer_consumption.publication in {
-                WebAnswerEvidencePublication.HOLD,
-                WebAnswerEvidencePublication.BLOCKED,
-            }:
-                published = published_web_answer(model_answer, web_answer_consumption)
-                content = f"{spoken}\n\n{published}".strip() if spoken else published
-                response["content"] = content
-                response["file_clips"] = list(structural_file_clips)
-                response["voice_clip"] = None
-                verification = _unknown_verdict("web_answer_evidence_held")
-                verification_status = VERDICT_UNKNOWN
-                answer_verified = False
+            if model_answer.strip():
+                auth = getattr(context, "_authenticated_turn_context", None)
+                turn_id = str(getattr(auth, "turn_id", "") or "")
+                if re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}", turn_id) is None:
+                    turn_id = "runtime.web.answer"
+                admitted_urls = tuple(
+                    str(item.get("url") or "")
+                    for item in context.web_sources
+                    if isinstance(item, Mapping) and str(item.get("url") or "").strip()
+                )
+                web_answer_consumption = consume_web_answer_evidence(
+                    "runtime.web.answer",
+                    turn_id,
+                    answer=model_answer,
+                    admitted_source_urls=admitted_urls,
+                    currentness=WebCurrentnessDecision.SEARCH_REQUIRED,
+                    current_sensitive=True,
+                    provider_selection=observed_web_provider_selection(
+                        {
+                            "sources": [{"url": url} for url in admitted_urls],
+                            "selected_provider_id": context.web_selected_provider_id,
+                            "provider_primary_id": context.web_provider_primary_id,
+                            "provider_used_fallback": context.web_provider_used_fallback,
+                        }
+                    ),
+                )
+                if web_answer_consumption.publication in {
+                    WebAnswerEvidencePublication.HOLD,
+                    WebAnswerEvidencePublication.BLOCKED,
+                }:
+                    published = published_web_answer(model_answer, web_answer_consumption)
+                    content = f"{spoken}\n\n{published}".strip() if spoken else published
+                    response["content"] = content
+                    response["file_clips"] = list(structural_file_clips)
+                    response["voice_clip"] = None
+                    verification = _unknown_verdict("web_answer_evidence_held")
+                    verification_status = VERDICT_UNKNOWN
+                    answer_verified = False
 
         if (
             response.get("_simple_public_news_owned") is True

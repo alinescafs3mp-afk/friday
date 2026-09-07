@@ -1,6 +1,6 @@
 # Friday: canonical project backlog
 
-Updated: 2026-09-07 (reported production `0.208.55`; F.0–F.5 source including independent create/edit oracle and reply revision selection; C1–C11 already in intake; historical S3 witness preserved; Pandora unchanged)
+Updated: 2026-09-07 (reported production `0.208.55`; F.0–F.6 source including mixed file+archive+web consume; C1–C11 already in intake; historical S3 witness preserved; Pandora unchanged)
 
 This is the project's only backlog and mutable status register. It owns the
 current production identity, execution order, acceptance gaps and owner actions.
@@ -1383,7 +1383,9 @@ The checkboxes below acknowledge those specific contracts/observers only.
       `_strip_model_authored_web_urls`). Claims/citations come from the actual
       answer and admitted ledger, not an empty observer claim set.
       Unsupported/current-sensitive/contradictory/private evidence holds or
-      blocks publication. Not a deployed release.
+      blocks publication. Restored source-followup, isolated current-file+web
+      compare and empty model bodies skip consume so code-owned answers stay
+      intact. Not a deployed release.
 - [x] Automatic currentness and configured-provider fallback reach the
       requesting-answer consumer on `origin/main`, without private queries or
       new provider credentials. Prefetch refuses `SEARCH_BLOCKED_PRIVATE`.
@@ -1585,17 +1587,25 @@ primary release certification to create the worker.
 
 ### N4 — Whole-Organism Coherence
 
-Status: mixed-journey projections are reported live on `0.208.21`; complete
-N4 execution/consumption acceptance remains open. Durable organs, the shared view, the
+Status: mixed-journey projections are reported live on `0.208.21`; mixed
+file+archive+web consume is on this source tree, not a deployed release.
+Durable organs, the shared view, the
 store-shaped projection and the store observer derive mixed journeys
 from already-durable identities. Telegram MIXED is PROJECTED-only.
 Primary and secondary share one operation identity. New modes compose
 existing primitives. Mixed-journey is not a registered organ.
 
-- [ ] A real file + authorized archive + public web task produces a grounded
-      comparison/table through the existing runtime and one final publisher.
-- [ ] Prove actual status/final transport, cancellation, restart, duplicate input
-      and uncertain-send behavior for that composed task, not just its projection.
+- [x] A real file + authorized archive + public web task produces a grounded
+      comparison/table through the existing runtime and one final TEXT
+      publisher (`friday/orchestration/mixed_file_archive_web_query.py`,
+      `mixed_file_archive_web_comparison.py`,
+      `friday/organs/mixed_journey/consume.py`). Two-call tools-disabled
+      synthesizer cites F1+A1+W*; PREPARED_EVIDENCE_2. Production without
+      injected evidence fail-closes. Not live on `0.208.55`.
+- [x] Duplicate identity is idempotent; cancel-while-running does not
+      publish; web restart after RUNNING/FAILED/CANCELLED is fail-closed;
+      SEND_UNKNOWN does not send again. Publisher callback records known
+      versus unknown send. Not live on `0.208.55`.
 
 - [x] Read-only `SharedOperationViewV1` / `AgentSituationProjectionV1`
       on `origin/main` from already-supplied facts. No new execution
