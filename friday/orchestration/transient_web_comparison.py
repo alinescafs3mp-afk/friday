@@ -39,6 +39,7 @@ from friday.orchestration.turn_context_runtime import current_primary_authentica
 from friday.orchestration.web_currentness_policy import WebCurrentnessDecision
 from friday.orchestration.web_provider_policy import (
     ProviderObservation,
+    WebProviderId,
     WebProviderPolicyError,
     WebProviderStatus,
     select_web_provider,
@@ -470,6 +471,7 @@ class TransientWebComparisonEvidence:
     sources: tuple[TransientWebSource, ...] = field(repr=False)
     _query: str = field(repr=False, compare=False)
     _process_authority: object = field(repr=False, compare=False)
+    selected_provider_id: str | None = None
 
     def __post_init__(self) -> None:
         _require_digest(self.plan_sha256, label="evidence plan_sha256")
@@ -510,6 +512,17 @@ class TransientWebComparisonEvidence:
             raise TransientWebComparisonError("unavailable evidence reason is inconsistent")
         if self.outbound_attempted != (self.research_call_count == 1):
             raise TransientWebComparisonError("outbound attempt and call count are inconsistent")
+        if self.selected_provider_id is not None:
+            if (
+                type(self.selected_provider_id) is not str
+                or self.status is not TransientWebEvidenceStatus.SOURCED
+            ):
+                raise TransientWebComparisonError("transient web evidence provider is invalid")
+            try:
+                if WebProviderId(self.selected_provider_id).value != self.selected_provider_id:
+                    raise TransientWebComparisonError("transient web evidence provider is invalid")
+            except ValueError as exc:
+                raise TransientWebComparisonError("transient web evidence provider is invalid") from exc
 
     def identity_payload(self) -> dict[str, object]:
         """Body-free, restart-storable identity; source bodies remain process-only."""
@@ -530,6 +543,7 @@ class TransientWebComparisonEvidence:
             "timed_out_sources": self.timed_out_sources,
             "search_timed_out": self.search_timed_out,
             "projection_truncated": self.projection_truncated,
+            "selected_provider_id": self.selected_provider_id,
             "source_sha256": [source.content_sha256 for source in self.sources],
             "citation_labels": [source.label for source in self.sources],
         }
@@ -584,6 +598,7 @@ def _evidence(
     timed_out: int | None = None,
     search_timed_out: bool | None = None,
     projection_truncated: bool = False,
+    selected_provider_id: str | None = None,
 ) -> TransientWebComparisonEvidence:
     return TransientWebComparisonEvidence(
         plan_sha256=plan.canonical_sha256(),
@@ -599,9 +614,29 @@ def _evidence(
         search_timed_out=search_timed_out,
         projection_truncated=projection_truncated,
         sources=sources,
+        selected_provider_id=selected_provider_id,
         _query=plan._query,
         _process_authority=_PROCESS_AUTHORITY,
     )
+
+
+def _report_selected_provider_id(report: Mapping[str, Any]) -> str | None:
+    """Carry a closed provider id when present; never invent one."""
+
+    if "selected_provider_id" not in report:
+        return None
+    value = report["selected_provider_id"]
+    if value is None:
+        return None
+    if type(value) is not str:
+        raise TransientWebComparisonError("web report selected_provider_id is malformed")
+    token = value.strip().casefold()
+    if not token:
+        return None
+    try:
+        return WebProviderId(token).value
+    except ValueError:
+        return None
 
 
 def _consumption_turn_id() -> str:
@@ -845,6 +880,7 @@ def _project_report(
             timed_out=timed_out,
             search_timed_out=False,
             projection_truncated=projection_truncated,
+            selected_provider_id=_report_selected_provider_id(report),
         )
     if raw_sources or requested or failed or timed_out:
         return _evidence(

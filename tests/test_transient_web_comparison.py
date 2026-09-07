@@ -13,6 +13,7 @@ from typing import Any
 
 import pytest
 
+import friday.orchestration.transient_web_comparison as web_module
 from friday.orchestration.current_file_web_query import (
     extract_compare_current_file_public_web_query,
     extract_independent_public_web_query,
@@ -238,6 +239,33 @@ async def test_one_transient_call_uses_only_the_public_clause_and_never_captures
     identity = json.dumps(evidence.identity_payload(), ensure_ascii=False)
     assert "Current public fact" not in identity
     assert "https://" not in identity
+    assert evidence.selected_provider_id is None
+    assert evidence.identity_payload()["selected_provider_id"] is None
+
+
+def test_projected_evidence_carries_a_closed_provider_or_stays_none() -> None:
+    actor = ActorContext("local:alice", "user", "test")
+    plan = seal_explicit_public_web_query(
+        current_user_message=_message("current regulator guidance 2026"),
+        actor=actor,
+        conversation_id="conversation-1",
+    )
+    sourced = _report(_source(1))
+    sourced["query"] = plan._query
+    brave = dict(sourced)
+    brave["selected_provider_id"] = "brave"
+    unknown = dict(sourced)
+    unknown["selected_provider_id"] = "not-a-closed-provider"
+    carried = web_module._project_report(plan, brave)  # noqa: PLC2701
+    missing = web_module._project_report(plan, sourced)  # noqa: PLC2701
+    refused = web_module._project_report(plan, unknown)  # noqa: PLC2701
+    assert carried.status is TransientWebEvidenceStatus.SOURCED
+    assert carried.selected_provider_id == "brave"
+    assert carried.identity_payload()["selected_provider_id"] == "brave"
+    assert missing.selected_provider_id is None
+    assert missing.status is TransientWebEvidenceStatus.SOURCED
+    assert refused.selected_provider_id is None
+    assert refused.status is TransientWebEvidenceStatus.UNAVAILABLE
 
 
 @pytest.mark.anyio

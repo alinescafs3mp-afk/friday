@@ -136,7 +136,10 @@ def _archive_file() -> PreparedFileEvidence:
     )
 
 
-def _web_evidence(*texts: str) -> TransientWebComparisonEvidence:
+def _web_evidence(
+    *texts: str,
+    selected_provider_id: str | None = None,
+) -> TransientWebComparisonEvidence:
     actor = ActorContext("local:alice", "user", "test")
     query = "current public facts 2026"
     plan = seal_explicit_public_web_query(
@@ -157,18 +160,18 @@ def _web_evidence(*texts: str) -> TransientWebComparisonEvidence:
                 "truncated": False,
             }
         )
-    return web_module._project_report(  # noqa: PLC2701
-        plan,
-        {
-            "query": query,
-            "sources": rows,
-            "requested_sources": len(rows),
-            "completed_sources": len(rows),
-            "failed_sources": 0,
-            "timed_out_sources": 0,
-            "search_timed_out": False,
-        },
-    )
+    report: dict[str, object] = {
+        "query": query,
+        "sources": rows,
+        "requested_sources": len(rows),
+        "completed_sources": len(rows),
+        "failed_sources": 0,
+        "timed_out_sources": 0,
+        "search_timed_out": False,
+    }
+    if selected_provider_id is not None:
+        report["selected_provider_id"] = selected_provider_id
+    return web_module._project_report(plan, report)  # noqa: PLC2701
 
 
 def _full_web() -> TransientWebComparisonEvidence:
@@ -176,6 +179,7 @@ def _full_web() -> TransientWebComparisonEvidence:
         "Первый публичный источник описывает текущее состояние.",
         "Второй публичный источник подтверждает изменение.",
         "Третий публичный источник задаёт область применимости.",
+        selected_provider_id="brave",
     )
 
 

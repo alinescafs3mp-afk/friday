@@ -26,6 +26,7 @@ from friday.orchestration.mixed_file_archive_web_comparison import (
 )
 from friday.orchestration.mixed_file_archive_web_query import mixed_file_archive_web_turn_is_admitted
 from friday.orchestration.transient_web_comparison import TransientWebComparisonEvidence
+from friday.orchestration.web_provider_policy import WebProviderId
 from friday.orchestration.web_research_consumption import (
     WebResearchConsumptionReason,
     WebResearchConsumptionState,
@@ -199,14 +200,24 @@ def _plan_sha256(message: str, source_identity: str) -> str:
     return hashlib.sha256(material).hexdigest()
 
 
-def _web_consumption(turn_id: str, source_count: int) -> WebResearchConsumptionV1:
-    usable = source_count > 0
+def _web_consumption(
+    turn_id: str,
+    source_count: int,
+    selected_provider_id: str | None,
+) -> WebResearchConsumptionV1:
+    provider: str | None = None
+    if type(selected_provider_id) is str:
+        try:
+            provider = WebProviderId(selected_provider_id.strip().casefold()).value
+        except ValueError:
+            provider = None
+    usable = source_count > 0 and provider is not None
     return WebResearchConsumptionV1(
         "mixed.file.archive.web",
         turn_id,
         WebResearchConsumptionState.CONSUMABLE if usable else WebResearchConsumptionState.UNAVAILABLE,
-        "yandex" if usable else None,
-        source_count,
+        provider if usable else None,
+        source_count if usable else 0,
         WebResearchConsumptionReason.PRIMARY_SOURCES
         if usable
         else WebResearchConsumptionReason.NO_ADMITTED_SOURCES,
@@ -435,7 +446,11 @@ async def handle_mixed_file_archive_web_turn(
     ]
     citations = [{"label": label} for label in comparison.citation_labels]
     answer_sha256 = hashlib.sha256(comparison.answer.encode("utf-8")).hexdigest()
-    web_consumption = _web_consumption(turn_id, len(web_evidence.sources))
+    web_consumption = _web_consumption(
+        turn_id,
+        len(web_evidence.sources),
+        web_evidence.selected_provider_id,
+    )
     observed = _observe_identity(
         projection_id=journey_id,
         turn_id=turn_id,

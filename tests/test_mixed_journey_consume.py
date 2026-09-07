@@ -11,11 +11,16 @@ from test_mixed_file_archive_web_comparison import (
     _ComparisonModel,
     _current_file,
     _full_web,
+    _web_evidence,
 )
 
 from friday.agent_runtime import AgentRuntime
 from friday.orchestration.engineer_result_carrier import EngineerResultCarrierKind
 from friday.orchestration.mixed_journey_store_projection import MixedJourneyStoreProjectionState
+from friday.orchestration.web_research_consumption import (
+    WebResearchConsumptionReason,
+    WebResearchConsumptionState,
+)
 from friday.organs.mixed_journey.admit import mixed_status_admitted
 from friday.organs.mixed_journey.consume import (
     MixedJourneyConsumeLedger,
@@ -90,6 +95,10 @@ async def test_injected_evidence_publishes_text_only_with_file_archive_web_citat
     assert set(observed.view.organs.present_organs) == {"file", "archive", "web", "table"}
     assert mixed_status_admitted(observed) is True
     assert model.acquire_calls == 1
+    consumption = reply["web_research_consumption"]
+    assert consumption.selected_provider_id == "brave"
+    assert consumption.usability is WebResearchConsumptionState.CONSUMABLE
+    assert consumption.reason is WebResearchConsumptionReason.PRIMARY_SOURCES
 
 
 @pytest.mark.asyncio
@@ -146,6 +155,37 @@ async def test_send_unknown_does_not_send_again() -> None:
     second = await _handle(ledger=ledger, publisher=publisher)
     assert first["message"] == second["message"] == _DEFAULT_ANSWER
     assert sends == [_DEFAULT_ANSWER]
+
+
+@pytest.mark.asyncio
+async def test_consume_does_not_invent_a_provider_when_evidence_omits_one() -> None:
+    web = _web_evidence(
+        "Первый публичный источник описывает текущее состояние.",
+        "Второй публичный источник подтверждает изменение.",
+        "Третий публичный источник задаёт область применимости.",
+    )
+    reply = await _handle(web_evidence=web)
+    consumption = reply["web_research_consumption"]
+    assert consumption.selected_provider_id is None
+    assert consumption.usability is WebResearchConsumptionState.UNAVAILABLE
+    assert consumption.admitted_source_count == 0
+    assert consumption.reason is WebResearchConsumptionReason.NO_ADMITTED_SOURCES
+
+
+@pytest.mark.asyncio
+async def test_consume_does_not_invent_a_provider_when_evidence_names_an_unknown_one() -> None:
+    web = _web_evidence(
+        "Первый публичный источник описывает текущее состояние.",
+        selected_provider_id="not-a-closed-provider",
+    )
+    assert web.selected_provider_id is None
+    reply = await _handle(web_evidence=web)
+    consumption = reply.get("web_research_consumption")
+    assert consumption is None or consumption.selected_provider_id is None
+    if consumption is not None:
+        assert consumption.usability is WebResearchConsumptionState.UNAVAILABLE
+        assert consumption.admitted_source_count == 0
+    assert "yandex" not in str(reply).casefold()
 
 
 @pytest.mark.asyncio
