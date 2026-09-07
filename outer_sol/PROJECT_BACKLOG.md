@@ -1,6 +1,6 @@
 # Friday: canonical project backlog
 
-Updated: 2026-09-07 (reported production `0.208.55`; F.0–F.6 source including mixed file+archive+web consume; C1–C11 already in intake; historical S3 witness preserved; Pandora unchanged)
+Updated: 2026-09-07 (reported production `0.208.55`; F.0–F.6 source on `20311f32` with change-gate PASSED NON-CERTIFYING; F.7–F.10 existing contracts recorded without invented product work; F.11 independent review of `7be8d7f9..20311f32` assigned; C1–C11 already in intake; historical S3 witness preserved; Pandora unchanged)
 
 This is the project's only backlog and mutable status register. It owns the
 current production identity, execution order, acceptance gaps and owner actions.
@@ -122,7 +122,10 @@ deployed; the observation-bound consumed witness landed on live
 `0.208.51` assist and remains durable through live `0.208.55`. S5 40k lease
 and S6 recovery/browse paths stay live.
 
-The live product queue is N1–N5. The shared operation-progress contract is
+The live product queue is N1–N5 plus F.11 installed-artifact release.
+F.0–F.6 source is on `origin/main` `20311f32` (change-gate PASSED
+NON-CERTIFYING versus intake `7be8d7f9`); it is not live on `0.208.55`.
+The shared operation-progress contract is
 live. Production `0.208.55` keeps ordinary Telegram `/chat` status,
 Engineer status, file-album DOCUMENT status, Engineer FILE/ARCHIVE
 carrier, observed web/archive chat status, one-final-carrier packing,
@@ -641,6 +644,68 @@ Engineer host preflight and unrelated runtime/expectation failures. Do not infer
 that 149 corrected recorded failures make the entire current suite green.
 
 No deployed runtime, version, schema, Pandora item or companion plugin changes.
+
+### F.0–F.11 apply-and-release (2026-09-07)
+
+Status: F.0–F.6 source is on `origin/main` at
+`20311f324614ba8a792dc1f7e1d96e6a1d27f22a` (tree
+`82b8515b1a2e1f40b95d77e032c42e58bdcb89a4`). Change-gate versus intake
+`7be8d7f9303fdc5acb28c5fb24f218ee2afc5bcd` completed with
+`Quality gate (change): PASSED (NON-CERTIFYING)` (`result=passed`,
+`certification_eligible=false`, evidence
+`/var/tmp/friday-change-evidence.2aom2zP5`, inventory
+`28433dd8f2f4333cb260d9affed5a56b90fcea3107072ebe2d6464fbdc13fe05`,
+topology 20/4). This is not exact-release certification and not a
+deployed release. Production remains `0.208.55` /
+`e60860eaa89827bc5fc58d7c4f1c47514caaf2d4`. Version and schema stay
+`0.208.55` / 50 until F.11. Independent review of
+`7be8d7f9..20311f32` is assigned to Luna-1; Luna must not write this
+backlog, the inventory TSV, version files, or `friday/agent_runtime`
+product logic.
+
+Landed F.0–F.6 commits: `aa28cedd` timezone pins and dense rebind;
+`f9deec53` FTS rebuild after secure-delete purge; `1f592c51` inventory
+declare; `6536a2a8` ruff-format; `f9f7a656` isolated import probes;
+`2e642cd0` requesting-answer consume; `805c50c9` TEST cgroup admission;
+`7ac90584` independent create oracle; `304c41f0` reply-bound edits;
+`032bfb7a` mixed file+archive+web consume; `60b08f2a` mypy cancel bind;
+`20311f32` closed non-nightly scratch sum 16_535.
+
+- [x] F.0/F.1 stabilization source on this tree (clock/window pins,
+      FTS rebuild after purge, inventory, isolated import probes).
+      Hosted Ubuntu 24.04 SQLite 3.45.1 remains a distinct record from
+      local 3.46.1. Not a deployed release.
+- [x] F.2–F.6 product source on this tree (calendar fixtures, research
+      consume, TEST cgroup, coding oracle and reply-bound edits, mixed
+      consume durability). Live configured-model N2 acceptance is not
+      fabricated. Not live on `0.208.55`.
+- [x] F.7 existing document/memory/graph contracts remain on this tree
+      without new product logic: office formula-cache/hidden/merged
+      incomplete (`tests/test_office_structure_completeness.py`),
+      OCR/vision no-exception-body (`tests/test_local_ocr_fallback.py`,
+      `tests/test_multipage_scan_vision.py`), graph snapshot reaching
+      the agent (`tests/test_graph_snapshot_reaches_agent.py`), sole
+      ordinary facade `archive_search`, reversible entity edits
+      (`tests/test_entity_edits_are_reversible.py`). Installed-package
+      golden journeys remain F.11. Do not rebind historical
+      `0.208.1` registry receipts from this note.
+- [x] F.8 existing cancellation/restart/idempotency contracts remain
+      on this tree (`tests/test_turn_deadline_reliability.py`,
+      mixed-journey consume durability on `032bfb7a`/`60b08f2a`).
+      Installed Telegram/HTTP restart proof is F.11.
+- [x] F.9 N5 maintainability ratchet remains standing.
+      `friday/agent_runtime/__init__.py` is 76_572 lines. F.6 added only
+      thin dispatch there. No wholesale rewrite.
+- [x] F.10 S3 historical consumed witness on live `0.208.51`
+      2026-09-06T05:25Z is preserved. Do not fabricate traffic. Do not
+      re-activate `e60860ea` or `9c8a4eed`. Next product sibling that
+      changes friday sources is `assist_to_shadow`. Compact health
+      `effective_mode=off` (`material_loaded_not_accepted`) is
+      process-epoch, not a missing witness.
+- [ ] F.11 independent review of `7be8d7f9..20311f32`, next free
+      version `0.208.56`, exact-release, sealed activate until
+      Trusted-CA `https://127.0.0.1:8000/api/health` shows the new
+      version. Pandora stays excluded.
 
 ### P0G — canonical Gate Diet
 
@@ -1968,11 +2033,14 @@ record the owner required in this audit commit, not a failure dump):
 
 ### Open and implementable
 
-C1 correctness/containment and the existing N1–N5 product-completion work above
-are implementable and active under the owner's extended reliability mission.
-The prior audit/activation narrative is historical, not a blanket acceptance of
-those user outcomes. Preserve the 05:25Z S3 witness and its honest partial evidence;
-do not fabricate traffic, issue no-product hops for bookkeeping, or touch Pandora.
+F.0–F.6 source is on `origin/main` `20311f32` with a passed non-certifying
+change-gate versus intake `7be8d7f9`. F.7–F.10 did not invent new product
+work; existing contracts stay on this tree. F.11 independent review,
+version `0.208.56`, exact-release and sealed activate remain the live
+release path. Live configured-model N2 acceptance is not fabricated.
+EXECUTE/RUN of uploaded programs stay fail-closed. Preserve the 05:25Z
+S3 witness and its honest partial evidence; do not fabricate traffic,
+issue no-product hops for bookkeeping, or touch Pandora.
 
 ### Open and blocked
 
