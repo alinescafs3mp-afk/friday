@@ -569,6 +569,20 @@ async def test_check_aliases_share_the_same_revision_and_no_model_path(storage, 
 
 
 @pytest.mark.asyncio
+async def test_check_via_reply_uses_the_exact_published_revision(storage, tmp_path, compiler):
+    base = _base(storage, tmp_path)
+    response = await _check(
+        storage,
+        base,
+        message="проверь этот проект",
+        reply_assistant_message_id=base["message_id"],
+    )
+    assert response["context"]["coding_revision_check"] == "syntax_passed"
+    assert _report(response)["source_message_id"] == base["message_id"]
+    assert len(compiler) == 1
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("message", ["check this upload", "проверь main.py", "check", "проверь"])
 @pytest.mark.parametrize("entrance", ["async", "static"])
 async def test_upload_inspection_is_not_stolen_by_saved_revision_check(monkeypatch, message, entrance):

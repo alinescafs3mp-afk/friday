@@ -93,19 +93,22 @@ def oracle_sha256(oracle_id: str, cases: tuple[CodingBehaviorOracleCaseV1, ...])
     ).hexdigest()
 
 
-def admit_coding_behavior_oracle(message: str) -> CodingBehaviorOracleV1:
-    """Admit only the frozen CSV-summary CLI family.  Other creates stay unverified."""
+def _empty_oracle() -> CodingBehaviorOracleV1:
+    return CodingBehaviorOracleV1(
+        CodingBehaviorOracleState.EMPTY,
+        CodingBehaviorOracleReason.NO_FAMILY,
+        None,
+        None,
+        (),
+        "",
+    )
 
-    text = message or ""
-    if not text.strip() or _CSV_RE.search(text) is None or _SUMMARY_RE.search(text) is None:
-        return CodingBehaviorOracleV1(
-            CodingBehaviorOracleState.EMPTY,
-            CodingBehaviorOracleReason.NO_FAMILY,
-            None,
-            None,
-            (),
-            "",
-        )
+
+def admit_coding_behavior_oracle_id(oracle_id: str | None) -> CodingBehaviorOracleV1:
+    """Re-admit a previously persisted frozen family.  Unknown ids stay empty."""
+
+    if oracle_id != ORACLE_ID:
+        return _empty_oracle()
     digest = oracle_sha256(ORACLE_ID, CSV_SUMMARY_CASES)
     return CodingBehaviorOracleV1(
         CodingBehaviorOracleState.ADMITTED,
@@ -115,6 +118,15 @@ def admit_coding_behavior_oracle(message: str) -> CodingBehaviorOracleV1:
         CSV_SUMMARY_CASES,
         CLI_CONTRACT,
     )
+
+
+def admit_coding_behavior_oracle(message: str) -> CodingBehaviorOracleV1:
+    """Admit only the frozen CSV-summary CLI family.  Other creates stay unverified."""
+
+    text = message or ""
+    if not text.strip() or _CSV_RE.search(text) is None or _SUMMARY_RE.search(text) is None:
+        return _empty_oracle()
+    return admit_coding_behavior_oracle_id(ORACLE_ID)
 
 
 def oracle_worker_program() -> str:

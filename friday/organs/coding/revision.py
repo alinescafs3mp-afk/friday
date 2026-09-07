@@ -33,6 +33,7 @@ from friday.orchestration.coding_project_identity import (
     build_coding_project_identity,
 )
 from friday.orchestration.operation_result_carrier import MAX_OPERATION_RESULT_ARCHIVE_BYTES
+from friday.organs.coding.behavior_oracle import ORACLE_ID
 from friday.organs.coding.workspace_io import source_revision_sha256
 
 if TYPE_CHECKING:
@@ -247,6 +248,74 @@ def load_coding_revision(
         zipfile.BadZipFile,
     ) as exc:
         raise CodingRevisionUnavailable("revision unavailable") from exc
+
+
+def published_coding_revision_binding(
+    storage: Any,
+    *,
+    person_id: str,
+    conversation_id: str,
+    message_id: str,
+) -> tuple[str, str] | None:
+    """Exact published revision on one assistant message. Never latest/HEAD."""
+
+    if (
+        type(message_id) is not str
+        or _MESSAGE.fullmatch(message_id) is None
+        or type(conversation_id) is not str
+        or not conversation_id
+        or storage is None
+    ):
+        return None
+    try:
+        conversation = storage.get_conversation(conversation_id, person_id)
+        message = storage.get_message(message_id, person_id)
+        if (
+            not conversation
+            or conversation.get("mode") != "coding"
+            or not message
+            or message.get("role") != "assistant"
+            or message.get("conversation_id") != conversation_id
+        ):
+            return None
+        metadata = _metadata(message.get("metadata_json"))
+        record = metadata.get("coding_source_revision")
+        revision_sha256 = record.get("revision_sha256") if type(record) is dict else None
+        if (
+            metadata.get("interaction_mode") != "coding"
+            or type(record) is not dict
+            or set(record) != _RECORD_KEYS
+            or record.get("schema") != SCHEMA
+            or type(revision_sha256) is not str
+            or _DIGEST.fullmatch(revision_sha256) is None
+        ):
+            return None
+        identity = build_coding_project_identity(
+            "revision.reply",
+            "revision.reply",
+            project_id=record.get("project_id"),
+            revision_selector=revision_sha256,
+        )
+        if identity.identity is not CodingProjectIdentityState.IDENTIFIED:
+            return None
+        return message_id, revision_sha256
+    except (OSError, TypeError, ValueError, RuntimeError, RecursionError, CodingRevisionUnavailable):
+        return None
+
+
+def coding_message_oracle_id(storage: Any, *, person_id: str, message_id: str) -> str | None:
+    """Persisted frozen-oracle identity on one assistant message, if any."""
+
+    if storage is None or type(message_id) is not str or _MESSAGE.fullmatch(message_id) is None:
+        return None
+    try:
+        message = storage.get_message(message_id, person_id)
+        if not message or message.get("role") != "assistant":
+            return None
+        oracle_id = _metadata(message.get("metadata_json")).get("coding_behavior_oracle")
+    except (OSError, TypeError, ValueError, RuntimeError, RecursionError, CodingRevisionUnavailable):
+        return None
+    return oracle_id if type(oracle_id) is str and oracle_id == ORACLE_ID else None
 
 
 def reauthorize_coding_source_parent(

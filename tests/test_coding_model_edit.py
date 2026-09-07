@@ -14,6 +14,7 @@ import pytest
 from friday.generated_files import persist_generated_response_files
 from friday.orchestration.router import OrchestrationRouter
 from friday.organs.coding import static_turn
+from friday.organs.coding.model_edit import parse_model_edit_request
 from friday.organs.coding.revision import load_coding_revision
 from friday.organs.coding.worker_boundary import default_coding_worker_boundary
 from friday.permissions import LEGACY_OWNER_USER_ID, ActorContext, AuthorizationError
@@ -22,6 +23,34 @@ from friday.storage import init_storage
 OWNER = LEGACY_OWNER_USER_ID
 ACTOR = ActorContext(OWNER, "owner", "telegram-bridge", identity_id="5001", telegram_chat_id="5001")
 NEW_SOURCE = "def add(a: int, b: int) -> int:\n    return a + b\n"
+
+
+def test_explicit_edit_selector_stays_the_expert_path() -> None:
+    parsed = parse_model_edit_request("revise msg_0123456789abcdef " + "ab" * 32 + "\nДобавь helper")
+    assert parsed is not None and parsed[2] == "Добавь helper"
+
+
+def test_natural_edit_requires_an_authenticated_reply_binding() -> None:
+    task = "доработай этот проект\nДобавь helper"
+    assert parse_model_edit_request(task) is None
+    parsed = parse_model_edit_request(
+        task,
+        reply_message_id="msg_0123456789abcdef",
+        reply_revision_sha256="ab" * 32,
+    )
+    assert parsed == ("msg_0123456789abcdef", "ab" * 32, "Добавь helper")
+
+
+def test_conflicting_reply_and_explicit_ids_are_rejected() -> None:
+    message = "revise msg_0123456789abcdef " + "ab" * 32 + "\nДобавь helper"
+    assert (
+        parse_model_edit_request(
+            message,
+            reply_message_id="msg_fedcba9876543210",
+            reply_revision_sha256="cd" * 32,
+        )
+        is None
+    )
 
 
 class Model:

@@ -559,15 +559,15 @@ async def test_verified_csv_summary_survives_workspace_loss(storage, coding_boun
     original = _load(storage, base)
     assert created["verified"] is True
     helper = {"add": {"helper.py": "def version() -> int:\n    return 1\n"}}
-    edited = _publish(
+    edited_response = await _route(
         storage,
-        await _route(
-            storage,
-            Model(response={"content": json.dumps(helper), "finish_reason": "stop"}),
-            _request(base, "Добавь helper.version без изменения CLI"),
-            base["conversation_id"],
-        ),
+        Model(response={"content": json.dumps(helper), "finish_reason": "stop"}),
+        _request(base, "Добавь helper.version без изменения CLI"),
+        base["conversation_id"],
     )
+    assert edited_response["verified"] is True
+    assert edited_response["context"]["coding_behavior_verification"] == "verified"
+    edited = _publish(storage, edited_response)
     revision = _load(storage, edited)
     assert revision.project_id == original.project_id
     assert revision.revision_sha256 != original.revision_sha256
@@ -589,3 +589,99 @@ async def test_verified_csv_summary_survives_workspace_loss(storage, coding_boun
         assert restored["verified"] is False
     finally:
         reopened.close()
+
+
+async def _verified_csv(storage):
+    model = CreateModel()
+    model.response = {
+        "content": json.dumps({"files": CSV_SOURCES}),
+        "finish_reason": "stop",
+        "tool_calls": [],
+    }
+    created = await _route(storage, model, CSV_TASK, None)
+    return _publish(storage, created)
+
+
+@pytest.mark.asyncio
+async def test_wrong_csv_summary_edit_is_repaired_then_verified(storage, coding_boundary):
+    from tests.test_coding_model_edit import _request
+
+    repaired_main = "# repaired\n" + CSV_SOURCES["main.py"]
+    base = await _verified_csv(storage)
+    original = _load(storage, base)
+    model = ScriptedCreateModel(
+        [
+            json.dumps({"replace": {"main.py": WRONG_CSV_SOURCES["main.py"]}}),
+            json.dumps({"replace": {"main.py": repaired_main}}),
+        ]
+    )
+    response = await _route(
+        storage,
+        model,
+        _request(base, "Поправь обработку пустого ввода, не меняя CLI"),
+        base["conversation_id"],
+    )
+    assert len(model.calls) == 2
+    repair = json.loads(model.calls[1][0][1]["content"])
+    assert repair["repair"] is True
+    assert repair["diagnostics"]["failed_case"] == "two_rows"
+    assert response["verified"] is True
+    assert response["context"]["coding_revision_edit"] == "applied"
+    assert dict(_load(storage, base).members) == dict(original.members)
+    published = _publish(storage, response)
+    assert dict(_load(storage, published).members)["main.py"] == repaired_main.encode()
+
+
+@pytest.mark.asyncio
+async def test_reply_selects_the_exact_published_revision(storage, coding_boundary):
+    from tests.test_coding_model_edit import Model
+
+    base = await _verified_csv(storage)
+    original = _load(storage, base)
+    helper = {"add": {"helper.py": "def version() -> int:\n    return 1\n"}}
+    response = await _route(
+        storage,
+        Model(response={"content": json.dumps(helper), "finish_reason": "stop"}),
+        "доработай этот проект\nДобавь helper.version без изменения CLI",
+        base["conversation_id"],
+        reply_assistant_message_id=base["message_id"],
+    )
+    assert response["verified"] is True
+    assert response["context"]["coding_revision_edit"] == "applied"
+    published = _publish(storage, response)
+    after = _load(storage, published)
+    assert "helper.py" in dict(after.members)
+    assert dict(_load(storage, base).members) == dict(original.members)
+
+
+@pytest.mark.asyncio
+async def test_natural_edit_without_reply_does_not_select_latest(storage, coding_boundary):
+    from tests.test_coding_model_edit import Model
+
+    base = await _verified_csv(storage)
+    original = _load(storage, base)
+    response = await _route(
+        storage,
+        Model(),
+        "доработай этот проект\nДобавь helper.version без изменения CLI",
+        base["conversation_id"],
+    )
+    assert response["context"]["coding_revision_edit"] == "blocked"
+    assert response["verified"] is False
+    assert dict(_load(storage, base).members) == dict(original.members)
+
+
+@pytest.mark.asyncio
+async def test_restore_via_reply_reopens_the_exact_parent(storage, coding_boundary):
+    base = await _verified_csv(storage)
+    original = _load(storage, base)
+    restored = await _route(
+        storage,
+        None,
+        "восстанови этот проект",
+        base["conversation_id"],
+        reply_assistant_message_id=base["message_id"],
+    )
+    assert restored["context"]["coding_revision_restore"] == "restored"
+    assert restored["verified"] is False
+    assert dict(_load(storage, base).members) == dict(original.members)

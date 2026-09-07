@@ -20,7 +20,11 @@ from contextlib import suppress
 from dataclasses import dataclass, field
 from typing import Any, TypeVar
 
-from friday.organs.coding.revision import CodingRevisionUnavailable, load_coding_revision
+from friday.organs.coding.revision import (
+    CodingRevisionUnavailable,
+    load_coding_revision,
+    published_coding_revision_binding,
+)
 from friday.organs.coding.worker_spawn import BWRAP_EXECUTABLE, PRLIMIT_EXECUTABLE, PYTHON_EXECUTABLE
 from friday.permissions import ActorContext, AuthorizationError
 
@@ -35,6 +39,9 @@ CHECK_CPU_SEC = 10
 CHECK_SCHEMA = "friday.coding-python-check.v1"
 _PREFIX = re.compile(r"(?i)^(?:check|проверь)(?:\s|$)")
 _REQUEST = re.compile(r"(?i)^(?:check|проверь) (msg_[0-9a-f]{16}) ([0-9a-f]{64})$")
+_NATURAL = re.compile(
+    r"(?i)^(?:check|проверь)(?:\s+(?:этот|эту|this)\s+(?:проект|ревизию|project|revision))?$"
+)
 
 # Fixed trusted compiler, not a Python module supplied by the project. Only
 # ordinal/line diagnostics leave it; SyntaxError.text/msg and source names do not.
@@ -326,6 +333,7 @@ async def prepare_revision_check(
     conversation_id: str | None,
     attachments: list[dict[str, Any]] | None,
     turn_deadline: float | None,
+    reply_assistant_message_id: str | None = None,
 ) -> CodingRevisionCheck:
     """Load one explicit source revision; never choose latest or call a model."""
 
@@ -342,9 +350,27 @@ async def prepare_revision_check(
     )
     if deadline <= time.monotonic():
         return CodingRevisionCheck(message, "deadline")
-    selected = _REQUEST.fullmatch(message.strip()) if len(message) <= 160 else None
+    stripped = message.strip()
+    selected = _REQUEST.fullmatch(stripped) if len(stripped) <= 160 else None
     person_id = actor.own_id if actor.shared_tenant else user_id
-    if selected is None or attachments or storage is None or not conversation_id:
+    reply_binding = (
+        published_coding_revision_binding(
+            storage,
+            person_id=person_id,
+            conversation_id=conversation_id or "",
+            message_id=reply_assistant_message_id or "",
+        )
+        if reply_assistant_message_id and conversation_id
+        else None
+    )
+    message_id = None
+    revision_sha256 = None
+    if selected is not None:
+        if reply_binding is None or (reply_binding[0] == selected[1] and reply_binding[1] == selected[2]):
+            message_id, revision_sha256 = selected[1], selected[2]
+    elif reply_binding is not None and _NATURAL.fullmatch(stripped) is not None:
+        message_id, revision_sha256 = reply_binding
+    if message_id is None or revision_sha256 is None or attachments or storage is None or not conversation_id:
         return CodingRevisionCheck(message, "invalid_request")
     conversation = storage.get_conversation(conversation_id, person_id)
     if not conversation or conversation.get("is_archived"):
@@ -356,8 +382,8 @@ async def prepare_revision_check(
             person_id=person_id,
             tenant_id=actor.user_id,
             conversation_id=conversation_id,
-            message_id=selected[1],
-            revision_sha256=selected[2],
+            message_id=message_id,
+            revision_sha256=revision_sha256,
         )
     except CodingRevisionUnavailable:
         return CodingRevisionCheck(message, "source_unavailable")
@@ -379,9 +405,9 @@ async def prepare_revision_check(
         report = _checked_report(raw, payload, names)
     except (ValueError, TypeError, RecursionError):
         return CodingRevisionCheck(message, "report_rejected")
-    report.update({"source_message_id": selected[1], "revision_sha256": source.revision_sha256})
+    report.update({"source_message_id": message_id, "revision_sha256": source.revision_sha256})
     return CodingRevisionCheck(
-        message, report["state"], selected[1], source.revision_sha256, source.project_id, report
+        message, report["state"], message_id, source.revision_sha256, source.project_id, report
     )
 
 

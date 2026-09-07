@@ -889,6 +889,7 @@ class OrchestrationRouter:
                 conversation_id=conversation_id,
                 attachments=attachments,
                 enable_tools=False,
+                reply_assistant_message_id=reply_assistant_message_id,
             )
 
         async def call_legacy() -> dict[str, Any]:

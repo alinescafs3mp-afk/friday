@@ -1,6 +1,6 @@
 # Friday: canonical project backlog
 
-Updated: 2026-09-07 (reported production `0.208.55`; F.0–F.4 source on `origin/main` including independent create oracle; C1–C11 already in intake; historical S3 witness preserved; Pandora unchanged)
+Updated: 2026-09-07 (reported production `0.208.55`; F.0–F.5 source including independent create/edit oracle and reply revision selection; C1–C11 already in intake; historical S3 witness preserved; Pandora unchanged)
 
 This is the project's only backlog and mutable status register. It owns the
 current production identity, execution order, acceptance gaps and owner actions.
@@ -1505,9 +1505,15 @@ not claim safe build/test of untrusted uploads.
       user-systemd cgroup tree. Bounded repair (1 initial + 2). Calculator
       create stays unverified. Execute/run stay fail-closed. Not live on
       `0.208.55`. Not a safety certification.
-- [ ] Real edits to an immutable uploaded-project revision, bounded tests/repair,
-      durable accepted revision and exact follow-up/rollback. The existing
-      `applied=False` modification observer does not satisfy this requirement.
+- [x] Real edits to an immutable published revision, bounded tests/repair,
+      durable accepted revision and exact follow-up/rollback. Frozen
+      `csv_summary_v1` is inherited from the parent publication; BUILD then
+      ORACLE run on the new revision; parent bytes stay unchanged. Reply
+      `доработай этот проект` / `восстанови этот проект` / `проверь этот проект`
+      resolve that exact assistant publication, never latest/HEAD. Explicit
+      `msg_` + digest remains the expert path; conflicting reply+ids fail closed.
+      The EMPTY upload-modification observer is unchanged. Not live on
+      `0.208.55`. Not a safety certification.
 - [x] Aggregate resource enforcement for uploaded tests on this source tree
       (`friday/organs/coding/worker_cgroup.py`). User-systemd cgroup-v2
       `memory.max` / `memory.swap.max=0` / `pids.max` / `cpu.max` are

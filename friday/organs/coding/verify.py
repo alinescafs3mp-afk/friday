@@ -36,6 +36,7 @@ from friday.organs.coding.loop import (
     CodingIsolatedLoopState,
     observe_coding_isolated_loop,
 )
+from friday.organs.coding.revision import CodingSourceRevision
 from friday.organs.coding.worker_boundary import (
     CodingWorkerBoundaryV1,
     coding_worker_hazard_paths,
@@ -215,8 +216,9 @@ def observe_coding_behavior_verification(
             revision_sha256=revision_sha256,
         )
     try:
-        if runner not in (None, default_coding_worker_runner):
-            code = runner(argv, limits.wall_clock_sec)
+        injected = runner
+        if injected is not None and injected is not default_coding_worker_runner:
+            code = injected(argv, limits.wall_clock_sec)
             stderr = b""
         else:
             memory_bytes = admitted_memory_bytes(argv)
@@ -267,21 +269,19 @@ def observe_coding_behavior_verification(
     )
 
 
-def verify_creation_payload(
+def verify_source_revision(
+    source: CodingSourceRevision,
     *,
-    payload: str,
     oracle: CodingBehaviorOracleV1,
     worker_boundary: CodingWorkerBoundaryV1,
     runner: CodingWorkerRunner | None = None,
     revision_sha256: str | None = None,
 ) -> CodingBehaviorVerificationV1:
-    """Write a disposable copy and verify it.  Never persists a Coding turn."""
+    """Write a disposable copy of an already-prepared revision.  Never persists."""
 
     if oracle.state is not CodingBehaviorOracleState.ADMITTED:
         return _empty()
-    try:
-        source = prepare_coding_creation(payload)
-    except (ValueError, TypeError, RecursionError):
+    if type(source) is not CodingSourceRevision:
         return _blocked(CodingBehaviorVerificationReason.PAYLOAD_INVALID, oracle=oracle)
     digest = revision_sha256 or source.revision_sha256
     operation = "oracle-" + secrets.token_hex(8)
@@ -330,6 +330,31 @@ def verify_creation_payload(
             except (OSError, ValueError):
                 continue
             shutil.rmtree(resolved, ignore_errors=True)
+
+
+def verify_creation_payload(
+    *,
+    payload: str,
+    oracle: CodingBehaviorOracleV1,
+    worker_boundary: CodingWorkerBoundaryV1,
+    runner: CodingWorkerRunner | None = None,
+    revision_sha256: str | None = None,
+) -> CodingBehaviorVerificationV1:
+    """Write a disposable copy and verify it.  Never persists a Coding turn."""
+
+    if oracle.state is not CodingBehaviorOracleState.ADMITTED:
+        return _empty()
+    try:
+        source = prepare_coding_creation(payload)
+    except (ValueError, TypeError, RecursionError):
+        return _blocked(CodingBehaviorVerificationReason.PAYLOAD_INVALID, oracle=oracle)
+    return verify_source_revision(
+        source,
+        oracle=oracle,
+        worker_boundary=worker_boundary,
+        runner=runner,
+        revision_sha256=revision_sha256 or source.revision_sha256,
+    )
 
 
 def repair_diagnostics(verification: CodingBehaviorVerificationV1) -> dict[str, object]:

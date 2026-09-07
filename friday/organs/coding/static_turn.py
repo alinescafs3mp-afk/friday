@@ -33,6 +33,7 @@ from friday.orchestration.coding_worker_admission import CodingWorkerAdmissionSt
 from friday.organs.coding.behavior_oracle import (
     CodingBehaviorOracleState,
     admit_coding_behavior_oracle,
+    admit_coding_behavior_oracle_id,
 )
 from friday.organs.coding.check import CodingRevisionCheck, check_requested, reauthorize_revision_check
 from friday.organs.coding.create import (
@@ -67,7 +68,13 @@ from friday.organs.coding.modify import (
     prepare_revision_edit,
 )
 from friday.organs.coding.result_archive import observe_coding_result_archive
-from friday.organs.coding.revision import CodingRevisionUnavailable, load_coding_revision, revision_record
+from friday.organs.coding.revision import (
+    CodingRevisionUnavailable,
+    coding_message_oracle_id,
+    load_coding_revision,
+    published_coding_revision_binding,
+    revision_record,
+)
 from friday.organs.coding.verify import (
     CodingBehaviorVerificationReason,
     CodingBehaviorVerificationState,
@@ -89,6 +96,9 @@ from friday.permissions import ActorContext, AuthorizationError
 
 _RESTORE_PREFIX_RE = re.compile(r"(?i)^(?:restore|восстанови)(?:\s|$)")
 _RESTORE_RE = re.compile(r"(?i)^(?:restore|восстанови) (msg_[0-9a-f]{16}) ([0-9a-f]{64})$")
+_RESTORE_NATURAL_RE = re.compile(
+    r"(?i)^(?:restore|восстанови)(?:\s+(?:этот|эту|this)\s+(?:проект|ревизию|project|revision))?$"
+)
 
 _EDIT_PREFIX_RE = re.compile(r"(?i)^(?:edit|modify|измени)\s+msg_")
 _EDIT_RE = re.compile(r"(?i)^(?:edit|modify|измени) (msg_[0-9a-f]{16}) ([0-9a-f]{64})\r?\n([\s\S]+)$")
@@ -457,6 +467,7 @@ def handle_coding_static_turn(
     model_edit: CodingModelEditProposal | None = None,
     model_create: CodingModelCreateProposal | None = None,
     revision_check: CodingRevisionCheck | None = None,
+    reply_assistant_message_id: str | None = None,
 ) -> dict[str, Any]:
     """Inspect, create or edit an explicit source revision. Never run revision edits."""
 
@@ -490,18 +501,38 @@ def handle_coding_static_turn(
     restored = None
     candidate = None
     edit_targets = None
-    selection: re.Match[str] | tuple[str, str, str, str] | None = (
-        _RESTORE_RE.fullmatch((message or "").strip())
-        if restoring
-        else _EDIT_RE.fullmatch((message or "").strip())
-        if editing
+    stripped = (message or "").strip()
+    reply_binding = (
+        published_coding_revision_binding(
+            storage,
+            person_id=person_id,
+            conversation_id=conversation_id,
+            message_id=reply_assistant_message_id,
+        )
+        if storage is not None and conversation_id and reply_assistant_message_id
         else None
     )
+    selection: re.Match[str] | tuple[str, str, str, str] | None = None
+    if restoring:
+        explicit_restore = _RESTORE_RE.fullmatch(stripped)
+        if explicit_restore is not None:
+            if reply_binding is None or (
+                reply_binding[0] == explicit_restore[1] and reply_binding[1] == explicit_restore[2]
+            ):
+                selection = explicit_restore
+        elif reply_binding is not None and _RESTORE_NATURAL_RE.fullmatch(stripped) is not None:
+            selection = ("", reply_binding[0], reply_binding[1], "")
+    elif editing and not model_editing:
+        selection = _EDIT_RE.fullmatch(stripped)
     if model_editing:
         # A model proposal is data bound to this exact owner request. The source
         # and all write admissions are rechecked here, after the model await.
         try:
-            selected = parse_model_edit_request(message)
+            selected = parse_model_edit_request(
+                message,
+                reply_message_id=None if reply_binding is None else reply_binding[0],
+                reply_revision_sha256=None if reply_binding is None else reply_binding[1],
+            )
         except UnicodeError:
             selected = None
         selection = None
@@ -672,12 +703,20 @@ def handle_coding_static_turn(
         members = written_members
         report = build_coding_inspect_report(report_id, turn_id, members=members)
     oracle = admit_coding_behavior_oracle(message if model_creating else "")
+    if (
+        oracle.state is not CodingBehaviorOracleState.ADMITTED
+        and restored is not None
+        and selection is not None
+    ):
+        oracle = admit_coding_behavior_oracle_id(
+            coding_message_oracle_id(storage, person_id=person_id, message_id=selection[1])
+        )
     spawn = CodingWorkerSpawnV1(False, admission.admission, "skipped", False)
     if worker_admitted and (
         execute_claimed
         or (
             oracle.state is CodingBehaviorOracleState.ADMITTED
-            and created.state is CodingCreateObserveState.WRITTEN
+            and (created.state is CodingCreateObserveState.WRITTEN or edit_state == "written")
         )
     ):
         spawn = spawn_coding_worker(admission, boundary, runner=spawn_runner)
@@ -714,9 +753,8 @@ def handle_coding_static_turn(
         CodingBehaviorVerificationState.EMPTY,
         CodingBehaviorVerificationReason.NO_ORACLE,
     )
-    if (
-        oracle.state is CodingBehaviorOracleState.ADMITTED
-        and created.state is CodingCreateObserveState.WRITTEN
+    if oracle.state is CodingBehaviorOracleState.ADMITTED and (
+        created.state is CodingCreateObserveState.WRITTEN or edit_state == "written"
     ):
         verification = observe_coding_behavior_verification(
             admission=admission,
@@ -725,7 +763,13 @@ def handle_coding_static_turn(
             oracle=oracle,
             workspace=workspace,
             runner=spawn_runner,
-            revision_sha256=created.identity.revision_selector,
+            revision_sha256=(
+                created.identity.revision_selector
+                if created.state is CodingCreateObserveState.WRITTEN
+                else candidate.revision_sha256
+                if candidate is not None
+                else None
+            ),
         )
     ready = (
         created.state is CodingCreateObserveState.WRITTEN
@@ -805,7 +849,8 @@ def handle_coding_static_turn(
             restore_state = "blocked"
             text = (
                 "Указанная ревизия недоступна или её целостность не подтверждена. "
-                "Используй restore <message_id> <sha256> для точного результата из этого Coding-диалога, без вложений. "
+                "Используй restore <message_id> <sha256> или ответь на сообщение с исходниками: "
+                "восстанови этот проект. Без вложений. "
                 "Другая версия не подставлялась; код не исполнялся."
             )
     if editing:
@@ -824,16 +869,34 @@ def handle_coding_static_turn(
             )
     if model_editing:
         if edit_state == "applied":
-            text = (
-                "Изменения по текстовому заданию подготовлены моделью и применены к отдельной копии "
-                "точно выбранной ревизии. Исходная версия сохранена. "
-                "Код не исполнялся; сборка и тесты не запускались. Корректность поведения ещё не подтверждена."
-            )
+            if verification.state is CodingBehaviorVerificationState.VERIFIED:
+                text = (
+                    "Изменения по текстовому заданию подготовлены моделью и применены к отдельной копии "
+                    "точно выбранной ревизии. Исходная версия сохранена. "
+                    "Независимый оракул csv_summary_v1 подтвердил запрошенное поведение. "
+                    "Это не сертификат безопасности."
+                )
+            elif verification.reason in {
+                CodingBehaviorVerificationReason.ORACLE_FAILED,
+                CodingBehaviorVerificationReason.BUILD_FAILED,
+            }:
+                text = (
+                    "Изменения по текстовому заданию применены к отдельной копии точно выбранной ревизии. "
+                    "Исходная версия сохранена. Независимая проверка поведения не прошла; "
+                    "заготовка вместо программы не подставлялась. Это не сертификат безопасности."
+                )
+            else:
+                text = (
+                    "Изменения по текстовому заданию подготовлены моделью и применены к отдельной копии "
+                    "точно выбранной ревизии. Исходная версия сохранена. "
+                    "Код не исполнялся; сборка и тесты не запускались. Корректность поведения ещё не подтверждена."
+                )
         else:
             text = (
                 "Изменение по текстовому заданию заблокировано: выбранные исходники, ответ модели "
                 "или целостность результата не подтверждены. Используй revise (или доработай) "
-                "<message_id> <sha256>, затем с новой строки задание, без вложений. "
+                "<message_id> <sha256>, либо ответь на сообщение с исходниками: доработай этот проект, "
+                "затем с новой строки задание, без вложений. "
                 "Исходная версия не менялась; другая модель или ревизия не подставлялась. Код не исполнялся."
             )
     model_metadata = (
@@ -897,6 +960,14 @@ def handle_coding_static_turn(
             **model_metadata,
             **({"coding_source_revision": source_record} if source_record else {}),
             **({"coding_source_parent": source_parent} if source_parent else {}),
+            **(
+                {
+                    "coding_behavior_oracle": verification.oracle_id,
+                    "coding_behavior_verification": verification.state.value,
+                }
+                if verification.state is not CodingBehaviorVerificationState.EMPTY and verification.oracle_id
+                else {}
+            ),
         },
     )
     context: dict[str, Any] = {

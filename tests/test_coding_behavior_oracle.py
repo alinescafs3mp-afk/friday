@@ -3,6 +3,7 @@ from friday.organs.coding.behavior_oracle import (
     ORACLE_ID,
     CodingBehaviorOracleState,
     admit_coding_behavior_oracle,
+    admit_coding_behavior_oracle_id,
     oracle_sha256,
     oracle_worker_program,
 )
@@ -33,3 +34,11 @@ def test_oracle_identity_is_stable() -> None:
     program = oracle_worker_program()
     assert "two_rows" in program and "alice" in program
     assert "import docker" not in program
+
+
+def test_persisted_oracle_id_readmits_the_frozen_family() -> None:
+    admitted = admit_coding_behavior_oracle_id(ORACLE_ID)
+    assert admitted.state is CodingBehaviorOracleState.ADMITTED
+    assert admitted.oracle_sha256 == oracle_sha256(ORACLE_ID, CSV_SUMMARY_CASES)
+    assert admit_coding_behavior_oracle_id("latest").state is CodingBehaviorOracleState.EMPTY
+    assert admit_coding_behavior_oracle_id(None).state is CodingBehaviorOracleState.EMPTY

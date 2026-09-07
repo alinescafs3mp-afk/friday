@@ -49928,6 +49928,7 @@ class AgentRuntime:
                 conversation_id=conversation_id,
                 attachments=attachments,
                 enable_tools=False,
+                reply_assistant_message_id=reply_assistant_message_id,
             )
         trusted_telegram_update_id = str(telegram_update_id or "").strip()
         if trusted_telegram_update_id and (
@@ -50074,6 +50075,7 @@ class AgentRuntime:
                 conversation_id=conversation_id or (str(conversation["id"]) if conversation else None),
                 attachments=attachments,
                 enable_tools=False,
+                reply_assistant_message_id=reply_assistant_message_id,
             )
         # Check the explicit request before it can create/update a conversation,
         # then check the effective persisted mode independently.  The second
