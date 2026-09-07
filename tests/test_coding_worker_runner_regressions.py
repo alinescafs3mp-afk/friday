@@ -8,6 +8,7 @@ from pathlib import Path
 
 import pytest
 
+import friday.organs.coding.worker_cgroup as coding_tree
 import friday.organs.coding.worker_spawn as worker
 from friday.organs.coding.worker_programs import PROBE, TEST
 
@@ -29,7 +30,10 @@ def test_default_runner_refuses_uploaded_execution_before_popen(tmp_path, monkey
     def forbidden(*args, **kwargs):
         raise AssertionError("untrusted execution reached Popen")
 
+    monkeypatch.setattr(coding_tree, "coding_tree_enforcement_available", lambda: False)
     monkeypatch.setattr(worker.subprocess, "Popen", forbidden)
+    monkeypatch.setattr(coding_tree.subprocess, "Popen", forbidden)
+    monkeypatch.setattr(coding_tree.subprocess, "run", forbidden)
     assert worker.default_coding_worker_runner(_argv(tmp_path, source), 1) == 126
 
 

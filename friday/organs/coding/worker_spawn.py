@@ -1,8 +1,9 @@
-"""Admit and bound code-owned Coding probes and compilation in bubblewrap.
+"""Admit and bound code-owned Coding probes, compilation, and proved TEST trees.
 
 Only the current operation's workspace/export are mounted. Uploaded unittest
-execution is not admitted by this default runner: per-process rlimits do not
-constitute aggregate limits for an untrusted process tree.
+execution is admitted only after a live cgroup-v2 tree (memory, swap, pids, CPU
+quota) is installed and read back. Execute/run of uploaded programs stay outside
+this runner.
 """
 
 from __future__ import annotations
@@ -21,12 +22,14 @@ from friday.orchestration.coding_worker_admission import (
     build_coding_worker_admission,
 )
 from friday.orchestration.coding_worker_limits import MAX_CPU_SEC, MAX_MEMORY_BYTES, MAX_WALL_CLOCK_SEC
+from friday.organs.coding import worker_cgroup as coding_tree
 from friday.organs.coding.worker_boundary import (
     CodingWorkerBoundaryV1,
     coding_worker_hazard_paths,
     observe_coding_worker_isolation,
 )
-from friday.organs.coding.worker_programs import BUILD, PROBE
+from friday.organs.coding.worker_cgroup import DEFAULT_TASKS_MAX, DEFAULT_TMPFS_BYTES
+from friday.organs.coding.worker_programs import BUILD, PROBE, TEST
 from friday.private_fs import ensure_private_directory
 
 BWRAP_EXECUTABLE = "/usr/bin/bwrap"
@@ -37,6 +40,7 @@ DEFAULT_WALL_CLOCK_SEC = 60
 DEFAULT_MEMORY_BYTES = 64 * 1024 * 1024
 DEFAULT_CPU_SEC = 30
 MAX_WORKER_FILE_BYTES = 64 * 1024 * 1024
+MAX_WORKER_TASKS = DEFAULT_TASKS_MAX
 
 CodingWorkerRunner = Callable[[tuple[str, ...], int], int]
 
@@ -175,6 +179,9 @@ def coding_worker_bwrap_argv(
     cpu_sec: int = DEFAULT_CPU_SEC,
     python_c: str | None = None,
     python_args: tuple[str, ...] | None = None,
+    workspace_writable: bool = True,
+    export_writable: bool = True,
+    tmpfs_bytes: int = DEFAULT_TMPFS_BYTES,
 ) -> tuple[str, ...]:
     """Mount only this operation and apply hard rlimits before starting Python."""
 
@@ -182,9 +189,13 @@ def coding_worker_bwrap_argv(
         raise ValueError("invalid Coding memory limit")
     if type(cpu_sec) is not int or not 1 <= cpu_sec <= MAX_CPU_SEC:
         raise ValueError("invalid Coding CPU limit")
+    if type(tmpfs_bytes) is not int or not 1 <= tmpfs_bytes <= MAX_WORKER_FILE_BYTES:
+        raise ValueError("invalid Coding tmpfs limit")
     workspace, export = _worker_bind_paths(worker_root, workspace_path, export_path)
     source = PROBE if python_c is None else python_c
     args = (workspace_path, export_path, *hazards) if python_args is None else python_args
+    workspace_bind = "--bind" if workspace_writable else "--ro-bind"
+    export_bind = "--bind" if export_writable else "--ro-bind"
     return (
         BWRAP_EXECUTABLE,
         "--unshare-all",
@@ -211,16 +222,18 @@ def coding_worker_bwrap_argv(
         "/proc",
         "--dev",
         "/dev",
+        "--size",
+        str(tmpfs_bytes),
         "--tmpfs",
         "/tmp",
         "--dir",
         "/run",
         "--dir",
         CODING_WORKER_MOUNT,
-        "--bind",
+        workspace_bind,
         str(workspace),
         str(PurePosixPath(CODING_WORKER_MOUNT) / workspace_path),
-        "--bind",
+        export_bind,
         str(export),
         str(PurePosixPath(CODING_WORKER_MOUNT) / export_path),
         "--chdir",
@@ -241,8 +254,25 @@ def coding_worker_bwrap_argv(
     )
 
 
+def _admitted_memory_bytes(argv: tuple[str, ...]) -> int | None:
+    for part in argv:
+        if not part.startswith("--as="):
+            continue
+        payload = part[5:]
+        if payload.count(":") != 1:
+            return None
+        soft, hard = payload.split(":", 1)
+        if soft != hard or not soft.isdigit():
+            return None
+        value = int(soft)
+        if not 1 <= value <= MAX_MEMORY_BYTES:
+            return None
+        return value
+    return None
+
+
 def default_coding_worker_runner(argv: tuple[str, ...], timeout_sec: int) -> int:
-    """Run only trusted probe/compiler code; never capture unbounded child output."""
+    """Run probe/compile directly; run TEST only inside a proved aggregate cgroup."""
 
     if (
         not argv
@@ -253,14 +283,25 @@ def default_coding_worker_runner(argv: tuple[str, ...], timeout_sec: int) -> int
         return 126
     try:
         source_index = argv.index("-c") + 1
+        source = argv[source_index]
         if (
-            argv[source_index] not in (PROBE, BUILD)
+            source not in (PROBE, BUILD, TEST)
             or argv[source_index - 3 : source_index] != (PYTHON_EXECUTABLE, "-I", "-c")
             or PRLIMIT_EXECUTABLE not in argv
         ):
             return 126
     except (ValueError, IndexError):
         return 126
+    if source == TEST:
+        memory_bytes = _admitted_memory_bytes(argv)
+        if memory_bytes is None or not coding_tree.coding_tree_enforcement_available():
+            return 126
+        return coding_tree.run_admitted_coding_tree(
+            argv,
+            timeout_sec,
+            memory_bytes=memory_bytes,
+            tasks_max=MAX_WORKER_TASKS,
+        )
     try:
         process = subprocess.Popen(
             argv,

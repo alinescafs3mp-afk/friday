@@ -74070,7 +74070,9 @@ class AgentRuntime:
                         model_envelope="",
                         sources=[],
                     )
-            provider_report = web_payload if isinstance(web_payload, Mapping) else None
+            provider_report: Mapping[str, Any] | None = (
+                web_payload if isinstance(web_payload, Mapping) else None
+            )
             if provider_report is None and isinstance(outbound_result_data, Mapping):
                 provider_report = outbound_result_data
             self._record_web_projection(

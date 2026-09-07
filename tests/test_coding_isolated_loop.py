@@ -231,6 +231,10 @@ def test_admitted_unittest_sets_untrusted_execute(tmp_path: Path) -> None:
     assert result.untrusted_execute is True
     assert any("loader.discover" in part for part in calls[1])
     assert "--unshare-all" in calls[1]
+    assert "--size" in calls[1]
+    workspace_mount = str(Path(boundary.worker_root) / boundary.workspace_path)
+    bind_index = calls[1].index(workspace_mount)
+    assert calls[1][bind_index - 1] == "--ro-bind"
 
 
 def test_real_bwrap_compiles_extracted_python(tmp_path: Path) -> None:
@@ -252,7 +256,10 @@ def test_real_bwrap_compiles_extracted_python(tmp_path: Path) -> None:
     assert result.untrusted_execute is False
 
 
-def test_real_bwrap_probe_does_not_authorize_unbounded_uploaded_unittest(tmp_path: Path) -> None:
+def test_real_bwrap_probe_does_not_authorize_unbounded_uploaded_unittest(tmp_path: Path, monkeypatch) -> None:
+    import friday.organs.coding.worker_cgroup as coding_tree
+
+    monkeypatch.setattr(coding_tree, "coding_tree_enforcement_available", lambda: False)
     boundary = _boundary(tmp_path)
     admission = _admission(tmp_path, boundary)
     spawn = spawn_coding_worker(admission, boundary)
@@ -311,7 +318,10 @@ def test_host_network_boundary_does_not_reach_loop(tmp_path: Path) -> None:
     assert result.untrusted_execute is False
 
 
-def test_default_test_is_blocked_even_after_a_confirmed_namespace_probe(tmp_path: Path) -> None:
+def test_default_test_is_blocked_even_after_a_confirmed_namespace_probe(tmp_path: Path, monkeypatch) -> None:
+    import friday.organs.coding.worker_cgroup as coding_tree
+
+    monkeypatch.setattr(coding_tree, "coding_tree_enforcement_available", lambda: False)
     boundary = _boundary(tmp_path)
     admission = _admission(tmp_path, boundary)
     spawn = spawn_coding_worker(admission, boundary, runner=lambda argv, timeout: 0)
@@ -342,6 +352,106 @@ def test_probe_of_another_admission_cannot_authorize_build(tmp_path: Path) -> No
     )
     assert result.reason is CodingIsolatedLoopReason.PROBE_NOT_CONFIRMED
     assert calls == []
+
+
+def test_real_aggregate_unittest_runs_inside_proved_tree_limits(tmp_path: Path) -> None:
+    boundary = _boundary(tmp_path)
+    admission = _admission(tmp_path, boundary)
+    spawn = spawn_coding_worker(admission, boundary)
+    workspace = Path(boundary.worker_root) / boundary.workspace_path
+    workspace.mkdir(parents=True, exist_ok=True)
+    (workspace / "test_ok.py").write_text(
+        "import unittest\nclass T(unittest.TestCase):\n    def test_a(self):\n        self.assertEqual(1, 1)\n",
+        encoding="utf-8",
+    )
+    result = observe_coding_isolated_loop(
+        admission=admission,
+        boundary=boundary,
+        spawn=spawn,
+        extract=_extracted(),
+        operation=CodingModeExecuteOperation.TEST,
+    )
+    assert spawn.probe == "confirmed"
+    assert result.state is CodingIsolatedLoopState.TESTED
+    assert result.reason is CodingIsolatedLoopReason.TEST_OK
+    assert result.untrusted_execute is True
+
+
+def test_real_aggregate_memory_tree_is_not_a_successful_test(tmp_path: Path) -> None:
+    boundary = _boundary(tmp_path)
+    admission = compose_coding_worker_admission(
+        admission_id="admission.1",
+        authenticated_turn_id="turn.1",
+        worker_id="worker.1",
+        operation_id="operation.1",
+        project_id="project.1",
+        revision_selector=SNAPSHOT,
+        boundary=boundary,
+        memory_bytes=32 * 1024 * 1024,
+        wall_clock_sec=8,
+        cpu_sec=4,
+    )
+    spawn = spawn_coding_worker(admission, boundary)
+    workspace = Path(boundary.worker_root) / boundary.workspace_path
+    workspace.mkdir(parents=True, exist_ok=True)
+    (workspace / "test_bomb.py").write_text(
+        "import os, unittest\n"
+        "class T(unittest.TestCase):\n"
+        "    def test_alloc(self):\n"
+        "        kids=[]\n"
+        "        for _ in range(4):\n"
+        "            pid=os.fork()\n"
+        "            if pid==0:\n"
+        "                blob=bytearray(24*1024*1024)\n"
+        "                blob[0]=1\n"
+        "                os._exit(0)\n"
+        "            kids.append(pid)\n"
+        "        for kid in kids:\n"
+        "            pid,status=os.waitpid(kid, 0)\n"
+        "            self.assertTrue(os.WIFEXITED(status) and os.WEXITSTATUS(status)==0)\n",
+        encoding="utf-8",
+    )
+    result = observe_coding_isolated_loop(
+        admission=admission,
+        boundary=boundary,
+        spawn=spawn,
+        extract=_extracted(),
+        operation=CodingModeExecuteOperation.TEST,
+    )
+    assert spawn.probe == "confirmed"
+    assert result.state is not CodingIsolatedLoopState.TESTED
+    assert result.reason is not CodingIsolatedLoopReason.TEST_OK
+    assert result.untrusted_execute is True
+
+
+def test_real_aggregate_pid_tree_is_not_a_successful_test(tmp_path: Path) -> None:
+    boundary = _boundary(tmp_path)
+    admission = _admission(tmp_path, boundary)
+    spawn = spawn_coding_worker(admission, boundary)
+    workspace = Path(boundary.worker_root) / boundary.workspace_path
+    workspace.mkdir(parents=True, exist_ok=True)
+    (workspace / "test_fork.py").write_text(
+        "import os, time, unittest\n"
+        "class T(unittest.TestCase):\n"
+        "    def test_fork(self):\n"
+        "        for _ in range(80):\n"
+        "            pid=os.fork()\n"
+        "            if pid==0:\n"
+        "                time.sleep(5)\n"
+        "                os._exit(0)\n",
+        encoding="utf-8",
+    )
+    result = observe_coding_isolated_loop(
+        admission=admission,
+        boundary=boundary,
+        spawn=spawn,
+        extract=_extracted(),
+        operation=CodingModeExecuteOperation.TEST,
+    )
+    assert spawn.probe == "confirmed"
+    assert result.state is not CodingIsolatedLoopState.TESTED
+    assert result.reason is not CodingIsolatedLoopReason.TEST_OK
+    assert result.untrusted_execute is True
 
 
 def test_directory_replacement_invalidates_the_probe(tmp_path: Path) -> None:

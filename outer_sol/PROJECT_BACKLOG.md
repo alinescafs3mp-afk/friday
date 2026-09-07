@@ -1,6 +1,6 @@
 # Friday: canonical project backlog
 
-Updated: 2026-09-07 (reported production `0.208.55`; F.0–F.3 source work on `origin/main`; C1–C11 already in intake; historical S3 witness preserved; Pandora unchanged)
+Updated: 2026-09-07 (reported production `0.208.55`; F.0–F.4 source work on `origin/main`; C1–C11 already in intake; historical S3 witness preserved; Pandora unchanged)
 
 This is the project's only backlog and mutable status register. It owns the
 current production identity, execution order, acceptance gaps and owner actions.
@@ -57,8 +57,11 @@ archive extract, isolated untrusted `py_compile` / unittest,
 prompt-to-small-project, one-final `friday-source.zip` pack, digest
 and overwrite observation on extract, Coding Mode
 view/plan-gate/carrier, and upload-modification EMPTY observer remain
-live through `0.208.55`. Execute/run of uploaded programs stay
-fail-closed. This is not a safety certification. Upload-modification
+live through `0.208.55`. This source tree admits default TEST only
+inside a proved user-systemd cgroup-v2 tree (memory, swap, pids, CPU
+quota, sized tmpfs, read-only source mounts). Execute/run of uploaded
+programs stay fail-closed. This is not a safety certification and is
+not the live `0.208.55` artifact. Upload-modification
 apply never rewrites uploaded project files. N4 store-backed mixed
 journeys remain live through `0.208.55`. N5 implementable seam
 extract is closed, the maintainability ratchet remains standing.
@@ -196,11 +199,15 @@ must choose the next free version and follow the existing activation procedure.
 - The default Coding runner mounts only the current operation's workspace/export,
   binds a probe to one admission and directory identity, applies admitted hard
   memory/CPU limits to trusted probe/compilation, discards unbounded process
-  output, and kills/reaps its supervisor on cancellation/timeout. These are not
-  aggregate untrusted-process-tree guarantees. Default uploaded unittest execution
-  is therefore explicitly blocked until that boundary is implemented and proved.
+  output, and kills/reaps its supervisor on cancellation/timeout. Default TEST
+  additionally creates a user-systemd transient unit, reads `memory.max`,
+  `memory.swap.max=0`, `pids.max` and `cpu.max` back from cgroupfs, then joins
+  the bubblewrap supervisor into that unit before wait(). TEST source/export
+  mounts are read-only; `/tmp` is a sized tmpfs. A confirmed namespace probe is
+  not this proof. If the tree cannot be proved, TEST stays blocked.
   Discovery finding zero tests does not claim that uploaded modules were never
-  imported. Engineer Mode's separate owner-authorized boundary is unchanged.
+  imported. Execute/run stay fail-closed. Engineer Mode's separate
+  owner-authorized boundary is unchanged and is not the Coding TEST runner.
 - Orchestration contracts no longer eagerly import the complete router. This
   removes a real Coding↔orchestration import cycle; fresh-interpreter tests also
   preserve the public router exports and clean-wheel import origin.
@@ -221,11 +228,12 @@ a newer production summary cannot silently rebind old golden-journey receipts.
 Next actionable work, in order:
 
 1. Obtain native boundary results and independent review of this exact source
-   range. Keep unsafe uploaded execution disabled while proving a real aggregate
-   memory/CPU/process/output/disk boundary; never confuse a probe with that proof.
+   range. Execute/run of uploaded programs stay fail-closed. Default TEST is
+   admitted only inside the proved aggregate tree; never confuse a probe with
+   that proof.
 2. Verify the C2 shared carrier/export implementation below and continue the
-   remaining input/extraction transaction boundary. Default uploaded execution
-   remains blocked; source export is not aggregate worker isolation acceptance.
+   remaining input/extraction transaction boundary. Source export is not
+   functional create/modify acceptance.
 3. N2 requesting-answer consumption is on this source tree. Remaining N2 live
    configured-model acceptance, then a functional N3 Python
    create/modify/test/repair/persistent-revision journey, and measured N1/N4 mixed
@@ -270,7 +278,8 @@ source files pass. Hosted change, native exact-release, independent review and
 real production/Telegram observations remain separate pending evidence.
 
 Remaining coherence work: atomic authorized archive extraction, N2 live
-configured-model acceptance and N3 implementation/revision continuity, aggregate worker limits,
+configured-model acceptance and N3 implementation/revision continuity
+(functional create with an independent oracle, then real edits/repair),
 then mixed-journey publication/restart checks. A user project file named
 `manifest.json` or `cache.py` still intersects the inherited internal-name policy;
 resolve that by explicit source provenance, not by globally disabling filtering.
@@ -590,10 +599,11 @@ case uses the real declared Bubblewrap path and remains mandatory. Focused local
 results and hosted validation are recorded against the final source identity;
 local compilation-only tests do not attest native isolation.
 
-Still open: aggregate-limited behavioral execution, bounded repair, ordinary
-reply-based revision selection, live configured-model quality, independent review,
-and full native/exact-host release acceptance. Existing untrusted TEST/EXECUTE
-admission is not relaxed. No schema, version, production or Pandora changes.
+Still open: EXECUTE/RUN of uploaded programs stay fail-closed. Default TEST is
+admitted only inside the proved aggregate tree on this source tree, not on live
+`0.208.55`. Bounded repair, ordinary reply-based revision selection, live
+configured-model quality, independent review, and full native/exact-host release
+acceptance remain open. No schema, version, production or Pandora changes.
 
 ### C11: composable privacy SQL on the hosted SQLite runtime
 
@@ -1493,8 +1503,14 @@ not claim safe build/test of untrusted uploads.
 - [ ] Real edits to an immutable uploaded-project revision, bounded tests/repair,
       durable accepted revision and exact follow-up/rollback. The existing
       `applied=False` modification observer does not satisfy this requirement.
-- [ ] Aggregate resource enforcement and native acceptance for uploaded tests.
-      C1 deliberately blocks the default TEST path until then.
+- [x] Aggregate resource enforcement for uploaded tests on this source tree
+      (`friday/organs/coding/worker_cgroup.py`). User-systemd cgroup-v2
+      `memory.max` / `memory.swap.max=0` / `pids.max` / `cpu.max` are
+      installed and read back before the bubblewrap TEST supervisor is
+      joined into that unit. Native tests prove a passing unittest, a
+      forking memory tree is not TEST_OK, and a pid tree is not TEST_OK.
+      Execute/run stay fail-closed. Not live on `0.208.55`. Not a safety
+      certification. Engineer is not the Coding TEST runner.
 - [x] Upload-modification EMPTY observer live on `0.208.27`
       (`friday/organs/coding/modify.py`). Composes
       `coding_upload_modification_admission` from inspect, isolation,

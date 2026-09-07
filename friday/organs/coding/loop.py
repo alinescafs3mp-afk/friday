@@ -1,9 +1,9 @@
 """Isolated build/test of an already-extracted Coding workspace.
 
-Build compiles admitted Python without executing it. The default runner refuses
-uploaded unittest code until aggregate resource enforcement is available. Trusted
-injected runners support adapter tests, not production certification. Execute/run
-of uploaded programs stay fail-closed.
+Build compiles admitted Python without executing it. Default TEST is admitted
+only after live aggregate cgroup-v2 tree limits are proved. Trusted injected
+runners support adapter tests, not production certification. Execute/run of
+uploaded programs stay fail-closed.
 """
 
 from __future__ import annotations
@@ -17,6 +17,7 @@ from friday.orchestration.coding_worker_admission import (
     CodingWorkerAdmissionState,
     CodingWorkerAdmissionV1,
 )
+from friday.organs.coding import worker_cgroup as coding_tree
 from friday.organs.coding.extract import (
     CodingArchiveExtractObserveState,
     CodingArchiveExtractObserveV1,
@@ -122,11 +123,15 @@ def observe_coding_isolated_loop(
             return _blocked(CodingIsolatedLoopReason.PROBE_NOT_CONFIRMED)
     except (OSError, ValueError):
         return _blocked(CodingIsolatedLoopReason.PROBE_NOT_CONFIRMED)
-    if operation is CodingModeExecuteOperation.TEST and runner in (None, default_coding_worker_runner):
-        # RLIMIT_AS/CPU apply per process, not to an arbitrary uploaded process
-        # tree. Do not misrepresent the bounded compile runner as that boundary.
+    if (
+        operation is CodingModeExecuteOperation.TEST
+        and runner in (None, default_coding_worker_runner)
+        and not coding_tree.coding_tree_enforcement_available()
+    ):
+        # RLIMIT_AS/CPU apply per process. TEST needs a proved aggregate tree.
         return _blocked(CodingIsolatedLoopReason.RESOURCE_ENFORCEMENT_UNAVAILABLE)
     python_c = _BUILD if operation is CodingModeExecuteOperation.BUILD else _TEST
+    test_tree = operation is CodingModeExecuteOperation.TEST
     argv = coding_worker_bwrap_argv(
         worker_root=workspace.project_root,
         workspace_path=workspace.workspace_path,
@@ -138,6 +143,8 @@ def observe_coding_isolated_loop(
         cpu_sec=limits.cpu_sec,
         python_c=python_c,
         python_args=(workspace.workspace_path,),
+        workspace_writable=not test_tree,
+        export_writable=not test_tree,
     )
     if not argv or argv[0] != BWRAP_EXECUTABLE or python_c not in argv:
         return _blocked(CodingIsolatedLoopReason.SPAWN_FAILED)

@@ -3,6 +3,7 @@ from pathlib import Path
 
 from friday.orchestration.coding_worker_admission import CodingWorkerAdmissionState
 from friday.organs.coding.worker_boundary import default_coding_worker_boundary
+from friday.organs.coding.worker_cgroup import DEFAULT_TMPFS_BYTES
 from friday.organs.coding.worker_spawn import (
     BWRAP_EXECUTABLE,
     coding_worker_bwrap_argv,
@@ -119,6 +120,7 @@ def test_bwrap_argv_does_not_bind_host_hazards(tmp_path: Path) -> None:
     )
     bind_target = argv[argv.index("--bind") + 1]
     assert bind_target == str(Path(root) / "work/operation.1")
+    assert argv[argv.index("--tmpfs") - 2 : argv.index("--tmpfs")] == ("--size", str(DEFAULT_TMPFS_BYTES))
     assert root not in argv
     assert "docker.sock" not in bind_target
     assert argv[0] == BWRAP_EXECUTABLE

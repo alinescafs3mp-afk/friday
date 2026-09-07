@@ -1,8 +1,8 @@
 """Code-owned programs for the Coding namespace; never generated from user text.
 
 PROBE and BUILD do not import or execute uploaded modules. TEST does, including
-when discovery finds no test cases, so the default runner must not admit it until
-aggregate resource enforcement is implemented and verified.
+when discovery finds no test cases, so the default runner admits it only inside
+a proved aggregate cgroup-v2 tree.
 """
 
 PROBE = (

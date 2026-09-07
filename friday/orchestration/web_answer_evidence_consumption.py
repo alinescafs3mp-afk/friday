@@ -13,7 +13,7 @@ import re
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from enum import StrEnum
-from typing import Any, NoReturn, cast
+from typing import Any, NoReturn, TypedDict, cast
 from urllib.parse import urlsplit
 
 from friday.orchestration.web_citation_coverage import (
@@ -323,6 +323,16 @@ def claims_from_web_answer(
     return tuple(claims)
 
 
+class _ConsumptionCompact(TypedDict):
+    claim_support: str
+    claim_currentness: str
+    grounding: str
+    contradiction: str
+    citation_coverage: str
+    claim_count: int
+    supported_claim_count: int
+
+
 def _result(
     consumption_id: str,
     authenticated_turn_id: str,
@@ -486,7 +496,7 @@ def consume_web_answer_evidence(
         urls,
         cited_urls,
     )
-    compact = {
+    compact: _ConsumptionCompact = {
         "claim_support": _closed(support.support),
         "claim_currentness": _closed(claim_currentness.admission),
         "grounding": _closed(grounding.grounding),
