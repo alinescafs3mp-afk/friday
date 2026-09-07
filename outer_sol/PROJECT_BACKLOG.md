@@ -1,6 +1,6 @@
 # Friday: canonical project backlog
 
-Updated: 2026-09-07 (live production `0.208.56` shadow; F.11 sealed; mixed-journey consume carries selected provider or fail-closed on this source tree; version `0.208.57` prepared for `shadow_to_assist`; C1–C11 already in intake; historical S3 witness preserved; Pandora unchanged)
+Updated: 2026-09-07 (live production `0.208.57` assist; mixed-journey consume carries selected provider or fail-closed; C1–C11 already in intake; historical S3 witness preserved; Pandora unchanged)
 
 This is the project's only backlog and mutable status register. It owns the
 current production identity, execution order, acceptance gaps and owner actions.
@@ -22,21 +22,22 @@ Branch: `main`. Source corrections below are not a sealed or deployed release.
 
 Golden-journey receipts remain bound to the historical `0.208.1` root below
 until validly rebound. The last reported running sealed sibling is Friday
-`0.208.56` at
-`908e56cefa6aba2eb5d9ef15ffd2ad2ef0450eb4` (tree-file
-`d89330c91b7d4094d337eccafa24ba4b4b9627319aa2332b2dd38e1ba3ff651e`, wheel
-`6dc159fb50d8ff88a95409a0fe58a4974d382ed71d5dd89cc59d6d37b24462ee`, journal
-`clear`, predecessor `0.208.55` /
-`e60860eaa89827bc5fc58d7c4f1c47514caaf2d4`; this hop's journal fallback
-is the same `0.208.55` sibling). Trusted-CA health reports
-`version=0.208.56` `status=ok` `requested_mode=shadow`. S3 consumed
+`0.208.57` at
+`5c3ce13c1e486e6512d64e62a898a2ba84d76f93` (tree-file
+`18482b5db4a6aadd0873404bd3bcb8960c627f18bba9b82e54f6c926d30dca12`, wheel
+`78f2e7c31e1aa18d264dca36415c3b37fc9114d1b83e7bb73e53be8fc7bd5ae3`, journal
+`clear`, predecessor `0.208.56` /
+`908e56cefa6aba2eb5d9ef15ffd2ad2ef0450eb4`; this hop's journal fallback
+is the same `0.208.56` sibling). Trusted-CA health reports
+`version=0.208.57` `status=ok` `requested_mode=assist`. S3 consumed
 witness remains the durable 2026-09-06T05:25Z turn on then-live
 `0.208.51` assist (user `msg_d145ce5796b54ae1`, assistant
 `msg_df97d09e4d2b4a2f`, graph `graph_866d37c2794dcc1a`, promoted-product
-`evt_1827c6dff24b40b4`). Compact health after the `0.208.56` process
-epoch is `requested_mode=shadow`, `effective_mode=shadow`. Do not
-re-activate `908e56ce`, `e60860ea` or `9c8a4eed`. Next product sibling
-that changes friday sources is `shadow_to_assist`. N1
+`evt_1827c6dff24b40b4`). Compact health after the `0.208.57` process
+epoch is `requested_mode=assist`, `effective_mode=off`
+(`material_loaded_not_accepted`). Do not re-activate `5c3ce13c`,
+`908e56ce`, `e60860ea` or `9c8a4eed`. No further implementable
+product hop; do not issue a no-product `0.208.58`. N1
 Telegram surfaces and
 one-final-carrier packing remain live. N2 live `_web_research` plans a
 2–8 query public mission, executes complementary queries on
@@ -54,13 +55,13 @@ archive extract, isolated untrusted `py_compile` / unittest,
 prompt-to-small-project, one-final `friday-source.zip` pack, digest
 and overwrite observation on extract, Coding Mode
 view/plan-gate/carrier, and upload-modification EMPTY observer remain
-live through `0.208.56`. This source tree admits default TEST only
+live through `0.208.57`. This source tree admits default TEST only
 inside a proved user-systemd cgroup-v2 tree (memory, swap, pids, CPU
 quota, sized tmpfs, read-only source mounts). Execute/run of uploaded
-programs stay fail-closed. This is not a safety certification and is
-not the live `0.208.56` artifact. Upload-modification
+programs stay fail-closed. This is not a safety certification.
+Upload-modification
 apply never rewrites uploaded project files. N4 store-backed mixed
-journeys remain live through `0.208.56`. N5 implementable seam
+journeys remain live through `0.208.57`. N5 implementable seam
 extract is closed, the maintainability ratchet remains standing.
 
 - Database schema: 50. Live production, this source tree and the journal
@@ -71,7 +72,7 @@ extract is closed, the maintainability ratchet remains standing.
   `review_required` and grants no apply/delete authority. V12 `canary_ready`
   with verified, installation and effective context all exactly `40960`.
 - Secondary: accepted/live GPT-OSS profile `gptoss20b-2335df…`; after the
-  `0.208.56` cutover `state=healthy`, `mode=assist`,
+  `0.208.57` cutover `state=healthy`, `mode=assist`,
   `available=false`, supervisor `closed_reason=admitted`. `/api/health`
   `cooldown` is the in-process circuit, not laptop Docker liveness.
   Compact health still hides `circuit_retry_after_sec` and
@@ -116,14 +117,13 @@ S4-R8 formal cutover is code-owned `accepted`: dialogue offers `archive_search`;
 window, temporal and graph lanes dispatch through that facade; a generic
 continuation cannot mint a fresh exact selector. S3 assist-controller is
 deployed; the observation-bound consumed witness landed on live
-`0.208.51` assist and remains durable through live `0.208.56`. S5 40k lease
+`0.208.51` assist and remains durable through live `0.208.57`. S5 40k lease
 and S6 recovery/browse paths stay live.
 
-The live product queue is N1–N5. F.11 `0.208.56` is live shadow.
-Mixed-journey consume provider identity is on this source tree
-(`c8e245ea`); it is not live on `0.208.56`. Version `0.208.57`
-exact-release and sealed `shadow_to_assist` remain the live release
-path.
+The live product queue is N1–N5. F.11 `0.208.57` is live assist.
+Mixed-journey consume provider identity is live on `0.208.57`
+(`c8e245ea`). No further implementable product hop; Gemini/Pandora
+stay parked. Do not issue a no-product `0.208.58`.
 The shared operation-progress contract is
 live. Production `0.208.56` keeps ordinary Telegram `/chat` status,
 Engineer status, file-album DOCUMENT status, Engineer FILE/ARCHIVE
@@ -139,7 +139,7 @@ re-probe after cooldown. Execute/run of uploaded programs stay
 fail-closed. This is not a safety certification.
 Upload-modification apply never rewrites uploaded project files.
 Gemini parity is not claimed; it stays parked in Pandora. S3 consumed
-witness is closed; live shadow is `0.208.56`. N5 ratchet stays standing. Physical Android, P0H
+witness is closed; live assist is `0.208.57`. N5 ratchet stays standing. Physical Android, P0H
 deletion, off-machine mirror and provider-credential rotation remain
 owner-parked.
 
@@ -655,9 +655,9 @@ Status: F.0–F.6 source is on `origin/main` at
 `/var/tmp/friday-change-evidence.2aom2zP5`, inventory
 `28433dd8f2f4333cb260d9affed5a56b90fcea3107072ebe2d6464fbdc13fe05`,
 topology 20/4). This is not exact-release certification and not a
-deployed release. Production is `0.208.56` /
-`908e56cefa6aba2eb5d9ef15ffd2ad2ef0450eb4`. Version and schema stay
-`0.208.56` / 50 until `0.208.57`. Luna-1 independently ACCEPTed
+deployed release. Production is `0.208.57` /
+`5c3ce13c1e486e6512d64e62a898a2ba84d76f93`. Version and schema are
+`0.208.57` / 50. Luna-1 independently ACCEPTed
 `7be8d7f9..20311f32` (HANDOFF 2026-09-07T05:16:33Z, worktree clean,
 no product edits). Mixed-journey consume provider identity landed on
 source `c8e245ea`; production mixed-journey dispatch remains
@@ -678,8 +678,8 @@ declare; `6536a2a8` ruff-format; `f9f7a656` isolated import probes;
 - [x] F.2–F.6 product source on this tree (calendar fixtures, research
       consume, TEST cgroup, coding oracle and reply-bound edits, mixed
       consume durability). Live configured-model N2 acceptance is not
-      fabricated. Live on `0.208.56` except mixed-journey provider
-      identity, which is source `c8e245ea` for `0.208.57`.
+      fabricated. Live on `0.208.57` including mixed-journey provider
+      identity (`c8e245ea`).
 - [x] F.7 existing document/memory/graph contracts remain on this tree
       without new product logic: office formula-cache/hidden/merged
       incomplete (`tests/test_office_structure_completeness.py`),
@@ -688,21 +688,20 @@ declare; `6536a2a8` ruff-format; `f9f7a656` isolated import probes;
       the agent (`tests/test_graph_snapshot_reaches_agent.py`), sole
       ordinary facade `archive_search`, reversible entity edits
       (`tests/test_entity_edits_are_reversible.py`). Installed-package
-      golden journeys remain on the installed `0.208.56` artifact. Do
+      golden journeys remain on the installed `0.208.57` artifact. Do
       not rebind historical `0.208.1` registry receipts from this note.
 - [x] F.8 existing cancellation/restart/idempotency contracts remain
       on this tree (`tests/test_turn_deadline_reliability.py`,
       mixed-journey consume durability on `032bfb7a`/`60b08f2a`).
-      Installed Telegram/HTTP restart proof is live `0.208.56`.
+      Installed Telegram/HTTP restart proof is live `0.208.57`.
 - [x] F.9 N5 maintainability ratchet remains standing.
       `friday/agent_runtime/__init__.py` is 76_572 lines. F.6 added only
       thin dispatch there. No wholesale rewrite.
 - [x] F.10 S3 historical consumed witness on live `0.208.51`
       2026-09-06T05:25Z is preserved. Do not fabricate traffic. Do not
-      re-activate `908e56ce`, `e60860ea` or `9c8a4eed`. Next product
-      sibling that changes friday sources is `shadow_to_assist`.
-      Compact health `requested_mode=shadow` `effective_mode=shadow`
-      after the `0.208.56` cutover.
+      re-activate `5c3ce13c`, `908e56ce`, `e60860ea` or `9c8a4eed`.
+      Compact health `requested_mode=assist` `effective_mode=off`
+      after the `0.208.57` cutover.
 - [x] F.11 independent review of `7be8d7f9..20311f32` by Luna-1
       ACCEPT (HANDOFF 2026-09-07T05:16:33Z, no product edits,
       worktree clean at `20311f32`).
@@ -715,11 +714,16 @@ declare; `6536a2a8` ruff-format; `f9f7a656` isolated import probes;
       after activate enroll race (`dr_authentication_input_changed`);
       did not rollback; did not re-activate `908e56ce`. Pandora stays
       excluded.
-- [ ] Version `0.208.57`, exact-release, sealed
-      `semantic_supervisor_shadow_to_assist` until Trusted-CA
-      `https://127.0.0.1:8000/api/health` shows the new version.
-      Mixed-journey consume carries selected provider from evidence or
-      fail-closed; it does not invent `yandex`. Pandora stays excluded.
+- [x] Version `0.208.57`, exact-release, sealed
+      `semantic_supervisor_shadow_to_assist`. Trusted-CA
+      `https://127.0.0.1:8000/api/health` shows `version=0.208.57`
+      `status=ok` `requested_mode=assist`. Owner-smoke
+      `friday.s6-r3-signed-owner-smoke.v1` verdict=`passed` (11/11).
+      Observation `status=clear` (`hard_contradictions=0`). DR
+      lifecycle published revision 276. Mixed-journey consume carries
+      selected provider from evidence or fail-closed; it does not
+      invent `yandex`. Do not re-activate `5c3ce13c`. Do not issue a
+      no-product `0.208.58`. Pandora stays excluded.
 
 ### P0G — canonical Gate Diet
 
@@ -2047,13 +2051,13 @@ record the owner required in this audit commit, not a failure dump):
 
 ### Open and implementable
 
-F.11 `0.208.56` is live shadow. Mixed-journey consume provider identity
-is on this tree (`c8e245ea`). Version `0.208.57` exact-release and sealed
-`shadow_to_assist` remain the live release path. Live configured-model
-N2 acceptance is not fabricated.
+F.11 `0.208.57` is live assist. Mixed-journey consume provider identity
+is live (`c8e245ea`). No further implementable product hop. Do not
+issue a no-product `0.208.58`. Live configured-model N2 acceptance is
+not fabricated.
 EXECUTE/RUN of uploaded programs stay fail-closed. Preserve the 05:25Z
-S3 witness and its honest partial evidence; do not fabricate traffic,
-issue no-product hops for bookkeeping, or touch Pandora.
+S3 witness and its honest partial evidence; do not fabricate traffic
+or touch Pandora.
 
 ### Open and blocked
 
@@ -2069,7 +2073,7 @@ issue no-product hops for bookkeeping, or touch Pandora.
 - S3 consumed witness exists (durable 05:25Z graph and promoted-product
   row). Do not fabricate additional S3 traffic. Compact health after a
   cutover may still show `effective=off` (`material_loaded_not_accepted`);
-  that is not a missing witness. Live shadow is `0.208.56`.
+  that is not a missing witness. Live assist is `0.208.57`.
 - Primary-only path when the laptop/secondary is absent.
 - One turn / one effect owner / one final publisher. No new orchestrator.
 - Do not use Docker to certify primary Friday.
