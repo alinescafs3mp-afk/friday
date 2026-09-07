@@ -1,3 +1,15 @@
+## 0.208.57 — 2026-09-07
+
+### Carry mixed-journey web provider identity on a shadow_to_assist sibling
+
+- Distinct sealed candidate for `semantic_supervisor_shadow_to_assist` after
+  live 0.208.56. Mixed-journey consume carries a closed `selected_provider_id`
+  from transient web evidence when the report names one; otherwise
+  `UNAVAILABLE` / `NO_ADMITTED_SOURCES`. It does not invent `yandex`.
+  Production mixed-journey dispatch stays fail-closed without injected
+  prepared evidence. SQLite remains at schema 50; exact `0.208.56` is the
+  predecessor and `0.207.90` the fallback.
+
 ## 0.208.56 — 2026-09-07
 
 ### Land F.0–F.6 source on a distinct assist_to_shadow sibling
