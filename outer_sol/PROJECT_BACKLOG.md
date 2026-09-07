@@ -1,6 +1,6 @@
 # Friday: canonical project backlog
 
-Updated: 2026-09-07 (live production `0.208.57` assist; mixed-journey consume carries selected provider or fail-closed; C1–C11 already in intake; historical S3 witness preserved; Pandora unchanged)
+Updated: 2026-09-07 (live production `0.208.57` assist; mixed-journey consume carries selected provider or fail-closed; R10 RC→1.0 acceptance battery implemented for diagnostic checkpoint, product not accepted as 1.0; C1–C11 already in intake; historical S3 witness preserved; Pandora unchanged)
 
 This is the project's only backlog and mutable status register. It owns the
 current production identity, execution order, acceptance gaps and owner actions.
@@ -142,6 +142,41 @@ Gemini parity is not claimed; it stays parked in Pandora. S3 consumed
 witness is closed; live assist is `0.208.57`. N5 ratchet stays standing. Physical Android, P0H
 deletion, off-machine mirror and provider-credential rotation remain
 owner-parked.
+
+### R10 — RC → 1.0 live acceptance battery (tooling, not product GO)
+
+Status: battery implemented and harness-validated for Astra's diagnostic
+baseline. **This is not Friday 1.0 acceptance.** Entry:
+`docs/RELEASE_1_0_ACCEPTANCE.md`. Matrix:
+`tools/release_1_0_capability_matrix.json`. Wrapper:
+`tools/release_1_0_acceptance.py` (cannot emit GO, cannot start B after red A,
+cannot rewrite sealed A/B). Additional deterministic journeys:
+`tools/release_1_0_live_journeys.py` + `tests/test_release_1_0_*.py`.
+
+Grok-lab self-validation (model-free, isolated TestClient, LLM off): wrapper
+`--audit-only` / `--preflight` / `--negative-control` exit 0; sealed pair audit
+400 and 160-case audit valid; pytest `tests/test_release_1_0_*.py` 10 passed
+(15 additional deterministic journeys including backup→second-home restore);
+OpenAPI/source surfaces classified with zero unknown; inventory closed at
+12,742 functions, ten new change-unit functions, non-nightly scratch
+16,559 MiB. `--run-live` correctly returns `NOT_RUN` / exit 5 without a
+dedicated exclusive slot or `FRIDAY_ENV_FILE`.
+
+Registered gaps that block a 1.0 claim until closed or explicitly scoped:
+
+- `GAP-WORD-FIRST-GEN` / `R10-LIVE-DOC-WORD-FIRST-GEN`: live `0.208.57` first-turn
+  DOCX carrier rejected when the source `.txt` filename is spoken
+  (`WORD003_MAKE_FILE_PRE_RENDER_REJECT_SOURCE_TXT_STEM`). Required case; do not
+  skip or relabel beta. Diagnostic baseline must record FAIL.
+- `GAP-TELEGRAM-LIVE-ROUNDTRIP`: no dedicated test-bot contour; production
+  singleton must not be dual-consumed.
+- `GAP-MODEL-LIVE-ADDITIONAL-SLOT`: additional isolated-live R10 cases need the
+  exclusive model-heavy slot (Astra checkpoint).
+- `GAP-SOAK-BUDGET`: soak duration/load not frozen.
+- Physical Android remains owner-parked beta (`GAP-ANDROID-PHYSICAL`).
+
+Do not run the official 160 / A+B pair or exact-release overlapping another
+full gate. Product fixes stay under Astra after the baseline.
 
 ## Operating rules
 

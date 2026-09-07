@@ -4,6 +4,11 @@
 every exact test function to one product invariant, one execution kind and one tier,
 then closes its parameter set with an exact count and digest. Unknown or stale
 modules/functions, parameter drift, overlaps, collection drift and every skip fail.
+
+RC → 1.0 user-acceptance scope, additional R10 cases and diagnostic/final command
+order live in [`RELEASE_1_0_ACCEPTANCE.md`](RELEASE_1_0_ACCEPTANCE.md). Wrappers may
+invoke this controller; they must not emit a parallel certifying summary or turn a
+red tier green.
 One authoritative raw collection is classified once; selected JUnit node IDs must
 equal that closed classification and remain explicit in run evidence.
 

@@ -5,6 +5,11 @@ acceptance. It never uses the live archive or a real Telegram recipient. Model,
 embedding and reranker traffic is restricted to the three configured numeric local
 endpoints; every pass runs in an isolated filesystem and network namespace.
 
+The RC → 1.0 entry document is [`RELEASE_1_0_ACCEPTANCE.md`](RELEASE_1_0_ACCEPTANCE.md).
+It adds identified R10 journeys and a surface/capability matrix. It does not rewrite
+these sealed A/B manifests, does not start B after a red A, and does not declare
+Friday 1.0 accepted.
+
 ## Acceptance contract
 
 One official battery is exactly ten independently isolated passes with twenty cases
