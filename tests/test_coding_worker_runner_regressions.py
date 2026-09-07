@@ -10,7 +10,7 @@ import pytest
 
 import friday.organs.coding.worker_cgroup as coding_tree
 import friday.organs.coding.worker_spawn as worker
-from friday.organs.coding.worker_programs import PROBE, TEST
+from friday.organs.coding.worker_programs import ORACLE, PROBE, TEST
 
 
 def _argv(tmp_path: Path, source: str = PROBE):
@@ -25,7 +25,7 @@ def _argv(tmp_path: Path, source: str = PROBE):
     )
 
 
-@pytest.mark.parametrize("source", (TEST, "print('unexpected program')"))
+@pytest.mark.parametrize("source", (TEST, ORACLE, "print('unexpected program')"))
 def test_default_runner_refuses_uploaded_execution_before_popen(tmp_path, monkeypatch, source) -> None:
     def forbidden(*args, **kwargs):
         raise AssertionError("untrusted execution reached Popen")

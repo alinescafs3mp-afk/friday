@@ -1,6 +1,6 @@
 # Friday: canonical project backlog
 
-Updated: 2026-09-07 (reported production `0.208.55`; F.0–F.4 source work on `origin/main`; C1–C11 already in intake; historical S3 witness preserved; Pandora unchanged)
+Updated: 2026-09-07 (reported production `0.208.55`; F.0–F.4 source on `origin/main` including independent create oracle; C1–C11 already in intake; historical S3 witness preserved; Pandora unchanged)
 
 This is the project's only backlog and mutable status register. It owns the
 current production identity, execution order, acceptance gaps and owner actions.
@@ -1499,7 +1499,12 @@ not claim safe build/test of untrusted uploads.
 - [x] Prompt-to-scaffold groundwork reported live on `0.208.26`
       (`friday/organs/coding/create.py`). This writes a fixed no-op template,
       not an implementation of the requested application. No execute.
-- [ ] Functional application creation with an independent behavior oracle.
+- [x] Functional application creation with an independent behavior oracle
+      (`friday/organs/coding/behavior_oracle.py`, `verify.py`). Frozen
+      `csv_summary_v1` family; BUILD then ORACLE inside the proved
+      user-systemd cgroup tree. Bounded repair (1 initial + 2). Calculator
+      create stays unverified. Execute/run stay fail-closed. Not live on
+      `0.208.55`. Not a safety certification.
 - [ ] Real edits to an immutable uploaded-project revision, bounded tests/repair,
       durable accepted revision and exact follow-up/rollback. The existing
       `applied=False` modification observer does not satisfy this requirement.

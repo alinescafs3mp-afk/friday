@@ -2,8 +2,12 @@
 
 PROBE and BUILD do not import or execute uploaded modules. TEST does, including
 when discovery finds no test cases, so the default runner admits it only inside
-a proved aggregate cgroup-v2 tree.
+a proved aggregate cgroup-v2 tree. ORACLE is the Friday-owned independent
+behavior program; it also requires that tree. Execute/run of uploaded programs
+stay fail-closed.
 """
+
+from friday.organs.coding.behavior_oracle import oracle_worker_program
 
 PROBE = (
     "import os,sys;"
@@ -50,3 +54,5 @@ TEST = (
     "result=unittest.TextTestRunner(stream=sys.stderr, verbosity=1).run(suite)\n"
     "raise SystemExit(0 if result.wasSuccessful() else 1)\n"
 )
+
+ORACLE = oracle_worker_program()

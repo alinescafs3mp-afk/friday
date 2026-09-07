@@ -75,8 +75,8 @@ class _Runtime:
     async def _mentions_someone_from_the_archive(self, message, actor):
         return False
 
-    def _record_web_projection(self, context, status, sources):
-        AgentRuntime._record_web_projection(context, status, sources)  # noqa: SLF001
+    def _record_web_projection(self, context, status, sources, **kwargs):
+        AgentRuntime._record_web_projection(context, status, sources, **kwargs)  # noqa: SLF001
 
     def web_query_from(self, message: str) -> str:
         return message[:60]

@@ -1,7 +1,7 @@
 """Admit and bound code-owned Coding probes, compilation, and proved TEST trees.
 
-Only the current operation's workspace/export are mounted. Uploaded unittest
-execution is admitted only after a live cgroup-v2 tree (memory, swap, pids, CPU
+Only the current operation's workspace/export are mounted. Uploaded unittest and independent ORACLE
+execution are admitted only after a live cgroup-v2 tree (memory, swap, pids, CPU
 quota) is installed and read back. Execute/run of uploaded programs stay outside
 this runner.
 """
@@ -29,7 +29,7 @@ from friday.organs.coding.worker_boundary import (
     observe_coding_worker_isolation,
 )
 from friday.organs.coding.worker_cgroup import DEFAULT_TASKS_MAX, DEFAULT_TMPFS_BYTES
-from friday.organs.coding.worker_programs import BUILD, PROBE, TEST
+from friday.organs.coding.worker_programs import BUILD, ORACLE, PROBE, TEST
 from friday.private_fs import ensure_private_directory
 
 BWRAP_EXECUTABLE = "/usr/bin/bwrap"
@@ -254,7 +254,7 @@ def coding_worker_bwrap_argv(
     )
 
 
-def _admitted_memory_bytes(argv: tuple[str, ...]) -> int | None:
+def admitted_memory_bytes(argv: tuple[str, ...]) -> int | None:
     for part in argv:
         if not part.startswith("--as="):
             continue
@@ -272,7 +272,7 @@ def _admitted_memory_bytes(argv: tuple[str, ...]) -> int | None:
 
 
 def default_coding_worker_runner(argv: tuple[str, ...], timeout_sec: int) -> int:
-    """Run probe/compile directly; run TEST only inside a proved aggregate cgroup."""
+    """Run probe/compile directly; run TEST/ORACLE only inside a proved aggregate cgroup."""
 
     if (
         not argv
@@ -285,15 +285,15 @@ def default_coding_worker_runner(argv: tuple[str, ...], timeout_sec: int) -> int
         source_index = argv.index("-c") + 1
         source = argv[source_index]
         if (
-            source not in (PROBE, BUILD, TEST)
+            source not in (PROBE, BUILD, TEST, ORACLE)
             or argv[source_index - 3 : source_index] != (PYTHON_EXECUTABLE, "-I", "-c")
             or PRLIMIT_EXECUTABLE not in argv
         ):
             return 126
     except (ValueError, IndexError):
         return 126
-    if source == TEST:
-        memory_bytes = _admitted_memory_bytes(argv)
+    if source in (TEST, ORACLE):
+        memory_bytes = admitted_memory_bytes(argv)
         if memory_bytes is None or not coding_tree.coding_tree_enforcement_available():
             return 126
         return coding_tree.run_admitted_coding_tree(

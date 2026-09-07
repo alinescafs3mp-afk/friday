@@ -58306,7 +58306,9 @@ class AgentRuntime:
         if (
             web_evidence_used
             and not autonomous_engineer
+            and accepted_web_tool_names
             and response.get("_simple_public_news_owned") is not True
+            and response.get("_obsidian_owned") is not True
         ):
             from friday.execution_kernel.web_consumption import observed_web_provider_selection
             from friday.orchestration.web_answer_evidence_consumption import (
@@ -58314,15 +58316,19 @@ class AgentRuntime:
                 consume_web_answer_evidence,
                 published_web_answer,
             )
-            from friday.orchestration.web_currentness_policy import (
-                WebCurrentnessDecision,
-                WebCurrentnessRequest,
-                classify_web_currentness,
-            )
+            from friday.orchestration.web_currentness_policy import WebCurrentnessDecision
 
-            question = str(verification_question or clean_message or "")
-            currentness = classify_web_currentness(
-                WebCurrentnessRequest(question=question, explicit_search_requested=True)
+            # Consume this turn's research answer only.  A restored ledger /
+            # source-followup keeps its code-owned body.  Do not reclassify the
+            # raw user question: deictics such as «это все источники?» would
+            # SEARCH_BLOCKED_PRIVATE after the public search already ran.
+            spoken_prefix = f"{spoken}\n\n" if spoken else ""
+            model_answer = (
+                content[len(spoken_prefix) :]
+                if spoken_prefix and content.startswith(spoken_prefix)
+                else ""
+                if spoken and content == spoken
+                else content
             )
             auth = getattr(context, "_authenticated_turn_context", None)
             turn_id = str(getattr(auth, "turn_id", "") or "")
@@ -58336,10 +58342,10 @@ class AgentRuntime:
             web_answer_consumption = consume_web_answer_evidence(
                 "runtime.web.answer",
                 turn_id,
-                answer=content,
+                answer=model_answer,
                 admitted_source_urls=admitted_urls,
-                currentness=currentness,
-                current_sensitive=currentness is WebCurrentnessDecision.SEARCH_REQUIRED,
+                currentness=WebCurrentnessDecision.SEARCH_REQUIRED,
+                current_sensitive=True,
                 provider_selection=observed_web_provider_selection(
                     {
                         "sources": [{"url": url} for url in admitted_urls],
@@ -58353,7 +58359,8 @@ class AgentRuntime:
                 WebAnswerEvidencePublication.HOLD,
                 WebAnswerEvidencePublication.BLOCKED,
             }:
-                content = published_web_answer(content, web_answer_consumption)
+                published = published_web_answer(model_answer, web_answer_consumption)
+                content = f"{spoken}\n\n{published}".strip() if spoken else published
                 response["content"] = content
                 response["file_clips"] = list(structural_file_clips)
                 response["voice_clip"] = None
@@ -73808,29 +73815,6 @@ class AgentRuntime:
                     "content": (
                         "Интернет-поиск не запускался: приватный источник стал "
                         "недоступен, изменился или право на поиск было отозвано. "
-                        "Не утверждай, что получила внешние сведения."
-                    ),
-                }
-            )
-            return
-        from friday.orchestration.web_currentness_policy import (
-            WebCurrentnessDecision,
-            WebCurrentnessRequest,
-            classify_web_currentness,
-        )
-
-        prefetch_currentness = classify_web_currentness(
-            WebCurrentnessRequest(question=query, explicit_search_requested=True)
-        )
-        if prefetch_currentness is WebCurrentnessDecision.SEARCH_BLOCKED_PRIVATE:
-            if context is not None:
-                self._record_web_projection(context, "failed", [])
-            messages.append(
-                {
-                    "role": "system",
-                    "content": (
-                        "Интернет-поиск не запускался: запрос содержит частные "
-                        "сведения и не может уйти к публичному провайдеру. "
                         "Не утверждай, что получила внешние сведения."
                     ),
                 }

@@ -59,10 +59,6 @@ _URL_RE = re.compile(r"(?i)(?<![\w])(?:[a-z][a-z0-9+.-]*://[^\s<>\"']+)")
 _POSIX_PATH_RE = re.compile(r"(?:^|[\s(\[\"'=,:])/(?!/)[^\s<>\"']*")
 _HOME_PATH_RE = re.compile(r"(?:^|[\s(\[\"'=,:])~(?:/|\\)[^\s<>\"']*")
 _WINDOWS_PATH_RE = re.compile(r"(?i)(?:^|[\s(\[\"'=,:])(?:[a-z]:[\\/]|\\\\)[^\s<>\"']*")
-_PRIVATE_FILENAME_RE = re.compile(
-    r"(?i)(?<![\w.-])[\w .-]{1,128}\.(?:7z|csv|doc|docx|gz|jpeg|jpg|json|odt|pdf|png|ppt|"
-    r"pptx|rar|rtf|tar|txt|xls|xlsx|zip)(?![\w])"
-)
 
 
 class WebAnswerEvidenceConsumptionError(ValueError):
@@ -203,11 +199,14 @@ def _closed(value: object) -> str:
 
 
 def _has_private_carrier(text: str) -> bool:
+    # Bare filenames such as ``report.pdf`` are ordinary answer prose (file+web
+    # compare, obsidian, archive).  A private carrier here is a path, not an
+    # extension.  Private URLs are rejected separately via validate_public_web_url.
+    without_urls = _URL_RE.sub(" public-url ", text)
     return bool(
-        _POSIX_PATH_RE.search(text)
-        or _HOME_PATH_RE.search(text)
-        or _WINDOWS_PATH_RE.search(text)
-        or _PRIVATE_FILENAME_RE.search(text)
+        _POSIX_PATH_RE.search(without_urls)
+        or _HOME_PATH_RE.search(without_urls)
+        or _WINDOWS_PATH_RE.search(without_urls)
     )
 
 

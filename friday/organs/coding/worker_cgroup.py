@@ -19,6 +19,7 @@ import time
 from contextlib import suppress
 from dataclasses import dataclass
 from pathlib import Path
+from typing import NamedTuple
 
 from friday.orchestration.coding_worker_limits import MAX_MEMORY_BYTES, MAX_WALL_CLOCK_SEC
 
@@ -348,6 +349,11 @@ def _stop_unit(unit: str) -> None:
         )
 
 
+class CodingTreeCommandV1(NamedTuple):
+    code: int
+    stderr: bytes
+
+
 def run_admitted_coding_tree(
     argv: tuple[str, ...],
     timeout_sec: int,
@@ -358,8 +364,37 @@ def run_admitted_coding_tree(
 ) -> int:
     """Run an already-admitted bubblewrap argv inside a proved aggregate cgroup."""
 
-    if not argv or type(timeout_sec) is not int or not 1 <= timeout_sec <= MAX_WALL_CLOCK_SEC:
-        return 126
+    return run_admitted_coding_tree_report(
+        argv,
+        timeout_sec,
+        memory_bytes=memory_bytes,
+        tasks_max=tasks_max,
+        cpu_quota_percent=cpu_quota_percent,
+        stderr_limit=0,
+    ).code
+
+
+def run_admitted_coding_tree_report(
+    argv: tuple[str, ...],
+    timeout_sec: int,
+    *,
+    memory_bytes: int,
+    tasks_max: int = DEFAULT_TASKS_MAX,
+    cpu_quota_percent: int = DEFAULT_CPU_QUOTA_PERCENT,
+    stderr_limit: int = 2048,
+) -> CodingTreeCommandV1:
+    """Same tree as TEST; optionally keep a bounded stderr slice for repair."""
+
+    empty = CodingTreeCommandV1(126, b"")
+    if (
+        not argv
+        or type(timeout_sec) is not int
+        or not 1 <= timeout_sec <= MAX_WALL_CLOCK_SEC
+        or type(stderr_limit) is not int
+        or stderr_limit < 0
+        or stderr_limit > 8192
+    ):
+        return empty
     runtime = min(MAX_WALL_CLOCK_SEC, timeout_sec + 5)
     limits = CodingTreeLimitsV1(
         memory_bytes=memory_bytes,
@@ -370,18 +405,20 @@ def run_admitted_coding_tree(
     try:
         tree = _allocate(limits)
     except (CodingTreeEnforcementError, OSError, subprocess.TimeoutExpired):
-        return 126
+        return empty
     process: subprocess.Popen[bytes] | None = None
+    stderr = b""
     try:
 
         def _preexec() -> None:
             _join_cgroup(tree.cgroup)
 
+        capture = stderr_limit > 0
         process = subprocess.Popen(  # noqa: S603 - caller-admitted closed argv
             argv,
             stdin=subprocess.DEVNULL,
             stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
+            stderr=subprocess.PIPE if capture else subprocess.DEVNULL,
             start_new_session=True,
             env={"PATH": "/usr/bin:/bin", "HOME": "/work", "LANG": "C"},
             preexec_fn=_preexec,
@@ -390,16 +427,26 @@ def run_admitted_coding_tree(
             raise CodingTreeEnforcementError("join")
         _prove_limits(tree.cgroup, limits)
         try:
-            return process.wait(timeout=timeout_sec)
+            if capture:
+                captured = process.communicate(timeout=timeout_sec)[1] or b""
+                stderr = captured[:stderr_limit]
+                code = process.returncode
+                if type(code) is not int:
+                    return CodingTreeCommandV1(126, stderr)
+                return CodingTreeCommandV1(code, stderr)
+            return CodingTreeCommandV1(process.wait(timeout=timeout_sec), b"")
         except subprocess.TimeoutExpired:
-            return 124
+            return CodingTreeCommandV1(124, stderr)
     except (CodingTreeEnforcementError, OSError, ValueError):
-        return 126
+        return empty
     finally:
         if process is not None and process.poll() is None:
             _kill_tree(tree.cgroup)
             with suppress(ProcessLookupError, PermissionError, OSError):
                 os.killpg(process.pid, signal.SIGKILL)
             with suppress(OSError, subprocess.TimeoutExpired):
-                process.wait(timeout=5)
+                if process.stderr is not None:
+                    process.communicate(timeout=5)
+                else:
+                    process.wait(timeout=5)
         _stop_unit(tree.unit)

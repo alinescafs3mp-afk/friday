@@ -19,12 +19,23 @@ from typing import Any
 
 from friday.model_input_hygiene import secondary_model_messages_are_secret_free
 from friday.orchestration.coding_prompt_normalization import CodingPromptNormalizationState
+from friday.organs.coding.behavior_oracle import (
+    CodingBehaviorOracleState,
+    admit_coding_behavior_oracle,
+)
 from friday.organs.coding.create import creation_prompt, prepare_coding_creation
 from friday.organs.coding.modify import prepare_revision_edit
 from friday.organs.coding.revision import (
     CodingRevisionUnavailable,
     CodingSourceRevision,
     load_coding_revision,
+)
+from friday.organs.coding.verify import (
+    MAX_CREATION_REPAIRS,
+    CodingBehaviorVerificationReason,
+    CodingBehaviorVerificationState,
+    repair_diagnostics,
+    verify_creation_payload,
 )
 from friday.organs.coding.worker_boundary import CodingWorkerBoundaryV1
 from friday.organs.coding.worker_spawn import CodingWorkerRunner
@@ -286,6 +297,7 @@ async def _propose_creation(
     attachments: list[dict[str, Any]] | None,
     model: Any,
     turn_deadline: float | None,
+    diagnostics: dict[str, object] | None = None,
 ) -> CodingModelCreateProposal:
     matched = _MODEL_CREATE_PREFIX.match(message.strip())
     if attachments or storage is None or matched is None or not message.strip()[matched.end() :].strip():
@@ -299,9 +311,17 @@ async def _propose_creation(
     if prompt.prompt is not CodingPromptNormalizationState.NORMALIZED:
         return CodingModelCreateProposal(message, CodingModelEditState.INPUT_REJECTED)
     # Send the FULL task, not the bounded title/goal used by the existing UI.
+    oracle = admit_coding_behavior_oracle(message)
+    system = _CREATE_SYSTEM
+    if oracle.state is CodingBehaviorOracleState.ADMITTED:
+        system = _CREATE_SYSTEM + "\n" + oracle.cli_contract
+    user: dict[str, object] = {"task": message}
+    if diagnostics is not None:
+        user["repair"] = True
+        user["diagnostics"] = diagnostics
     messages = [
-        {"role": "system", "content": _CREATE_SYSTEM},
-        {"role": "user", "content": json.dumps({"task": message}, ensure_ascii=False)},
+        {"role": "system", "content": system},
+        {"role": "user", "content": json.dumps(user, ensure_ascii=False)},
     ]
     if (
         not secondary_model_messages_are_secret_free([{"content": message}])
@@ -343,12 +363,13 @@ async def handle_coding_turn(
     worker_boundary: CodingWorkerBoundaryV1 | None = None,
     spawn_runner: CodingWorkerRunner | None = None,
 ) -> dict[str, Any]:
-    """Use the existing primary client once, then re-enter the same Coding turn.
+    """Use the existing primary client, then re-enter the same Coding turn.
 
     Cancellation propagates before any turn/workspace writes. All other model
     failures yield a body-free blocked response; none retry via another runtime.
-    The sync turn reloads the exact revision after the await. Final publication
-    separately reauthorizes the persisted parent binding in its own transaction.
+    An admitted independent oracle may use at most two repair calls on the same
+    primary client. The sync turn reloads the exact revision after the await.
+    Final publication separately reauthorizes the persisted parent binding.
     """
 
     from friday.organs.coding.static_turn import _require_coding_actor, handle_coding_static_turn
@@ -404,6 +425,66 @@ async def handle_coding_turn(
             model=model,
             turn_deadline=turn_deadline,
         )
+        oracle = admit_coding_behavior_oracle(message)
+        if (
+            creation.state is CodingModelEditState.PREPARED
+            and creation.payload is not None
+            and oracle.state is CodingBehaviorOracleState.ADMITTED
+        ):
+            from pathlib import Path
+
+            from friday.config import default_home
+            from friday.organs.coding.static_turn import default_coding_worker_boundary
+
+            if worker_boundary is None:
+                home = Path(default_home())
+                worker_boundary = default_coding_worker_boundary(
+                    friday_home=str(home),
+                    owner_home=str(Path.home()),
+                    database_path=str(home / "data" / "state"),
+                )
+            person = actor.own_id if actor.shared_tenant else user_id
+            unrepaired = {
+                CodingBehaviorVerificationReason.RESOURCE_ENFORCEMENT_UNAVAILABLE,
+                CodingBehaviorVerificationReason.WORKER_NOT_ADMITTED,
+                CodingBehaviorVerificationReason.PROBE_NOT_CONFIRMED,
+                CodingBehaviorVerificationReason.SPAWN_FAILED,
+                CodingBehaviorVerificationReason.NO_WORKSPACE,
+            }
+            for attempt in range(MAX_CREATION_REPAIRS + 1):
+                if not coding_conversation_active(storage, conversation_id, person):
+                    creation = CodingModelCreateProposal(
+                        message, CodingModelEditState.INVALID_REQUEST, creation.calls
+                    )
+                    break
+                if creation.payload is None:
+                    break
+                checked = verify_creation_payload(
+                    payload=creation.payload,
+                    oracle=oracle,
+                    worker_boundary=worker_boundary,
+                    runner=spawn_runner,
+                )
+                if checked.state is CodingBehaviorVerificationState.VERIFIED:
+                    break
+                if attempt == MAX_CREATION_REPAIRS or checked.reason in unrepaired:
+                    break
+                repaired = await _propose_creation(
+                    storage=storage,
+                    user_id=user_id,
+                    actor=actor,
+                    message=message,
+                    conversation_id=conversation_id,
+                    attachments=attachments,
+                    model=model,
+                    turn_deadline=turn_deadline,
+                    diagnostics=repair_diagnostics(checked),
+                )
+                creation = CodingModelCreateProposal(
+                    message, repaired.state, creation.calls + repaired.calls, repaired.payload
+                )
+                if creation.state is not CodingModelEditState.PREPARED:
+                    break
     return handle_coding_static_turn(
         storage=storage,
         user_id=user_id,

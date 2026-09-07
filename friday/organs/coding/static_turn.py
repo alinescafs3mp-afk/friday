@@ -30,6 +30,10 @@ from friday.orchestration.coding_mode_snapshot import build_coding_mode_snapshot
 from friday.orchestration.coding_mode_view import build_coding_mode_view
 from friday.orchestration.coding_project_identity import build_coding_project_identity
 from friday.orchestration.coding_worker_admission import CodingWorkerAdmissionState
+from friday.organs.coding.behavior_oracle import (
+    CodingBehaviorOracleState,
+    admit_coding_behavior_oracle,
+)
 from friday.organs.coding.check import CodingRevisionCheck, check_requested, reauthorize_revision_check
 from friday.organs.coding.create import (
     CodingCreateObserveState,
@@ -64,6 +68,12 @@ from friday.organs.coding.modify import (
 )
 from friday.organs.coding.result_archive import observe_coding_result_archive
 from friday.organs.coding.revision import CodingRevisionUnavailable, load_coding_revision, revision_record
+from friday.organs.coding.verify import (
+    CodingBehaviorVerificationReason,
+    CodingBehaviorVerificationState,
+    CodingBehaviorVerificationV1,
+    observe_coding_behavior_verification,
+)
 from friday.organs.coding.worker_boundary import (
     CodingWorkerBoundaryV1,
     default_coding_worker_boundary,
@@ -661,8 +671,15 @@ def handle_coding_static_turn(
             )
         members = written_members
         report = build_coding_inspect_report(report_id, turn_id, members=members)
+    oracle = admit_coding_behavior_oracle(message if model_creating else "")
     spawn = CodingWorkerSpawnV1(False, admission.admission, "skipped", False)
-    if execute_claimed and worker_admitted:
+    if worker_admitted and (
+        execute_claimed
+        or (
+            oracle.state is CodingBehaviorOracleState.ADMITTED
+            and created.state is CodingCreateObserveState.WRITTEN
+        )
+    ):
         spawn = spawn_coding_worker(admission, boundary, runner=spawn_runner)
     extract = CodingArchiveExtractObserveV1(
         CodingArchiveExtractObserveState.EMPTY,
@@ -692,6 +709,23 @@ def handle_coding_static_turn(
             operation=operation,
             runner=spawn_runner,
             created=created,
+        )
+    verification = CodingBehaviorVerificationV1(
+        CodingBehaviorVerificationState.EMPTY,
+        CodingBehaviorVerificationReason.NO_ORACLE,
+    )
+    if (
+        oracle.state is CodingBehaviorOracleState.ADMITTED
+        and created.state is CodingCreateObserveState.WRITTEN
+    ):
+        verification = observe_coding_behavior_verification(
+            admission=admission,
+            boundary=boundary,
+            spawn=spawn,
+            oracle=oracle,
+            workspace=workspace,
+            runner=spawn_runner,
+            revision_sha256=created.identity.revision_selector,
         )
     ready = (
         created.state is CodingCreateObserveState.WRITTEN
@@ -816,11 +850,27 @@ def handle_coding_static_turn(
             else {"coding_model_create": "output_rejected", "coding_model_calls": 0}
         )
         if created.state is CodingCreateObserveState.WRITTEN and source_record:
-            text = (
-                "Исходники нового проекта подготовлены моделью по текстовому заданию и сохранены "
-                "в отдельной рабочей папке. Сборка и тесты не запускались; "
-                "корректность поведения ещё не подтверждена."
-            )
+            if verification.state is CodingBehaviorVerificationState.VERIFIED:
+                text = (
+                    "Исходники нового проекта подготовлены моделью по текстовому заданию и сохранены "
+                    "в отдельной рабочей папке. Независимый оракул csv_summary_v1 подтвердил "
+                    "запрошенное поведение. Это не сертификат безопасности."
+                )
+            elif verification.reason in {
+                CodingBehaviorVerificationReason.ORACLE_FAILED,
+                CodingBehaviorVerificationReason.BUILD_FAILED,
+            }:
+                text = (
+                    "Исходники нового проекта подготовлены моделью и сохранены. "
+                    "Независимая проверка поведения не прошла; заготовка вместо программы не подставлялась. "
+                    "Это не сертификат безопасности."
+                )
+            else:
+                text = (
+                    "Исходники нового проекта подготовлены моделью по текстовому заданию и сохранены "
+                    "в отдельной рабочей папке. Сборка и тесты не запускались; "
+                    "корректность поведения ещё не подтверждена."
+                )
         else:
             text = (
                 "Создание проекта по текстовому заданию заблокировано: ответ модели, условия записи "
@@ -853,7 +903,7 @@ def handle_coding_static_turn(
         "interaction_mode": "coding",
         "coding_inspect_report": report.report.value,
         "coding_inspect_reason": report.reason.value,
-        "coding_execution_attempted": loop.untrusted_execute,
+        "coding_execution_attempted": loop.untrusted_execute or verification.untrusted_execute,
         "coding_worker_admission": admission.admission.value,
         "coding_worker_admission_reason": admission.reason.value,
         "coding_worker_spawned": spawn.spawned,
@@ -882,6 +932,15 @@ def handle_coding_static_turn(
         "coding_result_restart": result_archive.restart_state,
         "coding_result_rollback": result_archive.rollback_state,
         **model_metadata,
+        **(
+            {
+                "coding_behavior_oracle": verification.oracle_id,
+                "coding_behavior_verification": verification.state.value,
+                "coding_behavior_verification_reason": verification.reason.value,
+            }
+            if verification.state is not CodingBehaviorVerificationState.EMPTY
+            else {}
+        ),
         "llm_failed": model_metadata.get("coding_model_edit", model_metadata.get("coding_model_create"))
         in {
             "model_unavailable",
@@ -898,7 +957,7 @@ def handle_coding_static_turn(
         "message_id": assistant_id,
         "message": text,
         "message_format": "plain",
-        "verified": False,
+        "verified": verification.state is CodingBehaviorVerificationState.VERIFIED,
         "citations": [],
         "tools_used": [],
         "files": files,

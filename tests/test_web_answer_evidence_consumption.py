@@ -163,6 +163,22 @@ def test_private_path_in_the_answer_blocks_publication() -> None:
     assert result.reason is WebAnswerEvidenceReason.PRIVATE_OR_INVALID
 
 
+def test_bare_filename_in_the_answer_does_not_block_publication() -> None:
+    result = consume_web_answer_evidence(
+        "answer-1",
+        "turn-1",
+        answer="The language reference describes the 3.14 release in report.pdf.",
+        admitted_source_urls=("https://docs.python.org/3/",),
+        currentness=WebCurrentnessDecision.SEARCH_REQUIRED,
+    )
+    assert result.publication is WebAnswerEvidencePublication.ADMITTED
+    assert result.reason is WebAnswerEvidenceReason.CLAIMS_SUPPORTED
+    assert "report.pdf" in published_web_answer(
+        "The language reference describes the 3.14 release in report.pdf.",
+        result,
+    )
+
+
 def test_current_sensitive_claims_hold_without_required_search() -> None:
     result = consume_web_answer_evidence(
         "answer-1",

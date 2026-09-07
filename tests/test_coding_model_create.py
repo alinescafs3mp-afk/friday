@@ -413,3 +413,179 @@ async def test_archival_cancels_new_model_edit_without_removing_saved_revision(
     assert len(model.calls) == int(during)
     assert result["context"]["coding_revision_edit"] == "blocked" and result["files"] == []
     assert _load(storage, base) == original
+
+
+CSV_TASK = "создай python cli который читает csv из stdin и печатает сводку rows и sum колонки amount"
+CSV_SOURCES = {
+    "main.py": (
+        "import csv, io, sys\n"
+        "def main() -> None:\n"
+        "    text = sys.stdin.read()\n"
+        "    if text == '':\n"
+        "        raise SystemExit(2)\n"
+        "    reader = csv.DictReader(io.StringIO(text))\n"
+        "    if reader.fieldnames is None:\n"
+        "        raise SystemExit(2)\n"
+        "    total = 0\n"
+        "    count = 0\n"
+        "    for row in reader:\n"
+        "        count += 1\n"
+        "        total += int(row['amount'])\n"
+        "    sys.stdout.write(f'rows={count}\\nsum={total}\\n')\n"
+        "if __name__ == '__main__':\n"
+        "    main()\n"
+    ),
+    "README.md": "# CSV summary\n\nRead CSV from stdin and print rows/sum.\n",
+}
+WRONG_CSV_SOURCES = {
+    "main.py": (
+        "def main() -> None:\n"
+        "    print('rows=0')\n"
+        "    print('sum=0')\n"
+        "if __name__ == '__main__':\n"
+        "    main()\n"
+    ),
+    "test_main.py": (
+        "import unittest\nclass T(unittest.TestCase):\n    def test_ok(self) -> None:\n        self.assertTrue(True)\n"
+    ),
+    "README.md": "# wrong\n",
+}
+
+
+class ScriptedCreateModel:
+    def __init__(self, payloads: list[str]):
+        self.calls = []
+        self.payloads = list(payloads)
+
+    async def chat(self, messages, **kwargs):
+        self.calls.append((messages, kwargs))
+        return {"content": self.payloads.pop(0), "finish_reason": "stop", "tool_calls": []}
+
+
+@pytest.mark.asyncio
+async def test_csv_summary_create_is_verified_by_independent_oracle(storage, coding_boundary):
+    model = CreateModel()
+    model.response = {
+        "content": json.dumps({"files": CSV_SOURCES}),
+        "finish_reason": "stop",
+        "tool_calls": [],
+    }
+    response = await _route(storage, model, CSV_TASK, None)
+    assert len(model.calls) == 1
+    assert json.loads(model.calls[0][0][1]["content"]) == {"task": CSV_TASK}
+    assert "amount column" in model.calls[0][0][0]["content"]
+    assert response["verified"] is True
+    assert response["context"]["coding_create"] == "written"
+    assert response["context"]["coding_behavior_oracle"] == "csv_summary_v1"
+    assert response["context"]["coding_behavior_verification"] == "verified"
+    assert response["context"]["coding_execution_attempted"] is True
+    assert response["context"]["coding_loop"] == "empty"
+    published = _publish(storage, response)
+    assert dict(_load(storage, published).members)["main.py"] == CSV_SOURCES["main.py"].encode()
+
+
+@pytest.mark.asyncio
+async def test_wrong_csv_summary_is_repaired_then_verified(storage, coding_boundary):
+    model = ScriptedCreateModel(
+        [json.dumps({"files": WRONG_CSV_SOURCES}), json.dumps({"files": CSV_SOURCES})]
+    )
+    response = await _route(storage, model, CSV_TASK, None)
+    assert len(model.calls) == 2
+    repair = json.loads(model.calls[1][0][1]["content"])
+    assert repair["task"] == CSV_TASK and repair["repair"] is True
+    assert repair["diagnostics"]["failed_case"] == "two_rows"
+    assert response["verified"] is True
+    assert response["context"]["coding_model_calls"] == 2
+    assert response["context"]["coding_behavior_verification"] == "verified"
+    published = _publish(storage, response)
+    assert dict(_load(storage, published).members)["main.py"] == CSV_SOURCES["main.py"].encode()
+
+
+@pytest.mark.asyncio
+async def test_exhausted_csv_summary_repair_keeps_the_failing_artifact(storage, coding_boundary):
+    wrong = json.dumps({"files": WRONG_CSV_SOURCES})
+    model = ScriptedCreateModel([wrong, wrong, wrong])
+    response = await _route(storage, model, CSV_TASK, None)
+    assert len(model.calls) == 3
+    assert response["verified"] is False
+    assert response["context"]["coding_create"] == "written"
+    assert response["context"]["coding_behavior_verification"] == "blocked"
+    assert response["context"]["coding_behavior_verification_reason"] == "oracle_failed"
+    published = _publish(storage, response)
+    assert dict(_load(storage, published).members)["main.py"] == WRONG_CSV_SOURCES["main.py"].encode()
+    assert "заготовка вместо программы не подставлялась" in response["message"].casefold()
+
+
+@pytest.mark.asyncio
+async def test_csv_summary_user_run_words_do_not_grant_execute(storage, coding_boundary, monkeypatch):
+    from friday.organs.coding import static_turn
+
+    loop = static_turn.observe_coding_isolated_loop
+
+    def refuse_execute(*args, **kwargs):
+        operation = kwargs.get("operation")
+        if getattr(operation, "value", operation) in {"execute", "run", "test"}:
+            raise AssertionError("user execute claim reached the isolated loop")
+        return loop(*args, **kwargs)
+
+    monkeypatch.setattr(static_turn, "observe_coding_isolated_loop", refuse_execute)
+    model = CreateModel()
+    model.response = {
+        "content": json.dumps({"files": CSV_SOURCES}),
+        "finish_reason": "stop",
+        "tool_calls": [],
+    }
+    response = await _route(storage, model, CSV_TASK + " и запусти программу", None)
+    assert response["verified"] is True
+    assert response["context"]["coding_loop"] == "empty"
+    assert response["context"]["coding_behavior_verification"] == "verified"
+
+
+@pytest.mark.asyncio
+async def test_verified_csv_summary_survives_workspace_loss(storage, coding_boundary, tmp_path):
+    import shutil
+
+    from friday.storage import init_storage
+    from tests.test_coding_model_edit import Model, _request
+
+    model = CreateModel()
+    model.response = {
+        "content": json.dumps({"files": CSV_SOURCES}),
+        "finish_reason": "stop",
+        "tool_calls": [],
+    }
+    created = await _route(storage, model, CSV_TASK, None)
+    base = _publish(storage, created)
+    original = _load(storage, base)
+    assert created["verified"] is True
+    helper = {"add": {"helper.py": "def version() -> int:\n    return 1\n"}}
+    edited = _publish(
+        storage,
+        await _route(
+            storage,
+            Model(response={"content": json.dumps(helper), "finish_reason": "stop"}),
+            _request(base, "Добавь helper.version без изменения CLI"),
+            base["conversation_id"],
+        ),
+    )
+    revision = _load(storage, edited)
+    assert revision.project_id == original.project_id
+    assert revision.revision_sha256 != original.revision_sha256
+    assert dict(_load(storage, base).members)["main.py"] == CSV_SOURCES["main.py"].encode()
+    settings = storage.settings
+    storage.close()
+    shutil.rmtree(tmp_path / "worker")
+    reopened = init_storage(settings)
+    try:
+        assert _load(reopened, base) == original
+        assert _load(reopened, edited) == revision
+        restored = await _route(
+            reopened,
+            None,
+            f"restore {base['message_id']} {original.revision_sha256}",
+            base["conversation_id"],
+        )
+        assert restored["context"]["coding_revision_restore"] == "restored"
+        assert restored["verified"] is False
+    finally:
+        reopened.close()
