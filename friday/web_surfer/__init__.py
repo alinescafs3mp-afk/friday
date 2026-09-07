@@ -28,8 +28,16 @@ import httpx
 from bs4 import BeautifulSoup
 
 from friday.config import FridaySettings
+from friday.orchestration.web_provider_policy import (
+    ProviderObservation,
+    WebProviderDecision,
+    WebProviderPolicyError,
+    WebProviderStatus,
+    select_web_provider,
+)
 from friday.public_web_url import canonical_public_web_url_key
 from friday.retrieval import best_snippet
+from friday.web_research_contract import MAX_RESEARCH_SOURCES
 from friday.web_surfer._direct import direct_answers
 
 LOGGER = logging.getLogger(__name__)
@@ -247,6 +255,37 @@ def _admitted_web_provider_id(value: object) -> str | None:
     if token in _ADMITTED_WEB_PROVIDER_IDS:
         return token
     return None
+
+
+def _select_observed_search_provider(
+    *,
+    primary_id: str | None,
+    selected_id: str | None,
+    source_count: int,
+    used_fallback: bool,
+) -> tuple[str | None, bool]:
+    """Consume observed chain facts through the shared provider-selection policy."""
+
+    if primary_id is None or selected_id is None or source_count < 1:
+        return selected_id, used_fallback
+    try:
+        selected = ProviderObservation(
+            provider_id=selected_id,
+            status=WebProviderStatus.COMPLETED,
+            source_count=min(source_count, MAX_RESEARCH_SOURCES),
+        )
+        if used_fallback and primary_id != selected_id:
+            selection = select_web_provider(
+                ProviderObservation(provider_id=primary_id, status=WebProviderStatus.REFUSED),
+                selected,
+            )
+        else:
+            selection = select_web_provider(selected)
+    except (TypeError, ValueError, WebProviderPolicyError):
+        return selected_id, used_fallback
+    if selection.decision is WebProviderDecision.UNAVAILABLE:
+        return selected_id, used_fallback
+    return selection.selected_provider_id, selection.used_fallback
 
 
 def declares_search_filter_support(*filter_names: str):  # noqa: ANN201
@@ -1406,12 +1445,20 @@ class WebSurfer:
 
         primary_id = _admitted_web_provider_id(primary_name)
         selected_id = _admitted_web_provider_id(selected_name)
+        used_fallback = bool(primary_id and selected_id and primary_id != selected_id)
+        diversified = _diversify(results, limit)
+        selected_id, used_fallback = _select_observed_search_provider(
+            primary_id=primary_id,
+            selected_id=selected_id,
+            source_count=len(diversified),
+            used_fallback=used_fallback,
+        )
         return attested_search_results(
-            _diversify(results, limit),
+            diversified,
             freshness=freshness,
             provider_primary_id=primary_id,
             selected_provider_id=selected_id,
-            provider_used_fallback=bool(primary_id and selected_id and primary_id != selected_id),
+            provider_used_fallback=used_fallback,
         )
 
     async def _search_duckduckgo_html(

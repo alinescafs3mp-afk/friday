@@ -29994,6 +29994,14 @@ def _project_web_tool_result(
             }
             projected_data["sources"] = filtered_items
             projected_data["usable_sources"] = len(filtered_items)
+            selected_id = data.get("selected_provider_id")
+            if isinstance(selected_id, str) and selected_id.strip():
+                projected_data["selected_provider_id"] = selected_id.strip()
+                primary_id = data.get("provider_primary_id")
+                if isinstance(primary_id, str) and primary_id.strip():
+                    projected_data["provider_primary_id"] = primary_id.strip()
+                if "provider_used_fallback" in data:
+                    projected_data["provider_used_fallback"] = data.get("provider_used_fallback") is True
             if freshness:
                 projected_data["freshness"] = freshness
                 projected_data[SEARCH_FILTER_ATTESTATION_KEY] = {"freshness": freshness}
@@ -30008,6 +30016,14 @@ def _project_web_tool_result(
                 "query": str(data.get("query") or "")[:1_000],
                 "results": filtered_items,
             }
+            selected_id = data.get("selected_provider_id")
+            if isinstance(selected_id, str) and selected_id.strip():
+                projected_data["selected_provider_id"] = selected_id.strip()
+                primary_id = data.get("provider_primary_id")
+                if isinstance(primary_id, str) and primary_id.strip():
+                    projected_data["provider_primary_id"] = primary_id.strip()
+                if "provider_used_fallback" in data:
+                    projected_data["provider_used_fallback"] = data.get("provider_used_fallback") is True
             if freshness:
                 projected_data["freshness"] = freshness
                 projected_data[SEARCH_FILTER_ATTESTATION_KEY] = {"freshness": freshness}
@@ -37632,6 +37648,11 @@ class AgentContext:
     #: Bounded public provenance for deterministic API/Telegram delivery.  Page
     #: text remains in ephemeral tool evidence; only title+URL are durable.
     web_sources: list[dict[str, str]] = field(default_factory=list)
+    #: Observed search-provider facts from this turn's kernel report.  A later
+    #: title+URL follow-up restore does not invent them.
+    web_selected_provider_id: str | None = None
+    web_provider_primary_id: str | None = None
+    web_provider_used_fallback: bool = False
     #: Evidence scope is separate from tool-evidence capacity.  In particular,
     #: a provenance follow-up restores this durable bit without pretending a
     #: new web call must be judged in the current turn.
@@ -41288,6 +41309,8 @@ class AgentRuntime:
         context: AgentContext,
         status: str,
         sources: list[dict[str, str]],
+        *,
+        provider_report: Mapping[str, Any] | None = None,
     ) -> None:
         """Merge one projected web attempt into turn-scoped provenance."""
 
@@ -41309,6 +41332,15 @@ class AgentRuntime:
         merged = all_merged[:5]
         merge_omitted_sources = len(all_merged) > len(merged)
         context.web_sources = merged
+        if merged and isinstance(provider_report, Mapping):
+            selected = provider_report.get("selected_provider_id")
+            if isinstance(selected, str) and selected.strip():
+                context.web_selected_provider_id = selected.strip()
+                primary = provider_report.get("provider_primary_id")
+                context.web_provider_primary_id = (
+                    primary.strip() if isinstance(primary, str) and primary.strip() else None
+                )
+                context.web_provider_used_fallback = provider_report.get("provider_used_fallback") is True
         if merged:
             context.web_evidence_status = (
                 "partial"
@@ -43287,6 +43319,9 @@ class AgentRuntime:
         context.policy_web_authorized = False
         context.web_evidence_status = "none"
         context.web_sources = []
+        context.web_selected_provider_id = None
+        context.web_provider_primary_id = None
+        context.web_provider_used_fallback = False
         context.web_evidence_scope = "none"
         context.web_evidence_tools = []
         context.simple_public_news_plan = None
@@ -56906,6 +56941,9 @@ class AgentRuntime:
             web_evidence_used = False
             context.web_evidence_status = "none"
             context.web_sources = []
+            context.web_selected_provider_id = None
+            context.web_provider_primary_id = None
+            context.web_provider_used_fallback = False
             response["tool_evidence"] = [
                 entry
                 for entry in (response.get("tool_evidence") or [])
@@ -58262,6 +58300,64 @@ class AgentRuntime:
                 response["file_clips"] = list(structural_file_clips)
                 response["voice_clip"] = None
                 verification = _unknown_verdict("web_source_reconciliation_changed_final_body")
+                verification_status = VERDICT_UNKNOWN
+                answer_verified = False
+
+        if (
+            web_evidence_used
+            and not autonomous_engineer
+            and response.get("_simple_public_news_owned") is not True
+        ):
+            from friday.execution_kernel.web_consumption import observed_web_provider_selection
+            from friday.orchestration.web_answer_evidence_consumption import (
+                WebAnswerEvidencePublication,
+                consume_web_answer_evidence,
+                published_web_answer,
+            )
+            from friday.orchestration.web_currentness_policy import (
+                WebCurrentnessDecision,
+                WebCurrentnessRequest,
+                classify_web_currentness,
+            )
+
+            question = str(verification_question or clean_message or "")
+            currentness = classify_web_currentness(
+                WebCurrentnessRequest(question=question, explicit_search_requested=True)
+            )
+            auth = getattr(context, "_authenticated_turn_context", None)
+            turn_id = str(getattr(auth, "turn_id", "") or "")
+            if re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}", turn_id) is None:
+                turn_id = "runtime.web.answer"
+            admitted_urls = tuple(
+                str(item.get("url") or "")
+                for item in context.web_sources
+                if isinstance(item, Mapping) and str(item.get("url") or "").strip()
+            )
+            web_answer_consumption = consume_web_answer_evidence(
+                "runtime.web.answer",
+                turn_id,
+                answer=content,
+                admitted_source_urls=admitted_urls,
+                currentness=currentness,
+                current_sensitive=currentness is WebCurrentnessDecision.SEARCH_REQUIRED,
+                provider_selection=observed_web_provider_selection(
+                    {
+                        "sources": [{"url": url} for url in admitted_urls],
+                        "selected_provider_id": context.web_selected_provider_id,
+                        "provider_primary_id": context.web_provider_primary_id,
+                        "provider_used_fallback": context.web_provider_used_fallback,
+                    }
+                ),
+            )
+            if web_answer_consumption.publication in {
+                WebAnswerEvidencePublication.HOLD,
+                WebAnswerEvidencePublication.BLOCKED,
+            }:
+                content = published_web_answer(content, web_answer_consumption)
+                response["content"] = content
+                response["file_clips"] = list(structural_file_clips)
+                response["voice_clip"] = None
+                verification = _unknown_verdict("web_answer_evidence_held")
                 verification_status = VERDICT_UNKNOWN
                 answer_verified = False
 
@@ -67216,7 +67312,12 @@ class AgentRuntime:
                         expected_query=expected_web_query,
                         research_max_sources=requested_research_sources,
                     )
-                    self._record_web_projection(context, web_status, web_sources)
+                    self._record_web_projection(
+                        context,
+                        web_status,
+                        web_sources,
+                        provider_report=tool_result.data if isinstance(tool_result.data, Mapping) else None,
+                    )
                     if web_status not in {"sourced", "partial"} or not web_sources:
                         # A structured refusal/timeout/empty report is a
                         # successful handler RETURN, not successful evidence.
@@ -73712,6 +73813,29 @@ class AgentRuntime:
                 }
             )
             return
+        from friday.orchestration.web_currentness_policy import (
+            WebCurrentnessDecision,
+            WebCurrentnessRequest,
+            classify_web_currentness,
+        )
+
+        prefetch_currentness = classify_web_currentness(
+            WebCurrentnessRequest(question=query, explicit_search_requested=True)
+        )
+        if prefetch_currentness is WebCurrentnessDecision.SEARCH_BLOCKED_PRIVATE:
+            if context is not None:
+                self._record_web_projection(context, "failed", [])
+            messages.append(
+                {
+                    "role": "system",
+                    "content": (
+                        "Интернет-поиск не запускался: запрос содержит частные "
+                        "сведения и не может уйти к публичному провайдеру. "
+                        "Не утверждай, что получила внешние сведения."
+                    ),
+                }
+            )
+            return
         try:
             # Registry truth declares web_research ``mutate`` because accepted
             # pages are persisted into Raw/Inbox.  Once admitted, do not cancel
@@ -73946,7 +74070,15 @@ class AgentRuntime:
                         model_envelope="",
                         sources=[],
                     )
-            self._record_web_projection(context, web_status, web_sources)
+            provider_report = web_payload if isinstance(web_payload, Mapping) else None
+            if provider_report is None and isinstance(outbound_result_data, Mapping):
+                provider_report = outbound_result_data
+            self._record_web_projection(
+                context,
+                web_status,
+                web_sources,
+                provider_report=provider_report,
+            )
             if rendered and web_status in {"sourced", "partial"} and web_sources:
                 context.web_evidence_tools.append("web_research")
                 context.web_evidence_scope = "open_search"

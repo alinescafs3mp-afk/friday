@@ -1,6 +1,6 @@
 # Friday: canonical project backlog
 
-Updated: 2026-09-06 (reported production `0.208.55`; C1–C11 source corrections and whole-product reliability work active; historical S3 witness preserved; Pandora unchanged)
+Updated: 2026-09-07 (reported production `0.208.55`; F.0–F.3 source work on `origin/main`; C1–C11 already in intake; historical S3 witness preserved; Pandora unchanged)
 
 This is the project's only backlog and mutable status register. It owns the
 current production identity, execution order, acceptance gaps and owner actions.
@@ -46,7 +46,9 @@ one-final-carrier packing remain live. N2 live `_web_research` plans a
 fact-bearing public sources, and observes remaining N2 gates on the
 admitted report without inventing claims; empty research does not
 attach those keys; `SEARCH_BLOCKED_PRIVATE` never becomes a query
-plan. `_web_search` and `_web_fetch` refuse `BLOCKED_PRIVATE`.
+plan. The requesting answer on this source tree consumes the admitted
+bundle; I/O observers keep empty claim lists. `_web_search` and
+`_web_fetch` refuse `BLOCKED_PRIVATE`.
 File+web comparison and `POST /api/ingest/url` consume
 `BLOCKED_PRIVATE`. Private N2 self-score is Friday's own gates, not
 Gemini parity; do not claim Gemini parity without a paired scored
@@ -224,9 +226,10 @@ Next actionable work, in order:
 2. Verify the C2 shared carrier/export implementation below and continue the
    remaining input/extraction transaction boundary. Default uploaded execution
    remains blocked; source export is not aggregate worker isolation acceptance.
-3. Wire real N2 answer/task evidence consumption, then a functional N3 Python
+3. N2 requesting-answer consumption is on this source tree. Remaining N2 live
+   configured-model acceptance, then a functional N3 Python
    create/modify/test/repair/persistent-revision journey, and measured N1/N4 mixed
-   journeys. Existing scaffolds, observers and empty claim sets are not completion.
+   journeys. I/O observers and empty claim sets are not completion of live N2.
 4. Revisit S3 minimum-tier selection and the extra-hop activation lifecycle only
    with compatibility/restart/replay tests and independent review. No gate bypass.
 
@@ -266,8 +269,8 @@ Whole-project Ruff, the 1565-file canonical formatting scope and Mypy over 528
 source files pass. Hosted change, native exact-release, independent review and
 real production/Telegram observations remain separate pending evidence.
 
-Remaining coherence work: atomic authorized archive extraction, real N2 evidence
-consumption and N3 implementation/revision continuity, aggregate worker limits,
+Remaining coherence work: atomic authorized archive extraction, N2 live
+configured-model acceptance and N3 implementation/revision continuity, aggregate worker limits,
 then mixed-journey publication/restart checks. A user project file named
 `manifest.json` or `cache.py` still intersects the inherited internal-name policy;
 resolve that by explicit source provenance, not by globally disabling filtering.
@@ -1344,44 +1347,58 @@ one editable Friday status → one final result carrier. Reuse
 
 ### N2 — Deep Web Research and Automatic Knowledge-Gap Search
 
-Status: research I/O/observers are reported live on `0.208.26`; N2 product
-completion is open. `_web_research` plans a 2–8 complementary
-public-query mission, executes those queries on fact-bearing public
-sources, and observes remaining N2 gates on the already-admitted
+Status: research I/O/observers are reported live on `0.208.26`; requesting-answer
+consumption is on this source tree, not a deployed release. N2 live
+configured-model acceptance remains open. `_web_research` plans a 2–8
+complementary public-query mission, executes those queries on fact-bearing
+public sources, and observes remaining N2 gates on the already-admitted
 report. Empty research does not attach observation keys.
 `SEARCH_BLOCKED_PRIVATE` never becomes a query plan. The observer
-does not search, fetch, or invent claims. Live `_web_research` still
+does not search, fetch, or invent claims. The requesting answer consumes
+the admitted bundle. Live `_web_research` still
 refuses private observed URLs, empty-after-outbound
 (`no_admitted_sources`) and invalid provider facts. `_web_search`
 and `_web_fetch` refuse `BLOCKED_PRIVATE`. File+web comparison and
 `POST /api/ingest/url` consume `BLOCKED_PRIVATE`. Private N2
 self-score is Friday's own gates, not Gemini parity. Do not claim
 Gemini parity without a paired scored set. Do not fabricate
-witnesses.
+witnesses. F.2 calendar/window/document-date contracts remain in
+existing tests; F.0 pinned frozen Moscow fixtures. Do not hardcode Dest's
+location for every tenant.
 
 The checkboxes below acknowledge those specific contracts/observers only.
-- [ ] The requesting answer or task consumes an exact admitted evidence bundle.
-      Validate claims/citations from the actual result, not an empty claim set;
-      unsupported/current-sensitive/contradictory evidence must affect publication.
-- [ ] Automatic currentness and configured-provider fallback reach a real consumer,
-      without private queries or new provider credentials.
+- [x] The requesting answer consumes an exact admitted evidence bundle on
+      `origin/main` (`friday/orchestration/web_answer_evidence_consumption.py`,
+      kernel `consume_kernel_web_answer`, runtime after
+      `_strip_model_authored_web_urls`). Claims/citations come from the actual
+      answer and admitted ledger, not an empty observer claim set.
+      Unsupported/current-sensitive/contradictory/private evidence holds or
+      blocks publication. Not a deployed release.
+- [x] Automatic currentness and configured-provider fallback reach the
+      requesting-answer consumer on `origin/main`, without private queries or
+      new provider credentials. Prefetch refuses `SEARCH_BLOCKED_PRIVATE`.
+      `web_surfer.search` consults `select_web_provider`. `FALLBACK_USED` is
+      `admitted_degraded`; `UNAVAILABLE` holds. I/O observers stay empty-claim.
+      Not a deployed release.
 
 - [x] Automatic currentness / knowledge-gap policy module on `origin/main`
-      (`friday/orchestration/web_currentness_policy.py`). Not wired into
-      live `web_surfer` or Telegram. Private filenames, paths and deictics
-      stay local.
+      (`friday/orchestration/web_currentness_policy.py`). Prefetch and the
+      requesting-answer consumer consult it. Private filenames, paths and
+      deictics stay local.
 - [x] Multi-query research mission planner live on `0.208.26`
       (`friday/orchestration/web_research_mission.py`). Emits 2–8
       complementary public queries; `SEARCH_BLOCKED_PRIVATE` never becomes a
       query plan. Kernel `_web_research` plans and executes complementary
       queries on fact-bearing public sources.
 - [x] Provider selection and honest degraded-fallback policy on
-      `origin/main` (`friday/orchestration/web_provider_policy.py`). Not
-      wired into live `web_surfer`. PRIMARY_OK / FALLBACK_USED /
-      DEGRADED_PARTIAL / UNAVAILABLE; empty success is refused.
+      `origin/main` (`friday/orchestration/web_provider_policy.py`).
+      `web_surfer.search` and the requesting-answer consumer consult it.
+      PRIMARY_OK / FALLBACK_USED / DEGRADED_PARTIAL / UNAVAILABLE; empty
+      success is refused. Not a deployed release.
 - [x] `WebEvidenceBundleV1` contract on `origin/main`
-      (`friday/orchestration/web_evidence_bundle.py`). Not consumed by the
-      requesting workflow yet.
+      (`friday/orchestration/web_evidence_bundle.py`). The requesting-answer
+      consumer reuses its claim/source facts. I/O observers still do not
+      invent claims.
 - [x] Public-web source diversity on `origin/main`
       (`friday/orchestration/web_source_diversity.py`). Lexical hostname
       only; EMPTY / SINGLE_HOST / CONCENTRATED / DIVERSE. Observed live
@@ -1391,8 +1408,8 @@ The checkboxes below acknowledge those specific contracts/observers only.
       CONSUMABLE_DEGRADED / BLOCKED_PRIVATE / UNAVAILABLE. Live kernel
       `_web_research`/`_web_search`/`_web_fetch`, file+web comparison and
       `POST /api/ingest/url` refuse `BLOCKED_PRIVATE`; kernel research also
-      refuses empty-after-outbound. Other states are not yet consumed
-      by the requesting workflow.
+      refuses empty-after-outbound. The requesting-answer consumer uses the
+      selected provider decision; I/O observers still do not invent claims.
 - [x] Research readiness composition observed live on `0.208.26`
       (`friday/orchestration/web_research_readiness.py`). READY /
       READY_DEGRADED / NOT_READY from mission, diversity and consumption.

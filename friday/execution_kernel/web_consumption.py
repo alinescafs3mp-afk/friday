@@ -11,10 +11,19 @@ from collections.abc import Mapping
 from typing import Any
 
 from friday.orchestration.turn_context_runtime import current_primary_authenticated_turn_context
-from friday.orchestration.web_currentness_policy import WebCurrentnessDecision
+from friday.orchestration.web_answer_evidence_consumption import (
+    WebAnswerEvidenceConsumptionV1,
+    consume_web_answer_evidence,
+)
+from friday.orchestration.web_currentness_policy import (
+    WebCurrentnessDecision,
+    WebCurrentnessRequest,
+    classify_web_currentness,
+)
 from friday.orchestration.web_provider_policy import (
     ProviderObservation,
     WebProviderPolicyError,
+    WebProviderSelection,
     WebProviderStatus,
     select_web_provider,
 )
@@ -214,3 +223,66 @@ def _web_research_provider_consumption_refusal(
     if consumption.usability is WebResearchConsumptionState.BLOCKED_PRIVATE:
         return _web_research_consumption_failure(query, report, error="source_fact_private")
     return _web_research_consumption_failure(query, report, error=consumption.reason.value)
+
+
+def observed_web_provider_selection(report: Mapping[str, Any]) -> WebProviderSelection | None:
+    """Rebuild the observed provider selection without inventing a missing id."""
+
+    selected_id = report.get("selected_provider_id")
+    if not isinstance(selected_id, str) or not selected_id.strip():
+        return None
+    urls = _web_research_source_urls(report)
+    try:
+        admitted = len(urls)
+        search_count = min(admitted, MAX_RESEARCH_SOURCES)
+        selected = ProviderObservation(
+            provider_id=selected_id,
+            status=WebProviderStatus.COMPLETED,
+            source_count=search_count,
+            direct_source_count=admitted - search_count,
+            source_urls=urls,
+        )
+        primary_id = report.get("provider_primary_id")
+        used_fallback = report.get("provider_used_fallback") is True
+        if (
+            used_fallback
+            and isinstance(primary_id, str)
+            and primary_id.strip()
+            and primary_id.strip().casefold() != selected_id.strip().casefold()
+        ):
+            primary = ProviderObservation(
+                provider_id=primary_id,
+                status=WebProviderStatus.REFUSED,
+            )
+            return select_web_provider(primary, selected)
+        return select_web_provider(selected)
+    except (TypeError, ValueError, WebProviderPolicyError):
+        return None
+
+
+def consume_kernel_web_answer(
+    query: str,
+    report: Mapping[str, Any],
+    answer: str,
+    *,
+    currentness: WebCurrentnessDecision | str | None = None,
+) -> WebAnswerEvidenceConsumptionV1:
+    """Consume the requesting answer against the kernel's admitted research report."""
+
+    if currentness is None:
+        currentness = classify_web_currentness(
+            WebCurrentnessRequest(question=query, explicit_search_requested=True)
+        )
+    sensitive = currentness is WebCurrentnessDecision.SEARCH_REQUIRED or currentness == "search_required"
+    return consume_web_answer_evidence(
+        f"{_KERNEL_WEB_RESEARCH_CONSUMPTION_ID}.answer",
+        _kernel_web_research_turn_id(),
+        answer=answer,
+        admitted_source_urls=_web_research_source_urls(report),
+        currentness=currentness,
+        provider_selection=observed_web_provider_selection(report),
+        current_sensitive=sensitive,
+    )
+
+
+_kernel_web_answer_provider_selection = observed_web_provider_selection
