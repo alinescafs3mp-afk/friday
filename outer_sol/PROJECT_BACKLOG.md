@@ -1,6 +1,6 @@
 # Friday: canonical project backlog
 
-Updated: 2026-09-07 (reported production `0.208.55`; F.0–F.6 source on `20311f32` with change-gate PASSED NON-CERTIFYING; F.7–F.10 existing contracts recorded without invented product work; F.11 independent review of `7be8d7f9..20311f32` assigned; C1–C11 already in intake; historical S3 witness preserved; Pandora unchanged)
+Updated: 2026-09-07 (reported production `0.208.55`; F.0–F.6 source independently accepted `7be8d7f9..20311f32` by Luna-1; version `0.208.56` prepared for exact-release; C1–C11 already in intake; historical S3 witness preserved; Pandora unchanged)
 
 This is the project's only backlog and mutable status register. It owns the
 current production identity, execution order, acceptance gaps and owner actions.
@@ -123,8 +123,10 @@ deployed; the observation-bound consumed witness landed on live
 and S6 recovery/browse paths stay live.
 
 The live product queue is N1–N5 plus F.11 installed-artifact release.
-F.0–F.6 source is on `origin/main` `20311f32` (change-gate PASSED
-NON-CERTIFYING versus intake `7be8d7f9`); it is not live on `0.208.55`.
+F.0–F.6 source is independently accepted (`7be8d7f9..20311f32`, Luna-1
+ACCEPT, no product edits). Version `0.208.56` exact-release and sealed
+`assist_to_shadow` remain the live release path; it is not live on
+`0.208.55`.
 The shared operation-progress contract is
 live. Production `0.208.55` keeps ordinary Telegram `/chat` status,
 Engineer status, file-album DOCUMENT status, Engineer FILE/ARCHIVE
@@ -658,10 +660,12 @@ Status: F.0–F.6 source is on `origin/main` at
 topology 20/4). This is not exact-release certification and not a
 deployed release. Production remains `0.208.55` /
 `e60860eaa89827bc5fc58d7c4f1c47514caaf2d4`. Version and schema stay
-`0.208.55` / 50 until F.11. Independent review of
-`7be8d7f9..20311f32` is assigned to Luna-1; Luna must not write this
-backlog, the inventory TSV, version files, or `friday/agent_runtime`
-product logic.
+`0.208.55` / 50 until F.11 lands `0.208.56`. Luna-1 independently
+ACCEPTed `7be8d7f9..20311f32` (HANDOFF 2026-09-07T05:16:33Z, worktree
+clean, no product edits). Residual non-blocking:
+`mixed_journey.consume._web_consumption` hardcodes provider id
+`yandex`; production mixed-journey dispatch remains fail-closed
+without injected prepared evidence.
 
 Landed F.0–F.6 commits: `aa28cedd` timezone pins and dense rebind;
 `f9deec53` FTS rebuild after secure-delete purge; `1f592c51` inventory
@@ -702,10 +706,16 @@ declare; `6536a2a8` ruff-format; `f9f7a656` isolated import probes;
       changes friday sources is `assist_to_shadow`. Compact health
       `effective_mode=off` (`material_loaded_not_accepted`) is
       process-epoch, not a missing witness.
-- [ ] F.11 independent review of `7be8d7f9..20311f32`, next free
-      version `0.208.56`, exact-release, sealed activate until
-      Trusted-CA `https://127.0.0.1:8000/api/health` shows the new
-      version. Pandora stays excluded.
+- [x] F.11 independent review of `7be8d7f9..20311f32` by Luna-1
+      ACCEPT (HANDOFF 2026-09-07T05:16:33Z, no product edits,
+      worktree clean at `20311f32`). Residual non-blocking:
+      `mixed_journey.consume._web_consumption` hardcodes provider
+      id `yandex`; production mixed-journey dispatch remains
+      fail-closed without injected prepared evidence.
+- [ ] F.11 version `0.208.56`, exact-release, sealed
+      `semantic_supervisor_assist_to_shadow` until Trusted-CA
+      `https://127.0.0.1:8000/api/health` shows the new version.
+      Pandora stays excluded.
 
 ### P0G — canonical Gate Diet
 
@@ -2033,11 +2043,11 @@ record the owner required in this audit commit, not a failure dump):
 
 ### Open and implementable
 
-F.0–F.6 source is on `origin/main` `20311f32` with a passed non-certifying
-change-gate versus intake `7be8d7f9`. F.7–F.10 did not invent new product
-work; existing contracts stay on this tree. F.11 independent review,
-version `0.208.56`, exact-release and sealed activate remain the live
-release path. Live configured-model N2 acceptance is not fabricated.
+F.0–F.6 source is independently accepted (`7be8d7f9..20311f32`, Luna-1).
+F.7–F.10 did not invent new product work; existing contracts stay on this
+tree. F.11 version `0.208.56`, exact-release and sealed
+`assist_to_shadow` remain the live release path. Live configured-model
+N2 acceptance is not fabricated.
 EXECUTE/RUN of uploaded programs stay fail-closed. Preserve the 05:25Z
 S3 witness and its honest partial evidence; do not fabricate traffic,
 issue no-product hops for bookkeeping, or touch Pandora.

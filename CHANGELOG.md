@@ -1,3 +1,15 @@
+## 0.208.56 — 2026-09-07
+
+### Land F.0–F.6 source on a distinct assist_to_shadow sibling
+
+- Distinct sealed candidate for `semantic_supervisor_assist_to_shadow` after
+  live 0.208.55. Independently accepted source range `7be8d7f9..20311f32`:
+  timezone/window pins, FTS rebuild after secure-delete purge, requesting-answer
+  web consume, TEST cgroup admission, independent coding oracle and reply-bound
+  edits, mixed file+archive+web consume with cancel/idempotency durability.
+  SQLite remains at schema 50; exact `0.208.55` is the predecessor and
+  `0.207.90` the fallback.
+
 ## 0.208.55 — 2026-09-06
 
 ### No-product shadow_to_assist restore
