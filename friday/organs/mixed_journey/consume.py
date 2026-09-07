@@ -25,12 +25,15 @@ from friday.orchestration.mixed_file_archive_web_comparison import (
     mixed_file_archive_web_source_evidence_identity,
 )
 from friday.orchestration.mixed_file_archive_web_query import mixed_file_archive_web_turn_is_admitted
-from friday.orchestration.transient_web_comparison import TransientWebComparisonEvidence
-from friday.orchestration.web_provider_policy import WebProviderId
+from friday.orchestration.transient_web_comparison import (
+    TransientWebComparisonEvidence,
+    TransientWebUnavailableReason,
+)
+from friday.orchestration.web_currentness_policy import WebCurrentnessDecision
+from friday.orchestration.web_provider_policy import WebProviderDecision
 from friday.orchestration.web_research_consumption import (
-    WebResearchConsumptionReason,
-    WebResearchConsumptionState,
     WebResearchConsumptionV1,
+    build_web_research_consumption,
 )
 from friday.organs.mixed_journey.observe import observe_mixed_journey
 from friday.permissions import ActorContext
@@ -202,25 +205,33 @@ def _plan_sha256(message: str, source_identity: str) -> str:
 
 def _web_consumption(
     turn_id: str,
-    source_count: int,
-    selected_provider_id: str | None,
+    evidence: TransientWebComparisonEvidence,
 ) -> WebResearchConsumptionV1:
-    provider: str | None = None
-    if type(selected_provider_id) is str:
-        try:
-            provider = WebProviderId(selected_provider_id.strip().casefold()).value
-        except ValueError:
-            provider = None
-    usable = source_count > 0 and provider is not None
-    return WebResearchConsumptionV1(
+    source_count = len(evidence.sources)
+    provider_selection: dict[str, object] | None
+    if evidence.selected_provider_id is None:
+        provider_selection = (
+            {}
+            if evidence.unavailable_reason is TransientWebUnavailableReason.PROVIDER_ERROR
+            else None
+        )
+    else:
+        provider_selection = {
+            "selected_provider_id": evidence.selected_provider_id,
+            "admitted_source_count": source_count,
+        }
+        if evidence.provider_decision is not None:
+            provider_selection.update(
+                decision=evidence.provider_decision.value,
+                used_fallback=(
+                    evidence.provider_decision is WebProviderDecision.FALLBACK_USED
+                ),
+            )
+    return build_web_research_consumption(
         "mixed.file.archive.web",
         turn_id,
-        WebResearchConsumptionState.CONSUMABLE if usable else WebResearchConsumptionState.UNAVAILABLE,
-        provider if usable else None,
-        source_count if usable else 0,
-        WebResearchConsumptionReason.PRIMARY_SOURCES
-        if usable
-        else WebResearchConsumptionReason.NO_ADMITTED_SOURCES,
+        WebCurrentnessDecision.SEARCH_REQUIRED,
+        provider_selection,
     )
 
 
@@ -448,8 +459,7 @@ async def handle_mixed_file_archive_web_turn(
     answer_sha256 = hashlib.sha256(comparison.answer.encode("utf-8")).hexdigest()
     web_consumption = _web_consumption(
         turn_id,
-        len(web_evidence.sources),
-        web_evidence.selected_provider_id,
+        web_evidence,
     )
     observed = _observe_identity(
         projection_id=journey_id,

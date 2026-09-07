@@ -17,6 +17,11 @@ from test_mixed_file_archive_web_comparison import (
 from friday.agent_runtime import AgentRuntime
 from friday.orchestration.engineer_result_carrier import EngineerResultCarrierKind
 from friday.orchestration.mixed_journey_store_projection import MixedJourneyStoreProjectionState
+from friday.orchestration.transient_web_comparison import (
+    TransientWebEvidenceStatus,
+    TransientWebUnavailableReason,
+)
+from friday.orchestration.web_provider_policy import WebProviderDecision
 from friday.orchestration.web_research_consumption import (
     WebResearchConsumptionReason,
     WebResearchConsumptionState,
@@ -102,6 +107,27 @@ async def test_injected_evidence_publishes_text_only_with_file_archive_web_citat
 
 
 @pytest.mark.asyncio
+async def test_projected_fallback_evidence_stays_degraded_through_mixed_consumption() -> None:
+    web = _web_evidence(
+        "Первый публичный источник описывает текущее состояние.",
+        "Второй публичный источник подтверждает изменение.",
+        "Третий публичный источник задаёт область применимости.",
+        provider_primary_id="yandex",
+        selected_provider_id="brave",
+        provider_used_fallback=True,
+    )
+    assert web.provider_decision is WebProviderDecision.FALLBACK_USED
+
+    reply = await _handle(web_evidence=web)
+
+    consumption = reply["web_research_consumption"]
+    assert consumption.selected_provider_id == "brave"
+    assert consumption.admitted_source_count == 3
+    assert consumption.usability is WebResearchConsumptionState.CONSUMABLE_DEGRADED
+    assert consumption.reason is WebResearchConsumptionReason.FALLBACK_SOURCES
+
+
+@pytest.mark.asyncio
 async def test_duplicate_identity_is_idempotent_and_does_not_recall_the_model() -> None:
     ledger = MixedJourneyConsumeLedger()
     model = _ComparisonModel()
@@ -169,7 +195,52 @@ async def test_consume_does_not_invent_a_provider_when_evidence_omits_one() -> N
     assert consumption.selected_provider_id is None
     assert consumption.usability is WebResearchConsumptionState.UNAVAILABLE
     assert consumption.admitted_source_count == 0
-    assert consumption.reason is WebResearchConsumptionReason.NO_ADMITTED_SOURCES
+    assert consumption.reason is WebResearchConsumptionReason.PROVIDER_UNAVAILABLE
+
+
+@pytest.mark.asyncio
+async def test_consume_does_not_invent_primary_decision_for_legacy_selected_provider() -> None:
+    web = _web_evidence(
+        "Первый публичный источник описывает текущее состояние.",
+        "Второй публичный источник подтверждает изменение.",
+        "Третий публичный источник задаёт область применимости.",
+        selected_provider_id="brave",
+    )
+    assert web.status.value == "sourced"
+    assert web.selected_provider_id == "brave"
+    assert web.provider_primary_id is None
+    assert web.provider_decision is None
+
+    reply = await _handle(web_evidence=web)
+
+    consumption = reply["web_research_consumption"]
+    assert consumption.selected_provider_id is None
+    assert consumption.admitted_source_count == 0
+    assert consumption.usability is WebResearchConsumptionState.UNAVAILABLE
+    assert consumption.reason is WebResearchConsumptionReason.PROVIDER_FACTS_INVALID
+
+
+@pytest.mark.asyncio
+async def test_invalid_projected_provider_provenance_stays_invalid_in_partial_consumption() -> None:
+    web = _web_evidence(
+        "Публичный источник описывает текущее состояние.",
+        provider_primary_id="brave",
+        selected_provider_id="brave",
+        provider_used_fallback=True,
+    )
+    assert web.status is TransientWebEvidenceStatus.UNAVAILABLE
+    assert web.unavailable_reason is TransientWebUnavailableReason.PROVIDER_ERROR
+
+    reply = await _handle(
+        web_evidence=web,
+        model=_ComparisonModel(answer="Локальные источники доступны, веб недоступен. [F1] [A1]"),
+    )
+
+    consumption = reply["web_research_consumption"]
+    assert consumption.selected_provider_id is None
+    assert consumption.admitted_source_count == 0
+    assert consumption.usability is WebResearchConsumptionState.UNAVAILABLE
+    assert consumption.reason is WebResearchConsumptionReason.PROVIDER_FACTS_INVALID
 
 
 @pytest.mark.asyncio

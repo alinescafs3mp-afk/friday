@@ -139,6 +139,8 @@ def _archive_file() -> PreparedFileEvidence:
 def _web_evidence(
     *texts: str,
     selected_provider_id: str | None = None,
+    provider_primary_id: str | None = None,
+    provider_used_fallback: bool | None = None,
 ) -> TransientWebComparisonEvidence:
     actor = ActorContext("local:alice", "user", "test")
     query = "current public facts 2026"
@@ -171,6 +173,10 @@ def _web_evidence(
     }
     if selected_provider_id is not None:
         report["selected_provider_id"] = selected_provider_id
+    if provider_primary_id is not None:
+        report["provider_primary_id"] = provider_primary_id
+    if provider_used_fallback is not None:
+        report["provider_used_fallback"] = provider_used_fallback
     return web_module._project_report(plan, report)  # noqa: PLC2701
 
 
@@ -180,6 +186,8 @@ def _full_web() -> TransientWebComparisonEvidence:
         "Второй публичный источник подтверждает изменение.",
         "Третий публичный источник задаёт область применимости.",
         selected_provider_id="brave",
+        provider_primary_id="brave",
+        provider_used_fallback=False,
     )
 
 

@@ -9,6 +9,7 @@ in-memory public sources.
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 from typing import Any
 
 import pytest
@@ -28,6 +29,7 @@ from friday.orchestration.transient_web_comparison import (
     seal_compare_current_file_public_web_query,
     seal_explicit_public_web_query,
 )
+from friday.orchestration.web_provider_policy import WebProviderDecision
 from friday.permissions import (
     CORE_CAPABILITIES,
     ActorContext,
@@ -262,10 +264,129 @@ def test_projected_evidence_carries_a_closed_provider_or_stays_none() -> None:
     assert carried.status is TransientWebEvidenceStatus.SOURCED
     assert carried.selected_provider_id == "brave"
     assert carried.identity_payload()["selected_provider_id"] == "brave"
+    assert carried.provider_primary_id is None
+    assert carried.provider_decision is None
     assert missing.selected_provider_id is None
     assert missing.status is TransientWebEvidenceStatus.SOURCED
     assert refused.selected_provider_id is None
     assert refused.status is TransientWebEvidenceStatus.UNAVAILABLE
+
+
+def test_projected_evidence_identity_distinguishes_primary_and_fallback_provenance() -> None:
+    actor = ActorContext("local:alice", "user", "test")
+    plan = seal_explicit_public_web_query(
+        current_user_message=_message("current regulator guidance 2026"),
+        actor=actor,
+        conversation_id="conversation-1",
+    )
+    sourced = _report(_source(1))
+    sourced["query"] = plan._query
+    primary_report = {
+        **sourced,
+        "provider_primary_id": "brave",
+        "selected_provider_id": "brave",
+        "provider_used_fallback": False,
+    }
+    fallback_report = {
+        **sourced,
+        "provider_primary_id": "yandex",
+        "selected_provider_id": "brave",
+        "provider_used_fallback": True,
+    }
+
+    primary = web_module._project_report(plan, primary_report)  # noqa: PLC2701
+    fallback = web_module._project_report(plan, fallback_report)  # noqa: PLC2701
+
+    assert primary.provider_primary_id == "brave"
+    assert primary.provider_decision is WebProviderDecision.PRIMARY_OK
+    assert fallback.provider_primary_id == "yandex"
+    assert fallback.selected_provider_id == "brave"
+    assert fallback.provider_decision is WebProviderDecision.FALLBACK_USED
+    assert primary.identity_payload()["provider_decision"] == "primary_ok"
+    assert fallback.identity_payload()["provider_decision"] == "fallback_used"
+    assert primary.canonical_sha256() != fallback.canonical_sha256()
+
+
+@pytest.mark.parametrize(
+    "provider_facts",
+    [
+        {"provider_primary_id": "yandex", "selected_provider_id": "brave"},
+        {
+            "provider_primary_id": "yandex",
+            "selected_provider_id": "brave",
+            "provider_used_fallback": False,
+        },
+        {"selected_provider_id": "brave", "provider_used_fallback": True},
+        {
+            "provider_primary_id": "brave",
+            "selected_provider_id": "brave",
+            "provider_used_fallback": True,
+        },
+        {
+            "provider_primary_id": "brave",
+            "selected_provider_id": "brave",
+            "provider_used_fallback": "false",
+        },
+    ],
+)
+def test_invalid_provider_provenance_projects_unavailable(
+    provider_facts: dict[str, object],
+) -> None:
+    actor = ActorContext("local:alice", "user", "test")
+    plan = seal_explicit_public_web_query(
+        current_user_message=_message("current regulator guidance 2026"),
+        actor=actor,
+        conversation_id="conversation-1",
+    )
+    report = {**_report(_source(1)), **provider_facts, "query": plan._query}
+
+    evidence = web_module._project_report(plan, report)  # noqa: PLC2701
+
+    assert evidence.status is TransientWebEvidenceStatus.UNAVAILABLE
+    assert evidence.unavailable_reason is TransientWebUnavailableReason.PROVIDER_ERROR
+    assert evidence.sources == ()
+    assert evidence.selected_provider_id is None
+    assert evidence.provider_primary_id is None
+    assert evidence.provider_decision is None
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        {"provider_primary_id": "yandex"},
+        {"provider_decision": WebProviderDecision.FALLBACK_USED},
+        {
+            "provider_primary_id": "brave",
+            "provider_decision": WebProviderDecision.FALLBACK_USED,
+        },
+        {
+            "provider_primary_id": "yandex",
+            "provider_decision": WebProviderDecision.PRIMARY_OK,
+        },
+        {"provider_decision": WebProviderDecision.DEGRADED_PARTIAL},
+        {"provider_decision": "primary_ok"},
+    ],
+)
+def test_transient_evidence_rejects_forged_provider_provenance(
+    mutation: dict[str, object],
+) -> None:
+    actor = ActorContext("local:alice", "user", "test")
+    plan = seal_explicit_public_web_query(
+        current_user_message=_message("current regulator guidance 2026"),
+        actor=actor,
+        conversation_id="conversation-1",
+    )
+    report = {
+        **_report(_source(1)),
+        "query": plan._query,
+        "provider_primary_id": "brave",
+        "selected_provider_id": "brave",
+        "provider_used_fallback": False,
+    }
+    evidence = web_module._project_report(plan, report)  # noqa: PLC2701
+
+    with pytest.raises(TransientWebComparisonError, match="provider"):
+        replace(evidence, **mutation)
 
 
 @pytest.mark.anyio
