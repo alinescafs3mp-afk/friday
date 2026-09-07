@@ -424,10 +424,8 @@ async def handle_mixed_file_archive_web_turn(
     if type(comparison) is not MixedFileArchiveWebComparison:
         active_ledger.mark(key, MixedJourneyConsumeState.FAILED)
         return _chat_dict(message=_FAILED, conversation_id=conversation_id or "")
-    if (
-        active_ledger.get(key) is not None
-        and active_ledger.get(key).state is MixedJourneyConsumeState.CANCELLED
-    ):
+    current = active_ledger.get(key)
+    if current is not None and current.state is MixedJourneyConsumeState.CANCELLED:
         return _chat_dict(message=_CANCELLED, conversation_id=conversation_id or "")
 
     web_sources = [

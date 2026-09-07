@@ -1605,7 +1605,8 @@ existing primitives. Mixed-journey is not a registered organ.
 - [x] Duplicate identity is idempotent; cancel-while-running does not
       publish; web restart after RUNNING/FAILED/CANCELLED is fail-closed;
       SEND_UNKNOWN does not send again. Publisher callback records known
-      versus unknown send. Not live on `0.208.55`.
+      versus unknown send. Cancel-after-compare binds the ledger record
+      once so mypy can narrow Optional. Not live on `0.208.55`.
 
 - [x] Read-only `SharedOperationViewV1` / `AgentSituationProjectionV1`
       on `origin/main` from already-supplied facts. No new execution
