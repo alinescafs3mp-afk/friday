@@ -14,6 +14,7 @@ from friday.retrieval_benchmark.release import archive_search_release_sha256
 _ROOT = Path(__file__).resolve().parents[2]
 _INSTRUMENT = _ROOT / "tools" / "document_dense_recall_measurement.py"
 _EVIDENCE = _ROOT / "evidence" / "s4_document_dense_recall_before_after.json"
+_CURRENT_EVIDENCE = _ROOT / "evidence" / "s4_document_dense_recall_r10_current.json"
 
 
 def _canonical(value: object) -> bytes:
@@ -120,15 +121,30 @@ def test_current_dense_report_reproduces_the_exact_body_free_candidate() -> None
     evidence = json.loads(_EVIDENCE.read_text(encoding="utf-8"))
     measured, raw_output = _run_candidate()
     candidate = evidence["candidate"]
+    current = json.loads(_CURRENT_EVIDENCE.read_text(encoding="utf-8"))
 
     assert evidence["schema"] == "friday.s4-document-dense-recall.before-after.body-free.v2"
+    assert set(current) == {
+        "schema",
+        "historical_evidence_sha256",
+        "release_sha256",
+        "instrument_sha256",
+        "stable_envelope_sha256",
+        "observed_source_commit",
+    }
+    assert current["schema"] == "friday.document-dense-recall.current-candidate.v1"
+    assert current["historical_evidence_sha256"] == hashlib.sha256(_EVIDENCE.read_bytes()).hexdigest()
     assert measured["schema"] == "friday.document-dense-recall-measurement.body-free.v1"
     assert measured["corpus"] == {
         key: value for key, value in evidence["corpus"].items() if key != "projection"
     }
-    assert measured["release_sha256"] == candidate["release_sha256"]
+    # The archived before/after receipt keeps its historical product identity.
+    # A separate measured receipt binds today's bytes; quality expectations
+    # below still come from the unchanged historical benchmark.
+    assert measured["release_sha256"] == current["release_sha256"]
     assert measured["release_sha256"] == archive_search_release_sha256()
     assert measured["instrument_sha256"] == evidence["instrument"]["instrument_sha256"]
+    assert measured["instrument_sha256"] == current["instrument_sha256"]
     assert measured["network_forbidden"] is True
     assert measured["claim"] == evidence["claim"]
     assert measured["index_fixture"] == evidence["index_fixture"]
@@ -144,7 +160,7 @@ def test_current_dense_report_reproduces_the_exact_body_free_candidate() -> None
     assert measured["result"]["authorized_foreign_sources_returned"] == 0
     assert measured["result"]["current_revision_cases"] == 24
     assert measured["result"]["dense_evidence_cases"] == 24
-    assert _sha256(_stable_measurement(measured)) == candidate["stable_envelope_sha256"]
+    assert _sha256(_stable_measurement(measured)) == current["stable_envelope_sha256"]
     assert _sha256(measured["result"]) == candidate["result_sha256"]
     assert _sha256(measured["result"]["cases"]) == candidate["case_results_sha256"]
     assert raw_output == _canonical(measured) + b"\n"
@@ -223,7 +239,7 @@ def test_dense_report_is_truthful_about_scope_and_context_only_observations() ->
 def test_checked_in_measurement_contains_no_private_corpus_material() -> None:
     import tools.retrieval_bench as corpus
 
-    serialized = _EVIDENCE.read_text(encoding="utf-8")
+    serialized = _EVIDENCE.read_text(encoding="utf-8") + _CURRENT_EVIDENCE.read_text(encoding="utf-8")
     forbidden = {
         '"query":',
         "/home/",

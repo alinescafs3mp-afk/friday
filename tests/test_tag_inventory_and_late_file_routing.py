@@ -12,8 +12,10 @@ import pytest
 from friday.agent_runtime import (
     AgentContext,
     AgentRuntime,
+    _attachment_reference_kind,
     _fast_tag_inventory_intent,
     _is_direct_file_request,
+    file_turn_authority,
 )
 from friday.execution_kernel import ToolResult
 from friday.permissions import ActorContext
@@ -49,6 +51,10 @@ def _frozen_tag_questions() -> list[pytest.ParamSpec]:
 class _TagKernel:
     def __init__(self) -> None:
         self.calls: list[tuple[str, dict[str, Any]]] = []
+
+    def get_tool_definitions(self, actor: Any, *, topic: Any = None) -> list[dict[str, Any]]:
+        del actor, topic
+        return [_tool("list_tags"), _tool("kg_stats"), _tool("make_file")]
 
     async def execute(self, name: str, arguments: dict[str, Any], *, actor: Any) -> ToolResult:
         del actor
@@ -438,6 +444,43 @@ def test_a_visible_creation_request_is_direct_file_authority(question: str) -> N
     assert _is_direct_file_request(question) is True
 
 
+_TAG_TABLE_WITHOUT_FILE = (
+    "Сформируй исчерпывающую таблицу частот всех syn-tag значений. Проверка SYN-B04-08.",
+    "Составь таблицу всех тегов моего архива с количеством использований.",
+    "Дай таблицу частот всех меток.",
+    "Подготовь сводку всех тегов в виде таблицы.",
+    "Подготовьте все теги.",
+    "Покажи все теги и составь таблицу с частотами.",
+    "В виде таблицы составь все теги с количеством использований.",
+)
+
+
+@pytest.mark.parametrize("question", _TAG_TABLE_WITHOUT_FILE)
+def test_tag_table_shape_does_not_grant_file_creation(question: str) -> None:
+    assert _fast_tag_inventory_intent(question) is True
+    assert _is_direct_file_request(question) is False
+    assert file_turn_authority(question).proved("file_create") is False
+    assert _attachment_reference_kind(question) == ""
+    assert file_turn_authority(question).proved("local_read") is False
+
+
+@pytest.mark.parametrize(
+    "question",
+    [
+        "Сформируй таблицу частот всех тегов в Excel.",
+        "Составь файл с таблицей частот всех меток.",
+        "Сформируй таблицу тегов. Создай Word-файл с отдельным отчётом.",
+        "Подготовь таблицу из приложенного файла.",
+        "В Excel составь таблицу всех тегов.",
+        "В виде файла составь таблицу всех тегов.",
+        "Покажи все теги и составь таблицу с частотами в Excel.",
+    ],
+)
+def test_tag_table_guard_preserves_explicit_export_and_other_file_requests(question: str) -> None:
+    assert _is_direct_file_request(question) is True
+    assert file_turn_authority(question).proved("file_create") is True
+
+
 class _PatchedLLM:
     enabled = True
     model = "synthetic-late-file-double"
@@ -504,6 +547,45 @@ def _chat_runtime(settings: Any, storage: Any, monkeypatch: pytest.MonkeyPatch, 
     monkeypatch.setattr(runtime, "_prepare_context", prepare)
     monkeypatch.setattr(runtime, "_generate_response", generate)
     return runtime
+
+
+@pytest.mark.parametrize("question", _TAG_TABLE_WITHOUT_FILE)
+@pytest.mark.asyncio
+async def test_full_chat_tag_table_cannot_add_a_late_file(
+    question: str,
+    settings: Any,
+    storage: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    kernel = _TagKernel()
+    runtime = _chat_runtime(settings, storage, monkeypatch, kernel)
+
+    async def generate(context: AgentContext, message: str, attachments: Any) -> dict[str, Any]:
+        del attachments
+        used: list[str] = []
+        await runtime._prefetch_archive_numbers(  # noqa: SLF001
+            message,
+            ActorContext(user_id="alice", preset_key="owner", source="test"),
+            [_tool("list_tags"), _tool("kg_stats")],
+            [],
+            used,
+            [],
+            context,
+        )
+        assert context.remainder_known and context.open_remainder == ""
+        return {"content": context.structural_answer, "tools_used": used}
+
+    monkeypatch.setattr(runtime, "_generate_response", generate)
+    reply = await runtime.chat(
+        "alice",
+        question,
+        actor=ActorContext(user_id="alice", preset_key="owner", source="test"),
+        enable_tools=True,
+    )
+    assert kernel.calls == [("list_tags", {})]
+    assert reply["tools_used"] == ["list_tags"]
+    assert reply["files"] == []
+    assert "syn-tag-alpha — 2" in reply["message"]
 
 
 @pytest.mark.parametrize("success", [True, False], ids=["success", "failure"])
@@ -726,3 +808,18 @@ async def test_a_lone_file_verdict_never_authorises_a_late_make_file(
     assert kernel.calls == []
     assert reply["tools_used"] == []
     assert reply["files"] == []
+
+
+@pytest.mark.parametrize(
+    "question",
+    [
+        "Составь таблицу всех тегов. Прочитай приложенный файл.",
+        "Подготовь сводку всех тегов в виде таблицы. Прочитай приложенный файл.",
+        "Покажи все теги и составь таблицу с частотами, затем прочитай этот файл.",
+        "Составь таблицу всех тегов и найди CASE-404 в приложенной таблице.",
+        "Составь таблицу тегов из приложенной таблицы.",
+    ],
+)
+def test_tag_output_table_preserves_independent_file_source(question: str) -> None:
+    assert _attachment_reference_kind(question)
+    assert file_turn_authority(question).proved("local_read")

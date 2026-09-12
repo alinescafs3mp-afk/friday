@@ -895,14 +895,14 @@ class TransportMixin(BridgeShared):
             self._lease.release()
             raise
         self._running = True
-        timeout = httpx.Timeout(POLL_TIMEOUT + 10.0, connect=15.0)
-        # Start from httpx's standard public root bundle with environment overrides disabled,
-        # then add the operator's private CA when this backend uses a self-signed or
-        # locally issued certificate.  Hostname verification remains mandatory.
-        backend_ssl_context = httpx.create_ssl_context(verify=True, trust_env=False)
-        if self.config.backend_ca_file:
-            backend_ssl_context.load_verify_locations(cafile=self.config.backend_ca_file)
         try:
+            timeout = httpx.Timeout(POLL_TIMEOUT + 10.0, connect=15.0)
+            # Start from httpx's standard public root bundle with environment overrides disabled,
+            # then add the operator's private CA when this backend uses a self-signed or
+            # locally issued certificate.  Hostname verification remains mandatory.
+            backend_ssl_context = httpx.create_ssl_context(verify=True, trust_env=False)
+            if self.config.backend_ca_file:
+                backend_ssl_context.load_verify_locations(cafile=self.config.backend_ca_file)
             async with (
                 # Only Telegram goes through the proxy. `trust_env` stays off on both
                 # clients: the proxy is a deliberate setting, not something a stray
@@ -934,6 +934,7 @@ class TransportMixin(BridgeShared):
                     self._poll_watchdog(),
                 )
         finally:
+            self._running = False
             self._inbox.close()
             self._lease.release()
             LOGGER.info("Telegram bridge stopped")

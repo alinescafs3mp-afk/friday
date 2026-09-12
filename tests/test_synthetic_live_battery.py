@@ -73,6 +73,7 @@ def _satisfying_record(case: battery.ExpandedCase) -> dict[str, Any]:
     content = oracle["content"]
     tag_inventory = content.get("exact_tag_inventory")
     standalone = content.get("standalone_integer")
+    office_summary = content.get("office_structure_summary")
     exact_link = content.get("exact_markdown_link")
     if case.oracle_profile == "package_a_honesty":
         message = (
@@ -83,6 +84,13 @@ def _satisfying_record(case: battery.ExpandedCase) -> dict[str, Any]:
         message = "\n".join(f"- `{name}` — {count} записей" for name, count in tag_inventory.items())
         if content.get("exact_tag_distinct_total") is not None:
             message += f"\nВсего тегов: {content['exact_tag_distinct_total']}"
+    elif isinstance(office_summary, dict):
+        fields = ", ".join(json.dumps(field, ensure_ascii=False) for field in office_summary["fields"])
+        message = (
+            f"Разбор подтверждён: таблиц — {office_summary['tables']}, "
+            f"строк данных — {office_summary['records']}, столбцов — {office_summary['columns']}. "
+            f"Поля: {fields}."
+        )
     elif standalone is not None:
         message = f"{standalone}"
     elif isinstance(exact_link, dict):
@@ -383,7 +391,142 @@ def test_document_counts_are_frozen_non_monotonic_unique_and_derived_from_bytes(
         assert document is not None
         rows = base64.b64decode(document["content_base64"], validate=True).decode().splitlines()
         assert len(rows) - 1 == battery._expected_document_row_count(case)
-        assert battery.oracle_for_case(case)["content"]["standalone_integer"] == len(rows) - 1
+        content = battery.oracle_for_case(case)["content"]
+        if case.battery_id == "B" and case.question_index in {11, 16}:
+            assert content["standalone_integer"] is None
+            assert content["office_structure_summary"] == {
+                "tables": 1,
+                "records": len(rows) - 1,
+                "columns": 2,
+                "fields": ["ID", "Статус"],
+            }
+        else:
+            assert content["standalone_integer"] == len(rows) - 1
+
+
+@pytest.mark.parametrize("question_index", [11, 16])
+def test_package_c_summary_checks_structure_instead_of_a_bare_count(question_index: int) -> None:
+    case = _cases("B", 3)[question_index - 1]
+    record = _satisfying_record(case)
+    assert battery.evaluate_case(case, record, latency_ms=1)["passed"] is True
+    record["response"]["message"] = str(battery._expected_document_row_count(case))
+    outcome = battery.evaluate_case(case, record, latency_ms=1)
+    assert "content_office_structure_mismatch" in outcome["failure_codes"]
+
+
+@pytest.mark.parametrize(
+    ("old", "new"),
+    [
+        ("таблиц — 1", "таблиц — 2"),
+        ("строк данных — 40", "строк данных — 41"),
+        ("столбцов — 2", "столбцов — 3"),
+        ('"ID", "Статус"', '"ID", "Состояние"'),
+        ('"ID", "Статус"', '"Статус", "ID"'),
+        ('"ID", "Статус"', '"ID", "ID"'),
+        ('"ID", "Статус"', '"ID", "Статус", "Лишний"'),
+        ("Разбор подтверждён", "Разбор не подтверждён"),
+        ("строк данных — 40", "строк данных — около 40"),
+        ("строк данных — 40", "строк данных — " + "9" * 5000),
+    ],
+)
+def test_package_c_summary_rejects_incorrect_facts(old: str, new: str) -> None:
+    case = _cases("B", 3)[10]
+    record = _satisfying_record(case)
+    assert old in record["response"]["message"]
+    record["response"]["message"] = record["response"]["message"].replace(old, new)
+    outcome = battery.evaluate_case(case, record, latency_ms=1)
+    assert "content_office_structure_mismatch" in outcome["failure_codes"]
+
+
+@pytest.mark.parametrize("wrapper", ["Не {report}", "«{report}»", "{report} На самом деле 41 строка."])
+def test_package_c_summary_rejects_reported_or_conflicting_claims(wrapper: str) -> None:
+    case = _cases("B", 3)[10]
+    record = _satisfying_record(case)
+    record["response"]["message"] = wrapper.format(report=record["response"]["message"])
+    assert (
+        "content_office_structure_mismatch"
+        in battery.evaluate_case(case, record, latency_ms=1)["failure_codes"]
+    )
+
+
+@pytest.mark.parametrize("question_index", [8, 9, 11, 12, 16, 17])
+@pytest.mark.parametrize(
+    ("key", "bad"),
+    [
+        ("office_exact_owned", False),
+        ("attachment_context_used", False),
+        ("model_spoke", True),
+        ("model_router_calls", 1),
+        ("model_http_attempts", 1),
+    ],
+)
+def test_package_c_structural_cases_require_owned_model_free_evidence(
+    question_index: int, key: str, bad: object
+) -> None:
+    case = _cases("B", 3)[question_index - 1]
+    record = _satisfying_record(case)
+    oracle = battery.oracle_for_case(case)
+    assert "model_http_attempts" not in oracle["state"]["min"]
+    assert battery.evaluate_case(case, record, latency_ms=1)["passed"] is True
+    record["state"][key] = bad
+    assert f"state_{key}_mismatch" in battery.evaluate_case(case, record, latency_ms=1)["failure_codes"]
+
+
+@pytest.mark.parametrize("question_index", [8, 9, 11, 12, 16, 17])
+def test_package_c_frozen_bytes_through_product_match_independent_oracle(question_index: int) -> None:
+    from friday.agent_runtime import _bounded_attachment_projection
+    from friday.agent_runtime._office_attachments import (
+        OFFICE_STRUCTURE_KEY,
+        code_owned_office_answer,
+        trusted_office_attachment,
+    )
+    from friday.documents import DocumentExtractor
+
+    case = _cases("B", 3)[question_index - 1]
+    document = battery._case_document(case)
+    assert document is not None
+    extracted = DocumentExtractor(secret_values=()).extract(
+        base64.b64decode(document["content_base64"], validate=True), document["filename"]
+    )
+    assert extracted.success
+    attachments = _bounded_attachment_projection(
+        [
+            trusted_office_attachment(
+                {
+                    "filename": document["filename"],
+                    "transient_text": extracted.text,
+                    "extraction_success": True,
+                    "verification_eligible": True,
+                    OFFICE_STRUCTURE_KEY: extracted.office_structure_index,
+                }
+            )
+        ]
+    )
+    answer = code_owned_office_answer(case.question, attachments)
+    assert answer is not None and answer["status"] == "passed"
+    record = _satisfying_record(case)
+    record["response"]["message"] = answer["content"]
+    # State was exercised separately by the actual AgentRuntime tests; this
+    # check deliberately binds only frozen document bytes, wording and content.
+    assert battery.evaluate_case(case, record, latency_ms=1)["passed"] is True
+
+
+@pytest.mark.parametrize(
+    ("index", "data", "expected"),
+    [
+        (8, "ID,Статус\nA,готово\n,готово\nA,\n", 2),
+        (9, "ID,Статус\nA,готово\n,\n,готово\n", 2),
+        (12, "ID,Статус\nA,готово\nA,готово\na,готово\n", 2),
+        (12, "ID,Статус\n,готово\n,готово\n", 0),
+        (17, "ID,Статус\nA,готово\nA,\n,готово\n", 1),
+    ],
+)
+def test_package_c_oracle_derives_predicate_from_cells_not_total(index, data, expected, monkeypatch):
+    case = _cases("B", 3)[index - 1]
+    document = battery._case_document(case)
+    document["content_base64"] = base64.b64encode(data.encode()).decode()
+    monkeypatch.setattr(battery, "_case_document", lambda _case: document)
+    assert battery.oracle_for_case(case)["content"]["standalone_integer"] == expected
 
 
 def test_package_c_allows_echoed_control_id_but_rejects_a_second_answer_count() -> None:
@@ -798,7 +941,7 @@ def test_battery_env_preflight_failure_does_not_print_private_path(
     private_path = tmp_path / "private-config-basename.env"
 
     with pytest.raises(battery.BatteryContractError) as captured:
-        battery.main(["--both", "--env-file", str(private_path)])
+        battery.main(["--battery", "A", "--env-file", str(private_path)])
 
     streams = capsys.readouterr()
     assert str(captured.value) == "live_env_file_not_private"
@@ -1000,7 +1143,10 @@ def test_pair_green_requires_a_then_b_on_one_exact_runtime() -> None:
         },
     }
     reports = [report("A"), report("B")]
-    assert battery._pair_reports_green(reports) is True
+    assert battery._closed_report_is_green(reports[0]) is True
+    assert battery._closed_report_is_green(reports[1]) is True
+    assert battery._report_is_green(reports[1]) is False
+    assert battery._pair_reports_green(reports) is False
     reports[1]["runtime_hashes"] = ["d" * 64] * 10
     for item in reports[1]["passes"]:
         item["runtime_hash"] = "d" * 64
@@ -1483,6 +1629,62 @@ def test_k12_rejects_an_exact_anchor_disowned_as_wrong() -> None:
     )
 
 
+@pytest.mark.parametrize(
+    "message",
+    [
+        "Не используй [SYN-LINK-B05-03](https://example.invalid/b/03)",
+        "[SYN-LINK-B05-03](https://example.invalid/b/03) — это не ссылка.",
+    ],
+)
+def test_k12_rejects_link_local_negation_in_source_evaluation_and_rendered_state(message: str) -> None:
+    case = _cases("B", 5)[2]
+    label = "SYN-LINK-B05-03"
+    url = "https://example.invalid/b/03"
+    assert battery._markdown_source_exact(message, label=label, url=url) is False
+
+    record = _satisfying_record(case)
+    record["response"]["message"] = message
+    assert (
+        "content_markdown_link_not_exact"
+        in battery.evaluate_case(case, record, latency_ms=1)["failure_codes"]
+    )
+
+    from friday.telegram_bridge._markup import to_telegram_html
+
+    rendered = to_telegram_html(message)
+    collector = battery._RenderedAnchorCollector()
+    collector.feed(rendered)
+    collector.close()
+    rendered_state_exact = bool(
+        not collector.invalid
+        and collector.anchors == [(url, label)]
+        and battery._markdown_source_exact(message, label=label, url=url)
+    )
+    assert rendered_state_exact is False
+    assert battery._telegram_html_is_safe(rendered)
+
+
+def test_k12_unrelated_raw_html_negation_keeps_the_exact_anchor_affirmative() -> None:
+    case = _cases("B", 5)[2]
+    label = "SYN-LINK-B05-03"
+    url = "https://example.invalid/b/03"
+    message = f"Не печатай сырой HTML; используй [{label}]({url})."
+    assert battery._markdown_source_exact(message, label=label, url=url) is True
+
+    record = _satisfying_record(case)
+    record["response"]["message"] = message
+    assert battery.evaluate_case(case, record, latency_ms=1)["passed"] is True
+
+    from friday.telegram_bridge._markup import to_telegram_html
+
+    rendered = to_telegram_html(message)
+    collector = battery._RenderedAnchorCollector()
+    collector.feed(rendered)
+    collector.close()
+    assert not collector.invalid and collector.anchors == [(url, label)]
+    assert battery._telegram_html_is_safe(rendered)
+
+
 def test_k12_exact_link_only_case_rejects_extra_prose() -> None:
     case = _cases("A", 5)[2]
     record = _satisfying_record(case)
@@ -1490,6 +1692,74 @@ def test_k12_exact_link_only_case_rejects_extra_prose() -> None:
     assert (
         "content_markdown_link_not_exact"
         in battery.evaluate_case(case, record, latency_ms=1)["failure_codes"]
+    )
+
+
+@pytest.mark.parametrize("index", [2, 4, 5])
+@pytest.mark.parametrize("prose", ["label", "url", "both"])
+def test_k12_preserves_one_anchor_with_prompt_permitted_reference_prose(index: int, prose: str) -> None:
+    case = _cases("B", 5)[index - 1]
+    record = _satisfying_record(case)
+    label = f"SYN-LINK-B05-{index:02d}"
+    url = f"https://example.invalid/b/{index:02d}"
+    explanation = {
+        "label": f"Подпись {label} сохранена.",
+        "url": f"Адрес: {url}.",
+        "both": f"Подпись {label}, адрес {url}.",
+    }[prose]
+    message = f"[{label}]({url})\n{explanation}"
+    record["response"]["message"] = message
+    assert battery.evaluate_case(case, record, latency_ms=1)["passed"] is True
+    # Exercise the real renderer as well as the independent source predicate;
+    # the allowed prose cannot replace or duplicate the clickable anchor.
+    from friday.telegram_bridge._markup import to_telegram_html
+
+    rendered = to_telegram_html(message)
+    collector = battery._RenderedAnchorCollector()
+    collector.feed(rendered)
+    collector.close()
+    assert not collector.invalid and collector.anchors == [(url, label)]
+    assert battery._telegram_html_is_safe(rendered)
+
+
+@pytest.mark.parametrize(
+    "suffix",
+    [
+        " [SYN-LINK-B05-02](https://example.invalid/b/02)",
+        " https://example.invalid/wrong",
+        " SYN-LINK-B05-03",
+    ],
+)
+def test_k12_reference_prose_does_not_permit_extra_anchors_or_wrong_references(suffix: str) -> None:
+    case = _cases("B", 5)[1]
+    record = _satisfying_record(case)
+    record["response"]["message"] = "[SYN-LINK-B05-02](https://example.invalid/b/02)" + suffix
+    assert (
+        "content_markdown_link_not_exact"
+        in battery.evaluate_case(case, record, latency_ms=1)["failure_codes"]
+    )
+
+
+def test_k12_explicit_bare_url_prohibition_remains_enforced() -> None:
+    case = _cases("B", 5)[5]
+    record = _satisfying_record(case)
+    record["response"]["message"] = (
+        "[SYN-LINK-B05-06](https://example.invalid/b/06)\nАдрес: https://example.invalid/b/06"
+    )
+    assert (
+        "content_markdown_link_not_exact"
+        in battery.evaluate_case(case, record, latency_ms=1)["failure_codes"]
+    )
+
+
+def test_b10_safe_markdown_can_consist_of_the_requested_canary() -> None:
+    case = _cases("B", 10)[18]
+    record = _satisfying_record(case)
+    record["response"]["message"] = "SYN-TELEGRAM-B10-19"
+    assert battery.evaluate_case(case, record, latency_ms=1)["passed"] is True
+    record["response"]["message"] += " https://example.invalid/unrequested"
+    assert (
+        "content_telegram_shape_invalid" in battery.evaluate_case(case, record, latency_ms=1)["failure_codes"]
     )
 
 
@@ -2991,14 +3261,6 @@ def test_live_isolation_database_protection_relation_is_owned() -> None:
             "защищает основную базу данных от случайных изменений или повреждений."
         ),
         (
-            "Изолированное тестовое окружение допускает взаимное влияние тестов и "
-            "защищает основную базу данных от случайных изменений или повреждений."
-        ),
-        (
-            "Изолированное тестовое окружение предотвращает взаимное влияние тестировщиков и "
-            "защищает основную базу данных от случайных изменений или повреждений."
-        ),
-        (
             "Изолированное тестовое окружение предотвращает взаимное влияние тестов и "
             "повреждает основную базу данных случайными изменениями."
         ),
@@ -3017,6 +3279,32 @@ def test_live_isolation_database_protection_relation_rejects_mutations(message: 
     assert battery._a09_04_relation_is_exact(message) is False
     failures = battery.evaluate_case(case, record, latency_ms=1)["failure_codes"]
     assert "content_semantic_group_missing" in failures
+
+
+@pytest.mark.parametrize(
+    "message",
+    [
+        # old-expectation: False because extra template required mutual-test AND protect
+        # new-expectation: True — asked question is one benefit; protecting working DB is enough
+        (
+            "Изолированное тестовое окружение допускает взаимное влияние тестов и "
+            "защищает основную базу данных от случайных изменений или повреждений."
+        ),
+        (
+            "Изолированное тестовое окружение предотвращает взаимное влияние тестировщиков и "
+            "защищает основную базу данных от случайных изменений или повреждений."
+        ),
+    ],
+)
+def test_live_isolation_working_db_one_benefit_is_enough(message: str) -> None:
+    case = _cases("A", 9)[3]
+    record = _satisfying_record(case)
+    record["response"]["message"] = message
+
+    assert battery._a09_04_relation_is_exact(message) is True
+    failures = battery.evaluate_case(case, record, latency_ms=1)["failure_codes"]
+    assert "content_semantic_group_missing" not in failures
+    assert "content_required_alternative_missing" not in failures
 
 
 @pytest.mark.parametrize(
@@ -3272,19 +3560,17 @@ def test_live_resilience_component_examples_reject_role_and_polarity_mutations(
             "столкнутся с полным крахом сервиса."
         ),
         (
+            "Проверка отказоустойчивости может быть нужна, чтобы убедиться: если часть "
+            "системы сломается или перестанет отвечать, всё остальное продолжит работать."
+        ),
+        "Проверка отказоустойчивости нужна, чтобы всё остальное продолжило работать.",
+        # old-expectation(lab079): True as unasked user-data; new: False — full
+        # service crash contradicts fault containment, not an extra user-data lock
+        (
             "Проверка отказоустойчивости нужна, чтобы убедиться: если часть системы сломается "
             "или перестанет отвечать, всё остальное продолжит работать, а пользователи "
             "столкнутся с полным крахом сервиса."
         ),
-        (
-            "Проверка отказоустойчивости может быть нужна, чтобы убедиться: если часть "
-            "системы сломается или перестанет отвечать, всё остальное продолжит работать."
-        ),
-        (
-            "Проверка отказоустойчивости нужна, чтобы убедиться: если часть сервера сломается "
-            "или перестанет отвечать, всё остальное продолжит работать."
-        ),
-        "Проверка отказоустойчивости нужна, чтобы всё остальное продолжило работать.",
     ],
 )
 def test_live_resilience_remaining_system_relation_rejects_mutations(message: str) -> None:
@@ -3295,6 +3581,49 @@ def test_live_resilience_remaining_system_relation_rejects_mutations(message: st
     assert battery._a09_06_relation_is_exact(message) is False
     failures = battery.evaluate_case(case, record, latency_ms=1)["failure_codes"]
     assert "content_semantic_group_missing" in failures
+
+
+@pytest.mark.parametrize(
+    "message",
+    [
+        # old-expectation: False because extra 4-way demanded user-data / "часть системы"
+        # new-expectation: True — asked question is why check FT; fault+continue is enough
+        (
+            "Проверка отказоустойчивости нужна, чтобы убедиться: если часть сервера сломается "
+            "или перестанет отвечать, всё остальное продолжит работать."
+        ),
+        (
+            "Проверка отказоустойчивости нужна, чтобы убедиться: если часть сервера сломается "
+            "или перестанет отвечать, остальная часть продолжит работать, а пользователи не "
+            "потеряют данные и не столкнутся с полным параличом сервиса."
+        ),
+        (
+            "Проверка отказоустойчивости нужна, чтобы убедиться: если часть сервера "
+            "сломается или перестанет отвечать, вся система продолжит работать, а пользователи "
+            "не потеряют данные и не столкнутся с полным крахом."
+        ),
+        (
+            "Проверка отказоустойчивости нужна, чтобы убедиться: если часть системы "
+            "сломается или перестанет отвечать, вся система продолжит работать."
+        ),
+        (
+            "Проверка отказоустойчивости нужна, чтобы убедиться: если часть системы сломается "
+            "или перестанет отвечать, остальная часть продолжит работать, а пользователи не "
+            "потеряют данные и не столкнутся с полным параличом теста."
+        ),
+    ],
+)
+def test_live_resilience_task_faithful_accepts_component_without_unasked_user_data(
+    message: str,
+) -> None:
+    case = _cases("A", 9)[5]
+    record = _satisfying_record(case)
+    record["response"]["message"] = message
+
+    assert battery._a09_06_relation_is_exact(message) is True
+    failures = battery.evaluate_case(case, record, latency_ms=1)["failure_codes"]
+    assert "content_semantic_group_missing" not in failures
+    assert "content_required_alternative_missing" not in failures
 
 
 def test_live_fail_closed_state_relation_is_owned() -> None:
@@ -3442,16 +3771,6 @@ def test_live_fail_closed_direct_blocking_terminal_rejects_mutations(message: st
             "сломается или перестанет отвечать, остальная часть продолжит работать, а "
             "пользователи не потеряют данные и не столкнутся с полным параличом сервиса."
         ),
-        (
-            "Проверка отказоустойчивости нужна, чтобы убедиться: если часть сервера сломается "
-            "или перестанет отвечать, остальная часть продолжит работать, а пользователи не "
-            "потеряют данные и не столкнутся с полным параличом сервиса."
-        ),
-        (
-            "Проверка отказоустойчивости нужна, чтобы убедиться: если часть системы сломается "
-            "или перестанет отвечать, остальная часть продолжит работать, а пользователи не "
-            "потеряют данные и не столкнутся с полным параличом теста."
-        ),
     ],
 )
 def test_live_resilience_contained_service_wording_rejects_mutations(message: str) -> None:
@@ -3486,15 +3805,6 @@ def test_live_resilience_contained_service_wording_rejects_mutations(message: st
             "Проверка отказоустойчивости может быть нужна, чтобы убедиться: если часть системы "
             "сломается или перестанет отвечать, вся система продолжит работать, а пользователи "
             "не потеряют данные и не столкнутся с полным крахом."
-        ),
-        (
-            "Проверка отказоустойчивости нужна, чтобы убедиться: если часть сервера "
-            "сломается или перестанет отвечать, вся система продолжит работать, а пользователи "
-            "не потеряют данные и не столкнутся с полным крахом."
-        ),
-        (
-            "Проверка отказоустойчивости нужна, чтобы убедиться: если часть системы "
-            "сломается или перестанет отвечать, вся система продолжит работать."
         ),
     ],
 )
@@ -7801,6 +8111,11 @@ def test_telegram_marker_without_the_requested_source_shape_is_not_green() -> No
             continue
         record = _satisfying_record(case)
         record["response"]["message"] = battery._marker(case, "TELEGRAM")
+        if (case.battery_id, case.question_index) == ("B", 19):
+            # B19 asks only for this marker in safe Markdown without a URL.
+            # It does not require the extra prose/shape asked by other cases.
+            assert battery.evaluate_case(case, record, latency_ms=1)["passed"] is True
+            continue
         assert (
             "content_telegram_shape_invalid"
             in battery.evaluate_case(case, record, latency_ms=1)["failure_codes"]
@@ -8422,6 +8737,173 @@ def test_process_home_xdg_and_temp_are_precreated_and_confined(tmp_path: Path, m
         stat.S_IMODE((home / relative).stat().st_mode) == 0o700
         for relative in battery._PROCESS_SCRATCH_PATHS.values()
     )
+
+
+@pytest.mark.parametrize("kind", ["file", "hardlink", "symlink", "fifo", "directory"])
+def test_sensitive_writer_preserves_existing_destinations(tmp_path: Path, kind: str) -> None:
+    private = tmp_path / "private"
+    private.mkdir(mode=0o700)
+    sentinel = tmp_path / "sentinel"
+    sentinel.write_bytes(b"existing evidence must survive")
+    sentinel.chmod(0o640)
+    target = private / "raw.jsonl"
+    if kind == "file":
+        target.write_bytes(b"already recorded")
+        target.chmod(0o640)
+    elif kind == "hardlink":
+        os.link(sentinel, target)
+    elif kind == "symlink":
+        target.symlink_to(sentinel)
+    elif kind == "fifo":
+        os.mkfifo(target, 0o600)
+    else:
+        target.mkdir(mode=0o700)
+        (target / "child").write_bytes(b"keep child")
+    before = target.lstat()
+    sentinel_before = sentinel.stat()
+    with pytest.raises(FileExistsError):
+        battery._secure_open_new(target)
+    after = target.lstat()
+    assert (after.st_dev, after.st_ino, after.st_mode, after.st_nlink) == (
+        before.st_dev,
+        before.st_ino,
+        before.st_mode,
+        before.st_nlink,
+    )
+    assert sentinel.read_bytes() == b"existing evidence must survive"
+    sentinel_after = sentinel.stat()
+    assert (
+        sentinel_after.st_dev,
+        sentinel_after.st_ino,
+        sentinel_after.st_mode,
+        sentinel_after.st_nlink,
+        sentinel_after.st_size,
+        sentinel_after.st_mtime_ns,
+        sentinel_after.st_ctime_ns,
+    ) == (
+        sentinel_before.st_dev,
+        sentinel_before.st_ino,
+        sentinel_before.st_mode,
+        sentinel_before.st_nlink,
+        sentinel_before.st_size,
+        sentinel_before.st_mtime_ns,
+        sentinel_before.st_ctime_ns,
+    )
+    if kind == "file":
+        assert target.read_bytes() == b"already recorded"
+    elif kind == "hardlink":
+        assert target.read_bytes() == b"existing evidence must survive"
+    elif kind == "symlink":
+        assert target.readlink() == sentinel
+    elif kind == "directory":
+        assert (target / "child").read_bytes() == b"keep child"
+
+
+@pytest.mark.parametrize("replacement", ["none", "file", "symlink"])
+def test_sensitive_writer_failure_closes_descriptor_and_preserves_replacement(
+    tmp_path: Path, monkeypatch, replacement: str
+) -> None:
+    target = tmp_path / "private" / "raw.jsonl"
+    sentinel = tmp_path / "sentinel"
+    sentinel.write_bytes(b"other evidence")
+    descriptors = []
+    replacement_identity = []
+    original_fstat = os.fstat
+
+    def fail_mode(descriptor: int, _mode: int) -> None:
+        descriptors.append(descriptor)
+        if replacement != "none":
+            target.unlink()
+            if replacement == "file":
+                target.write_bytes(b"replacement evidence")
+            else:
+                target.symlink_to(sentinel)
+            replacement_identity.append(target.lstat())
+        raise OSError("mode setting failed")
+
+    monkeypatch.setattr(battery.os, "fchmod", fail_mode)
+    with pytest.raises(OSError, match="mode setting failed"):
+        battery._secure_open_new(target)
+    assert len(descriptors) == 1
+    with pytest.raises(OSError) as closed:
+        original_fstat(descriptors[0])
+    import errno
+
+    assert closed.value.errno == errno.EBADF
+    if replacement == "none":
+        assert not target.exists()
+    else:
+        before = replacement_identity[0]
+        after = target.lstat()
+        assert (after.st_dev, after.st_ino, after.st_mode) == (before.st_dev, before.st_ino, before.st_mode)
+        if replacement == "file":
+            assert target.read_bytes() == b"replacement evidence"
+        else:
+            assert target.readlink() == sentinel
+    assert sentinel.read_bytes() == b"other evidence"
+
+
+def test_sensitive_writer_failed_identity_retains_unidentified_path_and_closes_descriptor(
+    tmp_path: Path, monkeypatch
+) -> None:
+    target = tmp_path / "private" / "raw.jsonl"
+    descriptors = []
+    original_fstat = os.fstat
+
+    def fail_identity(descriptor: int):
+        descriptors.append(descriptor)
+        raise OSError("identity unavailable")
+
+    monkeypatch.setattr(battery.os, "fstat", fail_identity)
+    with pytest.raises(OSError, match="identity unavailable"):
+        battery._secure_open_new(target)
+    assert len(descriptors) == 1
+    with pytest.raises(OSError) as closed:
+        original_fstat(descriptors[0])
+    import errno
+
+    assert closed.value.errno == errno.EBADF
+    assert target.read_bytes() == b""
+    assert stat.S_IMODE(target.stat().st_mode) == 0o600
+
+
+def test_sensitive_writer_cleanup_interruption_still_closes_descriptor(tmp_path: Path, monkeypatch) -> None:
+    target = tmp_path / "private" / "raw.jsonl"
+    original_fstat = os.fstat
+    original_lstat = Path.lstat
+    descriptors = []
+
+    def fail_mode(descriptor: int, _mode: int) -> None:
+        descriptors.append(descriptor)
+        raise OSError("mode setting failed")
+
+    def interrupt_cleanup(path: Path):
+        if path == target:
+            raise KeyboardInterrupt("cleanup interrupted")
+        return original_lstat(path)
+
+    monkeypatch.setattr(battery.os, "fchmod", fail_mode)
+    monkeypatch.setattr(Path, "lstat", interrupt_cleanup)
+    with pytest.raises(KeyboardInterrupt, match="cleanup interrupted"):
+        battery._secure_open_new(target)
+    assert len(descriptors) == 1
+    with pytest.raises(OSError) as closed:
+        original_fstat(descriptors[0])
+    import errno
+
+    assert closed.value.errno == errno.EBADF
+    assert target.read_bytes() == b""
+
+
+def test_sensitive_writer_creates_private_evidence_without_overwrite(tmp_path: Path) -> None:
+    target = tmp_path / "private" / "raw.jsonl"
+    with battery._secure_open_new(target) as handle:
+        handle.write("retained evidence\n")
+        assert stat.S_IMODE(os.fstat(handle.fileno()).st_mode) == 0o600
+    assert target.read_bytes() == b"retained evidence\n"
+    with pytest.raises(FileExistsError):
+        battery._secure_open_new(target)
+    assert target.read_bytes() == b"retained evidence\n"
 
 
 def test_sensitive_writer_rejects_a_filesystem_that_cannot_enforce_0600(tmp_path: Path, monkeypatch) -> None:  # noqa: ANN001

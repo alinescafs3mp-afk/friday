@@ -309,7 +309,8 @@ EXPECTED_SIGNATURES: dict[str, str] = {
     "discard_notifications_verified": "(self, ids: 'Sequence[str]', *, reason: 'str') -> 'list[str]'",
     "diff_knowledge_versions": "(self, ko_id: 'str', user_id: 'str', *, from_version: 'int | None' = None, to_version: 'int | None' = None) -> 'dict[str, Any] | None'",
     "enqueue_notification": "(self, user_id: 'str', chat_id: 'str', body: 'str', *, kind: 'str' = '', dedup_key: 'str' = '') -> 'bool'",
-    "ensure_user": "(self, user_id: 'str', *, source: 'str' = 'local', external_id: 'str' = '', display_name: 'str' = '', username: 'str' = '', preset_key: 'str' = 'user', metadata: 'dict[str, Any] | None' = None) -> 'dict[str, Any]'",
+    # Omitted source preserves an existing origin; new accounts still default to local.
+    "ensure_user": "(self, user_id: 'str', *, source: 'str | None' = None, external_id: 'str' = '', display_name: 'str' = '', username: 'str' = '', preset_key: 'str' = 'user', metadata: 'dict[str, Any] | None' = None) -> 'dict[str, Any]'",
     "eval_case_health": "(self, user_id: 'str', *, cases: 'list[dict[str, Any]] | None' = None) -> 'dict[str, Any]'",
     "execute": "(self, sql: 'str', params: 'tuple | dict | None' = None) -> 'sqlite3.Cursor'",
     "export_user": "(self, user_id: 'str') -> 'dict[str, Any]'",

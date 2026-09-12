@@ -397,10 +397,11 @@ def test_a_sent_document_does_not_trigger_building_another_one():
     """
     import inspect
 
-    from friday.agent_runtime import _ASKS_FOR_A_FILE, AgentRuntime
+    from friday.agent_runtime import AgentRuntime, _is_direct_file_request
 
-    # Сам детектор на такой строке срабатывает — в этом и была ловушка.
-    assert _ASKS_FOR_A_FILE.search("Загружен документ: отчёт по проверке.docx")
+    # The old lexical matcher admitted this filename. The current detector
+    # requires a user imperative; the synthetic-notice guard stays in place.
+    assert not _is_direct_file_request("Загружен документ: отчёт по проверке.docx")
 
     source = inspect.getsource(AgentRuntime.chat)
     guard = source[: source.index("_file_for_a_request_that_wanted_one(")]

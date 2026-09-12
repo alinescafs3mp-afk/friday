@@ -8,6 +8,7 @@ exactly as before and no call site moved.
 from __future__ import annotations
 
 from collections import Counter
+from contextlib import nullcontext
 from typing import TYPE_CHECKING
 
 from friday.ingestion._base import (
@@ -502,65 +503,71 @@ class AdviceMixin(PipelineShared):
     ) -> dict[str, Any]:
         """Preview or apply deterministic enrichment to an existing Knowledge Object."""
 
-        current = self.storage.get_knowledge_object(knowledge_object_id, user_id)
-        if not current or current.get("deleted_at"):
-            raise ValueError("Knowledge Object not found")
-        content = str(current.get("content") or "")
-        assessment = self.assess_text(content)
-        enrichment = self._enrich(content, assessment, user_id=user_id)
-        result: dict[str, Any] = {
-            "item": current,
-            "assessment": self.assess_existing_knowledge(user_id, current),
-            "suggestion": enrichment.to_suggestions(),
-            "applied": False,
-            "graph_links": [],
-            "unresolved_entities": [],
-        }
-        if not apply:
-            return result
+        # Linking can set the legacy primary entity. Commit that graph change
+        # and the resulting version snapshot together, with one current read.
+        with self.storage.transaction() if apply else nullcontext():
+            current = self.storage.get_knowledge_object(knowledge_object_id, user_id)
+            if not current or current.get("deleted_at"):
+                raise ValueError("Knowledge Object not found")
+            content = str(current.get("content") or "")
+            assessment = self.assess_text(content)
+            enrichment = self._enrich(content, assessment, user_id=user_id)
+            result: dict[str, Any] = {
+                "item": current,
+                "assessment": self.assess_existing_knowledge(user_id, current),
+                "suggestion": enrichment.to_suggestions(),
+                "applied": False,
+                "graph_links": [],
+                "unresolved_entities": [],
+            }
+            if not apply:
+                return result
 
-        metadata = _json_dict(current.get("metadata_json"))
-        history = metadata.get("reenrichment_history")
-        if not isinstance(history, list):
-            history = []
-        history.append(
-            {
-                "at": utc_now(),
-                "reviewed_by": reviewed_by,
-                "policy_version": _PROMOTION_POLICY_VERSION,
-                "previous_quality_score": current.get("quality_score"),
-                "new_quality_score": enrichment.quality_score,
-            }
-        )
-        metadata.update(enrichment.metadata)
-        metadata["reenrichment_history"] = history[-20:]
-        updated = self.storage.update_knowledge_fields(
-            knowledge_object_id,
-            user_id,
-            title=enrichment.title,
-            summary=enrichment.summary,
-            tags_json=enrichment.tags,
-            metadata_json=metadata,
-            knowledge_kind=enrichment.knowledge_kind,
-            importance=enrichment.importance,
-            quality_score=enrichment.quality_score,
-            promotion_score=assessment.promotion_score,
-        )
-        graph_links, unresolved = self._link_entities(
-            user_id,
-            knowledge_object_id,
-            str(current["raw_object_id"]),
-            enrichment.entities,
-        )
-        result.update(
-            {
-                "item": updated,
-                "applied": True,
-                "graph_links": graph_links,
-                "unresolved_entities": unresolved,
-            }
-        )
-        return result
+            metadata = _json_dict(current.get("metadata_json"))
+            history = metadata.get("reenrichment_history")
+            if not isinstance(history, list):
+                history = []
+            history.append(
+                {
+                    "at": utc_now(),
+                    "reviewed_by": reviewed_by,
+                    "policy_version": _PROMOTION_POLICY_VERSION,
+                    "previous_quality_score": current.get("quality_score"),
+                    "new_quality_score": enrichment.quality_score,
+                }
+            )
+            metadata.update(enrichment.metadata)
+            metadata["reenrichment_history"] = history[-20:]
+            graph_links, unresolved = self._link_entities(
+                user_id,
+                knowledge_object_id,
+                str(current["raw_object_id"]),
+                enrichment.entities,
+            )
+            self.storage.update_knowledge_fields(
+                knowledge_object_id,
+                user_id,
+                title=enrichment.title,
+                summary=enrichment.summary,
+                tags_json=enrichment.tags,
+                metadata_json=metadata,
+                knowledge_kind=enrichment.knowledge_kind,
+                importance=enrichment.importance,
+                quality_score=enrichment.quality_score,
+                promotion_score=assessment.promotion_score,
+            )
+            final = self.storage.get_knowledge_object(knowledge_object_id, user_id)
+            if final is None:
+                raise RuntimeError("Knowledge object disappeared during reenrichment")
+            result.update(
+                {
+                    "item": final,
+                    "applied": True,
+                    "graph_links": graph_links,
+                    "unresolved_entities": unresolved,
+                }
+            )
+            return result
 
     def _enrich(
         self,
@@ -687,7 +694,10 @@ class AdviceMixin(PipelineShared):
                 # он не может.
                 if candidate_name.casefold() not in lowered_content:
                     continue
-                pattern = re.compile(rf"(?<![\w.]){re.escape(candidate_name)}(?![\w.])", re.I)
+                # A terminal period (or ellipsis) closes the mention. Dots
+                # followed by identifier characters still belong to BRK.A,
+                # version strings, and aliases rather than a shorter name.
+                pattern = re.compile(rf"(?<![\w.]){re.escape(candidate_name)}(?!\w|\.+[\w+#/-])", re.I)
                 if not pattern.search(content):
                     continue
                 key = (

@@ -399,6 +399,100 @@ def test_read_only_source_scope_does_not_license_a_current_or_mixed_deed(claim: 
     )
 
 
+@pytest.mark.asyncio
+async def test_a_verified_same_turn_quote_keeps_the_named_input_attachment_state(
+    settings,
+    storage,
+    monkeypatch,
+) -> None:
+    """A source read may describe its input carrier without claiming a new output."""
+
+    runtime = _runtime(settings, storage, monkeypatch)
+    filename = "syn-b07-10.txt"
+    marker = "SYN-ATTACHMENT-0123456789ABCDEF0123"
+    attachment = await _registered_text_attachment(
+        settings,
+        storage,
+        filename=filename,
+        source_text=f"Это полностью синтетический файл. Контрольный маркер: {marker}.",
+    )
+    model_answer = (
+        f"Файл {filename} прикреплён к caption-вопросу этого же хода. "
+        f"Контрольное значение: {marker}."
+    )
+
+    async def generate(context, message, attachments):  # noqa: ANN001
+        del context, message, attachments
+        return {"content": model_answer, "tools_used": [], "_model_generated": True}
+
+    monkeypatch.setattr(runtime, "_generate_response", generate)
+    reply = await runtime.chat(
+        "alice",
+        "Сопоставь caption-вопрос и файл одного turn, затем процитируй контрольное значение. "
+        "Проверка SYN-B07-10.",
+        actor=_actor(),
+        attachments=[attachment],
+        enable_tools=False,
+    )
+
+    # The established formatter wraps the named input in inline code.
+    assert reply["message"] == model_answer.replace(filename, f"`{filename}`", 1)
+    assert reply["attachment_context_available"] is True
+    assert reply["attachment_coverage_complete"] is True
+    assert reply["attachment_verification_complete"] is True
+    stored = storage.get_message(str(reply["message_id"]), "alice")
+    assert stored["content"] == reply["message"]
+    metadata = json.loads(str(stored["metadata_json"] or "{}"))
+    guards = metadata["structural"].get("output_guards", {})
+    assert guards.get("supported_deed_replaced") is not True
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "unsupported_claim",
+    [
+        "Файл other-source.pdf прикреплён к caption-вопросу этого же хода.",
+        "Я прикрепила файл syn-b07-10.txt к ответу.",
+        "Файл syn-b07-10.txt прикреплён вам в чат.",
+        "Вот файл syn-b07-10.txt.",
+    ],
+)
+async def test_a_same_turn_quote_does_not_license_an_output_carrier_claim(
+    settings,
+    storage,
+    monkeypatch,
+    unsupported_claim: str,
+) -> None:
+    runtime = _runtime(settings, storage, monkeypatch)
+    marker = "SYN-ATTACHMENT-0123456789ABCDEF0123"
+    attachment = await _registered_text_attachment(
+        settings,
+        storage,
+        filename="syn-b07-10.txt",
+        source_text=f"Это полностью синтетический файл. Контрольный маркер: {marker}.",
+    )
+
+    async def generate(context, message, attachments):  # noqa: ANN001
+        del context, message, attachments
+        return {
+            "content": f"{unsupported_claim} Контрольное значение: {marker}.",
+            "tools_used": [],
+            "_model_generated": True,
+        }
+
+    monkeypatch.setattr(runtime, "_generate_response", generate)
+    reply = await runtime.chat(
+        "alice",
+        "Сопоставь caption-вопрос и файл одного turn, затем процитируй контрольное значение. "
+        "Проверка SYN-B07-10.",
+        actor=_actor(),
+        attachments=[attachment],
+        enable_tools=False,
+    )
+
+    assert reply["message"] == _UNCONFIRMED_SUPPORTED_DEED
+
+
 @pytest.mark.parametrize(
     ("kind", "filename", "source_text", "model_answer"),
     [

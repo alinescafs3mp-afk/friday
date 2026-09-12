@@ -650,6 +650,7 @@ async def test_retry_command_caches_one_response_and_resumes_its_file_suffix(
 ) -> None:
     path = tmp_path / "telegram.sqlite3"
     response = _artifact_response("file")
+    response.update(message_id="msg_retry_fixture", conversation_id="conv_retry_fixture")
     backend_calls: list[tuple[str, str]] = []
     first = _bridge(path)
     inbox = _opened(first)
@@ -679,10 +680,24 @@ async def test_retry_command_caches_one_response_and_resumes_its_file_suffix(
 
     restarted = _bridge(path)
 
-    async def unexpected_backend(*_args: Any, **_kwargs: Any) -> dict[str, Any]:
-        raise AssertionError("cached /retry response must not regenerate")
+    async def classify_cached_retry(
+        _backend: object,
+        method: str,
+        endpoint: str,
+        *_args: Any,
+    ) -> dict[str, Any]:
+        import hashlib
 
-    monkeypatch.setattr(restarted, "_backend_json", unexpected_backend)
+        digest = hashlib.sha256(str(response["message"]).encode()).hexdigest()
+        assert method == "GET"
+        assert endpoint == f"/api/me/mixed-deliveries/msg_retry_fixture?answer_sha256={digest}"
+        return {
+            "authorized": True,
+            "mixed_required": False,
+            "conversation_id": "conv_retry_fixture",
+        }
+
+    monkeypatch.setattr(restarted, "_backend_json", classify_cached_retry)
     healed = _Telegram()
     try:
         assert await _run_pending(restarted, healed) is True

@@ -1482,20 +1482,117 @@ def test_source_search_over_http_excludes_rejected_material(settings):
         from friday.permissions import LEGACY_OWNER_USER_ID
 
         storage.ensure_user(LEGACY_OWNER_USER_ID)
-        kept = _ingest(storage, LEGACY_OWNER_USER_ID, f"оставлено {PHRASE}", status=InboxStatus.PENDING)
-        _ingest(storage, LEGACY_OWNER_USER_ID, f"отклонено {PHRASE}", status=InboxStatus.IGNORED)
+        foreign_user = "foreign-source-neighbour"
+        storage.ensure_user(foreign_user, preset_key="owner")
+        kept_marker = "оставлено"
+        ignored_marker = "отклонено"
+        foreign_marker = "чужое"
+        kept_body = f"{kept_marker} {PHRASE}"
+        ignored_body = f"{ignored_marker} {PHRASE}"
+        foreign_body = f"{foreign_marker} {PHRASE}"
+        kept = _ingest(storage, LEGACY_OWNER_USER_ID, kept_body, status=InboxStatus.PENDING)
+        ignored = _ingest(storage, LEGACY_OWNER_USER_ID, ignored_body, status=InboxStatus.IGNORED)
+        foreign_id = _ingest(storage, foreign_user, foreign_body, status=InboxStatus.PENDING)
+        owner_token = settings.api_token
+        owner = {"Authorization": f"Bearer {owner_token}"}
 
-        owner = {"Authorization": f"Bearer {settings.api_token}"}
+        def _raw_row(raw_id: str) -> dict:
+            row = storage.execute(
+                "SELECT id, user_id, source, source_ref, raw_content, content_type, "
+                "metadata_json, content_hash, version, deleted_at "
+                "FROM raw_objects WHERE id=?",
+                (raw_id,),
+            ).fetchone()
+            assert row is not None
+            return dict(row)
+
+        def _inbox_rows(raw_id: str) -> list[dict]:
+            rows = storage.execute(
+                "SELECT id, user_id, raw_object_id, knowledge_object_id, status, "
+                "suggested_entity_id, suggested_tags_json, suggested_action, "
+                "classification_notes, reviewed_at, reviewed_by "
+                "FROM inbox WHERE raw_object_id=? ORDER BY id",
+                (raw_id,),
+            ).fetchall()
+            return [dict(row) for row in rows]
+
+        def _seed_snapshot() -> dict:
+            return {
+                "raw": {raw_id: _raw_row(raw_id) for raw_id in (kept, ignored, foreign_id)},
+                "inbox": {raw_id: _inbox_rows(raw_id) for raw_id in (kept, ignored, foreign_id)},
+            }
+
+        before = _seed_snapshot()
+        assert before["raw"][kept]["raw_content"] == kept_body
+        assert before["raw"][kept]["deleted_at"] is None
+        assert before["raw"][ignored]["raw_content"] == ignored_body
+        assert before["raw"][foreign_id]["raw_content"] == foreign_body
+        assert [row["status"] for row in before["inbox"][kept]] == ["pending"]
+        assert [row["status"] for row in before["inbox"][ignored]] == ["ignored"]
+        assert [row["status"] for row in before["inbox"][foreign_id]] == ["pending"]
+
         response = client.get("/api/knowledge/sources", params={"q": PHRASE}, headers=owner)
         assert response.status_code == 200
         body = response.json()
+        assert body["query"] == PHRASE
+        assert body["count"] == 1
         assert [item["id"] for item in body["items"]] == [kept]
         assert body["excludes"] == "ignored"
+        kept_item = body["items"][0]
+        excerpt = str(kept_item.get("excerpt") or "")
+        assert PHRASE in excerpt
+        assert kept_marker in excerpt
+        public_keys = set(kept_item)
+        assert "_raw_content" not in public_keys
+        assert "_raw_metadata" not in public_keys
         assert "_raw_content" not in str(body)
         assert "_raw_metadata" not in str(body)
+        assert ignored_body not in str(body)
+        assert ignored_marker not in str(body)
+        assert foreign_id not in {item["id"] for item in body["items"]}
+        assert foreign_id not in str(body)
+        assert foreign_body not in str(body)
+        assert owner_token not in response.text
+        assert _seed_snapshot() == before
+
+        canaries = (
+            kept,
+            ignored,
+            foreign_id,
+            kept_body,
+            ignored_body,
+            foreign_body,
+            kept_marker,
+            ignored_marker,
+            foreign_marker,
+            owner_token,
+        )
+
+        def _assert_refusal(resp, status: int, *, allow_query_echo: bool = False) -> None:
+            assert resp.status_code == status
+            if status in {401, 403}:
+                assert "items" not in resp.json()
+            for secret in canaries:
+                assert secret not in resp.text
+            if not allow_query_echo:
+                assert PHRASE not in resp.text
+            assert _seed_snapshot() == before
+
+        missing_query = client.get("/api/knowledge/sources", headers=owner)
+        _assert_refusal(missing_query, 422)
+        zero_limit = client.get("/api/knowledge/sources", params={"q": PHRASE, "limit": 0}, headers=owner)
+        _assert_refusal(zero_limit, 422, allow_query_echo=True)
+        over_limit = client.get("/api/knowledge/sources", params={"q": PHRASE, "limit": 101}, headers=owner)
+        _assert_refusal(over_limit, 422, allow_query_echo=True)
 
         # Unauthenticated callers get nothing.
-        assert client.get("/api/knowledge/sources", params={"q": PHRASE}).status_code == 401
+        anonymous = client.get("/api/knowledge/sources", params={"q": PHRASE})
+        _assert_refusal(anonymous, 401)
+
+        storage.set_permission_override(LEGACY_OWNER_USER_ID, "knowledge.read", "deny")
+        denied = client.get("/api/knowledge/sources", params={"q": PHRASE}, headers=owner)
+        _assert_refusal(denied, 403)
+        assert _seed_snapshot() == before
 
 
 def test_one_rejection_hides_the_source_even_among_several_inbox_rows(storage):

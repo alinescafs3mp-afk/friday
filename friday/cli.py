@@ -575,7 +575,7 @@ def _decrypt_backup(args: argparse.Namespace) -> int:
     if destination.exists():
         print(f"Не перезаписываю существующий файл: {destination}", file=sys.stderr)
         return 2
-    decrypt_file(source, destination, key_file)
+    decrypt_file(source, destination, key_file, overwrite=False)
     print(f"Расшифровано: {destination}")
     print("Дальше: `jericho verify-backup` рядом с манифестом или `jericho restore-backup`.")
     return 0
@@ -734,11 +734,10 @@ def _import(args: argparse.Namespace) -> int:
         suffixes=args.suffix,
         include_hidden=args.include_hidden,
         follow_symlinks=args.follow_symlinks,
-        # План НЕ ограничивается числом партии: ограничение по плану даёт те же
-        # первые N файлов на каждом запуске. Партию отмеряет `run_import` по
-        # загруженным. Потолок плана оставлен щедрым, чтобы обход не был бесконечным
-        # на дереве, где почти всё уже загружено.
-        limit=(args.limit * 20 if args.limit else None),
+        # План не знает, что уже загружено. Любой потолок, полученный из
+        # размера партии, может скрыть новые файлы за готовым префиксом.
+        # Полный обход только планирует; run_import отмеряет новые загрузки.
+        limit=None,
     )
 
     megabytes = plan.total_bytes / (1024 * 1024)
@@ -894,12 +893,20 @@ def _backfill_document_dates(args: argparse.Namespace) -> int:
     cursor = 0
     try:
         while True:
+            page_limit = max(1, args.batch)
+            if args.limit:
+                remaining = args.limit - scanned
+                if remaining <= 0:
+                    break
+                page_limit = min(page_limit, remaining)
             batch = storage.knowledge_missing_document_date(
-                user_id=args.user, limit=args.batch, after_rowid=cursor
+                user_id=args.user, limit=page_limit, after_rowid=cursor
             )
             if not batch:
                 break
             for row in batch:
+                if args.limit and scanned >= args.limit:
+                    break
                 cursor = max(cursor, int(row["position"]))
                 scanned += 1
                 raw_path = str(row.get("stored_path") or "")
@@ -1028,10 +1035,18 @@ def _backfill_entities(args: argparse.Namespace) -> int:
     cursor = 0
     try:
         while True:
-            batch = storage.knowledge_bodies_after(after_rowid=cursor, user_id=args.user, limit=args.batch)
+            page_limit = max(1, args.batch)
+            if args.limit:
+                remaining = args.limit - scanned
+                if remaining <= 0:
+                    break
+                page_limit = min(page_limit, remaining)
+            batch = storage.knowledge_bodies_after(after_rowid=cursor, user_id=args.user, limit=page_limit)
             if not batch:
                 break
             for row in batch:
+                if args.limit and scanned >= args.limit:
+                    break
                 cursor = int(row["rowid"])
                 scanned += 1
                 ko_id, owner = str(row["id"]), str(row["user_id"])
@@ -1384,14 +1399,22 @@ def _extract_structure_relations(args: argparse.Namespace) -> int:
         return 2
     apply_changes = bool(getattr(args, "apply", False))
 
-    async def run() -> tuple[int, int, int, int, int]:
-        scanned = proposed = kept = skipped_windows = model_errors = 0
+    async def run() -> tuple[int, int, int, int, int, int]:
+        scanned = proposed = kept = skipped_windows = model_errors = object_errors = 0
         cursor = 0
         while True:
-            batch = storage.knowledge_bodies_after(after_rowid=cursor, user_id=args.user, limit=args.batch)
+            page_limit = max(1, args.batch)
+            if args.limit:
+                remaining = args.limit - scanned
+                if remaining <= 0:
+                    break
+                page_limit = min(page_limit, remaining)
+            batch = storage.knowledge_bodies_after(after_rowid=cursor, user_id=args.user, limit=page_limit)
             if not batch:
                 break
             for row in batch:
+                if args.limit and scanned >= args.limit:
+                    break
                 cursor = int(row["rowid"])
                 scanned += 1
                 try:
@@ -1402,7 +1425,8 @@ def _extract_structure_relations(args: argparse.Namespace) -> int:
                         store=apply_changes,
                     )
                 except Exception as error:  # noqa: BLE001 — один документ не рвёт проход
-                    print(f"  {row['id']}: {type(error).__name__}: {error}", file=sys.stderr)
+                    object_errors += 1
+                    print(f"  {row['id']}: {type(error).__name__}", file=sys.stderr)
                     continue
                 proposed += int(result.get("proposed") or 0)
                 kept += len(result.get("candidates") or [])
@@ -1410,10 +1434,10 @@ def _extract_structure_relations(args: argparse.Namespace) -> int:
                 model_errors += int(result.get("model_errors") or 0)
             if args.limit and scanned >= args.limit:
                 break
-        return scanned, proposed, kept, skipped_windows, model_errors
+        return scanned, proposed, kept, skipped_windows, model_errors, object_errors
 
     try:
-        scanned, proposed, kept, skipped_windows, model_errors = asyncio.run(run())
+        scanned, proposed, kept, skipped_windows, model_errors, object_errors = asyncio.run(run())
         if apply_changes:
             storage.record_event(
                 "graph.structure_relations_extracted",
@@ -1426,6 +1450,8 @@ def _extract_structure_relations(args: argparse.Namespace) -> int:
     if skipped_windows:
         # Названо вслух: молча недочитанный документ выглядит как разобранный.
         print(f"НЕ прочитано окон (документы длиннее потолка): {skipped_windows}.")
+    if object_errors:
+        print(f"ОШИБОК ОБРАБОТКИ ОБЪЕКТОВ: {object_errors}.", file=sys.stderr)
     if model_errors:
         # Недоступная модель даёт «просмотрено 1532, предложено 0» — то же, что
         # архив без единой объявленной связи. Поймано на первом проходе: 83
@@ -1447,7 +1473,7 @@ def _extract_structure_relations(args: argparse.Namespace) -> int:
         print("Это КАНДИДАТЫ — каждый ждёт подтверждения человеком в панели.")
     else:
         print("Это ПОКАЗ, в базу ничего не записано. Чтобы применить, повторите с --apply.")
-    return 0
+    return 1 if object_errors else 0
 
 
 def _retag_documents(args: argparse.Namespace) -> int:
@@ -1492,7 +1518,12 @@ def _retag_documents(args: argparse.Namespace) -> int:
             storage.close()
             return 2
     report_path = getattr(args, "report", None)
-    report_file = open_private_text_write(Path(report_path)) if report_path else None
+    try:
+        report_file = open_private_text_write(Path(report_path)) if report_path else None
+    except (OSError, ValueError):
+        storage.close()
+        print("Не удалось открыть файл отчёта для безопасной записи.", file=sys.stderr)
+        return 2
 
     seen = kinds_set = stale_removed = changed = asked = 0
     by_kind: dict[str, int] = {}
@@ -1534,10 +1565,18 @@ def _retag_documents(args: argparse.Namespace) -> int:
         nonlocal seen, kinds_set, stale_removed, changed, asked
         cursor = 0
         while True:
-            batch = storage.knowledge_bodies_after(after_rowid=cursor, user_id=args.user, limit=args.batch)
+            page_limit = max(1, args.batch)
+            if args.limit:
+                remaining = args.limit - seen
+                if remaining <= 0:
+                    break
+                page_limit = min(page_limit, remaining)
+            batch = storage.knowledge_bodies_after(after_rowid=cursor, user_id=args.user, limit=page_limit)
             if not batch:
                 break
             for row in batch:
+                if args.limit and seen >= args.limit:
+                    break
                 cursor = int(row["rowid"])
                 seen += 1
                 current = storage.get_knowledge_object(str(row["id"]), str(row["user_id"]))
@@ -1578,7 +1617,7 @@ def _retag_documents(args: argparse.Namespace) -> int:
                     try:
                         kind, evidence = await ask_document_kind(content, llm=llm)
                     except Exception as error:  # noqa: BLE001 — один документ не рвёт проход
-                        print(f"  {row['id']}: {type(error).__name__}: {error}", file=sys.stderr)
+                        print(f"  {row['id']}: {type(error).__name__}", file=sys.stderr)
                         kind, evidence = "", ""
                     if not kind and evidence.startswith("другое: "):
                         proposals[evidence[8:]] = proposals.get(evidence[8:], 0) + 1
@@ -1969,7 +2008,12 @@ def _review_relation_candidates(args: argparse.Namespace) -> int:
     if apply_changes:
         warn_if_service_holds_the_database(storage, action="решать судьбу кандидатов")
     report_path = getattr(args, "report", None)
-    report_file = open_private_text_write(Path(report_path)) if report_path else None
+    try:
+        report_file = open_private_text_write(Path(report_path)) if report_path else None
+    except (OSError, ValueError):
+        storage.close()
+        print("Не удалось открыть файл отчёта для безопасной записи.", file=sys.stderr)
+        return 2
 
     def note(candidate: dict[str, Any], judged: dict[str, Any]) -> None:
         if report_file is None:

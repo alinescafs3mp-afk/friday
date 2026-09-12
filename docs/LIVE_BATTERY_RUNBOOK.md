@@ -33,7 +33,10 @@ not turn a red run green.
 
 The recursive cycle is accepted only by one clean official A+B pair on one unchanged
 released candidate: A must be 200/200 before B starts, B must then be 200/200, all
-twenty runtime hashes must agree, and `pair_clean` must be true.
+twenty runtime hashes must agree, and the authenticated B03/B09 content acceptance must
+make the signed final `pair_clean` true. Closed-only B rows and the initial pair
+aggregate are deliberately non-certifying. Follow
+[`LIVE_B09_CONTENT_REVIEW.md`](LIVE_B09_CONTENT_REVIEW.md).
 
 ## Prerequisites
 
@@ -144,18 +147,26 @@ staged allowlist without changing its paths or bytes, update only evidence that 
 outside the candidate inventory, push `main`, deploy that commit, and verify health
 plus a bounded local model check. Do not edit the candidate tree afterward.
 
-Run the official pair:
+Preregister the independent reviewer, fixed rubric and root-held key as described in
+[`LIVE_B09_CONTENT_REVIEW.md`](LIVE_B09_CONTENT_REVIEW.md), then run the official
+pair:
 
 ```bash
 umask 077
 PYTHONDONTWRITEBYTECODE=1 .venv/bin/python -B tools/synthetic_live_battery.py \
-  --env-file "$FRIDAY_ENV_FILE" --both --concurrency 4
+  --env-file "$FRIDAY_ENV_FILE" --both --concurrency 4 \
+  --run-directory "$pair_root" \
+  --b09-review-plan "$review_root/plan.json" \
+  --root-review-key /secure/operator/path/friday-b09-root.key
 ```
 
 The runner completes all ten A passes even when individual cases fail. It starts B
 only when A is wholly green. A red A or B returns exit code 4 and restarts the
 recursive workflow at bulk classification and repair; it is never resumed or patched
-in place.
+in place. A closed-green new-suite pair also returns `4` until the root verifies real
+actual preregistered lab RUN/RESULT delivery, issues the plan-required receipts and
+creates the signed final pair. Only the documented final verifier can return zero
+for A+B.
 
 ## Private evidence and public proof
 
@@ -170,7 +181,8 @@ The safe release records are:
 
 - `pre-release-sanitized-summary.json`, plus the focused and P06 sanitized summaries;
 - official `battery-a/aggregate.json`, `battery-b/aggregate.json` and
-  `pair-aggregate.json`;
+  `pair-aggregate.json` as closed evidence, plus the authenticated private
+  `final-pair.json` as the sole clean A+B verdict;
 - candidate, runner, manifest, runtime, evidence and reconciliation hashes;
 - counts, closed failure codes, synthetic case IDs and privacy verdicts.
 

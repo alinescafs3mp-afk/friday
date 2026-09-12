@@ -99,7 +99,9 @@ _PEOPLE_NOUN = r"(?:человек|люд|сотрудник|участник|л
 _COUNT_WORD = r"(?:сколько|количеств\w*|числ\w*|итого)"
 _COUNT_RECORDS = re.compile(
     rf"(?:\b{_COUNT_WORD}\b.{{0,50}}\b{_RECORD_NOUN}\b|"
-    rf"\b(?:посчита|пересчита)\w*.{{0,50}}\b{_RECORD_NOUN}\b)",
+    rf"\b(?:посчита|пересчита|сосчита)\w*.{{0,50}}\b{_RECORD_NOUN}\b|"
+    rf"\b(?:дай(?:те)?|укажи(?:те)?|назови(?:те)?)\s+точный\s+сч[её]т\s+"
+    rf"(?:всех\s+)?{_RECORD_NOUN}\b)",
     re.IGNORECASE,
 )
 _COUNT_PEOPLE = re.compile(
@@ -133,14 +135,14 @@ _LIST_PEOPLE = re.compile(
 )
 _RECHECK_WHOLE_FILE = re.compile(
     r"(?:\b(?:проверь|перепроверь)\s+(?:ещ[её]\s+)?раз\b|"
-    r"\b(?:посчита|пересчита)\w*\s+заново\b|"
+    r"\b(?:посчита|пересчита|сосчита)\w*\s+заново\b|"
     r"\bпочему\b.{0,60}\b(?:нашл|указал|перечисл)\w*\s+только\s+\d+\b|"
     r"\b(?:перечисл|покаж|назов|вывед)\w*\s+их\b|"
     r"\b(?:и\s+)?это\s+вс[её]\b)",
     re.IGNORECASE,
 )
 _EXPLICIT_ATTACHMENT_TARGET = re.compile(
-    r"\b(?:файл|документ|таблиц|вложен(?:ие|ия|ии|ий|ию|ием)?)\w*\b",
+    r"\b(?:файл|документ|таблиц|ведомост|вложен(?:ие|ия|ии|ий|ию|ием)?)\w*\b",
     re.IGNORECASE,
 )
 _DEICTIC_ATTACHMENT_TARGET = re.compile(
@@ -148,7 +150,7 @@ _DEICTIC_ATTACHMENT_TARGET = re.compile(
     r"\b(?:сколько|перечисл|покаж|назов|вывед)\w*\s+их\b|\bих\s+сколько\b|"
     r"\b(?:не\s+вс(?:е|ех)|остальн\w*)\b|\b(?:и\s+)?это\s+вс[её]\b|"
     r"\b(?:проверь|перепроверь)\s+(?:ещ[её]\s+)?раз\b|"
-    r"\b(?:посчита|пересчита)\w*\s+заново\b)",
+    r"\b(?:посчита|пересчита|сосчита)\w*\s+заново\b)",
     re.IGNORECASE,
 )
 _BARE_EXACT_ATTACHMENT_TARGET = re.compile(
@@ -168,13 +170,13 @@ _COMPOUND_CONJUNCTION = re.compile(
 )
 _CLOSED_EXACT_PAIR = re.compile(
     r"(?:\b(?:перечисл|покаж|назов|вывед)\w*\b.*\b(?:и|затем)\b.*"
-    r"\b(?:посчита|пересчита)\w*\b|"
-    r"\b(?:посчита|пересчита)\w*\b.*\b(?:и|затем)\b.*"
+    r"\b(?:посчита|пересчита|сосчита)\w*\b|"
+    r"\b(?:посчита|пересчита|сосчита)\w*\b.*\b(?:и|затем)\b.*"
     r"\b(?:перечисл|покаж|назов|вывед)\w*\b)",
     re.IGNORECASE,
 )
 _SEMANTIC_FILTER = re.compile(
-    r"(?:\b(?:старше|младше|ровесник|возраст|стаж|должност|роль|отдел|департамент|"
+    r"(?:\b(?:старше|младше|ровесник|возраст|стаж|должност|роль|отдел(?!ьн)|департамент|"
     r"подразделен|город|регион|страна|компан|организац)\w*\b|"
     r"\b(?:работа|состо|вход|занима|руковод|подчин)\w*\s+(?:в|на|у)\b|"
     r"\b(?:с|со)\s+(?:ролью|стажем|именем|фамилией|статусом)\b|"
@@ -219,8 +221,10 @@ _LOCAL_ATTACHMENT_SCOPE = re.compile(
     r"(?:\b(?:на|с)\s+(?:перв\w*|втор\w*|треть\w*|последн\w*)\s+"
     r"(?:страниц|лист)\w*\b|"
     r"\b(?:на|в)\s+(?:страниц|лист|строк|раздел|колонк)\w*\s+"
-    r"(?:\d{1,6}|[A-Za-zА-ЯЁ])\b|"
-    r"\b(?:страниц|лист|строк|раздел|колонк)\w*\s+(?:\d{1,6}|[A-Za-zА-ЯЁ])\b|"
+    r"(?:\d{1,6}|[A-Za-z])\b|"
+    r"\b(?:страниц|лист|строк|раздел|колонк)\w*\s+(?:\d{1,6}|[A-Za-z])\b|"
+    r"\bколонк\w*\s+[А-Яа-яЁё]\b"
+    r"(?=$|[.!?,;:]|\s+(?:(?:этой|данной|всей)\s+)?таблицы\b|\s+(?:в|из|и)\s+)|"
     r"\b(?:перв\w*|втор\w*|треть\w*|отдельн\w*)\s+(?:раздел|лист|страниц)\w*\b|"
     r"\bу\s+[^.!?\n]{1,48}\b(?:должност|роль|позици)\w*\b|"
     r"\bв\s+(?:названи|заголовк)\w*\b)",
@@ -228,8 +232,9 @@ _LOCAL_ATTACHMENT_SCOPE = re.compile(
 )
 _TARGET_FRAGMENT = re.compile(
     r"\b(?:"
-    r"(?:в|из|по)\s+(?:(?:этом|этой|этих|данном|данной|данных)\s+)?"
-    r"(?:файл|документ|таблиц|вложен)\w*|"
+    r"(?:в|во|из|по)\s+(?:(?:этом|этой|этих|данном|данной|данных|"
+    r"вс[её]м|всей|всего|приложенн\w*|прикрепл[её]нн\w*)\s+){0,4}"
+    r"(?:csv-)?(?:файл|документ|таблиц|вложен)\w*|"
     r"(?:этот|эта|это|эти|данный|данная|данное|данные)\s+"
     r"(?:файл|документ|таблиц|вложен)\w*|"
     r"(?:файл|документ|таблиц|вложен)\w*|"
@@ -240,14 +245,14 @@ _TARGET_FRAGMENT = re.compile(
 _CLOSED_COUNT_PEOPLE = re.compile(
     rf"(?:{_COUNT_WORD}\s+(?:всего\s+)?{_PEOPLE_NOUN}"
     rf"(?:\s+(?:указан|назван|перечислен|есть)\w*)?|"
-    rf"как\w*\s+(?:количеств|числ)\w*\s+{_PEOPLE_NOUN}|"
+    rf"как\w*\s+(?:точн\w*\s+)?(?:количеств|числ)\w*\s+{_PEOPLE_NOUN}|"
     rf"{_PEOPLE_NOUN}\s+сколько)",
     re.IGNORECASE,
 )
 _CLOSED_COUNT_RECORDS = re.compile(
     rf"(?:{_COUNT_WORD}\s+(?:всего\s+)?{_RECORD_NOUN}"
     rf"(?:\s+(?:указан|назван|перечислен|есть)\w*)?|"
-    rf"как\w*\s+(?:количеств|числ)\w*\s+{_RECORD_NOUN}|"
+    rf"как\w*\s+(?:точн\w*\s+)?(?:количеств|числ)\w*\s+{_RECORD_NOUN}|"
     rf"{_RECORD_NOUN}\s+сколько)",
     re.IGNORECASE,
 )
@@ -898,9 +903,317 @@ def _clean_question(question: str) -> str:
 
 
 _COUNT_PEOPLE_IMPERATIVE = re.compile(
-    rf"\b(?:посчита|пересчита)\w*.{{0,50}}\b{_PEOPLE_NOUN}\b",
+    rf"\b(?:посчита|пересчита|сосчита)\w*.{{0,50}}\b{_PEOPLE_NOUN}\b",
     re.IGNORECASE,
 )
+
+
+_STRUCTURAL_COUNT_VALUE = re.compile(
+    rf"(?:\b(?:точн\w*|исчерпывающ\w*|полн\w*)\s+"
+    rf"(?:числ\w*|сч[её]т\w*)\s+(?:всех\s+)?{_RECORD_NOUN}\b|"
+    rf"\bcardinality\s+{_RECORD_NOUN}\b|"
+    r"\bмощност\w*\s+(?:полн\w*\s+)?табличн\w*\s+набор\w*\b|"
+    r"\b(?:фактическ\w*|точн\w*)\s+размер\w*\s+"
+    r"(?:набор\w*|множеств\w*)\s+строк\w*\b|"
+    r"\b(?:row_count|total_rows_minus_header)\b)",
+    re.IGNORECASE,
+)
+_STRUCTURAL_COUNT_REQUEST = re.compile(
+    r"(?:^|[.!?;:]\s*)(?:"
+    r"(?:каков|какова|каково|каковы|какой|какое|какая)\b|"
+    r"(?:нужен|нужно|нужна)\b|"
+    r"ответ\s+должен\s+быть\b|"
+    r"(?:дай|дайте|верни|верните|сообщи|сообщите|укажи|укажите|"
+    r"выведи|выведите|вычисли|вычислите|найди|найдите|закрой|закройте)\b)",
+    re.IGNORECASE,
+)
+
+
+def _structural_count_requested(text: str) -> bool:
+    """Preserve structure and admit the arbiter, never choose a count kind.
+
+    A nominal cardinality request can miss the verb-based count grammar. It
+    still needs an explicit attachment target and request act. The existing
+    scope guard must reject filtered or compound requests before consulting
+    the arbiter; this predicate cannot turn those into an exact total.
+    """
+
+    return bool(
+        _STRUCTURAL_COUNT_REQUEST.search(text)
+        and (_EXPLICIT_ATTACHMENT_TARGET.search(text) or re.search(r"\bcsv\b", text))
+        and (_STRUCTURAL_COUNT_VALUE.search(text) or _COUNT_RECORDS.search(text))
+    )
+
+
+_OFFICE_CLOSED_WHOLE_TARGET = (
+    r"(?:(?:в|во|из|для)\s+)?"
+    r"(?:(?:всего|всей|эт\w*|данн\w*|синтетическ\w*|"
+    r"прикрепл[её]нн\w*|приложенн\w*|переданн\w*)\s+){0,4}"
+    r"(?:csv(?:-(?:документ|ведомост)\w*)?|файл\w*|документ\w*|"
+    r"таблиц\w*|ведомост\w*|вложени\w*)"
+)
+_OFFICE_CLOSED_WHOLE_TAIL = (
+    r"(?:\s*,?\s*(?:целиком|"
+    r"а\s+не\s+оценк\w*\s+по\s+предпросмотр\w*|"
+    r"без\s+включени\w*\s+назван\w*\s+столбц\w*|"
+    r"согласно\s+детерминированн\w*\s+разбор\w*\s+файл\w*|"
+    r"после\s+удалени\w*\s+единственн\w*\s+заголовк\w*|"
+    r"без\s+семплирован\w*))*"
+)
+
+_OFFICE_COMPOSITIONAL_WHOLE_TARGET = (
+    r"(?:(?:в|во|из|для)\s+)?"
+    r"(?:(?:вс\w*|цел\w*|эт\w*|данн\w*|тестов\w*|табличн\w*|синтетическ\w*|"
+    r"прикрепл[её]нн\w*|приложенн\w*|переданн\w*)\s+){0,6}"
+    r"(?:csv(?:-(?:документ|ведомост|таблиц)\w*)?|файл\w*|документ\w*|"
+    r"таблиц\w*|ведомост\w*|вложени\w*|набор\w*|реестр\w*)"
+    r"(?:\s+csv)?(?:\s+этого\s+сообщения)?"
+)
+_OFFICE_COMPOSITIONAL_WHOLE_TAIL = (
+    r"(?:\s*,?\s*(?:целиком|"
+    r"а\s+не\s+оценк\w*\s+по\s+предпросмотр\w*|"
+    r"без\s+включени\w*\s+назван\w*\s+столбц\w*|"
+    r"согласно\s+детерминированн\w*\s+разбор\w*\s+файл\w*|"
+    r"после\s+удалени\w*\s+единственн\w*\s+заголовк\w*|"
+    r"не\s+считая\s+(?:header|заголовк\w*)|"
+    r"после\s+(?:перв\w*\s+строк\w*|строк\w*\s+заголовк\w*|шапк\w*)|"
+    r"под\s+шапк\w*|без\s+заголовк\w*|"
+    r"исключив\s+(?:её\s+)?заголовок|"
+    r"не\s+принимая\s+заголовок\s+за\s+отдельн\w*\s+запис\w*|"
+    r"на\s+основании\s+структур\w*\s+файл\w*|"
+    r"полностью\s+и\s+верни\s+только\s+точн\w*\s+итог\w*|"
+    r"без\s+семплирован\w*))*"
+)
+
+# These pieces form one closed whole-record count speech act.  Method prefixes
+# themselves bind the certified source; the other families still require an
+# explicit source target.  No component consumes arbitrary prose, so a filter,
+# quoted command, or second effect remains unmatched residue.
+_OFFICE_CLOSED_RECORD_TERM = (
+    rf"(?:{_RECORD_NOUN}(?:\s+(?:с\s+)?данн\w*)?|"
+    r"тел\w*\s+запис\w*|data\s+rows|строк\w*\s*-\s*объект\w*|"
+    r"элемент\w*\s+массив\w*\s+строк\w*)"
+)
+_OFFICE_CLOSED_HEADER_SCOPE = (
+    r"(?:не\s+считая\s+(?:header|заголовк\w*)|"
+    r"после\s+(?:перв\w*\s+строк\w*|строк\w*\s+заголовк\w*|шапк\w*)|"
+    r"под\s+шапк\w*)"
+)
+_OFFICE_CLOSED_RECORD_RELATION = (
+    r"(?:\s*,?\s*(?:реальн\w*\s+)?"
+    r"(?:наход|перечисл|вид|содерж|присутств|подтвержд|следу)\w*"
+    r"(?:\s+парсер\w*)?|\s+нужно\s+учитывать)?"
+)
+_OFFICE_CLOSED_SOURCE_METHOD_PREFIX = (
+    r"(?:прочита\w*\s+структурн\w*\s+аттестаци\w*\s+вложени\w*|"
+    r"проверь\s+(?:границ\w*\s+таблиц\w*|структур\w*\s+csv)|"
+    r"опираясь\s+на\s+структур\w*\s+вложени\w*|"
+    r"просканируй\s+документ\w*\s+до\s+eof)\s*(?:и|,)\s*"
+)
+_OFFICE_CLOSED_PROCEDURE_PREFIX = r"(?:не\s+проси\s+следующ\w*\s+вопрос\s*:\s*сразу\s+)?"
+_OFFICE_CLOSED_COUNT_COMMAND = (
+    rf"(?:"
+    rf"(?:назов|сообщ|дай|дайте|верни|верните|вывед|вычисл|определ)\w*\s+"
+    rf"(?:"
+    rf"(?:точн\w*|полн\w*|исчерпывающ\w*)\s+"
+    rf"(?:числ\w*|количеств\w*|сч[её]т\w*)\s+(?:всех\s+)?{_OFFICE_CLOSED_RECORD_TERM}|"
+    rf"(?:числ\w*|количеств\w*|cardinality)\s+{_OFFICE_CLOSED_RECORD_TERM}|"
+    rf"точн\w*\s+итог\w*\s+по\s+количеств\w*\s+{_OFFICE_CLOSED_RECORD_TERM}"
+    rf")|"
+    rf"(?:посчита|пересчита|сосчита)\w*\s+(?:"
+    rf"(?:вс(?:е|ех)\s+)?{_OFFICE_CLOSED_RECORD_TERM}|"
+    rf"(?:точн\w*|полн\w*)\s+(?:числ\w*|количеств\w*)\s+"
+    rf"{_OFFICE_CLOSED_RECORD_TERM})"
+    rf")"
+)
+_OFFICE_CLOSED_INTERROGATIVE_COUNT = (
+    rf"(?:"
+    rf"сколько\s+(?:всего\s+|полн\w*\s+)?{_OFFICE_CLOSED_RECORD_TERM}|"
+    rf"(?:каков|какова|каково|каковы|какой|какое|какая)\s+(?:"
+    rf"(?:(?:полн\w*|точн\w*)\s+)*"
+    rf"(?:количеств\w*|числ\w*)\s+{_OFFICE_CLOSED_RECORD_TERM}|"
+    rf"точн\w*\s+размер\w*\s+списк\w*\s+строк\w*)"
+    rf")"
+)
+_OFFICE_COMPOSITIONAL_WHOLE_COUNT_GRAMMARS = tuple(
+    re.compile(pattern, re.IGNORECASE)
+    for pattern in (
+        rf"{_OFFICE_CLOSED_SOURCE_METHOD_PREFIX}{_OFFICE_CLOSED_COUNT_COMMAND}"
+        rf"{_OFFICE_CLOSED_RECORD_RELATION}(?:\s+{_OFFICE_CLOSED_HEADER_SCOPE})?"
+        rf"(?:\s+{_OFFICE_COMPOSITIONAL_WHOLE_TARGET})?"
+        rf"{_OFFICE_COMPOSITIONAL_WHOLE_TAIL}",
+        rf"{_OFFICE_CLOSED_PROCEDURE_PREFIX}(?:{_OFFICE_CLOSED_COUNT_COMMAND}|"
+        rf"{_OFFICE_CLOSED_INTERROGATIVE_COUNT}){_OFFICE_CLOSED_RECORD_RELATION}"
+        rf"(?:\s+{_OFFICE_CLOSED_HEADER_SCOPE})?\s+{_OFFICE_COMPOSITIONAL_WHOLE_TARGET}"
+        rf"{_OFFICE_COMPOSITIONAL_WHOLE_TAIL}",
+    )
+)
+_OFFICE_CLOSED_ARBITER_GRAMMARS = tuple(
+    re.compile(pattern, re.IGNORECASE)
+    for pattern in (
+        rf"(?:посчита|пересчита|сосчита)\w*\s+(?:вс(?:е|ех)\s+)?"
+        rf"(?:{_PEOPLE_NOUN}|{_RECORD_NOUN})(?:\s+{_OFFICE_CLOSED_WHOLE_TARGET})?"
+        rf"{_OFFICE_CLOSED_WHOLE_TAIL}",
+        rf"(?:назов|покаж|перечисл|вывед)\w*\s+(?:вс\w*|кажд\w*)\s+"
+        rf"(?:{_PEOPLE_NOUN}|{_RECORD_NOUN})(?:\s+{_OFFICE_CLOSED_WHOLE_TARGET})?"
+        rf"{_OFFICE_CLOSED_WHOLE_TAIL}",
+        rf"(?:дай|дайте|верни|верните)\s+точн\w*\s+(?:"
+        rf"сч[её]т\w*\s+(?:всех\s+)?{_RECORD_NOUN}|"
+        rf"размер\w*\s+(?:набор\w*|множеств\w*)\s+{_RECORD_NOUN})\s+"
+        rf"{_OFFICE_CLOSED_WHOLE_TARGET}{_OFFICE_CLOSED_WHOLE_TAIL}",
+        rf"ответ\s+должен\s+быть\s+точн\w*\s+числ\w*\s+{_RECORD_NOUN}\s+"
+        rf"{_OFFICE_CLOSED_WHOLE_TARGET}{_OFFICE_CLOSED_WHOLE_TAIL}",
+        rf"(?:нужен|нужно|нужна)\s+исчерпывающ\w*\s+сч[её]т\w*\s+"
+        rf"{_RECORD_NOUN}\s+{_OFFICE_CLOSED_WHOLE_TARGET}{_OFFICE_CLOSED_WHOLE_TAIL}",
+        rf"(?:каков|какова|каково|каковы|какой|какое|какая)\s+"
+        rf"мощност\w*\s+"
+        rf"(?:полн\w*\s+)?табличн\w*\s+набор\w*"
+        rf"(?:\s+{_OFFICE_CLOSED_WHOLE_TARGET})?{_OFFICE_CLOSED_WHOLE_TAIL}",
+        rf"(?:каков|какова|каково|каковы|какой|какое|какая)\s+"
+        rf"(?:детерминированн\w*\s+)?(?:row_count|total_rows_minus_header)"
+        rf"(?:\s+имеет\s+цел\w*\s+csv|\s+{_OFFICE_CLOSED_WHOLE_TARGET})?"
+        rf"{_OFFICE_CLOSED_WHOLE_TAIL}",
+        rf"(?:дай|дайте|верни|верните|сообщи|сообщите|укажи|укажите|"
+        rf"выведи|выведите|вычисли|вычислите|найди|найдите|"
+        rf"закрой|закройте)\s+"
+        rf"(?:детерминированн\w*\s+)?(?:row_count|total_rows_minus_header|cardinality)"
+        rf"(?:\s+{_RECORD_NOUN})?\s+{_OFFICE_CLOSED_WHOLE_TARGET}"
+        rf"{_OFFICE_CLOSED_WHOLE_TAIL}",
+        rf"(?:найди|найдите)\s+фактическ\w*\s+размер\w*\s+набор\w*\s+"
+        rf"строк\w*\s+{_OFFICE_CLOSED_WHOLE_TARGET}{_OFFICE_CLOSED_WHOLE_TAIL}",
+        rf"(?:укажи|укажите)\s+cardinality\s+{_RECORD_NOUN}\s+"
+        rf"{_OFFICE_CLOSED_WHOLE_TARGET}{_OFFICE_CLOSED_WHOLE_TAIL}",
+        rf"(?:вычисли|вычислите)\s+мощност\w*\s+(?:полн\w*\s+)?"
+        rf"табличн\w*\s+набор\w*(?:\s+{_OFFICE_CLOSED_WHOLE_TARGET})?"
+        rf"{_OFFICE_CLOSED_WHOLE_TAIL}",
+        rf"(?:закрой|закройте)\s+табличн\w*\s+проход\w*\s+точн\w*\s+"
+        rf"сч[её]тчик\w*\s+всех\s+{_RECORD_NOUN}\s+"
+        rf"{_OFFICE_CLOSED_WHOLE_TARGET}{_OFFICE_CLOSED_WHOLE_TAIL}",
+        r"(?:полн\w*\s+состав\w*\s+команд\w*|"
+        r"вывед\w*\s+весь\s+переч\w*|распиш\w*\s+поим[её]нно\s+кто\s+там)",
+    )
+)
+_OFFICE_CORRELATION_SUFFIX = re.compile(
+    r"(?:[.!?]\s*)?(?:Контроль|Проверка)\s+"
+    r"[A-Z0-9]{2,24}(?:-[A-Z0-9]{1,24}){1,8}[.!?]*\s*$"
+)
+
+
+_OFFICE_SCHEMA_TARGET = (
+    r"(?:(?:эт|данн|приложенн|прикрепл[её]нн|загруженн|переданн)\w*\s+)?"
+    r"(?:таблиц\w*|csv|xlsx?)"
+)
+_OFFICE_PARSE_SUMMARY = re.compile(
+    r"(?:(?:не\s+используй\s+число\s+из\s+текста\s+вопроса)\s*;\s*)?"
+    r"(?:покажи|покажите|выведи|выведите|сообщи|сообщите|верни|верните|извлеки|извлеките)\s+"
+    r"(?:только\s+)?(?:подтвержд[её]нн\w*\s+)?(?:"
+    r"(?:итог|результат)\s+разбора\s+" + _OFFICE_SCHEMA_TARGET + r"|"
+    r"структуру\s+" + _OFFICE_SCHEMA_TARGET + r"|"
+    r"(?:итог|результат)\s+из\s+(?:csv|xlsx?)[-\s]+структур\w*)"
+    r"(?:\s*,\s*без\s+приблизительн\w*\s+слов)?",
+    re.IGNORECASE,
+)
+_OFFICE_FIELD_LITERAL = r'(?:«[^»\n]{1,80}»|"[^"\n]{1,80}"|[A-Za-zА-Яа-яЁё][\w-]{0,79})'
+_OFFICE_NONEMPTY_FIELD_COUNT = re.compile(
+    r"(?:(?:сообщи|сообщите|покажи|покажите|назови|назовите)\s+количество\s+(?:записей|строк)|"
+    r"(?:посчитай|посчитайте)\s+(?:записи|строки))\s*,?\s+"
+    r"для\s+которых\s+в\s+" + _OFFICE_SCHEMA_TARGET + r"\s+"
+    r"(?:есть\s+значения|заполнены\s+поля)\s+"
+    r"(?P<fields>" + _OFFICE_FIELD_LITERAL + r"(?:\s*(?:,|\bи\b)\s*" + _OFFICE_FIELD_LITERAL + r"){0,15})",
+    re.IGNORECASE,
+)
+
+
+_OFFICE_ID_FIELD_COUNT = re.compile(
+    r"(?:верни|верните|сообщи|сообщите|назови|назовите|выведи|выведите)\s+"
+    r"(?:число|количество)\s+(?:строк|записей)\s+с\s+(?P<field>" + _OFFICE_FIELD_LITERAL + r")"
+    r"(?:\s*,\s*(?:исключив|не\s+считая)\s+строку\s+схемы\s+(?P<schema>"
+    + _OFFICE_FIELD_LITERAL
+    + r"(?:\s*,\s*"
+    + _OFFICE_FIELD_LITERAL
+    + r"){0,15}))?",
+    re.IGNORECASE,
+)
+_OFFICE_DISTINCT_FIELD_COUNT = re.compile(
+    r"сколько\s+(?:разных|уникальных)\s+(?P<field>" + _OFFICE_FIELD_LITERAL + r")\s+"
+    r"(?:физически\s+)?(?:(?:присутствует|содержится)\s+)?в\s+(?:строках\s+)?"
+    r"(?:(?:текущ|эт|данн|синтетическ|приложенн|прикрепл[её]нн)\w*\s+){0,4}"
+    r"(?:файл\w*|документ\w*|csv|таблиц\w*)",
+    re.IGNORECASE,
+)
+_OFFICE_NONEMPTY_RECORD_COUNT = re.compile(
+    r"(?:сверь\s+конец\s+файла\s+и\s+)?"
+    r"(?:назови|назовите|сообщи|сообщите|верни|верните|выведи|выведите)\s+"
+    r"(?:точное\s+)?(?:количество|число)\s+непустых\s+(?:записей|строк)(?:\s+данных)?"
+    r"(?:\s+" + _OFFICE_CLOSED_WHOLE_TARGET + r")?",
+    re.IGNORECASE,
+)
+
+
+@dataclass(frozen=True)
+class _OfficeStructuralRequest:
+    kind: str
+    fields: tuple[str, ...] = ()
+    required_schema: tuple[str, ...] = ()
+
+
+def _office_field_literals(value: str) -> tuple[str, ...]:
+    fields = tuple(
+        field[1:-1] if field[:1] in {'"', "«"} else field
+        for field in re.findall(_OFFICE_FIELD_LITERAL, value)
+        if field.casefold() != "и"
+    )
+    return fields if fields and len(fields) == len({_normalised_literal(f) for f in fields}) else ()
+
+
+def _office_structural_request(question: str) -> _OfficeStructuralRequest | None:
+    """Complete structural speech acts, never a model-selected predicate."""
+
+    raw = _OFFICE_CORRELATION_SUFFIX.sub("", str(question or ""), count=1)
+    if _OFFICE_PARSE_SUMMARY.fullmatch(_clean_question(file_authority_speech(raw))):
+        return _OfficeStructuralRequest("structure_summary")
+    surface = raw.strip().rstrip(".!?").strip()
+    if _OFFICE_NONEMPTY_RECORD_COUNT.fullmatch(surface):
+        return _OfficeStructuralRequest("count_nonempty_records")
+    matched = _OFFICE_DISTINCT_FIELD_COUNT.fullmatch(surface)
+    if matched is not None:
+        fields = _office_field_literals(matched["field"])
+        return _OfficeStructuralRequest("count_distinct_field", fields) if fields else None
+    matched = _OFFICE_ID_FIELD_COUNT.fullmatch(surface)
+    if matched is not None:
+        fields = _office_field_literals(matched["field"])
+        schema = _office_field_literals(matched["schema"]) if matched["schema"] else ()
+        if not fields or (matched["schema"] and not schema):
+            return None
+        return _OfficeStructuralRequest("count_nonempty_fields", fields, schema)
+    # The only quotes allowed by this complete grammar are field literals.
+    # Quoting the whole command or adding another action cannot match it.
+    matched = _OFFICE_NONEMPTY_FIELD_COUNT.fullmatch(raw.strip().rstrip(".!?").strip())
+    if matched is None:
+        return None
+    fields = _office_field_literals(matched.group("fields"))
+    return _OfficeStructuralRequest("count_nonempty_fields", fields) if fields else None
+
+
+def _closed_whole_office_arbiter_request(question: str) -> bool:
+    """Prove the complete unquoted speech belongs to one whole-table request."""
+
+    speech = file_authority_speech(question)
+    speech = _OFFICE_CORRELATION_SUFFIX.sub("", speech, count=1)
+    text = _clean_question(speech)
+    return bool(text) and any(
+        pattern.fullmatch(text) is not None
+        for pattern in (
+            *_OFFICE_CLOSED_ARBITER_GRAMMARS,
+            *_OFFICE_COMPOSITIONAL_WHOLE_COUNT_GRAMMARS,
+        )
+    )
+
+
+def _whole_office_scope_allowed(question: str) -> bool:
+    """Only closed code grammar may authorize an arbiter or its selected kind."""
+
+    return bool(office_request_kind(question) or _closed_whole_office_arbiter_request(question))
 
 
 def _office_action_present(text: str) -> bool:
@@ -918,12 +1231,15 @@ def _office_action_present(text: str) -> bool:
         or _LIST_PEOPLE.search(cleaned)
         or _LIST_RECORDS.search(cleaned)
         or _RECHECK_WHOLE_FILE.search(cleaned)
+        or _structural_count_requested(cleaned)
     )
 
 
 def _office_unquoted_candidate(question: str) -> bool:
     """Positive unquoted Office target or action. kind_override cannot create this."""
 
+    if _office_structural_request(question) is not None:
+        return True
     if quoted_office_command_is_data(question):
         return False
     speech = file_authority_speech(question)
@@ -1037,7 +1353,7 @@ def _closed_office_request_kind(question: str) -> str:
     # exact count.  Any other conjunction or trailing operation remains residue
     # and therefore cannot be swallowed by this parser.
     pair = re.fullmatch(
-        r"(.+?)\s+(?:и|затем)\s+(?:посчита|пересчита)\w*(?:\s+их)?",
+        r"(.+?)\s+(?:и|затем)\s+(?:посчита|пересчита|сосчита)\w*(?:\s+их)?",
         remainder,
     )
     if pair:
@@ -1133,9 +1449,15 @@ def office_exact_request_detected(question: str) -> bool:
         return False
     if "?" not in text and _DECLARATIVE_ATTACHMENT_PROSE.search(text):
         return False
-    if office_request_kind(text):
+    if office_request_kind(question):
+        return True
+    if _closed_whole_office_arbiter_request(question):
         return True
     return bool(
+        not _NON_TABULAR_ROW_SCOPE.search(text)
+        and not _LOCAL_ATTACHMENT_SCOPE.search(text)
+        and _structural_count_requested(text)
+    ) or bool(
         not _NON_TABULAR_ROW_SCOPE.search(text)
         and not _LOCAL_ATTACHMENT_SCOPE.search(text)
         and office_attachment_targeted(text)
@@ -1156,6 +1478,9 @@ def office_exact_request_detected(question: str) -> bool:
 def office_request_kind(question: str) -> str:
     """Closed whole-file intent used only when an Office attachment is active."""
 
+    structural = _office_structural_request(question)
+    if structural is not None:
+        return structural.kind
     text = _office_intent_text(question)
     if not text:
         return ""
@@ -1165,6 +1490,13 @@ def office_request_kind(question: str) -> str:
         or _SEMANTIC_FILTER.search(text)
     ):
         return ""
+    # The complete speech grammar already proves one whole-table request.
+    # Nominal record counts (including cardinality/row_count) therefore need
+    # no model-selected enum; the exact record set remains the sole authority.
+    # The positive count predicate alone cannot authorize filtered or compound
+    # requests: all earlier scope checks and the full-speech proof still apply.
+    if _structural_count_requested(text) and _closed_whole_office_arbiter_request(question):
+        return "count_records"
     return _closed_office_request_kind(_without_filename_navigation_prefix(text))
 
 
@@ -1329,12 +1661,12 @@ OFFICE_INTENT_ARBITER_SYSTEM = (
 
 _OFFICE_ARBITER_EXHAUSTIVE_REQUEST = re.compile(
     rf"(?:"
-    rf"\b(?:посчита|пересчита|перечисл|покаж|назов|вывед|распиш)\w*\b"
+    rf"\b(?:посчита|пересчита|сосчита|перечисл|покаж|назов|вывед|распиш)\w*\b"
     rf"[^.!?\n]{{0,80}}\b(?:вс[еёхяю]*|полн\w*|спис\w*|переч\w*|состав\w*|"
     rf"{_PEOPLE_NOUN}|{_RECORD_NOUN})\b|"
     rf"\b(?:вс[еёхяю]*|полн\w*|спис\w*|переч\w*|состав\w*|"
     rf"{_PEOPLE_NOUN}|{_RECORD_NOUN})\b[^.!?\n]{{0,80}}"
-    rf"\b(?:посчита|пересчита|перечисл|покаж|назов|вывед|распиш)\w*\b"
+    rf"\b(?:посчита|пересчита|сосчита|перечисл|покаж|назов|вывед|распиш)\w*\b"
     rf")",
     re.IGNORECASE,
 )
@@ -1364,18 +1696,11 @@ def office_arbiter_applies(question: str, attachments: list[dict[str, Any]] | No
     каждом ходе с любым файлом.
     """
     text = _office_intent_text(question)
-    if not text or office_request_kind(question):
+    if not text or office_request_kind(question) or not _closed_whole_office_arbiter_request(question):
         return False
-    # This classifier exists only for whole-table count/list wording which the
-    # closed parser does not yet recognise.  Merely pointing at an Office file
-    # is not enough: production sent ordinary questions such as “о чём речь в
-    # этом файле?” through this optional model call before the actual review.
-    # The wasted classifier took 30–60 seconds and, after a timed-out upload
-    # preview, compounded the remote GPU queue.  Require an explicit exhaustive
-    # count/list speech act; every normal summary, critique, lookup and review
-    # proceeds directly to the file answer.
-    if not (_office_action_present(text) or _OFFICE_ARBITER_EXHAUSTIVE_REQUEST.search(text)):
-        return False
+    # The classifier sees only a complete code-owned whole-table speech act.
+    # Arbitrary residue cannot ask a model to authorize a different set or a
+    # second effect, even if the model returns a valid enum.
     active_items = [item for item in attachments or [] if isinstance(item, Mapping)]
     office_items = [item for item in active_items if looks_like_office_attachment(item)]
     if len(active_items) != 1 or len(office_items) != 1:
@@ -1384,6 +1709,102 @@ def office_arbiter_applies(question: str, attachments: list[dict[str, Any]] | No
     if not isinstance(view, Mapping):
         return False
     return view.get("index_complete") is True and view.get("prompt_complete") is True
+
+
+def _office_structural_answer(
+    request: _OfficeStructuralRequest,
+    record_sets: list[Mapping[str, Any]],
+    rows: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Read header-bound cells only after the complete-view proof."""
+
+    kind, requested_fields = request.kind, request.fields
+    canonical_fields = tuple(_normalised_literal(field) for field in requested_fields)
+    required_schema = tuple(_normalised_literal(field) for field in request.required_schema)
+    labels: tuple[str, ...] | None = None
+    records_total = 0
+    matching_total = 0
+    distinct_values: set[str] = set()
+    for record_set in record_sets:
+        header = rows.get(str(record_set.get("header_row_id") or ""))
+        if not isinstance(header, Mapping) or header.get("role") != "header":
+            return _unavailable_exact_answer()
+        cells = header.get("cells")
+        if not isinstance(cells, list) or not cells:
+            return _unavailable_exact_answer()
+        columns: dict[str, int] = {}
+        for cell in cells:
+            if not isinstance(cell, Mapping):
+                return _unavailable_exact_answer()
+            label = _display(cell.get("value"))
+            normalised = _normalised_literal(label)
+            column = cell.get("column")
+            if not normalised or normalised in columns or type(column) is not int or column <= 0:
+                return _unavailable_exact_answer()
+            columns[normalised] = column
+        if len(set(columns.values())) != len(columns):
+            return _unavailable_exact_answer()
+        if any(field not in columns for field in canonical_fields):
+            return _unavailable_exact_answer()
+        if required_schema and tuple(columns) != required_schema:
+            return _unavailable_exact_answer()
+        current_labels = tuple(_display(cell.get("value")) for cell in cells)
+        if labels is not None and current_labels != labels:
+            return _unavailable_exact_answer()
+        labels = current_labels
+        for record_id in record_set.get("record_ids") or []:
+            row = rows.get(str(record_id))
+            row_cells = row.get("cells") if isinstance(row, Mapping) else None
+            if not isinstance(row_cells, list):
+                return _unavailable_exact_answer()
+            by_column: dict[int, Any] = {}
+            for cell in row_cells:
+                if not isinstance(cell, Mapping):
+                    return _unavailable_exact_answer()
+                column = cell.get("column")
+                if type(column) is not int or column <= 0 or column in by_column:
+                    return _unavailable_exact_answer()
+                value = cell.get("value")
+                if not isinstance(value, str):
+                    return _unavailable_exact_answer()
+                by_column[column] = value
+            if set(by_column) != set(columns.values()):
+                return _unavailable_exact_answer()
+            records_total += 1
+            if kind == "count_distinct_field":
+                # Header names are normalised; distinct IDs remain literal and
+                # case-sensitive. Only empty/whitespace-only cells are excluded.
+                value = by_column[columns[canonical_fields[0]]]
+                if _display(value):
+                    distinct_values.add(value)
+            elif kind == "count_nonempty_records":
+                matching_total += any(_display(value) for value in by_column.values())
+            elif all(_display(by_column[columns[field]]) for field in canonical_fields):
+                matching_total += 1
+    if labels is None:
+        return _unavailable_exact_answer()
+    if kind == "structure_summary":
+        content = (
+            f"Разбор подтверждён: таблиц — {len(record_sets)}, строк данных — {records_total}, "
+            f"столбцов — {len(labels)}. Поля: "
+            + ", ".join(json.dumps(label, ensure_ascii=False) for label in labels)
+            + "."
+        )
+    elif kind == "count_distinct_field":
+        content = (
+            f"В документе {len(distinct_values)} различных значений поля "
+            + json.dumps(requested_fields[0], ensure_ascii=False)
+            + "."
+        )
+    elif kind == "count_nonempty_records":
+        content = f"В документе {matching_total} непустых записей данных."
+    else:
+        content = (
+            f"В документе {matching_total} позиций с заполненными полями: "
+            + ", ".join(json.dumps(field, ensure_ascii=False) for field in requested_fields)
+            + "."
+        )
+    return {"content": content, "status": "passed", "kind": kind}
 
 
 def code_owned_office_answer(
@@ -1400,9 +1821,14 @@ def code_owned_office_answer(
     определяется структурой, а не моделью.
     """
 
-    if not _office_unquoted_candidate(question):
+    if not _office_unquoted_candidate(question) or not _whole_office_scope_allowed(question):
         return None
-    kind = kind_override if kind_override in OFFICE_INTENT_KINDS else office_request_kind(question)
+    closed_kind = office_request_kind(question)
+    # A deterministic grammar already owns its kind. The arbiter enum is
+    # accepted only for the separate closed full-speech arbiter grammar.
+    kind = closed_kind
+    if not kind and _closed_whole_office_arbiter_request(question):
+        kind = kind_override if kind_override in OFFICE_INTENT_KINDS else ""
     if not kind:
         return None
     active_items = [item for item in attachments or [] if isinstance(item, Mapping)]
@@ -1433,6 +1859,9 @@ def code_owned_office_answer(
     record_sets = details["sets"]
     if not _closed_world_record_sets(view, record_sets):
         return _unavailable_exact_answer()
+    structural = _office_structural_request(question)
+    if structural is not None:
+        return _office_structural_answer(structural, record_sets, rows)
     people_requested = kind in {"count_people", "list_people"}
     if kind in {"recheck", "count_auto"}:
         people_requested = any(record_set.get("person_column") is not None for record_set in record_sets)

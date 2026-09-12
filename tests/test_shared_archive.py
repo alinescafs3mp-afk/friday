@@ -145,18 +145,237 @@ def test_the_correspondence_stays_private(shared):
 
 def test_without_the_setting_isolation_is_intact(settings):
     """Контроль: умолчание не изменилось — арендаторы по-прежнему разделены."""
+    import hashlib
+    import json
+
+    from friday.storage.models import KnowledgeObject, RawObject, new_id
+
     app = create_app(settings)
     with TestClient(app) as client:
         owner = {"Authorization": f"Bearer {settings.api_token}"}
         kolya = _person(client, owner, "kolya")
         vasya = _person(client, owner, "vasya")
-        client.post(
-            "/api/knowledge",
-            json={"title": "Только для Коли", "content": "секрет"},
-            headers=kolya,
+        kolya_token = kolya["Authorization"].split(" ", 1)[1]
+        vasya_token = vasya["Authorization"].split(" ", 1)[1]
+        storage = app.state.storage
+
+        def _seed(
+            user_id: str, *, title: str, content: str, tag: str, document_date: str, source_text: str
+        ) -> dict:
+            raw = RawObject(
+                id=new_id("raw"),
+                user_id=user_id,
+                source="upload",
+                source_ref=new_id("src"),
+                raw_content=source_text,
+                content_type="text",
+                content_hash=hashlib.sha256(f"{user_id}:{source_text}".encode()).hexdigest(),
+            )
+            storage.store_raw_object(raw)
+            knowledge = KnowledgeObject(
+                id=new_id("ko"),
+                user_id=user_id,
+                raw_object_id=raw.id,
+                content=content,
+                content_type="text",
+                title=title,
+                tags_json=[tag],
+                metadata_json={"document_date": document_date},
+            )
+            storage.store_knowledge_object(knowledge)
+            return {
+                "raw_id": raw.id,
+                "ko_id": knowledge.id,
+                "title": title,
+                "content": content,
+                "tag": tag,
+                "document_date": document_date,
+                "source_text": source_text,
+            }
+
+        shared_phrase = "sharedquarryphrase"
+        date_since = "2024-01-01"
+        date_until = "2024-02-28"
+        kolya_seed = _seed(
+            "kolya",
+            title="Только для Коли",
+            content="секрет Коли",
+            tag="kolya-ledger",
+            document_date="2024-01-15",
+            source_text=f"{shared_phrase} kolyakeptsourceword личный источник Коли",
         )
-        listing = client.get("/api/knowledge?limit=10", headers=vasya).json()
-        assert [item for item in listing["items"] if item["title"] == "Только для Коли"] == []
+        vasya_seed = _seed(
+            "vasya",
+            title="Только для Васи",
+            content="секрет Васи",
+            tag="vasya-ledger",
+            document_date="2024-02-20",
+            source_text=f"{shared_phrase} vasyakeptsourceword личный источник Васи",
+        )
+        kolya_seed["excerpt_marker"] = "kolyakeptsourceword"
+        vasya_seed["excerpt_marker"] = "vasyakeptsourceword"
+
+        def _knowledge_row(knowledge_id: str) -> dict:
+            row = storage.execute(
+                "SELECT id, user_id, raw_object_id, content, content_type, title, summary, "
+                "tags_json, metadata_json, knowledge_kind, lifecycle_stage, version, "
+                "superseded_by_id, deleted_at FROM knowledge_objects WHERE id=?",
+                (knowledge_id,),
+            ).fetchone()
+            assert row is not None
+            return dict(row)
+
+        def _raw_row(raw_id: str) -> dict:
+            row = storage.execute(
+                "SELECT id, user_id, source, source_ref, raw_content, content_type, "
+                "metadata_json, content_hash, version, deleted_at FROM raw_objects WHERE id=?",
+                (raw_id,),
+            ).fetchone()
+            assert row is not None
+            return dict(row)
+
+        def _seed_snapshot() -> dict:
+            return {
+                "knowledge": {
+                    kolya_seed["ko_id"]: _knowledge_row(kolya_seed["ko_id"]),
+                    vasya_seed["ko_id"]: _knowledge_row(vasya_seed["ko_id"]),
+                },
+                "raw": {
+                    kolya_seed["raw_id"]: _raw_row(kolya_seed["raw_id"]),
+                    vasya_seed["raw_id"]: _raw_row(vasya_seed["raw_id"]),
+                },
+            }
+
+        before = _seed_snapshot()
+        assert before["knowledge"][kolya_seed["ko_id"]]["content"] == kolya_seed["content"]
+        assert before["knowledge"][kolya_seed["ko_id"]]["title"] == kolya_seed["title"]
+        assert before["knowledge"][kolya_seed["ko_id"]]["deleted_at"] is None
+        assert before["knowledge"][kolya_seed["ko_id"]]["lifecycle_stage"] == "active"
+        assert json.loads(before["knowledge"][kolya_seed["ko_id"]]["tags_json"]) == [kolya_seed["tag"]]
+        assert before["raw"][kolya_seed["raw_id"]]["raw_content"] == kolya_seed["source_text"]
+        assert before["raw"][vasya_seed["raw_id"]]["raw_content"] == vasya_seed["source_text"]
+
+        def _own_surfaces(headers: dict[str, str], seed: dict, other: dict) -> list[str]:
+            listing = client.get("/api/knowledge", params={"limit": 10}, headers=headers)
+            assert listing.status_code == 200, listing.text
+            listed = listing.json()
+            assert listed["count"] == 1
+            assert [item["id"] for item in listed["items"]] == [seed["ko_id"]]
+            own_item = listed["items"][0]
+            assert own_item["title"] == seed["title"]
+            assert json.loads(own_item["tags_json"]) == [seed["tag"]]
+            assert other["ko_id"] not in {item["id"] for item in listed["items"]}
+            assert other["title"] not in listing.text
+            assert other["content"] not in listing.text
+            assert other["source_text"] not in listing.text
+            assert other["excerpt_marker"] not in listing.text
+
+            tags = client.get("/api/knowledge/tags", headers=headers)
+            assert tags.status_code == 200, tags.text
+            tagged = tags.json()
+            assert tagged["count"] == 1
+            assert tagged["total"] == 1
+            assert tagged["items"] == [{"tag": seed["tag"], "count": 1}]
+            assert other["tag"] not in tags.text
+
+            sources = client.get("/api/knowledge/sources", params={"q": shared_phrase}, headers=headers)
+            assert sources.status_code == 200, sources.text
+            sourced = sources.json()
+            assert sourced["query"] == shared_phrase
+            assert sourced["count"] == 1
+            assert [item["id"] for item in sourced["items"]] == [seed["raw_id"]]
+            excerpt = str(sourced["items"][0].get("excerpt") or "")
+            assert shared_phrase in excerpt
+            assert seed["excerpt_marker"] in excerpt
+            assert other["excerpt_marker"] not in excerpt
+            assert other["raw_id"] not in {item["id"] for item in sourced["items"]}
+            assert other["source_text"] not in sources.text
+            assert other["raw_id"] not in sources.text
+
+            by_date = client.get(
+                "/api/knowledge/by-date",
+                params={"since": date_since, "until": date_until, "limit": 10},
+                headers=headers,
+            )
+            assert by_date.status_code == 200, by_date.text
+            dated = by_date.json()
+            assert dated["count"] == 1
+            assert dated["total"] == 1
+            assert dated["since"] == date_since
+            assert dated["until"] == date_until
+            assert [(item["id"], item["document_date"], item["title"]) for item in dated["items"]] == [
+                (seed["ko_id"], seed["document_date"], seed["title"])
+            ]
+            assert other["ko_id"] not in {item["id"] for item in dated["items"]}
+            assert other["title"] not in by_date.text
+            return [listing.text, tags.text, sources.text, by_date.text]
+
+        kolya_bodies = _own_surfaces(kolya, kolya_seed, vasya_seed)
+        vasya_bodies = _own_surfaces(vasya, vasya_seed, kolya_seed)
+        selected_bodies = [*kolya_bodies, *vasya_bodies]
+        assert _seed_snapshot() == before
+
+        secrets = [
+            kolya_token,
+            vasya_token,
+            settings.api_token,
+            kolya_seed["ko_id"],
+            vasya_seed["ko_id"],
+            kolya_seed["raw_id"],
+            vasya_seed["raw_id"],
+            kolya_seed["title"],
+            vasya_seed["title"],
+            kolya_seed["content"],
+            vasya_seed["content"],
+            kolya_seed["source_text"],
+            vasya_seed["source_text"],
+            kolya_seed["excerpt_marker"],
+            vasya_seed["excerpt_marker"],
+            kolya_seed["tag"],
+            vasya_seed["tag"],
+        ]
+
+        def _assert_refusal(resp, status: int) -> None:
+            assert resp.status_code == status
+            if status in {401, 403}:
+                assert "items" not in resp.json()
+            for secret in secrets:
+                assert secret not in resp.text
+            assert _seed_snapshot() == before
+
+        storage.set_permission_override("kolya", "knowledge.read", "deny")
+        denied = client.get("/api/knowledge", params={"limit": 10}, headers=kolya)
+        _assert_refusal(denied, 403)
+        selected_bodies.append(denied.text)
+
+        still_vasya = client.get("/api/knowledge", params={"limit": 10}, headers=vasya)
+        assert still_vasya.status_code == 200
+        assert [item["id"] for item in still_vasya.json()["items"]] == [vasya_seed["ko_id"]]
+        selected_bodies.append(still_vasya.text)
+
+        anonymous = client.get("/api/knowledge", params={"limit": 10})
+        _assert_refusal(anonymous, 401)
+        selected_bodies.append(anonymous.text)
+
+        invalid_query = client.get("/api/knowledge/sources", headers=vasya)
+        _assert_refusal(invalid_query, 422)
+        invalid_date = client.get(
+            "/api/knowledge/by-date",
+            params={"since": "20-02-2024"},
+            headers=vasya,
+        )
+        _assert_refusal(invalid_date, 422)
+        invalid_limit = client.get("/api/knowledge", params={"limit": 0}, headers=vasya)
+        _assert_refusal(invalid_limit, 422)
+        selected_bodies.extend([invalid_query.text, invalid_date.text, invalid_limit.text])
+        for body in selected_bodies:
+            assert kolya_token not in body
+            assert vasya_token not in body
+            assert settings.api_token not in body
+            assert vasya_seed["source_text"] not in body or body in vasya_bodies
+        assert _seed_snapshot() == before
+        assert before["knowledge"][kolya_seed["ko_id"]]["content"] == kolya_seed["content"]
+        assert before["knowledge"][vasya_seed["ko_id"]]["content"] == vasya_seed["content"]
 
 
 def test_the_trail_still_says_who_acted(shared, storage):

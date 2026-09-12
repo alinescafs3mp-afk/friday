@@ -84,7 +84,7 @@ class CandidatesMixin(PipelineShared):
             raise ValueError("source_ref is required for agent candidates")
 
         digest = hashlib.sha256(content.encode("utf-8")).hexdigest()
-        self.storage.ensure_user(user_id, source=source)
+        self.storage.ensure_user(user_id)
         existing = self.storage.find_raw_by_source_ref(user_id, source, source_ref)
         if existing:
             existing_digest = str(existing.get("content_hash") or "")

@@ -10,7 +10,7 @@ from __future__ import annotations
 import re
 import unicodedata
 from collections.abc import Iterator, Mapping, Sequence
-from datetime import date
+from datetime import date, timedelta
 from typing import cast
 
 from friday.storage._base import (
@@ -40,6 +40,7 @@ from friday.storage._privacy import (
     _not_private_bounded_json_dependency,
     _not_private_entity_material_dependency,
     _not_private_knowledge_dependency,
+    _not_private_notification_dependency,
     _not_private_relation_candidate_dependency,
     _not_private_relation_dependency,
     _not_private_reminder_entity,
@@ -205,6 +206,21 @@ def _public_entity_version_snapshot(
     return snapshot_text
 
 
+def _timeline_event_end_bound(end: str) -> tuple[str, str]:
+    """Include an entire calendar day, preserving explicit timestamp precision."""
+    try:
+        end_day = date.fromisoformat(end) if len(end) == 10 else None
+    except ValueError:
+        end_day = None
+    if end_day is not None and end_day.isoformat() == end:
+        if end_day == date.max:
+            # No next representable day; only this extreme endpoint needs a
+            # calendar projection instead of the ordinary indexed comparison.
+            return "substr(t.occurred_at,1,10)<=?", end
+        return "t.occurred_at<?", (end_day + timedelta(days=1)).isoformat()
+    return "t.occurred_at<=?", end
+
+
 def _bounded_visible_timeline_event_rows(
     storage: StorageShared,
     shared_user_id: str,
@@ -215,6 +231,7 @@ def _bounded_visible_timeline_event_rows(
     not_before: str | None = None,
     exact_since: str | None = None,
     exact_until: str | None = None,
+    exclude_dismissed_reminders: bool = False,
     limit: int = 200,
 ) -> list[dict[str, Any]]:
     """Shared document events plus exactly this person's private reminders."""
@@ -244,8 +261,9 @@ def _bounded_visible_timeline_event_rows(
         clauses.append("t.occurred_at>=?")
         params.append(start)
     if end:
-        clauses.append("t.occurred_at<=?")
-        params.append(end)
+        end_clause, end_value = _timeline_event_end_bound(end)
+        clauses.append(end_clause)
+        params.append(end_value)
     if exact_since and exact_until:
         clauses.append(
             "((length(t.occurred_at)>10 AND "
@@ -290,6 +308,20 @@ def _bounded_visible_timeline_event_rows(
                 current_clock,
             ]
         )
+    if exclude_dismissed_reminders:
+        # This is a view-local visibility rule: generic timeline callers retain
+        # dismissed reminders.  Apply it in SQL so hidden rows never consume
+        # the caller's visible-page limit.
+        clauses.append(
+            "NOT EXISTS (SELECT 1 FROM outbound_notifications dismissed_reminder "
+            "WHERE dismissed_reminder.user_id=? "
+            "AND dismissed_reminder.kind='reminder' "
+            "AND dismissed_reminder.status='dismissed' "
+            "AND dismissed_reminder.dedup_key="
+            "('reminder:'||e.id||':'||t.occurred_at) "
+            f"AND {_not_private_notification_dependency('dismissed_reminder')})"
+        )
+        params.append(person_id)
     params.append(max(1, min(int(limit), 2_000)))
     rows = storage.execute(
         f"""SELECT substr(e.id,1,160) AS entity_id,
@@ -442,8 +474,9 @@ def _count_visible_timeline_events(
         clauses.append("t.occurred_at>=?")
         params.append(start)
     if end:
-        clauses.append("t.occurred_at<=?")
-        params.append(end)
+        end_clause, end_value = _timeline_event_end_bound(end)
+        clauses.append(end_clause)
+        params.append(end_value)
     if exact_since and exact_until:
         clauses.append(
             "((length(t.occurred_at)>10 AND "

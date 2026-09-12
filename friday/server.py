@@ -18,7 +18,7 @@ import secrets
 import time
 from collections import defaultdict, deque
 from collections.abc import AsyncIterator, Mapping
-from contextlib import ExitStack, asynccontextmanager, suppress
+from contextlib import AsyncExitStack, ExitStack, asynccontextmanager, suppress
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -209,6 +209,7 @@ from friday.permissions import (
     AuthorizationService,
     bind_actor,
 )
+from friday.reminder_schedule import reminder_when_text
 from friday.retrieval import EmbeddingBackend, HybridSearcher, is_relational_query
 from friday.retrieval._rerank_backend import RerankBackend, rerank_with_backend
 from friday.retrieval.memory_exact_internal import MemoryExactInternalAdapter
@@ -259,7 +260,7 @@ from friday.v12_model_runtime import AttestedV12ModelRuntime
 from friday.v12_model_transport import create_attested_v12_model_runtime
 from friday.web_surfer import WebSurfer
 from friday.workers import IntervalTask, WorkersManager
-from friday.workers._blocking import current_activity, run_blocking, wait_until_idle
+from friday.workers._blocking import current_activity, run_blocking, wait_until_idle, wait_until_idle_async
 
 
 class _AsyncClosableRuntime(Protocol):
@@ -2684,14 +2685,36 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
         # would still duplicate workers, scheduled backups, and side effects.
         # Keep one backend role per state directory and fail fast with useful
         # lock metadata instead of running a split-brain installation.
-        with (
-            ProcessLease(
-                settings.state_dir / "backend.lock",
-                protocol="friday.backend.v1",
-            ),
-            ExitStack() as dormant_engineer_backup_authority_stack,
-        ):
+        async with AsyncExitStack() as lifespan_resources:
+            lifespan_resources.enter_context(
+                ProcessLease(settings.state_dir / "backend.lock", protocol="friday.backend.v1")
+            )
+            dormant_engineer_backup_authority_stack = lifespan_resources.enter_context(ExitStack())
             storage = init_storage(settings)
+
+            async def retire_storage() -> None:
+                # Startup can fail before the yield/finally shutdown path. A
+                # cancelled await may still leave a physical database reader,
+                # so retain both storage and the backend lease until it ends.
+                # The async drain also works after shutdown_default_executor.
+                cancellation: asyncio.CancelledError | None = None
+                while True:
+                    try:
+                        stranded = await wait_until_idle_async(30.0)
+                    except asyncio.CancelledError as exc:
+                        # Cancellation ends the await, not the physical reader.
+                        # Retry the drain in this same owner, retaining the lease
+                        # even if shutdown cancels us more than once.
+                        cancellation = exc
+                        continue
+                    if not stranded:
+                        break
+                    LOGGER.warning("Storage retirement is still draining blocking work (%s)", stranded)
+                storage.close(final=True)
+                if cancellation is not None:
+                    raise cancellation
+
+            lifespan_resources.push_async_callback(retire_storage)
             turn_context_issuer = TurnContextIssuer(load_trace_namespace_key(storage.conn))
             storage.ensure_user(
                 LEGACY_OWNER_USER_ID,
@@ -2722,19 +2745,21 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
                 # process-private control state.  Preserve the existing honest
                 # terminalization path before exposing an endpoint.
                 restart_authority = SupervisorAssistAuthorityGate(storage, auth_service)
-                return await asyncio.to_thread(
-                    assist_graph_adapter.reconcile_all_active_after_restart,
-                    actor_resolver=SupervisorAssistRestartActorResolver(auth_service),
-                    authority_check=restart_authority,
-                    effect_check=lambda _actor, boundary: supervisor_assist_read_only_effect_gate(boundary),
-                )
+                activity = current_activity.set("backend-startup-reconcile")
+                try:
+                    return await run_blocking(
+                        assist_graph_adapter.reconcile_all_active_after_restart,
+                        actor_resolver=SupervisorAssistRestartActorResolver(auth_service),
+                        authority_check=restart_authority,
+                        effect_check=lambda _actor, boundary: supervisor_assist_read_only_effect_gate(
+                            boundary
+                        ),
+                    )
+                finally:
+                    current_activity.reset(activity)
 
             if not promoted_restart_requested:
-                try:
-                    assist_restart_batches = await retire_unrecoverable_restart_graphs()
-                except BaseException:
-                    storage.close()
-                    raise
+                assist_restart_batches = await retire_unrecoverable_restart_graphs()
             llm = LLMRouter(settings)
             secondary_brain = build_secondary_brain(settings)
             (
@@ -2893,11 +2918,7 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
                 )
                 promoted_agent = None
             if promoted_agent is None and promoted_restart_requested:
-                try:
-                    assist_restart_batches = await retire_unrecoverable_restart_graphs()
-                except BaseException:
-                    storage.close()
-                    raise
+                assist_restart_batches = await retire_unrecoverable_restart_graphs()
             agent = (
                 promoted_agent
                 if promoted_agent is not None
@@ -3269,11 +3290,7 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
                         asyncio.get_running_loop().shutdown_default_executor(),
                         timeout=max(30.0, drain_budget),
                     )
-                # `final=True`: anything that still outlives this gets a loud
-                # StorageClosedError rather than a fresh connection to a database
-                # whose process lease is about to be released.
-                storage.close(final=True)
-                LOGGER.info("Friday API stopped")
+        LOGGER.info("Friday API stopped")
 
     # The schema is behind a capability, so FastAPI's built-in (authenticated but
     # ungated) routes are switched off and re-served below. Authentication alone
@@ -3866,6 +3883,16 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
         )
         if claim["status"] == "replay":
             cached = claim.get("response") or {}
+            from friday.organs.mixed_journey.replay import reauthorize_mixed_cached_reply
+
+            cached = reauthorize_mixed_cached_reply(
+                cached,
+                storage=state.storage,
+                settings=settings,
+                actor=actor,
+                absolute_deadline=_turn_deadline,
+                request_message=message,
+            )
             return _public_chat_for_actor(
                 {**cached, "idempotent_replay": True},
                 storage=state.storage,
@@ -4048,6 +4075,7 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
             actor.own_id,
             start=today.isoformat(),
             end=(today + timedelta(days=lead_days)).isoformat(),
+            exclude_dismissed_reminders=True,
             limit=limit,
         )
         keys = [f"reminder:{event.get('entity_id')}:{event.get('occurred_at')}" for event in events]
@@ -4056,12 +4084,7 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
         items = []
         for event, key in zip(events, keys, strict=True):
             occurred_at = str(event.get("occurred_at") or "")
-            if occurred_at == today.isoformat():
-                when = "сегодня"
-            elif occurred_at == (today + timedelta(days=1)).isoformat():
-                when = "завтра"
-            else:
-                when = occurred_at
+            when = reminder_when_text(event, today)
             items.append(
                 {
                     "id": str(event.get("entity_id") or ""),
@@ -4395,6 +4418,33 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
             response["final_response_message_id"] = final_message_id
             response["final_response_persisted"] = bool(final_message_id)
         return response
+
+    @application.get("/api/me/mixed-deliveries/{message_id}", tags=["chat"])
+    def authorize_mixed_delivery(
+        request: Request,
+        message_id: str,
+        answer_sha256: str = Query(min_length=64, max_length=64, pattern="^[0-9a-f]{64}$"),
+    ) -> dict[str, Any]:
+        from friday.organs.mixed_journey.replay import authorized_mixed_reply_delivery
+
+        actor = _require(request, "chat.use")
+        state = request.app.state
+        projection = authorized_mixed_reply_delivery(
+            message_id,
+            answer_sha256,
+            storage=state.storage,
+            settings=state.settings,
+            actor=actor,
+            classify_non_mixed=actor.source == "telegram-bridge",
+        )
+        result: dict[str, Any] = {"authorized": projection is not None}
+        if actor.source == "telegram-bridge" and projection is not None:
+            result["mixed_required"] = projection.get("mixed_required") is not False
+            if result["mixed_required"]:
+                result["mixed_journey"] = projection
+            else:
+                result["conversation_id"] = projection["conversation_id"]
+        return result
 
     @application.post("/api/chat", tags=["chat"])
     async def chat(request: Request) -> dict[str, Any]:
@@ -4733,6 +4783,16 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
             )
             if claim["status"] == "replay":
                 cached = claim.get("response") or {}
+                from friday.organs.mixed_journey.replay import reauthorize_mixed_cached_reply
+
+                cached = reauthorize_mixed_cached_reply(
+                    cached,
+                    storage=state.storage,
+                    settings=settings,
+                    actor=actor,
+                    absolute_deadline=_turn_deadline,
+                    request_message=message,
+                )
                 return _public_chat_for_actor(
                     {**cached, "idempotent_replay": True},
                     storage=state.storage,

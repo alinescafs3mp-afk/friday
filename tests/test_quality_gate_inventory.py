@@ -21,9 +21,28 @@ def test_checked_in_inventory_closes_semantics_tiers_parameters_and_host_boundar
     # R10 RC→1.0 acceptance battery adds ten change-unit functions (24 MiB):
     # eight harness checks at 1 MiB, OpenAPI surface classification at 8 MiB,
     # and the additional deterministic journey suite at 8 MiB.
-    assert sum(rule.scratch_mb for rule in value.rules if rule.tier != "nightly") == 16_559
+    # R10 instrument repair adds 475 MiB: 43 unit functions at 8 MiB,
+    # three process functions at 1 MiB, two native probes at 64 MiB,
+    # seven relay functions at 0 MiB. Six restored provenance declarations
+    # retain their existing modules' 0 MiB policy; no old budget is weakened.
+    # Five source/runtime discovery and coverage controls add 8 MiB each.
+    # R10 revision060 declares 45 functions at 374 MiB total and removes
+    # one obsolete secondary refusal function at 8 MiB: 24,610 + 374 - 8.
+    # Revision075 reconciles all accumulated declarations, including three mixed-delivery HTTP functions at 8 MiB each.
+    # Revision076 adds four mixed-authority HTTP functions at 8 MiB each; prior budgets remain exact.
+    # Revision081 adds 264 MiB for22 restored functions; existing policy budgets stay exact.
+    # Revision082 adds 1,112 MiB: 115 change/unit declarations at 8 MiB
+    # and three exact-release/host-tool declarations at 64 MiB.
+    # Baseline repairs add17 unit functions at8 MiB each; existing budgets stay exact.
+    # The accepted post-baseline catalog adds 93 functions: 17 at128 MiB,
+    # 51 at64 MiB, six at8 MiB and19 at0 MiB. All prior budgets remain exact.
+    # One native shared-cleanup control adds 8 MiB to the accepted 48,941 MiB.
+    # Inventory088 adds94 change/unit functions:83 at0 MiB and11 at64 MiB (+704).
+    assert sum(rule.scratch_mb for rule in value.rules if rule.tier != "nightly") == 49_653
     assert nightly == {"tests/retrieval_benchmark/test_conversation_harness.py::test_manifest_is_one_closed_six_by_four_conversation_matrix", "tests/retrieval_benchmark/test_conversation_harness.py::test_second_offline_run_is_byte_identical_and_never_uses_network", "tests/retrieval_benchmark/test_document_harness.py::test_document_manifest_is_one_closed_five_class_corpus", "tests/retrieval_benchmark/test_document_harness.py::test_second_offline_document_run_is_byte_identical_and_network_forbidden", "tests/retrieval_benchmark/test_harness.py::test_ephemeral_manifest_has_at_least_twenty_cases_and_all_ten_classes", "tests/retrieval_benchmark/test_harness.py::test_two_offline_real_path_runs_are_byte_identical", "tests/test_obsidian_syncthing_live.py::test_pinned_syncthing_generates_and_accepts_the_managed_rest_contract", "tests/test_schema_migration_chain.py::test_every_real_backup_migrates_and_opens", "tests/test_windows_gateway_publish_recovery.py::test_native_powershell_projection_passes"}
-    assert sum(rule.tier == "change" and any(name in rule.function_id for name in large) for rule in value.rules) == 27
+    # Three A10 symbol-shape controls retain this family's change tier.
+    # Five explicit text-shape and two outside-deed functions join the previous35.
+    assert sum(rule.tier == "change" and any(name in rule.function_id for name in large) for rule in value.rules) == 42
     expected = {
         "tests/test_auth_hardening.py::test_failed_auth_attempts_are_rate_limited_per_ip": "security.authentication-and-untrusted-input", "tests/test_backup_mirror.py::test_encrypted_mirror_roundtrip": "schema.migration-backup-and-restore",
         "tests/test_agent_obsidian_production_composition.py::test_note_create_append_and_daily_exact_messages_mutate_the_real_vault": "storage.transaction-and-lifecycle", "tests/test_keyboard_layout.py::test_digits_and_unmapped_characters_survive": "configuration.policy-version-compatibility",

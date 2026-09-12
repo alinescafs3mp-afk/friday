@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import inspect
+import json
 import sys
 from pathlib import Path
 
@@ -354,6 +355,100 @@ def test_p10_rejects_changed_visible_angle_literal(tmp_path: Path, monkeypatch) 
     assert state["transport_delivery_shape_exact"] is False
 
 
+_A07_FIRST_RESPONSE = (
+    "Символы `<` и `>` безопасно встроены в текст, а маркер SYN-TELEGRAM-A10-07 подтверждает."
+)
+
+
+@pytest.mark.parametrize("mode", ["normal", "rate_limit", "markup_fallback"])
+@pytest.mark.parametrize(
+    "message",
+    [
+        _A07_FIRST_RESPONSE,
+        "Символы < и > безопасны; маркер SYN-TELEGRAM-A10-07 присутствует.",
+        "Символ `>` стоит перед `<`; маркер SYN-TELEGRAM-A10-07 присутствует.",
+    ],
+)
+def test_a07_safe_visible_symbols_follow_the_spoken_contract(message, mode, tmp_path: Path) -> None:
+    from test_synthetic_live_battery import _satisfying_record
+
+    case = _case("A", 7)
+    assert battery._telegram_shape_matches(case, message) is True
+    state = battery._telegram_transport_probe(message, mode=mode, home=tmp_path)
+    assert state["transport_delivered_once"] is True
+    assert state["transport_render_exact"] is True
+    assert state["transport_delivery_marker_exact"] is True
+    assert state["transport_delivery_shape_exact"] is True
+    assert state["transport_retry_sequence_exact"] is True
+    assert state["rendered_html_safe"] is True
+    if mode == "normal":
+        record = _satisfying_record(case)
+        record["response"]["message"] = message
+        record["raw_response"] = json.dumps(record["response"], ensure_ascii=False)
+        record["state"].update(state)
+        result = battery.evaluate_case(case, record, latency_ms=1)
+        assert result["passed"] is True, result["failure_codes"]
+
+
+@pytest.mark.parametrize(
+    "message",
+    [
+        _A07_FIRST_RESPONSE.replace("`<`", "меньше"),
+        _A07_FIRST_RESPONSE.replace("`>`", "больше"),
+        _A07_FIRST_RESPONSE.replace("`<`", "&lt;"),
+        _A07_FIRST_RESPONSE.replace("SYN-TELEGRAM-A10-07", "SYN-TELEGRAM-A10-17"),
+        _A07_FIRST_RESPONSE.replace("SYN-TELEGRAM-A10-07", ""),
+        _A07_FIRST_RESPONSE + " Ещё одно предложение.",
+    ],
+)
+def test_a07_rejects_missing_symbols_marker_or_a_second_sentence(message, tmp_path: Path) -> None:
+    from test_synthetic_live_battery import _satisfying_record
+
+    case = _case("A", 7)
+    record = _satisfying_record(case)
+    record["response"]["message"] = message
+    record["raw_response"] = json.dumps(record["response"], ensure_ascii=False)
+    record["state"].update(battery._telegram_transport_probe(message, mode="normal", home=tmp_path))
+    assert battery.evaluate_case(case, record, latency_ms=1)["passed"] is False
+
+
+@pytest.mark.parametrize(
+    ("before", "after"),
+    [
+        ("&lt;", ""),
+        ("&gt;", "&lt;"),
+        ("&lt;", "&amp;lt;"),
+        ("SYN-TELEGRAM-A10-07", "SYN-TELEGRAM-A10-17"),
+        ("SYN-TELEGRAM-A10-07", "<script>SYN-TELEGRAM-A10-07</script>"),
+        ("SYN-TELEGRAM-A10-07", "<b>SYN-TELEGRAM-A10-07</b>"),
+        ("<code>&lt;</code>", "&lt;"),
+    ],
+)
+def test_a07_corrupted_delivery_still_fails(before, after, tmp_path: Path, monkeypatch) -> None:
+    from friday.telegram_bridge._markup import to_telegram_html
+
+    rendered = to_telegram_html(_A07_FIRST_RESPONSE).replace(before, after)
+    _patch_both_renderers(monkeypatch, lambda _source: rendered)
+    state = battery._telegram_transport_probe(_A07_FIRST_RESPONSE, mode="normal", home=tmp_path)
+    assert state["transport_render_exact"] is True
+    assert state["transport_delivery_shape_exact"] is False
+
+
+def test_a07_duplicate_delivery_still_fails(tmp_path: Path, monkeypatch) -> None:
+    from friday.telegram_bridge._transport import TransportMixin
+
+    original = TransportMixin._post_message_chunk
+
+    async def duplicate(self, client, payload, chunk):
+        await original(self, client, payload, chunk)
+        return await original(self, client, payload, chunk)
+
+    monkeypatch.setattr(TransportMixin, "_post_message_chunk", duplicate)
+    state = battery._telegram_transport_probe(_A07_FIRST_RESPONSE, mode="normal", home=tmp_path)
+    assert state["transport_delivered_once"] is False
+    assert state["transport_delivery_shape_exact"] is False
+
+
 def test_probe_requires_exact_endpoint_and_only_json_kwarg(tmp_path: Path, monkeypatch) -> None:  # noqa: ANN001
     from friday.telegram_bridge._transport import TransportMixin
 
@@ -647,3 +742,61 @@ def test_probe_does_not_replace_process_global_asyncio_sleep() -> None:
 
     assert "asyncio.sleep =" not in source
     assert "transport_module.asyncio.sleep" not in source
+
+
+@pytest.mark.parametrize("mode", ["normal", "rate_limit", "markup_fallback"])
+def test_b_ampersand_pair_is_repaired_and_really_escaped_for_delivery(tmp_path: Path, mode: str):
+    from friday.text_shape import repair_explicit_text_shape
+
+    case = _case("B", 11)
+    marker = battery._marker(case, "TELEGRAM")
+    source = marker + " \\"
+    repaired = repair_explicit_text_shape(case.question, source)
+    assert not battery._telegram_shape_matches(case, source)
+    assert repaired == marker + " &"
+    assert battery._telegram_shape_matches(case, repaired)
+    state = battery._telegram_transport_probe(repaired, mode=mode, home=tmp_path)
+    for key in [
+        "transport_render_exact",
+        "transport_delivery_marker_exact",
+        "transport_delivery_shape_exact",
+        "transport_retry_sequence_exact",
+        "rendered_html_safe",
+    ]:
+        assert state[key] is True
+
+
+@pytest.mark.parametrize("count", [1, 2, 3])
+def test_b_numbered_list_uses_the_cardinality_actually_requested(tmp_path: Path, count: int):
+    case = _case("B", 3)
+    marker = battery._marker(case, "TELEGRAM")
+    source = "\n".join([f"1. {marker}", *[f"{n}. Нейтральный пункт" for n in range(2, count + 1)]])
+    assert battery._telegram_shape_matches(case, source)
+    state = battery._telegram_transport_probe(source, mode="normal", home=tmp_path)
+    assert state["transport_delivery_shape_exact"] is True
+    assert state["transport_render_exact"] is True
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        "SYN-TELEGRAM-B10-03",
+        "2. SYN-TELEGRAM-B10-03",
+        "1. SYN-TELEGRAM-B10-03\n3. Пропуск",
+        "1. SYN-TELEGRAM-B10-03\n1. Повтор",
+        "1. Другой\n2. SYN-TELEGRAM-B10-03",
+        "1. Лишнее SYN-TELEGRAM-B10-03",
+        "Предисловие\n1. SYN-TELEGRAM-B10-03",
+    ],
+)
+def test_b_numbered_list_keeps_order_and_first_literal_constraints(source: str):
+    case = _case("B", 3)
+    assert battery._telegram_shape_matches(case, source) is False
+
+
+@pytest.mark.parametrize("count", [1, 3])
+def test_a_numbered_list_still_requires_exactly_two_items(count: int):
+    case = _case("A", 3)
+    marker = battery._marker(case, "TELEGRAM")
+    source = "\n".join([f"1. {marker}", *[f"{n}. Нейтральный пункт" for n in range(2, count + 1)]])
+    assert battery._telegram_shape_matches(case, source) is False

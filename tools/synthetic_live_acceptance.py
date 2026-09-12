@@ -298,7 +298,7 @@ class ModelReadinessResult:
 class ModelLoadSample:
     running: float
     waiting: float
-    process_start_time_seconds: float
+    process_epoch: float | str
 
 
 def _assert_required_acceptance_setting(
@@ -339,6 +339,30 @@ def _assert_frozen_dispatcher_environment(environment: Mapping[str, str]) -> Non
         required=REQUIRED_ACCEPTANCE_MODEL,
         code_prefix="acceptance_model",
     )
+
+
+def _assert_configured_model_environment(environment: Mapping[str, str]) -> None:
+    """Validate an explicitly selected native config using product precedence.
+
+    The caller freezes the selected file and worker environment separately.
+    This validation must not replace its profile/model with historical values,
+    or promote an ignored legacy alias over the effective FRIDAY setting.
+    """
+    from friday.config import PROFILES
+
+    if not isinstance(environment, Mapping) or any(
+        type(key) is not str or type(value) is not str for key, value in environment.items()
+    ):
+        raise battery.BatteryContractError("model_environment_invalid")
+    profile = battery._environment_setting(environment, "FRIDAY_PROFILE")
+    if not profile.strip():
+        raise battery.BatteryContractError("acceptance_profile_missing")
+    # load_settings does not strip the profile before looking it up either.
+    if profile not in PROFILES:
+        raise battery.BatteryContractError("acceptance_profile_unknown")
+    model = battery._environment_setting(environment, "FRIDAY_LLM_MODEL")
+    if not model.strip():
+        raise battery.BatteryContractError("acceptance_model_missing")
 
 
 async def _read_bounded_response(response: httpx.Response, *, maximum_bytes: int) -> bytes:
@@ -388,7 +412,59 @@ def _vllm_load(body: bytes) -> ModelLoadSample | None:
     return ModelLoadSample(
         running=sum(observed["running"]),
         waiting=sum(observed["waiting"]),
-        process_start_time_seconds=process_starts[0],
+        process_epoch=process_starts[0],
+    )
+
+
+class _SglangReadinessTransport:
+    """Use the readiness client and deadline for the product's metadata sampler."""
+
+    def __init__(self, client: httpx.AsyncClient, origin: str) -> None:
+        self.client = client
+        self.origin = origin
+
+    async def _fetch(self, path: str, *, maximum_bytes: int, absolute_deadline: float) -> bytes:
+        async with self.client.stream(
+            "GET",
+            self.origin + path,
+            timeout=_bounded_http_timeout(absolute_deadline, ceiling=MODEL_READINESS_METRICS_TIMEOUT_SEC),
+        ) as response:
+            if response.status_code != 200:
+                raise battery.BatteryContractError("model_readiness_metrics_lost")
+            return await _read_bounded_response(response, maximum_bytes=maximum_bytes)
+
+    async def fetch_metrics(self, *, maximum_bytes: int, absolute_deadline: float) -> bytes:
+        return await self._fetch("/metrics", maximum_bytes=maximum_bytes, absolute_deadline=absolute_deadline)
+
+    async def fetch_server_info(self, *, maximum_bytes: int, absolute_deadline: float) -> bytes:
+        return await self._fetch(
+            "/server_info", maximum_bytes=maximum_bytes, absolute_deadline=absolute_deadline
+        )
+
+    async def fetch_deployment_witness(self, *, maximum_bytes: int, absolute_deadline: float) -> bytes:
+        return await self._fetch(
+            "/_friday/v1/deployment-witness",
+            maximum_bytes=maximum_bytes,
+            absolute_deadline=absolute_deadline,
+        )
+
+
+async def _sglang_load(client: httpx.AsyncClient, origin: str, deadline: float) -> ModelLoadSample:
+    from friday.model_profiles import QWEN38_27B_SGLANG_V12_PROFILE
+    from friday.v12_model_runtime import _sample_sglang_load_without_raw_retention
+
+    sample, _failure = await _sample_sglang_load_without_raw_retention(
+        _SglangReadinessTransport(client, origin),
+        profile=QWEN38_27B_SGLANG_V12_PROFILE,
+        metrics_deadline=min(deadline, time.monotonic() + MODEL_READINESS_METRICS_TIMEOUT_SEC),
+        absolute_deadline=deadline,
+    )
+    if sample is None:
+        raise battery.BatteryContractError("model_readiness_metrics_invalid")
+    return ModelLoadSample(
+        running=sample.running,
+        waiting=sample.waiting,
+        process_epoch=sample.process_epoch_sha256,
     )
 
 
@@ -514,7 +590,9 @@ async def _async_model_readiness_barrier(
 ) -> ModelReadinessResult:
     """Fail closed unless the configured model sustains four real classifiers.
 
-    vLLM exposes queue gauges at ``/metrics``.  When both gauges are present we
+    vLLM exposes queue gauges at ``/metrics``. SGLang uses the product sampler
+    with a deployment witness surrounding its metrics and process-info reads.
+    When authoritative gauges are present we
     require a stable empty queue before the probes and an empty queue after them.
     Four simultaneous, production-shaped outward-intent classifiers then have to
     return HTTP 200, and at least three must contain a usable closed JSON verdict.
@@ -535,6 +613,18 @@ async def _async_model_readiness_barrier(
     model = battery._environment_setting(environment, "FRIDAY_LLM_MODEL", "dispatcher").strip()
     if not model:
         raise battery.BatteryContractError("model_readiness_model_missing")
+    from friday.config import PROFILES
+    from friday.model_profiles import QWEN38_27B_SGLANG_V12_PROFILE
+
+    profile_name = battery._environment_setting(environment, "FRIDAY_PROFILE")
+    runtime_profile = PROFILES.get(profile_name)
+    is_sglang = runtime_profile is not None and runtime_profile.inference_backend == "sglang"
+    if is_sglang and (
+        profile_name != QWEN38_27B_SGLANG_V12_PROFILE.runtime_profile_name
+        or model != QWEN38_27B_SGLANG_V12_PROFILE.served_model_alias
+        or parsed.path not in {"/v1", "/v1/"}
+    ):
+        raise battery.BatteryContractError("model_readiness_profile_unsupported")
     api_key = battery._environment_setting(environment, "FRIDAY_LLM_API_KEY").strip()
     headers = {
         "Accept": "application/json",
@@ -547,6 +637,9 @@ async def _async_model_readiness_barrier(
     deadline = time.monotonic() + MODEL_READINESS_BUDGET_SEC
 
     async def sample_load(client: httpx.AsyncClient) -> ModelLoadSample | None:
+        if is_sglang:
+            origin = urlunsplit((parsed.scheme, parsed.netloc, "", "", ""))
+            return await _sglang_load(client, origin, deadline)
         try:
             async with client.stream(
                 "GET",
@@ -573,13 +666,13 @@ async def _async_model_readiness_barrier(
         load: ModelLoadSample | None,
         *,
         metrics_required: bool,
-        expected_epoch: float | None = None,
+        expected_epoch: float | str | None = None,
     ) -> bool:
         if load is None:
             if metrics_required:
                 raise battery.BatteryContractError("model_readiness_metrics_lost")
             return False
-        if expected_epoch is not None and load.process_start_time_seconds != expected_epoch:
+        if expected_epoch is not None and load.process_epoch != expected_epoch:
             raise battery.BatteryContractError("model_readiness_metrics_epoch_changed")
         if load.running != 0.0 or load.waiting != 0.0:
             raise battery.BatteryContractError("model_readiness_model_busy")
@@ -601,7 +694,7 @@ async def _async_model_readiness_barrier(
             first_sample = await sample_load(client)
             metrics_observed = require_idle(first_sample, metrics_required=False)
             metrics_samples = 1 if metrics_observed else 0
-            metrics_epoch = first_sample.process_start_time_seconds if first_sample is not None else None
+            metrics_epoch = first_sample.process_epoch if first_sample is not None else None
             if not metrics_observed and require_authoritative_metrics:
                 return ModelReadinessResult(
                     queue_state="unknown",
@@ -1748,6 +1841,7 @@ def run_acceptance(
     run_directory: Path,
     concurrency: int,
     artifact_id: str,
+    configured_model: bool = False,
 ) -> tuple[int, dict[str, Any]]:
     """Run one suite under the host-wide readiness/worker lifecycle lock."""
 
@@ -1764,6 +1858,7 @@ def run_acceptance(
             run_directory=run_directory,
             concurrency=concurrency,
             artifact_id=artifact_id,
+            configured_model=configured_model,
         )
 
 
@@ -1773,6 +1868,7 @@ def _run_acceptance_locked(
     run_directory: Path,
     concurrency: int,
     artifact_id: str,
+    configured_model: bool = False,
 ) -> tuple[int, dict[str, Any]]:
     """Run one sealed suite and return only a closed aggregate."""
 
@@ -1784,7 +1880,10 @@ def _run_acceptance_locked(
     manifests = _load_manifests()
     inventory_for_suite(suite)
     model_environment = battery._inherit_model_environment()
-    _assert_frozen_dispatcher_environment(model_environment)
+    if configured_model:
+        _assert_configured_model_environment(model_environment)
+    else:
+        _assert_frozen_dispatcher_environment(model_environment)
     battery._assert_ignored_or_external(run_directory)
     if run_directory.exists():
         raise battery.BatteryContractError("run_directory_already_exists")
@@ -1961,6 +2060,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             run_directory=run_directory,
             concurrency=int(args.concurrency),
             artifact_id=artifact_id,
+            configured_model=args.env_file is not None,
         )
     except Exception as exc:  # noqa: BLE001 - raw detail stays in private evidence
         failure = {

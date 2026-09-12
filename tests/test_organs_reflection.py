@@ -163,16 +163,77 @@ def test_reflection_endpoint_returns_digest_for_actor(settings):
     app = create_app(settings)
     with TestClient(app) as client:
         owner = {"Authorization": f"Bearer {settings.api_token}"}
-        _seed_knowledge(app.state.storage, LEGACY_OWNER_USER_ID, "Запись", "контент", ["t"])
+        storage = app.state.storage
+        storage.ensure_user("foreign-reflection-person", preset_key="user")
+        _seed_knowledge(storage, LEGACY_OWNER_USER_ID, "Запись владельца", "личный текст владельца", ["t"])
+        _seed_knowledge(
+            storage, "foreign-reflection-person", "Чужая запись", "чужой закрытый текст", ["foreign-tag"]
+        )
+
+        def seed_rows():
+            return {
+                table: [dict(row) for row in storage.execute(f"SELECT * FROM {table} ORDER BY id").fetchall()]  # noqa: S608
+                for table in ("raw_objects", "knowledge_objects")
+            }
+
+        original_rows = seed_rows()
+        assert all(len(rows) == 2 for rows in original_rows.values())
 
         response = client.get("/api/reflection", headers=owner)
         assert response.status_code == 200, response.text
         body = response.json()
-        assert body["digest"]["knowledge_total"] == 1
-        assert "Взгляд на вашу базу знаний" in body["message"]
+        assert body["digest"] == {
+            "knowledge_total": 1,
+            "active": 1,
+            "archived": 0,
+            "deprecated": 0,
+            "review_pressure": {
+                "pending_inbox": 0,
+                "relation_candidates": 0,
+                "conflicts": 0,
+                "aging_candidates": 0,
+            },
+            "top_tags": [{"tag": "t", "count": 1}],
+            "upcoming_events": [],
+            "recent_titles": ["Запись владельца"],
+        }, "reflection_http_digest"
+        assert body["message"] == (
+            "🪞 Взгляд на вашу базу знаний\n"
+            "• Объектов знаний: 1 (активных 1, архив 0, устаревших 0)\n"
+            "• Живые темы: #t (1)"
+        ), "reflection_http_wording"
+        assert seed_rows() == original_rows
+        for canary in (
+            "личный текст владельца",
+            "Чужая запись",
+            "чужой закрытый текст",
+            "foreign-tag",
+            settings.api_token,
+        ):
+            assert canary not in response.text
 
         # The capability is registered and enforced: an unauthenticated call fails.
-        assert client.get("/api/reflection").status_code == 401
+        anonymous = client.get("/api/reflection")
+        assert anonymous.status_code == 401
+        assert seed_rows() == original_rows
+        storage.set_permission_override(LEGACY_OWNER_USER_ID, "reflection.read", "deny")
+        denied = client.get("/api/reflection", headers=owner)
+        assert denied.status_code == 403
+        assert seed_rows() == original_rows
+        for refusal in (anonymous, denied):
+            assert "digest" not in refusal.json()
+            for canary in (
+                "Запись владельца",
+                "личный текст владельца",
+                "Чужая запись",
+                "чужой закрытый текст",
+                "foreign-tag",
+                settings.api_token,
+            ):
+                assert canary not in refusal.text
+            for rows in original_rows.values():
+                for row in rows:
+                    assert row["id"] not in refusal.text
 
 
 def _dummy_ctx():

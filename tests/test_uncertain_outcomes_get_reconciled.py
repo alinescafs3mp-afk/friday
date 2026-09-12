@@ -225,23 +225,80 @@ def test_a_long_list_says_how_many_are_hidden() -> None:
     assert "и ещё 4" in text, text
 
 
-def test_pending_approvals_no_longer_hide_the_unknown() -> None:
-    """Мутация: вернуть подсказку внутрь ветки «ничего не ждёт» — тест краснеет.
+@pytest.mark.asyncio
+async def test_pending_approvals_no_longer_hide_the_unknown(tmp_path) -> None:
+    """Unknown outcomes reach Telegram with both empty and nonempty pending lists."""
+    import httpx
 
-    Прежняя редакция показывала неизвестные исходы только когда очередь пуста:
-    одна ожидающая заявка полностью скрывала то, про что система сама не знает,
-    чем кончилось.
-    """
-    import inspect
+    from friday.telegram_bridge import TelegramBridge, TelegramConfig
 
-    from friday.telegram_bridge._commands import CommandsMixin
+    bridge = TelegramBridge(
+        TelegramConfig(
+            bot_token="123:token",
+            bridge_secret="B" * 48,
+            allowed_chat_ids=[5001],
+            inbox_db_path=str(tmp_path / "telegram.sqlite3"),
+        )
+    )
+    sent = []
+    queries = []
+    pending = []
 
-    source = inspect.getsource(CommandsMixin._process_update)
-    guidance_at = source.index("tail = self._uncertain_guidance(")
-    empty_at = source.index("if not items:", guidance_at - 2000)
-    assert guidance_at < empty_at, "подсказка снова спрятана в ветку «ничего не ждёт»"
-    # И она доезжает до непустого списка тоже.
-    assert "(footer, tail.strip())" in source, "к списку заявок подсказка не добавляется"
+    def backend(request):
+        assert request.method == "GET"
+        assert request.url.path == "/api/me/approvals"
+        assert request.headers["X-Friday-User"] == "1001"
+        assert request.headers["X-Friday-Chat"] == "5001"
+        status = request.url.params["status"]
+        queries.append(status)
+        assert status in {"pending", "uncertain"}
+        items = pending if status == "pending" else [{"summary": "Unknown synthetic action"}]
+        return httpx.Response(200, json={"total": len(items), "items": items})
+
+    def telegram(request):
+        assert request.url.path.endswith("/sendMessage")
+        payload = json.loads(request.content)
+        assert payload["chat_id"] == 5001
+        sent.append(payload["text"])
+        return httpx.Response(200, json={"ok": True, "result": {"message_id": len(sent)}})
+
+    try:
+        async with (
+            httpx.AsyncClient(transport=httpx.MockTransport(backend)) as backend_client,
+            httpx.AsyncClient(transport=httpx.MockTransport(telegram)) as telegram_client,
+        ):
+            for update_id in (1, 2):
+                pending[:] = (
+                    [] if update_id == 1 else [{"id": "approval_1", "summary": "Pending synthetic action"}]
+                )
+                sent.clear()
+                queries.clear()
+                await bridge._process_update(  # noqa: SLF001
+                    telegram_client,
+                    backend_client,
+                    {
+                        "update_id": update_id,
+                        "message": {
+                            "message_id": update_id,
+                            "chat": {"id": 5001, "type": "private"},
+                            "from": {"id": 1001, "first_name": "Alice"},
+                            "text": "/approvals",
+                        },
+                    },
+                    cached_response=None,
+                )
+                assert queries == ["pending", "uncertain"]
+                delivered = "\n".join(sent)
+                assert "Unknown synthetic action" in delivered
+                assert "НЕИЗВЕСТНЫМ исходом: 1" in delivered
+                if pending:
+                    assert "Pending synthetic action" in delivered
+                    assert "Ждут вашего решения: 1" in delivered
+                    assert "Ничего не ждёт" not in delivered
+                else:
+                    assert "Ничего не ждёт вашего решения" in delivered
+    finally:
+        bridge._inbox.close()  # noqa: SLF001
 
 
 def test_the_json_of_a_payload_survives_the_round_trip(storage) -> None:

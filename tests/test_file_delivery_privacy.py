@@ -188,6 +188,30 @@ def test_admin_download_revalidates_immediately_before_atomic_read(settings, mon
             headers=headers,
         )
         assert raw_id in {item["id"] for item in listed.json()["items"]}
+        download_path = f"/api/admin/files/{raw_id}/download"
+        params = {"user_id": LEGACY_OWNER_USER_ID}
+        storage = app.state.storage
+        prior_audit = storage.execute("SELECT COUNT(*) FROM audit_log").fetchone()[0]
+        available = client.get(download_path, params=params, headers=headers)
+        assert available.status_code == 200, available.text
+        assert available.content == b"ADMIN-PRIVATE-BYTES", "admin_file_exact_bytes"
+        assert available.headers["content-type"] == "application/octet-stream"
+        assert available.headers["content-disposition"] == (
+            "attachment; filename=\"ADMIN-PRIVATE-NAME.bin\"; filename*=UTF-8''ADMIN-PRIVATE-NAME.bin"
+        ), "admin_file_attachment_name"
+        audit = [dict(row) for row in storage.execute("SELECT * FROM audit_log ORDER BY rowid").fetchall()]
+        added = audit[prior_audit:]
+        assert len(added) == 1, "admin_file_audit"
+        assert (added[0]["user_id"], added[0]["action"], added[0]["target_type"], added[0]["target_id"]) == (
+            LEGACY_OWNER_USER_ID,
+            "admin.file.download",
+            "raw_object",
+            raw_id,
+        ), "admin_file_audit"
+        assert json.loads(added[0]["after_json"]) == {
+            "target_user_id": LEGACY_OWNER_USER_ID,
+            "filename_chars": 22,
+        }, "admin_file_audit_target"
         original = files_admin.read_authorized_file
 
         def quarantine_then_read(*args, **kwargs):
@@ -204,3 +228,7 @@ def test_admin_download_revalidates_immediately_before_atomic_read(settings, mon
         assert response.status_code == 404
         assert b"ADMIN-PRIVATE-BYTES" not in response.content
         assert "ADMIN-PRIVATE-NAME" not in response.text
+        assert settings.api_token not in response.text
+        assert [
+            dict(row) for row in storage.execute("SELECT * FROM audit_log ORDER BY rowid").fetchall()
+        ] == audit, "admin_file_refusal_audit"

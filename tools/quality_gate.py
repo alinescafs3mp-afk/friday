@@ -116,6 +116,84 @@ _COLLECTION_INVALID_ATTESTATIONS: set[str] = set()
 _COLLECTION_ORIGIN_ERRORS_BY_WORKER: dict[str, str] = {}
 _SERIAL_COLLECTION: tuple[str, ...] | None = None
 _TIER_SELECTION: frozenset[str] | None = None
+_ACTIVE_PROCESS_OWNER: Any = None
+_BOOTSTRAP_SOURCES: dict[str, str] = {}
+_BOOTSTRAP_PATHS = (
+    "tools/quality_gate_deadlines.py",
+    "tools/quality_gate_process.py",
+    "tools/quality_gate_phase.py",
+)
+
+
+def _bootstrap_source(path: Path) -> bytes:
+    """Read executable helper bytes once, without import caches or path aliases."""
+    before = path.lstat()
+    if (
+        path.resolve(strict=True) != path
+        or not stat.S_ISREG(before.st_mode)
+        or before.st_nlink != 1
+        or not 0 < before.st_size <= 1 << 20
+    ):
+        raise RuntimeError("gate_bootstrap_source_unsafe")
+    descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC)
+    try:
+        if _stat_identity(os.fstat(descriptor)) != _stat_identity(before):
+            raise RuntimeError("gate_bootstrap_source_changed")
+        with os.fdopen(os.dup(descriptor), "rb") as handle:
+            raw = handle.read((1 << 20) + 1)
+        if (
+            len(raw) != before.st_size
+            or _stat_identity(os.fstat(descriptor)) != _stat_identity(before)
+            or _stat_identity(path.lstat()) != _stat_identity(before)
+        ):
+            raise RuntimeError("gate_bootstrap_source_changed")
+        return raw
+    finally:
+        os.close(descriptor)
+
+
+@contextmanager
+def _early_process_owner() -> Iterator[Any]:
+    """Load only the launcher's stdlib helpers in a private Python namespace.
+
+    No product or candidate ``tools`` namespace is admitted. The first owned
+    Git reads verify these exact loaded bytes against the requested commit.
+    The projected candidate subsequently gets its usual independent namespace.
+    """
+    from types import ModuleType
+
+    global _ACTIVE_PROCESS_OWNER, _BOOTSTRAP_SOURCES
+    prefix = "_friday_gate_bootstrap"
+    if _ACTIVE_PROCESS_OWNER is not None or any(
+        name == prefix or name.startswith(prefix + ".") for name in sys.modules
+    ):
+        raise RuntimeError("gate_bootstrap_already_active")
+    names = []
+    try:
+        package = ModuleType(prefix)
+        package.__path__ = []  # dependencies are the three explicitly loaded files
+        package.__package__ = prefix
+        sys.modules[prefix] = package
+        names.append(prefix)
+        for relative in _BOOTSTRAP_PATHS:
+            path = ROOT / relative
+            raw = _bootstrap_source(path)
+            name = prefix + "." + path.stem
+            module = ModuleType(name)
+            module.__package__ = prefix
+            module.__file__ = str(path)
+            sys.modules[name] = module
+            names.append(name)
+            _BOOTSTRAP_SOURCES[relative] = hashlib.sha256(raw).hexdigest()
+            exec(compile(raw, str(path), "exec", dont_inherit=True), module.__dict__)
+        with sys.modules[prefix + ".quality_gate_phase"].GateProcessRunner() as owner:
+            _ACTIVE_PROCESS_OWNER = owner
+            yield owner
+    finally:
+        _ACTIVE_PROCESS_OWNER = None
+        _BOOTSTRAP_SOURCES = {}
+        for name in reversed(names):
+            sys.modules.pop(name, None)
 
 
 @dataclass(frozen=True)
@@ -426,6 +504,220 @@ def _scratch_parent() -> str | None:
     return str(parent)
 
 
+_SCRATCH_CLEANUP_MAX_INODES = 500_000
+_SCRATCH_CLEANUP_MAX_DEPTH = 128
+
+
+@dataclass(frozen=True)
+class _ScratchRootAuthority:
+    raw: str
+    parent: Path
+    name: str
+    parent_identity: tuple[int, int, int]
+    root_identity: tuple[int, int, int]
+    owner_uid: int
+    parent_fd: int = field(repr=False)
+    root_fd: int = field(repr=False)
+
+
+def _scratch_entry_identity(details: os.stat_result) -> tuple[int, int, int]:
+    return details.st_dev, details.st_ino, stat.S_IFMT(details.st_mode)
+
+
+def _capture_owned_scratch_root(raw: str) -> _ScratchRootAuthority:
+    """Pin the directory created by mkdtemp before control reaches its body."""
+
+    root = Path(raw)
+    if not root.is_absolute() or root.name in {"", ".", ".."}:
+        raise RuntimeError("quality_gate_scratch_cleanup_refused")
+    parent = root.parent
+    if os.name != "posix":
+        try:
+            parent_details = parent.stat()
+            root_details = root.lstat()
+        except OSError as exc:
+            raise RuntimeError("quality_gate_scratch_cleanup_refused") from exc
+        if not stat.S_ISDIR(root_details.st_mode) or stat.S_ISLNK(root_details.st_mode):
+            raise RuntimeError("quality_gate_scratch_cleanup_refused")
+        return _ScratchRootAuthority(
+            raw=raw,
+            parent=parent,
+            name=root.name,
+            parent_identity=_scratch_entry_identity(parent_details),
+            root_identity=_scratch_entry_identity(root_details),
+            owner_uid=root_details.st_uid,
+            parent_fd=-1,
+            root_fd=-1,
+        )
+
+    parent_fd = -1
+    root_fd = -1
+    try:
+        if parent.resolve(strict=True) != parent:
+            raise RuntimeError("quality_gate_scratch_cleanup_refused")
+        flags = os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC | os.O_NOFOLLOW
+        parent_fd = os.open(parent, flags)
+        parent_details = os.fstat(parent_fd)
+        lexical = os.stat(root.name, dir_fd=parent_fd, follow_symlinks=False)
+        root_fd = os.open(root.name, flags, dir_fd=parent_fd)
+        opened = os.fstat(root_fd)
+        if (
+            not stat.S_ISDIR(lexical.st_mode)
+            or _scratch_entry_identity(opened) != _scratch_entry_identity(lexical)
+            or opened.st_uid != os.geteuid()
+        ):
+            raise RuntimeError("quality_gate_scratch_cleanup_refused")
+        return _ScratchRootAuthority(
+            raw=raw,
+            parent=parent,
+            name=root.name,
+            parent_identity=_scratch_entry_identity(parent_details),
+            root_identity=_scratch_entry_identity(opened),
+            owner_uid=opened.st_uid,
+            parent_fd=parent_fd,
+            root_fd=root_fd,
+        )
+    except RuntimeError:
+        if root_fd >= 0:
+            os.close(root_fd)
+        if parent_fd >= 0:
+            os.close(parent_fd)
+        raise
+    except OSError as exc:
+        if root_fd >= 0:
+            os.close(root_fd)
+        if parent_fd >= 0:
+            os.close(parent_fd)
+        raise RuntimeError("quality_gate_scratch_cleanup_refused") from exc
+
+
+def _close_scratch_root_authority(authority: _ScratchRootAuthority) -> None:
+    for descriptor in (authority.root_fd, authority.parent_fd):
+        if descriptor >= 0:
+            with suppress(OSError):
+                os.close(descriptor)
+
+
+def _empty_owned_scratch_directory(
+    directory_fd: int,
+    *,
+    device: int,
+    depth: int,
+    counter: list[int],
+) -> None:
+    """Remove an owner-controlled tree through pinned directory descriptors."""
+
+    if depth > _SCRATCH_CLEANUP_MAX_DEPTH:
+        raise RuntimeError("quality_gate_scratch_cleanup_refused")
+    opened = os.fstat(directory_fd)
+    if not stat.S_ISDIR(opened.st_mode) or opened.st_dev != device or opened.st_uid != os.geteuid():
+        raise RuntimeError("quality_gate_scratch_cleanup_refused")
+    # Only directory search/write permission is needed for unlinking its
+    # children. Files remain byte-for-byte sealed until they are unlinked.
+    os.fchmod(directory_fd, 0o700)
+    with os.scandir(directory_fd) as entries:
+        names = tuple(entry.name for entry in entries)
+    flags = os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC | os.O_NOFOLLOW
+    for name in names:
+        counter[0] += 1
+        if counter[0] > _SCRATCH_CLEANUP_MAX_INODES or name in {"", ".", ".."}:
+            raise RuntimeError("quality_gate_scratch_cleanup_refused")
+        lexical = os.stat(name, dir_fd=directory_fd, follow_symlinks=False)
+        if lexical.st_dev != device or lexical.st_uid != os.geteuid():
+            raise RuntimeError("quality_gate_scratch_cleanup_refused")
+        identity = _scratch_entry_identity(lexical)
+        if stat.S_ISDIR(lexical.st_mode):
+            child_fd = os.open(name, flags, dir_fd=directory_fd)
+            try:
+                child = os.fstat(child_fd)
+                if _scratch_entry_identity(child) != identity:
+                    raise RuntimeError("quality_gate_scratch_cleanup_refused")
+                _empty_owned_scratch_directory(
+                    child_fd,
+                    device=device,
+                    depth=depth + 1,
+                    counter=counter,
+                )
+                current = os.stat(name, dir_fd=directory_fd, follow_symlinks=False)
+                if _scratch_entry_identity(current) != identity:
+                    raise RuntimeError("quality_gate_scratch_cleanup_refused")
+                os.rmdir(name, dir_fd=directory_fd)
+            finally:
+                os.close(child_fd)
+            continue
+        # Symlinks and non-directory special nodes are unlinked as entries;
+        # their targets are never opened, chmodded or traversed.
+        current = os.stat(name, dir_fd=directory_fd, follow_symlinks=False)
+        if _scratch_entry_identity(current) != identity:
+            raise RuntimeError("quality_gate_scratch_cleanup_refused")
+        os.unlink(name, dir_fd=directory_fd)
+
+
+def _remove_owned_scratch_tree(
+    raw: str,
+    *,
+    authority: _ScratchRootAuthority | None = None,
+) -> None:
+    """Delete exactly one mkdtemp tree, including owner-sealed descendants."""
+
+    root = Path(raw)
+    if not root.is_absolute() or root.name in {"", ".", ".."}:
+        raise RuntimeError("quality_gate_scratch_cleanup_refused")
+    captured_here = authority is None
+    authority = _capture_owned_scratch_root(raw) if authority is None else authority
+    if authority.raw != raw or authority.parent != root.parent or authority.name != root.name:
+        if captured_here:
+            _close_scratch_root_authority(authority)
+        raise RuntimeError("quality_gate_scratch_cleanup_refused")
+    try:
+        if os.name != "posix":
+            current = root.lstat()
+            if (
+                _scratch_entry_identity(current) != authority.root_identity
+                or current.st_uid != authority.owner_uid
+            ):
+                raise RuntimeError("quality_gate_scratch_cleanup_refused")
+            shutil.rmtree(root)
+            return
+
+        if authority.parent.resolve(strict=True) != authority.parent:
+            raise RuntimeError("quality_gate_scratch_cleanup_refused")
+        flags = os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC | os.O_NOFOLLOW
+        current_parent_fd = os.open(authority.parent, flags)
+        try:
+            if _scratch_entry_identity(os.fstat(current_parent_fd)) != authority.parent_identity:
+                raise RuntimeError("quality_gate_scratch_cleanup_refused")
+        finally:
+            os.close(current_parent_fd)
+        lexical = os.stat(authority.name, dir_fd=authority.parent_fd, follow_symlinks=False)
+        opened = os.fstat(authority.root_fd)
+        if (
+            _scratch_entry_identity(lexical) != authority.root_identity
+            or _scratch_entry_identity(opened) != authority.root_identity
+            or lexical.st_uid != authority.owner_uid
+            or opened.st_uid != authority.owner_uid
+            or authority.owner_uid != os.geteuid()
+        ):
+            raise RuntimeError("quality_gate_scratch_cleanup_refused")
+        _empty_owned_scratch_directory(
+            authority.root_fd,
+            device=opened.st_dev,
+            depth=0,
+            counter=[0],
+        )
+        current = os.stat(authority.name, dir_fd=authority.parent_fd, follow_symlinks=False)
+        if _scratch_entry_identity(current) != authority.root_identity:
+            raise RuntimeError("quality_gate_scratch_cleanup_refused")
+        os.rmdir(authority.name, dir_fd=authority.parent_fd)
+    except RuntimeError:
+        raise
+    except OSError as exc:
+        raise RuntimeError("quality_gate_scratch_cleanup_failed") from exc
+    finally:
+        if captured_here:
+            _close_scratch_root_authority(authority)
+
+
 def _exact_host_capacity() -> dict[str, int]:
     cpu_count = (os.process_cpu_count() if hasattr(os, "process_cpu_count") else os.cpu_count()) or 0
     scratch_free = shutil.disk_usage(_scratch_parent() or tempfile.gettempdir()).free
@@ -499,16 +791,47 @@ def _prepare_synthetic_backup_rehearsal(
 
 
 @contextmanager
+def _fenced_temporary_directory(
+    *, prefix: str, dir: Path | str | None, cleanup_allowed: Callable[[], bool] | None = None
+) -> Iterator[str]:
+    raw = tempfile.mkdtemp(prefix=prefix, dir=dir)
+    authority = _capture_owned_scratch_root(raw)
+    body_error: BaseException | None = None
+    try:
+        yield raw
+    except BaseException as exc:
+        body_error = exc
+        raise
+    finally:
+        try:
+            if cleanup_allowed is None or cleanup_allowed():
+                _remove_owned_scratch_tree(raw, authority=authority)
+            else:
+                print(f"FAILED: uncertain child cleanup; private scratch retained at {raw}", file=sys.stderr)
+        except BaseException as cleanup_error:
+            if body_error is None:
+                raise
+            note = f"quality-gate scratch cleanup failed: {type(cleanup_error).__name__}"
+            if hasattr(body_error, "add_note"):
+                body_error.add_note(note)
+            print(f"FAILED: {note}; private scratch retained at {raw}", file=sys.stderr)
+        finally:
+            _close_scratch_root_authority(authority)
+
+
+@contextmanager
 def _isolated_test_environment(
     scratch_parent: Path | None = None,
     *,
     prepare_schema_backups: bool = True,
     source_root: Path = ROOT,
     golden_journey_release_root: Path | None = None,
+    cleanup_allowed: Callable[[], bool] | None = None,
 ) -> Iterator[dict[str, str]]:
     """Yield one private, non-live environment for pytest collection and runs."""
 
-    with tempfile.TemporaryDirectory(
+    with _fenced_temporary_directory(
+        cleanup_allowed=cleanup_allowed,
         prefix="friday-quality-home-",
         dir=str(scratch_parent) if scratch_parent is not None else _scratch_parent(),
     ) as temporary:
@@ -685,6 +1008,8 @@ def _kill_process_group(process: subprocess.Popen[bytes], name: str) -> bool:
 
 
 def run_command(command: GateCommand) -> int:
+    if _ACTIVE_PROCESS_OWNER is not None:
+        return _ACTIVE_PROCESS_OWNER(command)
     print(f"\n[{command.name}]\n$ {_display_command(command.argv)}", flush=True)
     try:
         if command.child_umask is not None and not 0 <= command.child_umask <= 0o777:
@@ -970,6 +1295,18 @@ def _git_environment() -> dict[str, str]:
 
 
 def _git_output(root: Path, *arguments: str) -> str:
+    if _ACTIVE_PROCESS_OWNER is not None:
+        raw = _ACTIVE_PROCESS_OWNER.capture(
+            GateCommand(
+                "candidate Git read",
+                (GIT, "-C", str(root), *arguments),
+                _git_environment(),
+                cwd=root,
+                timeout_s=60,
+            ),
+            limit=16 << 20,
+        )
+        return raw.decode("utf-8").strip()
     try:
         completed = subprocess.run(  # noqa: S603 - fixed Git and code-owned arguments
             (GIT, "-C", str(root), *arguments),
@@ -990,8 +1327,27 @@ def _git_output(root: Path, *arguments: str) -> str:
         raise RuntimeError("Git command output is not UTF-8") from exc
 
 
+def _inventory_git_output(root: Path, *arguments: str) -> bytes:
+    if _ACTIVE_PROCESS_OWNER is None:
+        raise RuntimeError("gate_inventory_owner_missing")
+    return _ACTIVE_PROCESS_OWNER.capture(
+        GateCommand(
+            "candidate Git read",
+            (GIT, "-c", f"safe.directory={root}", "-C", str(root), *arguments),
+            _git_environment(),
+            cwd=root,
+            timeout_s=30,
+        ),
+        limit=16 << 20,
+    )
+
+
 def _require_candidate_launcher(candidate_sha: str) -> None:
-    paths = ("tools/quality_gate.py", "tools/quality_gate_inventory.py")
+    paths = (
+        "tools/quality_gate.py",
+        "tools/quality_gate_inventory.py",
+        *(_BOOTSTRAP_PATHS if _ACTIVE_PROCESS_OWNER is not None else ()),
+    )
     if (
         Path(__file__).resolve(strict=True) != (ROOT / paths[0]).resolve(strict=True)
         or _git_output(ROOT, "rev-parse", "HEAD") != candidate_sha
@@ -1014,6 +1370,11 @@ def _require_candidate_launcher(candidate_sha: str) -> None:
             or bool(details.st_mode & 0o111) != (fields[0] == "100755")
         ):
             raise RuntimeError("closed tier launcher bytes differ from the candidate")
+        if (
+            relative in _BOOTSTRAP_SOURCES
+            and hashlib.sha256(_bootstrap_source(path)).hexdigest() != _BOOTSTRAP_SOURCES[relative]
+        ):
+            raise RuntimeError("gate_bootstrap_loaded_bytes_changed")
 
 
 def _candidate_inventory_loader() -> Callable[[str | os.PathLike[str]], Any]:
@@ -1029,7 +1390,7 @@ def _candidate_inventory_loader() -> Callable[[str | os.PathLike[str]], Any]:
     except BaseException:
         sys.modules.pop(name, None)
         raise
-    if Path(module.__file__).resolve(strict=True) != path:
+    if module.__file__ is None or Path(module.__file__).resolve(strict=True) != path:
         raise RuntimeError("closed tier imported a non-candidate inventory")
     return module.load_inventory
 
@@ -1497,6 +1858,18 @@ def _bounded_file_identity(
 
 
 def _host_command(argv: Sequence[str], *, timeout: int = 10) -> str:
+    if _ACTIVE_PROCESS_OWNER is not None:
+        raw = _ACTIVE_PROCESS_OWNER.capture(
+            GateCommand(
+                "exact-host prerequisite",
+                tuple(argv),
+                {"LC_ALL": "C.UTF-8", "PATH": "/usr/bin:/bin"},
+                cwd=ROOT,
+                timeout_s=timeout,
+            ),
+            limit=8192,
+        )
+        return raw.decode("utf-8", errors="strict")
     completed = subprocess.run(  # noqa: S603 - fixed exact-host executables and literal argv
         argv,
         executable=argv[0],
@@ -1602,6 +1975,22 @@ def _write_tier_summary(directory_fd: int, summary: Mapping[str, Any]) -> None:
     contour = host.get("host_contour") if isinstance(host, Mapping) else None
     if summary.get("tier") == "exact-release" and contour != _exact_host_evidence():
         raise RuntimeError("exact-host contour drifted before evidence publication")
+    if _ACTIVE_PROCESS_OWNER is not None:
+        _ACTIVE_PROCESS_OWNER.check()
+        summary = dict(summary)
+        measured = summary["owned_commands"]
+        measured_ids = {id(row) for row in measured}
+        summary["auxiliary_commands"] = [
+            row for row in _ACTIVE_PROCESS_OWNER.commands if id(row) not in measured_ids
+        ]
+        phase = importlib.import_module("tools.quality_gate_phase")
+        comparison = summary["comparison_wheel"]["epoch_commit"] is not None
+        phase.validate_auxiliary_evidence(
+            summary["auxiliary_commands"],
+            measured,
+            summary["active_deadlines"],
+            expected_clones=1 + comparison,
+        )
     _write_private_json(directory_fd, "quality-gate-summary.json", summary)
 
 
@@ -1853,9 +2242,9 @@ def _positive_workers(value: str) -> int:
 
 def _tier_result_identity(tier: str, measurement_only: bool) -> tuple[str, str, bool]:
     if measurement_only:
-        return "friday.quality-gate-measurement.v1", "measured", False
+        return "friday.quality-gate-measurement.v2", "measured", False
     if tier == "exact-release":
-        return "friday.quality-gate-summary.v1", "passed", True
+        return "friday.quality-gate-summary.v2", "passed", True
     if tier == "nightly":
         return "friday.quality-gate-observation.v1", "observed", False
     return "friday.quality-gate-change.v1", "passed", False
@@ -1892,6 +2281,30 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--dry-run", action="store_true", help="print diagnostic commands")
     return parser
+
+
+def _candidate_r10_modules(source: Path) -> tuple[Any, Any]:
+    """Load candidate tools without adding a product checkout to isolated sys.path."""
+    from types import ModuleType
+
+    directory = (source / "tools").resolve(strict=True)
+    namespace = sys.modules.get("tools")
+    if namespace is None:
+        namespace = ModuleType("tools")
+        namespace.__path__ = [str(directory)]
+        namespace.__package__ = "tools"
+        namespace.__spec__ = importlib.machinery.ModuleSpec("tools", loader=None, is_package=True)
+        namespace.__spec__.submodule_search_locations = namespace.__path__
+        sys.modules["tools"] = namespace
+    elif {Path(path).resolve() for path in getattr(namespace, "__path__", ())} != {directory}:
+        raise RuntimeError("R10 candidate tools namespace has foreign authority")
+    current = sys.modules[__name__]
+    if sys.modules.setdefault("tools.quality_gate", current) is not current:
+        raise RuntimeError("R10 candidate gate module has foreign authority")
+    return (
+        importlib.import_module("tools.release_1_0_acceptance"),
+        importlib.import_module("tools.release_1_0_deterministic"),
+    )
 
 
 def _inventory_interpreter_is_isolated() -> bool:
@@ -1959,12 +2372,27 @@ def execute_tier(
     *,
     command_runner: Callable[[GateCommand], int] | None = None,
 ) -> int:
+    if args.tier != "exact-release" or command_runner is not None or not _inventory_interpreter_is_isolated():
+        return _execute_tier_impl(args, command_runner=command_runner)
+    try:
+        with _early_process_owner():
+            return _execute_tier_impl(args)
+    except (OSError, RuntimeError, ValueError, KeyboardInterrupt) as exc:
+        print(f"FAILED: {exc}", file=sys.stderr)
+        return 2
+
+
+def _execute_tier_impl(
+    args: argparse.Namespace,
+    *,
+    command_runner: Callable[[GateCommand], int] | None = None,
+) -> int:
     started_ns = time.monotonic_ns()
     started_times = os.times()
     if command_runner is not None:
         print("FAILED: closed tiers do not accept an injected command runner", file=sys.stderr)
         return 2
-    runner = run_command
+    runner = _ACTIVE_PROCESS_OWNER or run_command
     commit_pattern = re.compile(r"(?:[0-9a-f]{40}|[0-9a-f]{64})").fullmatch
     candidate_sha = args.candidate_sha
     base_sha = args.base_sha
@@ -2066,9 +2494,21 @@ def execute_tier(
     observed_by_step: dict[str, int] = {}
     effective_workers = {"non_ui": 0, "ui": 0}
     observation_assets: dict[str, Any] | None = None
+    journey_evidence: dict[str, Any] | None = None
+    process_owner: Any = _ACTIVE_PROCESS_OWNER
+    measured_processes: list[dict[str, Any]] = []
+    deadline_ledger: Any = None
+    deadline_evidence: dict[str, Any] | None = None
+
+    def cleanup_allowed() -> bool:
+        return process_owner is None or process_owner.cleanup_safe
 
     try:
-        with tempfile.TemporaryDirectory(prefix="fq-", dir=_scratch_parent()) as raw_scratch:
+        with (
+            _fenced_temporary_directory(
+                prefix="fq-", dir=_scratch_parent(), cleanup_allowed=cleanup_allowed
+            ) as raw_scratch,
+        ):
             scratch = Path(raw_scratch)
             scratch.chmod(0o700)
 
@@ -2076,10 +2516,18 @@ def execute_tier(
                 command: GateCommand,
                 *,
                 observation_root: Path | None = None,
+                phase: str | None = None,
+                fifo: Path | None = None,
             ) -> int:
                 nonlocal peak_scratch_bytes
+
+                def invoke() -> int:
+                    if phase is not None and process_owner is not None:
+                        return process_owner(command, ledger=deadline_ledger, phase=phase, fifo=fifo)
+                    return runner(command)
+
                 if observation_root is None:
-                    returncode = runner(command)
+                    returncode = invoke()
                     observed_bytes = _directory_bytes(scratch)
                 else:
                     root = observation_root
@@ -2087,11 +2535,13 @@ def execute_tier(
                         0 if root == scratch else max(0, _directory_bytes(scratch) - _directory_bytes(root))
                     )
                     with _scratch_peak_sampler(root, 0.5) as observed_peak:
-                        returncode = runner(command)
+                        returncode = invoke()
                     observed_bytes = observed_peak[0]
                     peak_scratch_bytes = max(peak_scratch_bytes, outside_bytes + observed_bytes)
                 observed_by_step[command.name] = observed_bytes
                 completed_steps.append(command.name)
+                if process_owner is not None:
+                    measured_processes.append(process_owner.commands[-1])
                 peak_scratch_bytes = max(peak_scratch_bytes, observed_bytes)
                 return returncode
 
@@ -2102,7 +2552,14 @@ def execute_tier(
                 peak_scratch_bytes = _directory_bytes(scratch)
                 candidate_tree = _git_output(source, "rev-parse", f"{candidate_sha}^{{tree}}")
                 inventory = load_inventory(source / "tools" / "quality_gate_inventory.tsv")
-                inventory.validate_candidate_modules(source, candidate_sha)
+                inventory.validate_candidate_modules(
+                    source,
+                    candidate_sha,
+                    git_output=_inventory_git_output if process_owner is not None else None,
+                )
+                if args.tier == "exact-release":
+                    acceptance, deterministic = _candidate_r10_modules(source)
+                    phase_module = importlib.import_module("tools.quality_gate_phase")
                 static_environment = _git_environment()
                 static_environment.pop("PYTHONPATH", None)
                 static_environment.pop("PYTEST_ADDOPTS", None)
@@ -2132,6 +2589,7 @@ def execute_tier(
                     prepare_schema_backups=False,
                     source_root=source,
                     golden_journey_release_root=golden_journey_release_root,
+                    cleanup_allowed=cleanup_allowed,
                 ) as raw_environment:
                     environment = dict(raw_environment)
                     test_python = sys.executable
@@ -2188,6 +2646,36 @@ def execute_tier(
                     if not selected:
                         raise RuntimeError("selected tier is empty")
 
+                    # R10 child receipts must close while JUnit and the actual
+                    # installed package projection still exist, before scratch cleanup.
+                    if (
+                        args.tier == "exact-release"
+                        and (source / "tools/release_1_0_capability_matrix.json").is_file()
+                    ):
+                        acceptance, deterministic = _candidate_r10_modules(source)
+
+                        journey_matrix = acceptance.load_matrix(
+                            source / "tools/release_1_0_capability_matrix.json"
+                        )
+                        if deterministic._journey_bindings(
+                            journey_matrix, (node.nodeid for node in selected)
+                        ):
+                            runtime_wheel = comparison_observed_sha256 or wheel_sha256
+                            if not isinstance(runtime_wheel, str):
+                                raise RuntimeError("R10 runtime wheel identity is missing")
+                            journey_context = deterministic.make_gate_context(
+                                {
+                                    "base_sha": base_sha,
+                                    "candidate_sha": candidate_sha,
+                                    "candidate_tree": candidate_tree,
+                                    "wheel_sha256": runtime_wheel,
+                                    "inventory_sha256": inventory.digest,
+                                },
+                                installed_site,
+                                source,
+                            )
+                            journey_evidence = {"context": journey_context, "records": []}
+
                     groups = (
                         (
                             "non-UI",
@@ -2195,6 +2683,17 @@ def execute_tier(
                         ),
                         ("UI", tuple(node for node in selected if node.execution_kind == "browser")),
                     )
+                    if process_owner is not None:
+                        deadline_matrix = acceptance.load_matrix(
+                            source / "tools/release_1_0_capability_matrix.json"
+                        )
+                        # The ledger seals matrix/collection limits without importing
+                        # execution registries into this installed-wheel parent.
+                        # Registry audits run in the acceptance instrument/reader.
+                        deadline_plan = phase_module.gate_plan(
+                            selected, deadline_matrix, os.urandom(16).hex()
+                        )
+                        deadline_ledger = phase_module.ParentDeadlineLedger(deadline_plan)
                     for label, nodes in groups:
                         if not nodes:
                             continue
@@ -2205,10 +2704,15 @@ def execute_tier(
                             prepare_schema_backups=False,
                             source_root=source,
                             golden_journey_release_root=golden_journey_release_root,
+                            cleanup_allowed=cleanup_allowed,
                         ) as group_environment:
                             if _INSTALLED_SITE_ENV in environment:
                                 group_environment[_INSTALLED_SITE_ENV] = environment[_INSTALLED_SITE_ENV]
                                 group_environment["PYTHONPATH"] = environment["PYTHONPATH"]
+                            if journey_evidence is not None:
+                                group_environment[deterministic.GATE_CONTEXT_ENV] = deterministic._bytes(
+                                    journey_context
+                                ).decode()
                             if args.tier == "nightly":
                                 group_environment.update(
                                     {name: environment[name] for name in _OBSERVATION_TEST_ENV}
@@ -2237,7 +2741,15 @@ def execute_tier(
                             )
                             scratch_baseline = _directory_bytes(scratch)
                             budget_mb = sum(node.scratch_mb for node in nodes)
-                            if measured(command, observation_root=scratch) != 0:
+                            if (
+                                measured(
+                                    command,
+                                    observation_root=scratch,
+                                    phase=label if process_owner is not None else None,
+                                    fifo=group_root / "deadline.pipe" if process_owner is not None else None,
+                                )
+                                != 0
+                            ):
                                 return 1
                             observed = collection_nodeids(collection_path)
                             if Counter(observed) != Counter(expected) or not _junit_phase_is_clean(
@@ -2247,6 +2759,20 @@ def execute_tier(
                             ):
                                 raise RuntimeError(f"{label} execution differs from its classified tier")
                             durations.update(_junit_durations(report_path))
+                            if journey_evidence is not None:
+                                if (
+                                    deterministic._identity(installed_site, source)
+                                    != journey_context["runtime"]
+                                ):
+                                    raise RuntimeError("R10 runtime projection changed during gate execution")
+                                journey_evidence["records"].extend(
+                                    deterministic.collect_gate_journeys(
+                                        report_path,
+                                        expected,
+                                        journey_context,
+                                        journey_matrix,
+                                    )
+                                )
                             peak_total = observed_by_step[command.name]
                             observed_bytes = max(0, peak_total - scratch_baseline)
                             scratch_groups.append(
@@ -2271,6 +2797,20 @@ def execute_tier(
                         for nodeid, duration in durations.items()
                     ):
                         raise RuntimeError("a node exceeded its declared maximum runtime")
+                    if journey_evidence is not None:
+                        deterministic.validate_gate_journeys(
+                            journey_evidence,
+                            journey_context["release"],
+                            journey_matrix,
+                            durations,
+                        )
+                    if deadline_ledger is not None:
+                        process_owner.check()
+                        deadline_evidence = deadline_ledger.complete(time.monotonic_ns(), succeeded=True)
+                        phase_module.validate_deadline_evidence(deadline_evidence, deadline_plan)
+                        phase_module.validate_process_evidence(
+                            measured_processes, completed_steps, deadline_evidence
+                        )
                     if observation_assets is not None:
                         _require_observation_assets_stable(environment, observation_assets)
                     peak_scratch_bytes = max(peak_scratch_bytes, _directory_bytes(scratch))
@@ -2295,6 +2835,8 @@ def execute_tier(
             initial = getattr(started_times, name) + getattr(started_times, f"children_{name}")
             return int((current - initial) * 1_000_000_000)
 
+        if process_owner is not None:
+            process_owner.check()
         _require_candidate_launcher(candidate_sha)
         _require_evidence_directory(evidence_dir, evidence_fd, ())
         schema, result, certification_eligible = _tier_result_identity(args.tier, measurement_only)
@@ -2338,15 +2880,37 @@ def execute_tier(
                 "sys_ns": cpu_ns("system"),
                 "max_rss_bytes": max_rss_bytes,
                 "peak_scratch_bytes": peak_scratch_bytes,
-                "retry_count": 0,
+                "retry_count": deadline_evidence["retry_count"] if deadline_evidence is not None else 0,
             },
         }
+        if deadline_evidence is not None:
+            summary["active_deadlines"] = deadline_evidence
+            summary["owned_commands"] = measured_processes
         if observation_assets is not None:
             summary["observation_assets"] = observation_assets
+        if journey_evidence is not None:
+            summary["r10_deterministic"] = journey_evidence
         _write_tier_summary(evidence_fd, summary)
         os.fsync(evidence_fd)
         _require_evidence_directory(evidence_dir, evidence_fd, ("quality-gate-summary.json",))
-    except (OSError, RuntimeError, ValueError, subprocess.TimeoutExpired) as exc:
+    except (OSError, RuntimeError, ValueError, subprocess.TimeoutExpired, KeyboardInterrupt) as exc:
+        if process_owner is not None:
+            if deadline_ledger is not None and deadline_evidence is None:
+                deadline_ledger.abort("gate_failed")
+            failure = {
+                "schema": "friday.quality-gate-failure.v1",
+                "status": "failed",
+                "candidate_sha": candidate_sha,
+                "candidate_tree": candidate_tree,
+                "certification_eligible": False,
+                "reason": str(exc),
+                "cleanup_safe": process_owner.cleanup_safe,
+                "retained_scratch": raw_scratch if not process_owner.cleanup_safe else None,
+                "owned_commands": process_owner.commands,
+                "active_deadlines": deadline_ledger.evidence() if deadline_ledger is not None else None,
+            }
+            with suppress(OSError, RuntimeError, ValueError):
+                _write_private_json(evidence_fd, "quality-gate-failure.json", failure)
         print(f"FAILED: {exc}", file=sys.stderr)
         return 1
     finally:

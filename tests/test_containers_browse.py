@@ -12,6 +12,7 @@ signed-bridge regression for query-bearing GET paths.
 from __future__ import annotations
 
 import hashlib
+import json
 
 import pytest
 from fastapi.testclient import TestClient
@@ -135,12 +136,13 @@ def test_http_tags_containers_and_filters(settings):
     with TestClient(app) as client:
         owner = {"Authorization": f"Bearer {settings.api_token}"}
         storage = app.state.storage
-        _tagged_ko(storage, LEGACY_OWNER_USER_ID, "Первая", ["Идеи", "python"])
-        _tagged_ko(storage, LEGACY_OWNER_USER_ID, "Вторая", ["идеи"])
+        first = _tagged_ko(storage, LEGACY_OWNER_USER_ID, "Первая", ["Идеи", "python"])
+        second = _tagged_ko(storage, LEGACY_OWNER_USER_ID, "Вторая", ["идеи"])
 
         # /api/knowledge/tags is a real route, not a knowledge id.
         tags = client.get("/api/knowledge/tags", headers=owner)
         assert tags.status_code == 200
+        assert len(tags.json()["items"]) == 2, "browse_tag_membership"
         assert {item["tag"].casefold(): item["count"] for item in tags.json()["items"]} == {
             "идеи": 2,
             "python": 1,
@@ -149,6 +151,13 @@ def test_http_tags_containers_and_filters(settings):
         filtered = client.get("/api/knowledge", params={"tag": "ИДЕИ"}, headers=owner)
         assert filtered.status_code == 200
         assert filtered.json()["count"] == 2
+        assert sorted((item["id"], item["title"]) for item in filtered.json()["items"]) == sorted(
+            [(first["id"], "Первая"), (second["id"], "Вторая")]
+        ), "browse_knowledge_membership"
+
+        audit_before = [
+            dict(row) for row in storage.execute("SELECT * FROM audit_log ORDER BY rowid").fetchall()
+        ]
 
         created = client.post("/api/kg/containers", json={"name": "Дом", "kind": "project"}, headers=owner)
         assert created.status_code == 200
@@ -159,6 +168,23 @@ def test_http_tags_containers_and_filters(settings):
             headers=owner,
         )
         assert child.status_code == 200
+        child_id = child.json()["container"]["id"]
+        for response, entity_id, name, kind in (
+            (created, root_id, "Дом", "project"),
+            (child, child_id, "Ремонт", "collection"),
+        ):
+            expected = {"id": entity_id, "name": name, "entity_type": kind, "description": ""}
+            assert {key: response.json()["container"][key] for key in expected} == expected, (
+                "container_http_create"
+            )
+            persisted = storage.get_entity(entity_id, LEGACY_OWNER_USER_ID)
+            assert persisted is not None
+            assert {key: persisted[key] for key in expected} == expected, "container_http_persistence"
+            assert not persisted["deleted_at"] and persisted["user_id"] == LEGACY_OWNER_USER_ID
+        edges = storage.list_part_of_relations(LEGACY_OWNER_USER_ID)
+        assert [(edge["source_entity_id"], edge["target_entity_id"]) for edge in edges] == [
+            (child_id, root_id)
+        ], "container_http_parent_persistence"
         assert (
             client.post("/api/kg/containers", json={"name": "Z", "kind": "person"}, headers=owner).status_code
             == 400
@@ -166,17 +192,61 @@ def test_http_tags_containers_and_filters(settings):
 
         listed = client.get("/api/kg/containers", headers=owner)
         assert listed.status_code == 200
-        parents = {item["name"]: item["parent_id"] for item in listed.json()["items"]}
-        assert parents["Дом"] is None
-        assert parents["Ремонт"] == root_id
+        listing = listed.json()
+        assert (listing["count"], listing["matched_at_least"], listing["truncated"]) == (2, 2, False)
+        assert sorted(
+            (item["id"], item["name"], item["entity_type"], item["parent_id"], item["knowledge_count"])
+            for item in listing["items"]
+        ) == sorted(
+            [
+                (root_id, "Дом", "project", None, 0),
+                (child_id, "Ремонт", "collection", root_id, 0),
+            ]
+        ), "container_http_membership"
 
         # Entity name lookup for browse surfaces.
         found = client.get("/api/kg/entities", params={"q": "Дом"}, headers=owner)
         assert found.status_code == 200
-        assert any(item["id"] == root_id for item in found.json()["items"])
+        assert (found.json()["count"], found.json()["matched_at_least"], found.json()["truncated"]) == (
+            1,
+            1,
+            False,
+        )
+        assert [(item["id"], item["name"], item["entity_type"]) for item in found.json()["items"]] == [
+            (root_id, "Дом", "project")
+        ], "entity_search_membership"
+        stats = client.get("/api/kg/stats", headers=owner)
+        assert stats.status_code == 200
+        expected_stats = {
+            "entity_count": 2,
+            "relation_count": 1,
+            "knowledge_object_count": 2,
+            "raw_object_count": 2,
+            "file_count": 0,
+            "entities_by_type": {"project": 1, "collection": 1},
+        }
+        assert {key: stats.json()[key] for key in expected_stats} == expected_stats, "graph_http_stats"
+        audit_after = [
+            dict(row) for row in storage.execute("SELECT * FROM audit_log ORDER BY rowid").fetchall()
+        ]
+        assert audit_after[: len(audit_before)] == audit_before, "container_http_audit_prefix"
+        delta = audit_after[len(audit_before) :]
+        assert [(row["action"], row["user_id"], row["target_type"], row["target_id"]) for row in delta] == [
+            ("container.create", LEGACY_OWNER_USER_ID, "entity", root_id),
+            ("container.create", LEGACY_OWNER_USER_ID, "entity", child_id),
+        ], "container_http_audit_delta"
+        assert all(
+            word not in json.dumps(audit_after, ensure_ascii=False)
+            for word in ("Первая", "Вторая", "Дом", "Ремонт")
+        )
 
 
 def test_admin_tags_containers_and_entity_filter(settings):
+    import re
+    import sqlite3
+    from contextlib import closing
+    from datetime import UTC, datetime
+
     app = create_app(settings)
     with TestClient(app) as client:
         owner = {"Authorization": f"Bearer {settings.api_token}"}
@@ -204,6 +274,63 @@ def test_admin_tags_containers_and_entity_filter(settings):
         assert by_entity.status_code == 200
         assert [item["id"] for item in by_entity.json()["items"]] == [ko["id"]]
 
+        # A same-name private container must neither be reused nor changed.
+        private_tenant = "local:container-private-086"
+        private_canary = "CONTAINER-PRIVATE-086"
+        storage.ensure_user(private_tenant, source="test")
+        app.state.kg.create_container(private_tenant, "Урожай", kind="collection", description=private_canary)
+
+        def snapshot():
+            with closing(sqlite3.connect(settings.database_path.as_uri() + "?mode=ro", uri=True)) as conn:
+                conn.row_factory = sqlite3.Row
+                conn.execute("PRAGMA query_only=ON")
+                business = {
+                    table: [dict(row) for row in conn.execute(f"SELECT * FROM {table} ORDER BY rowid")]
+                    for table in (
+                        "entities",
+                        "entity_versions",
+                        "raw_objects",
+                        "knowledge_objects",
+                        "knowledge_entity_links",
+                        "relations",
+                        "relation_revisions",
+                    )
+                }
+                audits = [dict(row) for row in conn.execute("SELECT rowid, * FROM audit_log ORDER BY rowid")]
+                return business, audits
+
+        def canonical(value):
+            return json.dumps(
+                value, ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False
+            )
+
+        def request_time(value, *, audit=False):
+            assert type(value) is str
+            fraction = r"\.000000" if audit else ""
+            assert re.fullmatch(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}" + fraction + r"\+00:00", value)
+            parsed = datetime.fromisoformat(value)
+            assert parsed.isoformat(timespec="microseconds" if audit else "seconds") == value
+            assert started.replace(microsecond=0) <= parsed <= ended
+            return value
+
+        before, audit_before = snapshot()
+        assert not [
+            row for row in before["entities"] if row["user_id"] == "local:kate" and row["name"] == "Урожай"
+        ]
+        assert (
+            len(
+                [
+                    row
+                    for row in before["entities"]
+                    if row["user_id"] == private_tenant
+                    and row["name"] == "Урожай"
+                    and row["description"] == private_canary
+                ]
+            )
+            == 1
+        )
+        assert audit_before
+        started = datetime.now(UTC)
         made = client.post(
             "/api/admin/containers",
             json={"user_id": "local:kate", "name": "Урожай", "kind": "collection"},
@@ -211,6 +338,125 @@ def test_admin_tags_containers_and_entity_filter(settings):
         )
         assert made.status_code == 200
         assert made.json()["container"]["entity_type"] == "collection"
+        ended = datetime.now(UTC)
+        after, audit_after = snapshot()
+        assert len(after["entities"]) == len(before["entities"]) + 1
+        assert after["entities"][:-1] == before["entities"]
+        created = after["entities"][-1]
+        entity_id = created["id"]
+        assert type(entity_id) is str and re.fullmatch(r"ent_[0-9a-f]{16}", entity_id)
+        assert entity_id not in {row["id"] for row in before["entities"]}
+        created_at = request_time(created["created_at"])
+        updated_at = request_time(created["updated_at"])
+        expected_entity = {
+            "id": entity_id,
+            "user_id": "local:kate",
+            "name": "Урожай",
+            "normalized_name": "урож",
+            "entity_type": "collection",
+            "aliases_json": "[]",
+            "description": "",
+            "metadata_json": '{"container": true, "origin": "user"}',
+            "canonical": 1,
+            "merged_into_id": None,
+            "version": 1,
+            "created_at": created_at,
+            "updated_at": updated_at,
+            "deleted_at": None,
+        }
+        assert canonical(after["entities"]) == canonical(before["entities"] + [expected_entity])
+        expected_card = {
+            "id": entity_id,
+            "name": "Урожай",
+            "entity_type": "collection",
+            "aliases": [],
+            "aliases_json": "[]",
+            "description": "",
+            "version": 1,
+            "created_at": created_at,
+            "updated_at": updated_at,
+            "parent_id": None,
+            "knowledge_count": 0,
+        }
+        assert canonical(made.json()) == canonical({"container": expected_card})
+
+        assert len(after["entity_versions"]) == len(before["entity_versions"]) + 1
+        assert after["entity_versions"][:-1] == before["entity_versions"]
+        version = after["entity_versions"][-1]
+        version_id = version["id"]
+        assert type(version_id) is str and re.fullmatch(r"entv_[0-9a-f]{16}", version_id)
+        assert version_id not in {row["id"] for row in before["entity_versions"]}
+        version_time = version["created_at"]
+        assert type(version_time) is str
+        assert re.fullmatch(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{6}Z", version_time)
+        parsed_version_time = datetime.fromisoformat(version_time.replace("Z", "+00:00"))
+        assert parsed_version_time.isoformat(timespec="microseconds").replace("+00:00", "Z") == version_time
+        # Ordinary wall-clock fixture only; no rollback/future-authority claim.
+        assert started <= parsed_version_time <= ended
+        assert all(
+            datetime.fromisoformat(row["created_at"].replace("Z", "+00:00")) < parsed_version_time
+            for row in before["entity_versions"]
+        )
+        expected_version = {
+            "id": version_id,
+            "user_id": "local:kate",
+            "entity_id": entity_id,
+            "version": 1,
+            "snapshot_json": json.dumps(expected_entity, ensure_ascii=False, sort_keys=True),
+            "created_at": version_time,
+        }
+        assert canonical(after["entity_versions"]) == canonical(
+            before["entity_versions"] + [expected_version]
+        )
+        # ensure_user and managed transaction context have legitimate writes;
+        # equality is limited to these selected raw business tables.
+        for table in (
+            "raw_objects",
+            "knowledge_objects",
+            "knowledge_entity_links",
+            "relations",
+            "relation_revisions",
+        ):
+            assert canonical(after[table]) == canonical(before[table]), table
+
+        assert len(audit_after) == len(audit_before) + 1
+        assert audit_after[:-1] == audit_before
+        audit = audit_after[-1]
+        audit_id = audit["id"]
+        assert type(audit_id) is str and re.fullmatch(r"audit_[0-9a-f]{16}", audit_id)
+        assert audit_id not in {row["id"] for row in audit_before}
+        assert type(audit["rowid"]) is int and audit["rowid"] > audit_before[-1]["rowid"]
+        request_id = made.headers["X-Request-ID"]
+        assert re.fullmatch(r"[0-9a-f]{24}", request_id)
+        expected_fingerprint = {
+            "id": entity_id,
+            "entity_type": "collection",
+            "version": 1,
+            "created_at": created_at,
+            "updated_at": updated_at,
+            "name_chars": 6,
+            "description_chars": 0,
+            "aliases_chars": 2,
+            "private_fields_count": 5,
+        }
+        expected_audit = {
+            "rowid": audit["rowid"],
+            "id": audit_id,
+            "user_id": LEGACY_OWNER_USER_ID,
+            "action": "admin.container.create",
+            "target_type": "entity",
+            "target_id": entity_id,
+            "before_json": None,
+            "after_json": json.dumps(expected_fingerprint, ensure_ascii=False, sort_keys=True),
+            "ip_address": "",
+            "request_id": request_id,
+            "created_at": request_time(audit["created_at"], audit=True),
+        }
+        assert canonical(audit_after) == canonical(audit_before + [expected_audit])
+        assert all(
+            private not in made.text + canonical([audit])
+            for private in (private_tenant, private_canary, "Запись Кати", settings.api_token)
+        )
 
 
 # --- signed bridge + query strings ---------------------------------------

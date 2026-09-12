@@ -51,6 +51,10 @@ from friday.orchestration.supervisor_representative_window_attestation import (
     REPRESENTATIVE_WINDOW_ISSUE_RESPONSE_SCHEMA,
     representative_window_sha256,
 )
+from friday.secondary_product_witness import (
+    secondary_product_witness_content,
+    secondary_product_witness_source_ref,
+)
 from friday.storage import SCHEMA_VERSION
 from tools import release_artifact_retention as retention
 from tools import release_artifact_retention_operator as retention_apply
@@ -3213,12 +3217,29 @@ def test_exact_backup_rejects_main_database_sidecar_symlink_before_checkpoint(
 
 def test_exact_backup_rejects_active_secondary_product_witness(tmp_path: Path) -> None:
     config = _obsidian_cutover_config(tmp_path)
+    nonce = "a" * 32
+    source_ref = secondary_product_witness_source_ref("assist", nonce)
+    content = secondary_product_witness_content("assist", nonce)
     connection = sqlite3.connect(config.database)
     try:
-        connection.execute("CREATE TABLE raw_objects(source_ref TEXT NOT NULL)")
         connection.execute(
-            "INSERT INTO raw_objects VALUES(?)",
-            ("secondary-product-witness:assist:" + "a" * 32,),
+            """CREATE TABLE raw_objects(
+                   source TEXT NOT NULL,
+                   source_ref TEXT NOT NULL,
+                   raw_content TEXT NOT NULL,
+                   content_hash TEXT NOT NULL,
+                   metadata_json TEXT NOT NULL
+               )"""
+        )
+        connection.execute(
+            "INSERT INTO raw_objects VALUES(?,?,?,?,?)",
+            (
+                "api",
+                source_ref,
+                content,
+                hashlib.sha256(content.encode()).hexdigest(),
+                json.dumps({"secondary_product_witness": True}),
+            ),
         )
         connection.commit()
     finally:
@@ -3226,6 +3247,64 @@ def test_exact_backup_rejects_active_secondary_product_witness(tmp_path: Path) -
     config.database.chmod(0o600)
 
     with pytest.raises(operator.ReleaseFailure, match="backup_active_secondary_product_witness"):
+        operator._exact_sqlite_backup(config)  # noqa: SLF001
+
+
+def test_exact_backup_allows_secondary_product_witness_prefix_decoys(tmp_path: Path) -> None:
+    config = _obsidian_cutover_config(tmp_path)
+    nonce = "b" * 32
+    source_ref = secondary_product_witness_source_ref("assist", nonce)
+    content = secondary_product_witness_content("assist", nonce)
+    digest = hashlib.sha256(content.encode()).hexdigest()
+    rows = (
+        ("manual", source_ref, content, digest, json.dumps({"secondary_product_witness": True})),
+        ("api", source_ref, content, digest, "{}"),
+    )
+    connection = sqlite3.connect(config.database)
+    try:
+        connection.execute(
+            """CREATE TABLE raw_objects(
+                   source TEXT NOT NULL,
+                   source_ref TEXT NOT NULL,
+                   raw_content TEXT NOT NULL,
+                   content_hash TEXT NOT NULL,
+                   metadata_json TEXT NOT NULL
+               )"""
+        )
+        connection.executemany("INSERT INTO raw_objects VALUES(?,?,?,?,?)", rows)
+        connection.commit()
+    finally:
+        connection.close()
+    config.database.chmod(0o600)
+
+    backup = operator._exact_sqlite_backup(config)  # noqa: SLF001
+    payload = backup.opaque
+    assert isinstance(payload, operator._ExactBackupPayload)  # noqa: SLF001
+    copied = sqlite3.connect(payload.directory / "database.sqlite3")
+    try:
+        assert copied.execute(
+            """SELECT source, source_ref, raw_content, content_hash, metadata_json
+                 FROM raw_objects ORDER BY source"""
+        ).fetchall() == sorted(rows)
+    finally:
+        copied.close()
+
+
+def test_exact_backup_refuses_malformed_secondary_product_witness_schema(tmp_path: Path) -> None:
+    config = _obsidian_cutover_config(tmp_path)
+    connection = sqlite3.connect(config.database)
+    try:
+        connection.execute("CREATE TABLE raw_objects(source_ref TEXT NOT NULL)")
+        connection.execute(
+            "INSERT INTO raw_objects VALUES(?)",
+            ("secondary-product-witness:assist:" + "c" * 32,),
+        )
+        connection.commit()
+    finally:
+        connection.close()
+    config.database.chmod(0o600)
+
+    with pytest.raises(operator.ReleaseFailure, match="backup_secondary_product_checkpoint_failed"):
         operator._exact_sqlite_backup(config)  # noqa: SLF001
 
 

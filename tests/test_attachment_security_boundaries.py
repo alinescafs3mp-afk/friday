@@ -415,7 +415,10 @@ async def test_office_intent_arbiter_uses_the_attachment_optional_stage_budget(
         timeout=1.0,
     )
 
-    assert result["message"] == "Обычный ответ после отказа optional Office routing."
+    # Exhaustive counts still require the exact oracle after optional routing
+    # times out. The unindexed synthetic body cannot certify a whole-file count.
+    assert "Не могу надёжно проверить точное количество" in result["message"]
+    assert "Обычный ответ после отказа optional Office routing." not in result["message"]
     assert arbiter_calls == 1
     assert arbiter_cancelled is True
 
@@ -996,7 +999,9 @@ async def test_tool_enabled_attachment_bounds_first_and_final_model_calls_withou
         timeout_start = len(observed_timeouts)
         result = await runtime._agentic_loop(  # noqa: SLF001
             context,
-            "объясни текущее вложение",
+            # A completed archive effect needs explicit archive authority;
+            # attachment-only turns correctly skip this prefetch entirely.
+            "Собери документы за вчера и объясни текущее вложение, сохрани итог в память.",
             actor,
             list(tools),
             [attachment],
@@ -1192,18 +1197,6 @@ async def test_attachment_late_file_filler_uses_primary_remainder_without_file_e
             observed_timeouts.append(float(timeout))
         return await real_wait_for(awaitable, timeout)
 
-    async def simple_context(user_id, message, conversation_id, **kwargs):
-        del message, kwargs
-        context = AgentContext(
-            conversation_id=conversation_id,
-            user_id=user_id,
-            person_id=user_id,
-            answer_mode="general_conversation",
-            current_attachment_present=True,
-        )
-        context_holder["context"] = context
-        return context
-
     llm = PrimaryThenHangingFillerLLM()
     kernel = RecordingKernel()
     runtime = AgentRuntime(
@@ -1212,9 +1205,18 @@ async def test_attachment_late_file_filler_uses_primary_remainder_without_file_e
         llm=llm,
         kernel=kernel,  # type: ignore[arg-type]
     )
+    real_builder = runtime._file_for_a_request_that_wanted_one
+
+    async def record_builder_context(*args, **kwargs):
+        # Current-file routes may construct context without _prepare_context.
+        # Observe the real carrier boundary without replacing either stage.
+        assert isinstance(kwargs.get("context"), AgentContext)
+        context_holder["context"] = kwargs["context"]
+        return await real_builder(*args, **kwargs)
+
     monkeypatch.setattr(agent_runtime_module, "_ATTACHMENT_GENERATION_TIMEOUT_SEC", cap)
     monkeypatch.setattr(agent_runtime_module.asyncio, "wait_for", record_wait_for)
-    monkeypatch.setattr(runtime, "_prepare_context", simple_context)
+    monkeypatch.setattr(runtime, "_file_for_a_request_that_wanted_one", record_builder_context)
     try:
         result = await runtime.chat(
             "alice",

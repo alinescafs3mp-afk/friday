@@ -433,6 +433,7 @@ def public_chat_ingestion(
     public.pop("accepted_effect_outcome", None)
     public.pop("accepted_archive_recall_outcome", None)
     public.pop("source_search_result_identities", None)
+    public.pop("_mixed_journey_source_facts", None)
     if "ingestion" in public:
         ingestion = public.get("ingestion")
         public["ingestion"] = (

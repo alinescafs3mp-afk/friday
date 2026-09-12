@@ -2304,3 +2304,50 @@ def test_runtime_seam_follows_content_guards_and_precedes_model_said() -> None:
     assert seam < status < regeneration_gate
     assert seam < source.index("model_said =")
     assert 'response["voice_clip"] = None' in source[seam : source.index("model_said =")]
+
+
+@pytest.mark.parametrize("target", ["SYN-TELEGRAM-B10-11", "MARK-42", "ПРОБА-17"])
+@pytest.mark.parametrize("tail", ["", " \\", " "])
+def test_explicit_symbol_after_literal_completes_only_the_requested_pair(target, tail):
+    question = f"Экранируй амперсанд после контрольной строки {target}. Проверка REQUEST-8."
+    actual = repair_explicit_text_shape(question, target + tail)
+    assert actual == target + " &"
+    assert repair_explicit_text_shape(question, actual) == actual
+
+
+@pytest.mark.parametrize(
+    "question",
+    [
+        "Не экранируй амперсанд после контрольной строки MARK-42.",
+        "Экранируй амперсанд после контрольной строки MARK-42 из файла.",
+        "Экранируй амперсанд после контрольной строки MARK-42, но не добавляй его.",
+        "Процитируй: «Экранируй амперсанд после контрольной строки MARK-42». ",
+        "Экранируй амперсанд после контрольной строки MARK-42 и отправь файл.",
+        "Экранируй амперсанд после контрольной строки MARK-42. Затем удали файл.",
+        "Экранируй слово амперсанд после контрольной строки MARK-42.",
+    ],
+)
+def test_symbol_pair_repair_requires_a_complete_unconditional_request(question):
+    answer = "MARK-42 \\"
+    assert repair_explicit_text_shape(question, answer) == answer
+
+
+@pytest.mark.parametrize(
+    "answer",
+    [
+        "MARK-42 &",
+        "MARK-42 \\&",
+        "MARK-42 &amp;",
+        "MARK-42 &&",
+        "MARK-42 MARK-42",
+        "MARK-42\n\\",
+        "Не могу выполнить MARK-42",
+        "Файл прочитан MARK-42 \\ ",
+        "**MARK-42**",
+        "MARK-42 текст",
+        "OTHER-77 \\ ",
+    ],
+)
+def test_symbol_pair_repair_does_not_rewrite_existing_content(answer):
+    question = "Экранируй амперсанд после маркера MARK-42."
+    assert repair_explicit_text_shape(question, answer) == answer

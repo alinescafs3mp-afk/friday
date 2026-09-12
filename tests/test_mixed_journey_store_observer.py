@@ -155,16 +155,18 @@ def test_backend_wait_does_not_render_mixed() -> None:
     assert "ядро обрабатывает запрос" in text
 
 
-def test_inbound_album_keeps_document_even_with_mixed_projection() -> None:
+@pytest.mark.parametrize("items", [1, 2])
+def test_inbound_album_keeps_document_even_with_mixed_projection(items: int) -> None:
     result = observe_mixed_journey(
         JOURNEY, TURN, files=({"id": "raw_aaaaaaaaaaaaaaaa", "sha256": DIGEST},), web=_web()
     )
     text = render_interactive_turn_status(
         TelegramStatusStage.DELIVERING_RESULT,
         8,
-        item_total=2,
-        received_items=2,
-        staged_items=2,
+        item_total=items,
+        received_items=items,
+        staged_items=items,
+        is_media_group=True,
         mixed_projection=result,
     )
     assert text.startswith("⏳ Обрабатываю файлы")

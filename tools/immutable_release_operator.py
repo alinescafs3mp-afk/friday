@@ -11107,6 +11107,32 @@ def _secondary_product_sqlite_sidecar(path: Path) -> os.stat_result | None:
     return status
 
 
+def _contains_secondary_product_witness(connection: sqlite3.Connection) -> bool:
+    """Apply the product's complete persisted-witness predicate."""
+
+    # Keep the builder importable before Friday is installed. Backup execution
+    # is candidate-bound and therefore resolves this from the installed wheel.
+    from friday.secondary_product_witness import is_secondary_product_witness_raw
+
+    rows = connection.execute(
+        """SELECT source, source_ref, raw_content, content_hash, metadata_json
+             FROM raw_objects
+            WHERE source='api' AND source_ref LIKE 'secondary-product-witness:%'"""
+    ).fetchall()
+    return any(
+        is_secondary_product_witness_raw(
+            {
+                "source": row[0],
+                "source_ref": row[1],
+                "raw_content": row[2],
+                "content_hash": row[3],
+                "metadata_json": row[4],
+            }
+        )
+        for row in rows
+    )
+
+
 def _prepare_secondary_product_backup_boundary(config: SystemdConfig) -> None:
     """Reject a live probe and truncate its already-scrubbed WAL before raw copy."""
 
@@ -11130,14 +11156,7 @@ def _prepare_secondary_product_backup_boundary(config: SystemdConfig) -> None:
             raw_table = connection.execute(
                 "SELECT 1 FROM sqlite_master WHERE type='table' AND name='raw_objects'"
             ).fetchone()
-            if (
-                raw_table is not None
-                and connection.execute(
-                    """SELECT 1 FROM raw_objects
-                     WHERE source_ref LIKE 'secondary-product-witness:%' LIMIT 1"""
-                ).fetchone()
-                is not None
-            ):
+            if raw_table is not None and _contains_secondary_product_witness(connection):
                 raise ReleaseFailure("backup_active_secondary_product_witness")
             checkpoint = connection.execute("PRAGMA wal_checkpoint(TRUNCATE)").fetchone()
         finally:

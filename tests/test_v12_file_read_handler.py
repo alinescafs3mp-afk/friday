@@ -2525,10 +2525,16 @@ async def test_prepare_writer_barrier_is_bounded_before_legacy_fallback(
     owner.start()
     assert await asyncio.to_thread(started.wait, 1)
     monkeypatch.setattr(file_read_module, "_PREPARATION_BUDGET_SEC", 0.05)
+    connections_before = len(storage._connections)  # noqa: SLF001
     started_at = time.monotonic()
     try:
         assert await handler.prepare(request, turn, plan) is None
         assert time.monotonic() - started_at < 0.5
+        assert len(storage._connections) == connections_before  # noqa: SLF001
     finally:
         release.set()
         await asyncio.to_thread(owner.join, 1)
+    # An interrupted cold opener must close its incomplete connection and
+    # restore its scoped deadline. A later attempt can still prove the source.
+    prepared = await asyncio.to_thread(handler._prepare_sync, request, time.monotonic() + 2.0)  # noqa: SLF001
+    assert prepared is not None

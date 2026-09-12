@@ -104,3 +104,46 @@ def test_the_substring_prefilter_keeps_case_insensitive_matches(storage, advisor
     names = _suggested_names(advisor, "Обсудили ПРОЕКТ АЛЬФА и сроки.")
 
     assert "Проект Альфа" in names, "отбор по подстроке съел совпадение в другом регистре"
+
+
+@pytest.mark.parametrize(
+    ("content", "expected"),
+    [
+        ("amberquartz.", {"amberquartz"}),
+        ("amberquartz...", {"amberquartz"}),
+        ("BRK.A.", {"BRK.A"}),
+        ("v1.2; PK-04-04.", {"v1.2", "PK-04-04"}),
+        ("preBRK; BRKsuffix; prefixamberquartzsuffix", set()),
+        ("BRK.AA; BRK..A; X.BRK;", set()),
+        ("OMEGA.ALIAS.", {"amberquartz"}),
+        ("foreignquartz.", set()),
+    ],
+    ids=["period", "ellipsis", "dotted", "version-code", "substring", "dot-continuation", "alias", "foreign"],
+)
+def test_existing_name_punctuation_preserves_identifier_and_person_boundaries(
+    storage, advisor, content, expected
+):
+    storage.ensure_user("alice")
+    storage.ensure_user("bob")
+    for name in ("amberquartz", "BRK", "BRK.A", "v1.2", "PK-04-04"):
+        storage.create_entity(
+            Entity(
+                id=new_id("ent"),
+                user_id="alice",
+                name=name,
+                entity_type=EntityType.CONCEPT,
+                aliases_json=["omega.alias"] if name == "amberquartz" else [],
+            )
+        )
+    storage.create_entity(
+        Entity(id=new_id("ent"), user_id="bob", name="foreignquartz", entity_type=EntityType.CONCEPT)
+    )
+    before = [dict(row) for row in storage.execute("SELECT * FROM entities ORDER BY id").fetchall()]
+    matches = [
+        item
+        for item in advisor._entity_suggestions("alice", content)
+        if item.get("method") == "existing_entity_exact_mention"
+    ]
+    assert {item["name"] for item in matches} == expected
+    assert all(item["confidence"] == 0.97 and item["entity_id"] for item in matches)
+    assert [dict(row) for row in storage.execute("SELECT * FROM entities ORDER BY id").fetchall()] == before

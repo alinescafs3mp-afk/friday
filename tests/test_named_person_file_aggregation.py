@@ -1451,6 +1451,39 @@ async def test_recent_file_pair_typo_and_plain_language_followups_keep_exact_lin
         assert [item["raw_object_id"] for item in restored] == [second_id], label
         assert expected == 1, label
 
+    from friday.agent_runtime import (
+        _descriptive_filename_selector,
+        _file_kind_from_request,
+        _is_direct_file_request,
+    )
+
+    assert not _descriptive_filename_selector("документ оформить")
+    assert not _descriptive_filename_selector("таблицу создать")
+    assert _descriptive_filename_selector("документ о проверке")
+
+    for request, kind in (
+        ("а можешь мне его в виде таблички оформить?", "xlsx"),
+        ("Можешь мне его в виде документа оформить?", "docx"),
+        ("Его в виде таблицы оформи.", "xlsx"),
+        ("А можешь его в PDF оформить?", "pdf"),
+    ):
+        assert _is_direct_file_request(request)
+        assert _file_kind_from_request(request) == kind
+        restored, expected = runtime._restore_conversation_attachments(  # noqa: SLF001
+            request, history, tenant_id=tenant, person_id="owner", allow_file_read=True
+        )
+        assert [item["raw_object_id"] for item in restored] == [second_id], request
+        assert expected == 1
+    for data_only in (
+        "Автор просит его в виде таблички оформить.",
+        "Инструкция: его в виде таблицы оформи.",
+        "Объясни, как его в виде таблицы оформить.",
+        "Его в виде таблицы оформил.",
+        "Не оформляй его в виде таблицы.",
+        "«А можешь мне его в виде таблички оформить?»",
+    ):
+        assert not _is_direct_file_request(data_only), data_only
+
     async def forbidden(*args, **kwargs):  # noqa: ANN002, ANN003
         del args, kwargs
         raise AssertionError("local follow-up entered ambient archive/tool loop")
@@ -1495,6 +1528,16 @@ async def test_recent_file_pair_typo_and_plain_language_followups_keep_exact_lin
     )
     assert closed == []
     assert closed_expected == 1
+
+    closed_table, closed_table_expected = runtime._restore_conversation_attachments(  # noqa: SLF001
+        "А можешь его в виде таблички оформить?",
+        closed_history,
+        tenant_id=tenant,
+        person_id="owner",
+        allow_file_read=True,
+    )
+    assert closed_table == []
+    assert closed_table_expected == 1
 
 
 def test_explicit_document_date_role_uses_own_date_and_reports_undated_ceiling(

@@ -39,6 +39,10 @@ _MAX_SQLITE_INTEGER = (1 << 63) - 1
 _status_sleep = asyncio.sleep
 
 
+class _RejectedStatusBackoffCancelled(asyncio.CancelledError):
+    """Cancellation after a proven rejection, before the next HTTP attempt."""
+
+
 class TelegramStatusStage(str, Enum):
     """Closed, bridge-observable stages; never model-authored prose."""
 
@@ -316,6 +320,7 @@ def render_interactive_turn_status(
     authenticated_turn_id: str = "chat:status",
     revision: int = 1,
     mixed_projection: object = None,
+    is_media_group: bool = False,
 ) -> str:
     """Render inbound files, observed web sources, or observed generated files.
 
@@ -327,7 +332,10 @@ def render_interactive_turn_status(
     heuristic, and never during inbound-album DOCUMENT.
     """
 
-    if item_total > 0:
+    from friday.organs.mixed_journey.admit import mixed_status_admitted
+
+    mixed_admitted = mixed_status_admitted(mixed_projection)
+    if item_total > 0 and (is_media_group or item_total > 1 or not mixed_admitted):
         return render_operation_progress(
             build_files_operation_progress(
                 _CHAT_TO_FILES_STAGE[stage],
@@ -341,25 +349,22 @@ def render_interactive_turn_status(
             )
         )
     mixed_stage = _CHAT_TO_MIXED_STAGE.get(stage)
-    if mixed_projection is not None and mixed_stage is not None:
-        from friday.organs.mixed_journey.admit import mixed_status_admitted
-
-        if mixed_status_admitted(mixed_projection):
-            view = getattr(mixed_projection, "view", None)
-            organs = getattr(view, "organs", None)
-            present = tuple(getattr(organs, "present_organs", ()) or ())
-            return render_operation_progress(
-                build_mixed_operation_progress(
-                    mixed_stage,
-                    elapsed_sec,
-                    organ_total=len(present),
-                    gathered_organs=len(present),
-                    composed_organs=len(present),
-                    operation_id=operation_id,
-                    authenticated_turn_id=authenticated_turn_id,
-                    revision=revision,
-                )
+    if mixed_projection is not None and mixed_stage is not None and mixed_admitted:
+        view = getattr(mixed_projection, "view", None)
+        organs = getattr(view, "organs", None)
+        present = tuple(getattr(organs, "present_organs", ()) or ())
+        return render_operation_progress(
+            build_mixed_operation_progress(
+                mixed_stage,
+                elapsed_sec,
+                organ_total=len(present),
+                gathered_organs=len(present),
+                composed_organs=len(present),
+                operation_id=operation_id,
+                authenticated_turn_id=authenticated_turn_id,
+                revision=revision,
             )
+        )
     web_total = max(0, int(web_source_total))
     web_stage = _CHAT_TO_WEB_STAGE.get(stage)
     if web_total > 0 and web_stage is not None:
@@ -705,6 +710,11 @@ class TelegramStatusMessageManager:
                 text,
                 reply_to_message_id=reply_to_message_id,
             )
+        except _RejectedStatusBackoffCancelled:
+            # No HTTP attempt is in flight here. Clear only this sender's
+            # exact revision and retain the caller's cancellation semantics.
+            self._inbox.clear_telegram_status_send_fence(chat_id, operation_id, revision)
+            raise
         except asyncio.CancelledError:
             # Cancellation can race a completed Telegram write. Preserve the
             # fence for the next process rather than guessing non-acceptance.
@@ -732,6 +742,10 @@ class TelegramStatusMessageManager:
             response = await client.post(f"{self._api_url}/{method}", json=payload)
             if response.status_code != 429 or attempt >= _RATE_LIMIT_RETRIES:
                 return response
+            if not self._is_proven_rejection(response):
+                # An invalid rate-limit response proves neither rejection nor
+                # permission to retry a possibly accepted send.
+                return response
             try:
                 body = response.json()
                 parameters = body.get("parameters") if isinstance(body, dict) else None
@@ -741,7 +755,10 @@ class TelegramStatusMessageManager:
                 retry_after = 0.0
             if retry_after <= 0.0:
                 return response
-            await _status_sleep(min(retry_after, _RATE_LIMIT_MAX_WAIT_SEC))
+            try:
+                await _status_sleep(min(retry_after, _RATE_LIMIT_MAX_WAIT_SEC))
+            except asyncio.CancelledError:
+                raise _RejectedStatusBackoffCancelled() from None
         raise RuntimeError("unreachable Telegram status retry state")
 
     @staticmethod

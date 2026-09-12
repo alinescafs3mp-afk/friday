@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import copy
+import hashlib
 import inspect
 import json
 import sqlite3
@@ -614,6 +615,47 @@ def test_logical_database_digest_includes_sqlite_sequence() -> None:
         assert battery._logical_database_digest(storage) != baseline
     finally:
         storage.close()
+
+
+@pytest.mark.parametrize("after_close", ["unchanged", "row_changed", "missing", "corrupt"])
+def test_tail_reconciliation_reads_current_schema_and_detects_shutdown_changes(
+    settings: Any,
+    storage: Any,
+    after_close: str,
+) -> None:
+    with storage.transaction():
+        storage.execute(
+            "INSERT INTO schema_meta(key, value, updated_at) VALUES('tail-probe', 'before', ?)",
+            ("2026-08-08T09:00:00+00:00",),
+        )
+    files = Path(settings.files_dir)
+    files.mkdir(mode=0o700, parents=True, exist_ok=True)
+    probe = SimpleNamespace(
+        settings=settings,
+        _tail_probe_baseline={},
+        _probe_counter_snapshot=lambda: {},
+        _tail_database_sha256=battery._logical_database_digest(storage),
+        _tail_file_manifest=battery._private_file_manifest(files),
+    )
+    storage.close(final=True)
+    database = Path(settings.database_path)
+    if after_close == "row_changed":
+        with sqlite3.connect(database) as writer:
+            writer.execute("UPDATE schema_meta SET value='after' WHERE key='tail-probe'")
+    elif after_close == "missing":
+        database.unlink()
+    elif after_close == "corrupt":
+        database.write_bytes(b"not a SQLite database")
+    before = hashlib.sha256(database.read_bytes()).hexdigest() if database.exists() else None
+
+    observed = battery._LiveCaseExecutor.finalize_tail(probe)
+
+    assert observed["database_exact"] is (after_close == "unchanged")
+    assert observed["clear"] is (after_close == "unchanged")
+    assert observed["probe_exact"] is True and observed["files_exact"] is True
+    assert storage._shut_down is True
+    after = hashlib.sha256(database.read_bytes()).hexdigest() if database.exists() else None
+    assert after == before  # Read-only verification must neither repair nor create the DB.
 
 
 def test_tail_file_manifest_binds_file_and_empty_directory_names(tmp_path: Path) -> None:

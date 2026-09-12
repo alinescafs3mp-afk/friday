@@ -159,7 +159,11 @@ async def start_mission(mission_id: str, request: Request) -> dict[str, Any]:
     actor = _require(request, "missions.control")
     _mission_to_control(request, actor, mission_id)
     executive = request.app.state.executive
-    mission = await executive.start_mission(mission_id, actor.user_id)
+    mission = await executive.start_mission(
+        mission_id,
+        actor.user_id,
+        audit_user_id=actor.own_id,
+    )
     if mission is None:
         raise HTTPException(status_code=404, detail="Mission not found")
     return {"mission": mission}

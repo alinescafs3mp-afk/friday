@@ -64,7 +64,7 @@ for entry in pathlib.Path("/proc/self/fd").iterdir():
         pass
 """
     completed = subprocess.run(
-        [sys.executable, "-c", script, str(key)],
+        [sys.executable, "-B", "-c", script, str(key)],
         check=False,
         capture_output=True,
         env={

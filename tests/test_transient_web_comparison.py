@@ -804,3 +804,90 @@ async def test_compare_file_web_seal_executes_only_the_public_topic(
     assert evidence.sources
     assert "договор" not in web.calls[0][0].casefold()
     assert "файл" not in web.calls[0][0].casefold()
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize(
+    ("selector", "topic"),
+    [
+        ("private-deal.txt", "актуальными публичными правилами пожарной безопасности"),
+        ("raw_0123456789abcdef", "актуальными публичными правилами пожарной безопасности"),
+        ('"private deal.txt"', "актуальными публичными правилами пожарной безопасности"),
+        ("@private-deal.txt", "актуальными публичными правилами пожарной безопасности"),
+        ("private-deal.txt!", "актуальными публичными правилами пожарной безопасности"),
+        ("raw_0123456789abcdef.", "актуальными публичными правилами пожарной безопасности"),
+    ],
+)
+async def test_mixed_web_seal_strips_archive_selector_but_binds_the_original_turn(
+    storage,
+    selector: str,
+    topic: str,
+) -> None:
+    actor = _actor(storage)
+    authorization = _grant(storage, actor)
+    message = f"Сравни этот файл с архивом {selector} и {topic} в интернете."
+    plan = seal_compare_current_file_public_web_query(
+        current_user_message=message,
+        actor=actor,
+        conversation_id="conversation-1",
+    )
+    web = _RecordingWeb(_report(_source(1)))
+    adapter = TransientWebComparisonAdapter(authorization, web)
+    evidence = await adapter.research(
+        plan=plan,
+        actor=actor,
+        conversation_id="conversation-1",
+        current_user_message=message,
+    )
+    assert web.calls == [(topic, 3)]
+    assert evidence.status is TransientWebEvidenceStatus.SOURCED
+    # An unchanged public topic cannot authorize a different private source.
+    with pytest.raises(TransientWebComparisonError, match="not bound"):
+        await adapter.research(
+            plan=plan,
+            actor=actor,
+            conversation_id="conversation-1",
+            current_user_message=message.replace(selector, "another-private-file.txt"),
+        )
+    assert web.calls == [(topic, 3)]
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize(
+    "selector",
+    [
+        "raw_ABCDEF0123456789",
+        "raw_0123456789abcdef0",
+        "raw_0123456789abcde",
+        "private deal.txt",
+        '"private deal.txt',
+        "archive.txt и raw_ABCDEF0123456789",
+        "archive.txt и second.txt",
+        "/etc/private.txt",
+        '"/etc/private deal.txt"',
+        "@private deal.txt!",
+        "@@private-deal.txt",
+        "raw_ABCDEF0123456789.",
+        "raw_0123456789abcdef0!",
+        "private-deal.txt..",
+        "private-deal.txt!suffix",
+    ],
+)
+async def test_malformed_mixed_archive_reference_never_reaches_public_web(storage, selector: str) -> None:
+    actor = _actor(storage)
+    authorization = _grant(storage, actor)
+    web = _RecordingWeb(_report(_source(1)))
+    message = f"Сравни этот файл с архивом {selector} и текущими публичными правилами в интернете."
+    with pytest.raises(TransientWebComparisonError):
+        plan = seal_compare_current_file_public_web_query(
+            current_user_message=message,
+            actor=actor,
+            conversation_id="conversation-1",
+        )
+        await TransientWebComparisonAdapter(authorization, web).research(
+            plan=plan,
+            actor=actor,
+            conversation_id="conversation-1",
+            current_user_message=message,
+        )
+    assert web.calls == []

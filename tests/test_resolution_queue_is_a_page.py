@@ -90,22 +90,132 @@ def test_the_queue_reports_the_whole_size_not_the_page_size(admin) -> None:
 
 
 def test_the_next_page_shows_what_the_first_one_hid(admin) -> None:
+    import json as _json
+
     app, client, headers, user_id = admin
-    _seed_candidates(app.state.storage, user_id, 12)
+    storage = app.state.storage
+    ids = _seed_candidates(storage, user_id, 12)
 
+    def _sql_row(table: str, row_id: str) -> dict:
+        allowed = {
+            "entity_resolution_candidates": "entity_resolution_candidates",
+            "entities": "entities",
+        }
+        row = storage.execute(
+            f"SELECT * FROM {allowed[table]} WHERE id=?",
+            (row_id,),
+        ).fetchone()
+        assert row is not None, f"{table} {row_id} missing"
+        return dict(row)
+
+    def _audit_ordered() -> list[dict]:
+        rows = storage.execute(
+            "SELECT id, user_id, action, target_type, target_id, before_json, "
+            "after_json, ip_address, request_id, created_at "
+            "FROM audit_log ORDER BY rowid ASC"
+        ).fetchall()
+        return [dict(row) for row in rows]
+
+    def _selected_state() -> dict:
+        return {
+            "ids": list(ids),
+            "candidates": [_sql_row("entity_resolution_candidates", item) for item in ids],
+            "entities": [
+                _sql_row("entities", _sql_row("entity_resolution_candidates", item)["entity_a_id"])
+                for item in ids
+            ]
+            + [
+                _sql_row("entities", _sql_row("entity_resolution_candidates", item)["entity_b_id"])
+                for item in ids
+            ],
+            "audit": _audit_ordered(),
+        }
+
+    def _page_card(candidate_id: str) -> dict:
+        cand = _sql_row("entity_resolution_candidates", candidate_id)
+        left = _sql_row("entities", cand["entity_a_id"])
+        right = _sql_row("entities", cand["entity_b_id"])
+        confidence = float(cand["confidence"])
+        if confidence >= 0.95:
+            recommendation = "strong_merge_candidate"
+        elif confidence >= 0.78:
+            recommendation = "compare_context"
+        else:
+            recommendation = "manual_review"
+        return {
+            "id": cand["id"],
+            "entity_a_id": cand["entity_a_id"],
+            "entity_b_id": cand["entity_b_id"],
+            "confidence": confidence,
+            "resolution_method": "name_similarity",
+            "status": "suggested",
+            "created_at": str(cand["created_at"] or ""),
+            "resolved_at": str(cand["resolved_at"] or ""),
+            "entity_a": {
+                "id": left["id"],
+                "name": left["name"],
+                "entity_type": "person",
+                "knowledge_count": 0,
+                "relation_count": 0,
+            },
+            "entity_b": {
+                "id": right["id"],
+                "name": right["name"],
+                "entity_type": "person",
+                "knowledge_count": 0,
+                "relation_count": 0,
+            },
+            "recommendation": recommendation,
+        }
+
+    def _envelope(items: list[dict], *, offset: int) -> dict:
+        return {
+            "user_id": user_id,
+            "items": items,
+            "count": 5,
+            "total": 12,
+            "limit": 5,
+            "offset": offset,
+            "matched_at_least": 6,
+            "truncated": True,
+        }
+
+    before = _selected_state()
     first = client.get(
-        f"/api/admin/resolutions?user_id={user_id}&status=suggested&limit=5&offset=0", headers=headers
-    ).json()
+        f"/api/admin/resolutions?user_id={user_id}&status=suggested&limit=5&offset=0",
+        headers=headers,
+    )
     second = client.get(
-        f"/api/admin/resolutions?user_id={user_id}&status=suggested&limit=5&offset=5", headers=headers
-    ).json()
+        f"/api/admin/resolutions?user_id={user_id}&status=suggested&limit=5&offset=5",
+        headers=headers,
+    )
+    assert first.status_code == 200, first.text
+    assert second.status_code == 200, second.text
+    assert _selected_state() == before
 
-    first_ids = {item["id"] for item in first["items"]}
-    second_ids = {item["id"] for item in second["items"]}
-    assert first_ids and second_ids
-    assert not (first_ids & second_ids), "страницы пересекаются — порядок не устойчив"
-    assert second["total"] == first["total"] == 12
-    assert second["offset"] == 5
+    first_cards = [_page_card(item_id) for item_id in ids[:5]]
+    second_cards = [_page_card(item_id) for item_id in ids[5:10]]
+    assert [item["id"] for item in first_cards] == ids[:5]
+    assert [item["id"] for item in second_cards] == ids[5:10]
+    assert first.json() == _envelope(first_cards, offset=0)
+    assert second.json() == _envelope(second_cards, offset=5)
+    assert [item["id"] for item in first.json()["items"]] == ids[:5]
+    assert [item["id"] for item in second.json()["items"]] == ids[5:10]
+    assert first.json()["count"] == 5
+    assert second.json()["count"] == 5
+    assert first.json()["total"] == 12
+    assert second.json()["total"] == 12
+    assert first.json()["limit"] == 5
+    assert second.json()["limit"] == 5
+    assert first.json()["offset"] == 0
+    assert second.json()["offset"] == 5
+    assert first_cards[0]["entity_a"]["name"] == "Иванов И.И. 0"
+    assert first_cards[0]["confidence"] == 0.9
+    assert first_cards[0]["recommendation"] == "compare_context"
+    assert set(item["id"] for item in first.json()["items"]).isdisjoint(
+        item["id"] for item in second.json()["items"]
+    )
+    _ = _json
 
 
 def test_the_document_count_of_a_row_is_a_count_not_a_page_length(admin) -> None:

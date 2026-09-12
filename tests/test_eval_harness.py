@@ -9,6 +9,7 @@ regression detection against the previous run, and the admin endpoints
 from __future__ import annotations
 
 import hashlib
+import json
 
 import pytest
 from fastapi.testclient import TestClient
@@ -126,7 +127,12 @@ def test_eval_endpoints_end_to_end(settings):
         # Label-from-results: search surfaces the record to pick.
         found = client.get("/api/admin/eval/search", params={"q": "Orion PostgreSQL"}, headers=owner)
         assert found.status_code == 200
-        assert target in [item["id"] for item in found.json()["items"]]
+        assert [item["id"] for item in found.json()["items"]] == [target], "eval_http_search_target"
+        assert (found.json()["user_id"], found.json()["query"], found.json()["count"]) == (
+            LEGACY_OWNER_USER_ID,
+            "Orion PostgreSQL",
+            1,
+        )
 
         added = client.post(
             "/api/admin/eval/cases",
@@ -134,20 +140,71 @@ def test_eval_endpoints_end_to_end(settings):
             headers=owner,
         )
         assert added.status_code == 200
+        case = added.json()["case"]
+        case_id = case["id"]
+        expected_case = {
+            "id": case_id,
+            "user_id": LEGACY_OWNER_USER_ID,
+            "query": "Orion база данных",
+            "expected_ids": [target],
+            "note": "t",
+            "source": "manual",
+        }
+        assert {key: case[key] for key in expected_case} == expected_case, "eval_http_created_case"
 
         listed = client.get("/api/admin/eval/cases", headers=owner)
+        assert listed.status_code == 200
         assert listed.json()["count"] == 1
+        assert listed.json()["user_id"] == LEGACY_OWNER_USER_ID
+        assert [{key: row[key] for key in expected_case} for row in listed.json()["items"]] == [
+            expected_case
+        ], "eval_http_listed_case"
+        assert [
+            {key: row[key] for key in expected_case}
+            for row in app.state.storage.list_eval_cases(LEGACY_OWNER_USER_ID)
+        ] == [expected_case], "eval_http_persisted_case"
 
         run = client.post("/api/admin/eval/run", json={}, headers=owner)
         assert run.status_code == 200
         assert run.json()["report"]["recall_at_k"] == 1.0
+        report = run.json()["report"]
+        assert run.json()["user_id"] == LEGACY_OWNER_USER_ID
+        assert (report["cases"], report["listed"], report["scored"], report["skipped_empty_expected"]) == (
+            1,
+            1,
+            1,
+            0,
+        )
+        assert report["k"] == settings.eval_k
+        assert [
+            {key: row[key] for key in ("id", "query", "expected", "found", "recall_at_k", "reciprocal_rank")}
+            for row in report["per_case"]
+        ] == [
+            {
+                "id": case_id,
+                "query": "Orion база данных",
+                "expected": 1,
+                "found": 1,
+                "recall_at_k": 1.0,
+                "reciprocal_rank": 1.0,
+            }
+        ], "eval_http_case_score"
+        assert json.loads(app.state.storage.kv_get("eval:last_run:" + LEGACY_OWNER_USER_ID)) == {
+            "recall_at_k": 1.0,
+            "mrr": 1.0,
+            "cases": 1,
+            "k": settings.eval_k,
+        }, "eval_http_persisted_baseline"
 
-        case_id = listed.json()["items"][0]["id"]
         deleted = client.delete(
             f"/api/admin/eval/cases/{case_id}", params={"user_id": LEGACY_OWNER_USER_ID}, headers=owner
         )
         assert deleted.status_code == 200
-        assert client.get("/api/admin/eval/cases", headers=owner).json()["count"] == 0
+        assert deleted.json() == {"status": "deleted"}
+        after = client.get("/api/admin/eval/cases", headers=owner)
+        assert after.status_code == 200
+        assert after.json() == {"user_id": LEGACY_OWNER_USER_ID, "items": [], "count": 0}
+        assert app.state.storage.list_eval_cases(LEGACY_OWNER_USER_ID) == [], "eval_http_delete_effect"
 
         actions = [row["action"] for row in app.state.storage.list_audit_log(None, limit=50)]
         assert {"admin.eval.case_add", "admin.eval.run", "admin.eval.case_delete"} <= set(actions)

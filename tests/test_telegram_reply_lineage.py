@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 
 import httpx
@@ -134,7 +135,24 @@ async def test_cached_backend_response_still_maps_retried_chunks(tmp_path, monke
             "text": "Повтори доставку",
         },
     }
-    cached = {"message_id": "msg_cached_answer", "message": "Кешированный ответ"}
+    cached = {
+        "message_id": "msg_cached_answer",
+        "conversation_id": "conv_cached_answer",
+        "message": "Кешированный ответ",
+    }
+
+    async def classify(_client, method, path, payload, user, chat):  # noqa: ANN001
+        digest = hashlib.sha256(cached["message"].encode()).hexdigest()
+        assert (method, path, payload, user, chat) == (
+            "GET",
+            f"/api/me/mixed-deliveries/msg_cached_answer?answer_sha256={digest}",
+            None,
+            "1001",
+            "5001",
+        )
+        return {"authorized": True, "mixed_required": False, "conversation_id": "conv_cached_answer"}
+
+    monkeypatch.setattr(bridge, "_backend_json", classify)
 
     try:
         assert bridge._inbox.store(update) is True  # noqa: SLF001

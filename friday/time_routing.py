@@ -195,7 +195,8 @@ _ORDINAL_DAY = re.compile(
     re.IGNORECASE,
 )
 _PAST = re.compile(
-    r"\b(?:происход\w*|что\s+(?:уже\s+)?было|что\s+уже\s+произош\w*|"
+    r"\b(?:происход\w*|что\s+(?:уже\s+)?было|что\s+(?:уже\s+)?"
+    r"(?:произош\w*|случил(?:ся|ась|ось|ись))|"
     r"чем\s+заним\w*|покаж\w*\s+(?:событ\w*|активност\w*|лент\w*)|"
     r"событ\w*\s+(?:появ\w*|произош\w*|был\w*))\b",
     re.IGNORECASE,
@@ -229,7 +230,15 @@ _ABSOLUTE_TIMELINE_READ_ACT = re.compile(
     r"мне\s+интересн\w*\s*,?\s*))?"
     r"(?:как(?:ое|ой|ая|ие)\b|как\s+называ\w*\b|что\b|покаж\w*\b|"
     r"назов\w*\b|прочит\w*\b|найд\w*\b|сообщ\w*\b|дай\b|привед\w*\b|"
-    r"расскаж\w*\b|перечисл\w*\b)",
+    r"расскаж\w*\b|перечисл\w*\b|"
+    r"верн(?:и|ите)\s+(?:названи\w*|имя|маркер\w*|результат\w*)\b|"
+    r"восстанов(?:и|ите)\s+из\s+граф\w*\b|"
+    r"проверь(?:те)?\s+(?:temporal\s+index|временн\w*\s+индекс\w*)\b|"
+    r"изолируй(?:те)?\s+суточн\w*\s+интервал\w*\b|"
+    r"нужен\s+факт\b|отфильтруй(?:те)?\s+истори\w*\b|"
+    r"ответь(?:те)?\s+(?:точн\w*\s+)?именем\b|"
+    r"запроси(?:те)?\s+прошлое\b|"
+    r"в\s+суточн\w*\s+окн\w*[^.!?]{1,100};\s*назови(?:те)?\s+его\b)",
     re.IGNORECASE,
 )
 _ABSOLUTE_TIMELINE_SUBJECT = re.compile(
@@ -239,6 +248,57 @@ _ABSOLUTE_TIMELINE_SUBJECT = re.compile(
     r"\bсинтетическ\w*\s+(?:лент\w*|архив\w*)\b|"
     r"\b(?:синтетическ\w*|тестов\w*)\s+(?:факт\w*|запис\w*)\b|"
     r"\bфакт\w*\s+из\s+(?:синтетическ\w*\s+)?лент\w*\b",
+    re.IGNORECASE,
+)
+_FUTURE_EVENT_MORPHOLOGY = re.compile(
+    r"\bчто\s+(?:случится|случатся|произойд[её]т|произойдут)\b",
+    re.IGNORECASE,
+)
+_CLOSED_FUTURE_TIMELINE_SCOPE = (
+    r"(?:в\s+календарн\w*\s+истори\w*|"
+    r"в(?:о)?\s+временн\w*\s+лини\w*|"
+    r"в\s+личн\w*\s+календар\w*)"
+)
+_CLOSED_FUTURE_DATE = (
+    r"(?:\d{4}-\d{2}-\d{2}|"
+    r"\d{1,2}(?:\s*-?\s*(?:го|е|ое))?\s+" + _MONTH_WORD_PATTERN + r"\s+\d{4}(?:\s+года)?)"
+)
+_CLOSED_FUTURE_EVENT_DATE_REQUEST = re.compile(
+    r"^\s*(?:(?:а|и|ну)\s+)?"
+    r"(?:(?:скаж\w*\s*,?\s*|можно\s+(?:ли\s+)?узна\w*\s*,?\s*))?"
+    r"что\s+(?:случится|случатся|произойд[её]т|произойдут)\s+"
+    r"(?:"
+    + _CLOSED_FUTURE_TIMELINE_SCOPE
+    + r"\s+)?"
+    + _CLOSED_FUTURE_DATE
+    + r"(?:\s+"
+    + _CLOSED_FUTURE_TIMELINE_SCOPE
+    + r")?\s*[?!.]*\s*$",
+    re.IGNORECASE,
+)
+_ABSOLUTE_EVENT_INDEX_SUBJECT = re.compile(
+    r"\b(?:valid[-_]time|occurred_at|what_happened)\b|"
+    r"\btemporal[-\s]+(?:index|срез\w*)\b|"
+    r"\bкалендарн\w*\s+(?:срез\w*|запис\w*|дня)\b|"
+    r"\b(?:синтетическ\w*\s+эпизод\w*|суточн\w*\s+окн\w*)\b|"
+    r"\bотфильтруй(?:те)?\s+истори\w*\b|"
+    r"\bмаркер\w*\s+(?:был\s+)?зафиксирован\w*\b",
+    re.IGNORECASE,
+)
+_TEMPORAL_METHOD_PREFIX = re.compile(
+    r"^\s*(?:не\s+ищи\s+по\s+тексту|"
+    r"сверь\s+дату\s*,\s*а\s+не\s+дату\s+загрузки|"
+    r"отдели\s+дату\s+документа\s+от\s+valid[-_]time)\s*:\s*",
+    re.IGNORECASE,
+)
+_TEMPORAL_READ_COUNTERMAND = re.compile(
+    r"\b(?:не\s+(?:показывай(?:те)?|называй(?:те)?|перечисляй(?:те)?|"
+    r"считай(?:те)?|говори(?:те)?|рассказывай(?:те)?|ищи(?:те)?|"
+    r"проверяй(?:те)?|читай(?:те)?)|"
+    r"не\s+(?:(?:надо|нужно)\s+|хочу\s+)"
+    r"(?:показывать|показать|называть|назвать|перечислять|перечислить|"
+    r"считать|посчитать|говорить|сказать|рассказывать|рассказать|"
+    r"искать|найти|проверять|проверить|читать|прочитать))\b",
     re.IGNORECASE,
 )
 _NON_TIMELINE_ABSOLUTE_SUBJECT = re.compile(
@@ -285,7 +345,24 @@ def temporal_routing_text(message: str) -> str:
     """Visible speech owned by the asker, excluding bounded quoted data."""
 
     text = " ".join(str(message or "").split())
-    return " ".join(_QUOTED_TEMPORAL_DATA.sub(" ", text).split())
+    text = " ".join(_QUOTED_TEMPORAL_DATA.sub(" ", text).split())
+    prefix = _TEMPORAL_METHOD_PREFIX.match(text)
+    if prefix:
+        request = text[prefix.end() :]
+        # This prefix selects the time index instead of text/import time. It
+        # contains no date or person whose authority could be donated to the
+        # following request. A negative or unrelated second clause stays whole.
+        if (
+            not _TEMPORAL_READ_COUNTERMAND.search(request)
+            and _ABSOLUTE_TIMELINE_READ_ACT.search(request)
+            and (
+                _ABSOLUTE_TIMELINE_SUBJECT.search(request)
+                or _ABSOLUTE_EVENT_INDEX_SUBJECT.search(request)
+                or _PAST.search(request)
+            )
+        ):
+            return request
+    return text
 
 
 def _explicit_absolute_dates(message: str) -> list[date]:
@@ -323,9 +400,13 @@ def _is_absolute_timeline_read_request(message: str) -> bool:
     """
 
     text = temporal_routing_text(message)
+    if _FUTURE_EVENT_MORPHOLOGY.search(text):
+        return bool(
+            _CLOSED_FUTURE_EVENT_DATE_REQUEST.fullmatch(text) and len(_explicit_absolute_dates(text)) == 1
+        )
     return bool(
         _ABSOLUTE_TIMELINE_READ_ACT.search(text)
-        and _ABSOLUTE_TIMELINE_SUBJECT.search(text)
+        and (_ABSOLUTE_TIMELINE_SUBJECT.search(text) or _ABSOLUTE_EVENT_INDEX_SUBJECT.search(text))
         and not _NON_TIMELINE_ABSOLUTE_SUBJECT.search(text)
         and len(_explicit_absolute_dates(text)) == 1
     )
@@ -335,6 +416,10 @@ def is_temporal_read_request(message: str) -> bool:
     """Whether the visible utterance itself asks to read a timeline/calendar."""
 
     text = temporal_routing_text(message)
+    if _TEMPORAL_READ_COUNTERMAND.search(text):
+        return False
+    if _FUTURE_EVENT_MORPHOLOGY.search(text):
+        return _is_absolute_timeline_read_request(text)
     return bool(_TEMPORAL_READ_REQUEST.search(text) or _is_absolute_timeline_read_request(text))
 
 
@@ -527,7 +612,7 @@ def _clock_from_text(text: str) -> tuple[int, int] | None:
     if explicit:
         return int(explicit.group(1)), int(explicit.group(2))
     folded = text.casefold()
-    if re.search(r"\bполноч\w*", folded):
+    if re.search(r"\bпол(?:у)?ноч\w*", folded):
         return 0, 0
     if re.search(r"\bполд(?:ень|ня)\b", folded):
         return 12, 0

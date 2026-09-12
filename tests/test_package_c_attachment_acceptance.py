@@ -248,6 +248,8 @@ def test_ordinary_office_questions_are_not_mistaken_for_exact_set_requests(quest
         "Что указано в строке 3 файла?",
         "Кто на странице 3 документа?",
         "Опиши колонку А таблицы.",
+        "Опиши колонку Б этой таблицы.",
+        "Опиши колонку В в таблице.",
     ],
 )
 def test_local_office_questions_do_not_claim_whole_attachment_scope(question: str) -> None:

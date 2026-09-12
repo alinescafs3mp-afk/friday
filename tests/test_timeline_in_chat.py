@@ -296,38 +296,197 @@ def test_the_period_total_comes_from_the_route_not_from_the_page(settings):
     app = create_app(settings)
     with TestClient(app) as client:
         storage = app.state.storage
-        for index in range(25):
-            body = f"акт номер {index}"
+        storage.ensure_user(LEGACY_OWNER_USER_ID)
+        foreign_user = "foreign-timeline-neighbour"
+        storage.ensure_user(foreign_user, preset_key="owner")
+
+        def _store(user_id: str, title: str, body: str, metadata: dict, salt: str) -> dict[str, str]:
             raw = RawObject(
                 id=new_id("raw"),
-                user_id=LEGACY_OWNER_USER_ID,
+                user_id=user_id,
                 source="test",
                 source_ref=new_id("src"),
                 raw_content=body,
                 content_type="text",
-                content_hash=hashlib.sha256(f"{body}{index}".encode()).hexdigest(),
+                content_hash=hashlib.sha256(f"{body}{salt}".encode()).hexdigest(),
             )
             storage.store_raw_object(raw)
+            knowledge_id = new_id("ko")
             storage.store_knowledge_object(
                 KnowledgeObject(
-                    id=new_id("ko"),
-                    user_id=LEGACY_OWNER_USER_ID,
+                    id=knowledge_id,
+                    user_id=user_id,
                     raw_object_id=raw.id,
                     content=body,
                     content_type="text",
-                    title=f"акт {index}",
-                    metadata_json={"document_date": f"2023-03-{index % 28 + 1:02d}"},
+                    title=title,
+                    metadata_json=metadata,
                 )
             )
+            return {
+                "id": knowledge_id,
+                "raw_id": raw.id,
+                "document_date": str(metadata.get("document_date") or ""),
+                "title": title,
+                "content": body,
+            }
+
+        seeded: list[dict[str, str]] = []
+        for index in range(25):
+            body = f"акт номер {index}"
+            document_date = f"2023-03-{index % 28 + 1:02d}"
+            seeded.append(
+                _store(
+                    LEGACY_OWNER_USER_ID,
+                    f"акт {index}",
+                    body,
+                    {"document_date": document_date},
+                    str(index),
+                )
+            )
+
+        april = _store(
+            LEGACY_OWNER_USER_ID,
+            "апрельский канар",
+            "вне окна апреля",
+            {"document_date": "2023-04-01"},
+            "april",
+        )
+        february = _store(
+            LEGACY_OWNER_USER_ID,
+            "февральский канар",
+            "вне окна февраля",
+            {"document_date": "2023-02-28"},
+            "february",
+        )
+        undated = _store(LEGACY_OWNER_USER_ID, "без собственной даты", "undated canary", {}, "undated")
+        foreign = _store(
+            foreign_user,
+            "чужой март",
+            "чужой документ марта",
+            {"document_date": "2023-03-25"},
+            "foreign",
+        )
+        april_id, february_id, undated_id, foreign_id = (
+            april["id"],
+            february["id"],
+            undated["id"],
+            foreign["id"],
+        )
+        extras = (april, february, undated, foreign)
+        owner_token = settings.api_token
+        owner = {"Authorization": f"Bearer {owner_token}"}
+
+        def _knowledge_row(knowledge_id: str) -> dict:
+            row = storage.execute(
+                "SELECT id, user_id, raw_object_id, content, content_type, title, summary, "
+                "tags_json, metadata_json, knowledge_kind, lifecycle_stage, version, "
+                "superseded_by_id, deleted_at FROM knowledge_objects WHERE id=?",
+                (knowledge_id,),
+            ).fetchone()
+            assert row is not None
+            return dict(row)
+
+        def _raw_row(raw_id: str) -> dict:
+            row = storage.execute(
+                "SELECT id, user_id, source, source_ref, raw_content, content_type, "
+                "metadata_json, content_hash, version, deleted_at FROM raw_objects WHERE id=?",
+                (raw_id,),
+            ).fetchone()
+            assert row is not None
+            return dict(row)
+
+        def _seed_snapshot() -> dict:
+            rows = list(seeded) + list(extras)
+            return {
+                "knowledge": {item["id"]: _knowledge_row(item["id"]) for item in rows},
+                "raw": {item["raw_id"]: _raw_row(item["raw_id"]) for item in rows},
+            }
+
+        before = _seed_snapshot()
+        assert before["knowledge"][seeded[24]["id"]]["content"] == "акт номер 24"
+        assert before["knowledge"][seeded[24]["id"]]["deleted_at"] is None
+        assert before["knowledge"][seeded[24]["id"]]["lifecycle_stage"] == "active"
+        assert before["raw"][foreign["raw_id"]]["raw_content"] == "чужой документ марта"
+
         response = client.get(
             "/api/knowledge/by-date",
             params={"since": "2023-03-01", "until": "2023-03-31", "limit": 10},
-            headers={"Authorization": f"Bearer {settings.api_token}"},
+            headers=owner,
         )
         assert response.status_code == 200, response.text
         payload = response.json()
         assert payload["count"] == 10, "страница осталась страницей"
         assert payload["total"] == 25, "в окне двадцать пять документов, и число обязано быть настоящим"
+        assert payload["since"] == "2023-03-01"
+        assert payload["until"] == "2023-03-31"
+        assert len(payload["items"]) == 10
+        expected_page = list(reversed(seeded[15:25]))
+        assert [(item["id"], item["document_date"], item["title"]) for item in payload["items"]] == [
+            (row["id"], row["document_date"], row["title"]) for row in expected_page
+        ]
+        page_ids = {item["id"] for item in payload["items"]}
+        for canary_id, canary_title in (
+            (april_id, "апрельский канар"),
+            (february_id, "февральский канар"),
+            (undated_id, "без собственной даты"),
+            (foreign_id, "чужой март"),
+        ):
+            assert canary_id not in page_ids
+            assert canary_id not in str(payload)
+            assert canary_title not in str(payload)
+        assert owner_token not in response.text
+        assert _seed_snapshot() == before
+
+        secrets = [owner_token]
+        for item in list(seeded) + list(extras):
+            secrets.extend([item["id"], item["raw_id"], item["title"], item["content"]])
+
+        def _assert_refusal(resp, status: int) -> None:
+            assert resp.status_code == status
+            if status in {401, 403}:
+                assert "items" not in resp.json()
+            for secret in secrets:
+                assert secret not in resp.text
+            assert _seed_snapshot() == before
+
+        malformed_date = client.get(
+            "/api/knowledge/by-date",
+            params={"since": "2023/03/01", "until": "2023-03-31"},
+            headers=owner,
+        )
+        _assert_refusal(malformed_date, 422)
+        zero_limit = client.get(
+            "/api/knowledge/by-date",
+            params={"since": "2023-03-01", "until": "2023-03-31", "limit": 0},
+            headers=owner,
+        )
+        _assert_refusal(zero_limit, 422)
+        over_limit = client.get(
+            "/api/knowledge/by-date",
+            params={"since": "2023-03-01", "until": "2023-03-31", "limit": 501},
+            headers=owner,
+        )
+        _assert_refusal(over_limit, 422)
+
+        anonymous = client.get(
+            "/api/knowledge/by-date",
+            params={"since": "2023-03-01", "until": "2023-03-31", "limit": 10},
+        )
+        _assert_refusal(anonymous, 401)
+
+        storage.set_permission_override(LEGACY_OWNER_USER_ID, "knowledge.read", "deny")
+        denied = client.get(
+            "/api/knowledge/by-date",
+            params={"since": "2023-03-01", "until": "2023-03-31", "limit": 10},
+            headers=owner,
+        )
+        _assert_refusal(denied, 403)
+        window_total = storage.count_documents_by_own_date(
+            LEGACY_OWNER_USER_ID, since="2023-03-01", until="2023-03-31"
+        )
+        assert window_total == 25
+        assert _seed_snapshot() == before
 
 
 def test_the_timeline_buttons_are_laid_out_in_rows_of_four():

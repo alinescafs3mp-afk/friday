@@ -19,6 +19,7 @@ _WEB_CUES = ("интернет", "web", "публичн", "актуальн", "�
 _COMPARE_CUES = ("сравни", "отлич", "разниц", "versus", " vs ", "сопостав", "compare")
 _MAX_QUERY_WORDS = 14
 _MAX_MESSAGE_CHARS = 1_200
+PRIVATE_RAW_REFERENCE_RE = re.compile(r"\braw_(?:[0-9a-f]{16}\w*|[0-9a-f]+\b)", re.IGNORECASE)
 
 _COMPARE_VERB = re.compile(
     r"\b(?:сравни\w*|сопостав\w*|отлич\w*|разниц\w*|versus|compare)\b|\bvs\b",
@@ -231,6 +232,9 @@ def extract_independent_public_web_query(message: object) -> str:
         or _COMPARE_VERB.search(topic) is not None
         or _WEB_TRANSPORT.search(topic) is not None
         or _VAGUE_TOPIC.fullmatch(topic) is not None
+        # Raw identities remain private when malformed, case-changed or used
+        # beside an unrecognized local-source phrase. Validate before sealing.
+        or PRIVATE_RAW_REFERENCE_RE.search(topic) is not None
     ):
         return ""
     try:

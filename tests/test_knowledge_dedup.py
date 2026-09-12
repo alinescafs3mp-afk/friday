@@ -10,6 +10,12 @@ and the on-demand admin endpoint.
 from __future__ import annotations
 
 import hashlib
+import json
+import math
+import re
+from dataclasses import replace
+from datetime import UTC, datetime, timedelta
+from time import monotonic
 
 import pytest
 from fastapi.testclient import TestClient
@@ -850,3 +856,270 @@ def test_an_ordinary_new_object_does_not_reopen_history(settings, storage):
     )
     third = _run(storage, cfg, close=False)
     assert third["objects_compared"] == 0, "the backfill was reopened and history is being re-walked"
+
+
+# These HTTP oracles exercise the real detector over persisted synthetic vectors.
+# test-embed is a storage key: this does not call an embedding model.
+_HTTP_DEDUP_P = "knowledge-dedup-person-p"
+_HTTP_DEDUP_Q = "knowledge-dedup-person-q"
+_HTTP_DEDUP_TABLES = (
+    "raw_objects",
+    "knowledge_objects",
+    "knowledge_embeddings",
+    "knowledge_chunk_embeddings",
+    "entities",
+    "entity_versions",
+    "knowledge_entity_links",
+    "relations",
+    "entity_merge_history",
+)
+
+
+def _http_dedup_same(actual, expected):
+    assert type(actual) is type(expected)
+    if isinstance(expected, dict):
+        assert actual.keys() == expected.keys()
+        for key in expected:
+            _http_dedup_same(actual[key], expected[key])
+    elif isinstance(expected, list):
+        assert len(actual) == len(expected)
+        for left, right in zip(actual, expected, strict=True):
+            _http_dedup_same(left, right)
+    else:
+        assert actual == expected
+
+
+def _http_dedup_time(value, start, finish):
+    assert isinstance(value, str)
+    parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    assert parsed.tzinfo is not None and parsed.utcoffset() == timedelta(0)
+    assert start.replace(microsecond=0) <= parsed <= finish
+    return value
+
+
+def _http_dedup_rows(store, table):
+    return [
+        dict(row)
+        for row in store.execute(
+            f"SELECT * FROM {table} WHERE user_id IN (?, ?) ORDER BY rowid",
+            (_HTTP_DEDUP_P, _HTTP_DEDUP_Q),
+        ).fetchall()
+    ]
+
+
+def _http_dedup_case(settings, second_content, second_vector, public, has_conflict):
+    cfg = replace(_dedup_settings(settings), shared_archive=False, dedup_scan_batch=512)
+    with TestClient(create_app(cfg), raise_server_exceptions=False) as client:
+        store = client.app.state.storage
+        native = {}
+        for person in (_HTTP_DEDUP_P, _HTTP_DEDUP_Q):
+            store.ensure_user(person, preset_key="user")
+            first = _store(store, person, "Buy milk and bread.", "Shopping alpha")
+            second = _store(
+                store,
+                person,
+                second_content if person == _HTTP_DEDUP_P else "Buy milk, bread.",
+                "Shopping beta",
+            )
+            native[person] = (first, second)
+            _index(store, person, first, [1.0, 0.0, 0.0], "test-embed")
+            _index(
+                store,
+                person,
+                second,
+                second_vector if person == _HTTP_DEDUP_P else [1.0, 0.0, 0.0],
+                "test-embed",
+            )
+        # This real pre-existing foreign conflict and its duplicate-bearing corpus
+        # must remain untouched even in the target tenant's negative scenario.
+        store.store_knowledge_conflict(
+            _HTTP_DEDUP_Q,
+            native[_HTTP_DEDUP_Q][0],
+            native[_HTTP_DEDUP_Q][1],
+            conflict_type="near_duplicate",
+            confidence=0.75,
+            evidence={"fixture": "FOREIGN_DEDUP_PRIVATE_CANARY"},
+        )
+        own_key = "dedup:scan:" + _HTTP_DEDUP_P
+        foreign_key = "dedup:scan:" + _HTTP_DEDUP_Q
+        store.kv_set(foreign_key, '{"version": 1, "model": "foreign-sentinel"}')
+        # Reuse the established fixture operation that closes the current second.
+        # Compute its exact stamp before its SQL write; there is no sleep or clock mock.
+        closed_stamp = f"{_CLOSED[0]}-01-01T00:00:00+00:00"
+        with store.transaction():
+            _close_second(store)
+        # Native GeneratedId values survive every preceding storage/index write.
+        # Expected persisted IDs are plain strings only after all fixture writes.
+        low, high = sorted(str(value) for value in native[_HTTP_DEDUP_P])
+        before = {table: _http_dedup_rows(store, table) for table in _HTTP_DEDUP_TABLES}
+        conflicts_before = _http_dedup_rows(store, "knowledge_conflicts")
+        assert len(conflicts_before) == 1
+        assert conflicts_before[0]["user_id"] == _HTTP_DEDUP_Q
+        runtime_before = [
+            dict(row)
+            for row in store.execute(
+                "SELECT * FROM runtime_kv WHERE key IN (?, ?) ORDER BY key",
+                (own_key, foreign_key),
+            ).fetchall()
+        ]
+        assert len(runtime_before) == 1 and runtime_before[0]["key"] == foreign_key
+        audits_before = [
+            dict(row) for row in store.execute("SELECT * FROM audit_log ORDER BY rowid").fetchall()
+        ]
+        started = datetime.now(UTC)
+        tick = monotonic()
+        response = client.post(
+            "/api/admin/knowledge/detect-duplicates",
+            json={"user_id": _HTTP_DEDUP_P},
+            headers={"Authorization": f"Bearer {settings.api_token}"},
+        )
+        duration = monotonic() - tick
+        finished = datetime.now(UTC)
+        assert response.status_code == 200, response.text
+        payload = response.json()
+        elapsed = payload["elapsed_sec"]
+        assert type(elapsed) is float and math.isfinite(elapsed)
+        assert 0.0 <= elapsed <= duration + 0.001
+        assert elapsed == round(elapsed, 3)
+        # Only measured elapsed_sec is dynamic; all ten other keys and values
+        # come from the scenario's literal expected report, not the response.
+        _http_dedup_same(payload, {**public, "elapsed_sec": elapsed})
+        _http_dedup_same({table: _http_dedup_rows(store, table) for table in _HTTP_DEDUP_TABLES}, before)
+        conflicts_after = _http_dedup_rows(store, "knowledge_conflicts")
+        expected_conflicts = list(conflicts_before)
+        if has_conflict:
+            assert len(conflicts_after) == 2
+            conflict = conflicts_after[-1]
+            conflict_id = conflict["id"]
+            assert isinstance(conflict_id, str)
+            assert re.fullmatch(r"conf_[0-9a-f]{16}", conflict_id)
+            assert conflict_id != conflicts_before[0]["id"]
+            expected_conflicts.append(
+                {
+                    "id": conflict_id,
+                    "user_id": _HTTP_DEDUP_P,
+                    "knowledge_a_id": low,
+                    "knowledge_b_id": high,
+                    "pair_key": low + "|" + high,
+                    "conflict_type": "near_duplicate",
+                    "confidence": 1.0,
+                    "evidence_json": '{"detector": "embedding_cosine", "similarity": 1.0}',
+                    "status": "suggested",
+                    "created_at": _http_dedup_time(conflict["created_at"], started, finished),
+                    "reviewed_at": None,
+                    "reviewed_by": None,
+                    "resolution_note": "",
+                }
+            )
+        _http_dedup_same(conflicts_after, expected_conflicts)
+        runtime_after = [
+            dict(row)
+            for row in store.execute(
+                "SELECT * FROM runtime_kv WHERE key IN (?, ?) ORDER BY key",
+                (own_key, foreign_key),
+            ).fetchall()
+        ]
+        assert len(runtime_after) == 2
+        _http_dedup_same(
+            runtime_after,
+            [
+                {
+                    "key": own_key,
+                    "value": json.dumps(
+                        {
+                            "version": 1,
+                            "model": "test-embed",
+                            "threshold": 0.9,
+                            "watermark": [closed_stamp, high],
+                            "backfill": [closed_stamp, low],
+                            "backfill_done": True,
+                            "swept_below": 1,
+                        },
+                        ensure_ascii=False,
+                        sort_keys=True,
+                    ),
+                    "updated_at": _http_dedup_time(runtime_after[0]["updated_at"], started, finished),
+                },
+                *runtime_before,
+            ],
+        )
+        audits_after = [
+            dict(row) for row in store.execute("SELECT * FROM audit_log ORDER BY rowid").fetchall()
+        ]
+        assert len(audits_after) == len(audits_before) + 1
+        _http_dedup_same(audits_after[:-1], audits_before)
+        audit = audits_after[-1]
+        audit_id = audit["id"]
+        assert isinstance(audit_id, str) and re.fullmatch(r"audit_[0-9a-f]{16}", audit_id)
+        assert audit_id not in {row["id"] for row in audits_before}
+        request_id = response.headers["x-request-id"]
+        assert re.fullmatch(r"[0-9a-f]{24}", request_id)
+        _http_dedup_same(
+            audit,
+            {
+                "id": audit_id,
+                "user_id": LEGACY_OWNER_USER_ID,
+                "action": "admin.knowledge.detect_duplicates",
+                "target_type": "user",
+                "target_id": _HTTP_DEDUP_P,
+                "before_json": None,
+                "after_json": json.dumps(
+                    {
+                        "elapsed_sec": elapsed,
+                        "mode": "backfill",
+                        "pending": 0,
+                        "private_fields_count": 6,
+                        "suppressed": 0,
+                    },
+                    ensure_ascii=False,
+                    sort_keys=True,
+                ),
+                "ip_address": "",
+                "request_id": request_id,
+                "created_at": _http_dedup_time(audit["created_at"], started, finished),
+            },
+        )
+        assert "PRIVATE_CANARY" not in json.dumps(audit)
+
+
+def test_admin_knowledge_detect_duplicates_persists_one_exact_pair(settings):
+    _http_dedup_case(
+        settings,
+        "Buy milk, bread.",
+        [1.0, 0.0, 0.0],
+        {
+            "user_id": _HTTP_DEDUP_P,
+            "detected": 1,
+            "series_neighbours_skipped": 0,
+            "candidate_pairs": 1,
+            "objects_scanned": 2,
+            "objects_compared": 2,
+            "mode": "backfill",
+            "pending": 0,
+            "suppressed": 0,
+            "incomplete": False,
+        },
+        True,
+    )
+
+
+def test_admin_knowledge_detect_duplicates_orthogonal_pair_stays_separate(settings):
+    # Fresh app and target corpus: the true pair belongs only to the foreign tenant.
+    _http_dedup_case(
+        settings,
+        "Call the dentist.",
+        [0.0, 1.0, 0.0],
+        {
+            "user_id": _HTTP_DEDUP_P,
+            "detected": 0,
+            "series_neighbours_skipped": 0,
+            "candidate_pairs": 0,
+            "objects_scanned": 2,
+            "objects_compared": 2,
+            "mode": "backfill",
+            "pending": 0,
+            "suppressed": 0,
+            "incomplete": False,
+        },
+        False,
+    )

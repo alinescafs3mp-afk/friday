@@ -430,15 +430,19 @@ class ViewsMixin(BridgeShared):
             if not notif_id or not CALLBACK_TARGET_RE.fullmatch(notif_id):
                 continue
             body = str(item.get("body") or "напоминание").strip() or "напоминание"
+            callback_data = f"remind:dismiss:{notif_id}"
+            reply_markup = None
+            if callback_data_fits(callback_data):
+                reply_markup = {
+                    "inline_keyboard": [
+                        [{"text": "Снять", "callback_data": callback_data}],
+                    ]
+                }
             await self._send_message(
                 telegram,
                 chat_id,
                 body,
-                reply_markup={
-                    "inline_keyboard": [
-                        [{"text": "Снять", "callback_data": f"remind:dismiss:{notif_id}"}],
-                    ]
-                },
+                reply_markup=reply_markup,
             )
 
     @staticmethod

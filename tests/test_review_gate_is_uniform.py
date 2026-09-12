@@ -86,17 +86,385 @@ def _telegram_post(client, settings, payload: dict) -> object:
 
 @pytest.mark.parametrize("policy", REVIEW_POLICIES)
 def test_pasted_text_follows_the_policy(settings, policy):
-    app = _client(settings, policy)
-    with TestClient(app) as client:
-        headers = _owner(settings)
-        user_id = _me(client, headers)
-        response = client.post("/api/ingest", json={"content": FACT, "source_ref": "t:1"}, headers=headers)
-        assert response.status_code == 200, response.text
+    import hashlib
+    import json as json_mod
+    import re
+    from datetime import UTC, datetime
 
-        promoted = _knowledge_count(app, user_id) > 0
-        assert promoted is (policy == "assessed"), (
-            f"политика {policy}: вставленный текст {'продвинулся' if promoted else 'ушёл в Inbox'}"
+    from friday.permissions import LEGACY_OWNER_USER_ID
+    from friday.storage.models import InboxItem, KnowledgeObject, RawObject, new_id
+    from tests.test_api_tokens import _issue
+
+    person = "scopedperson"
+    secret = "jrc_scopedperson_text_import_secret"
+    canary_content = "CANARY_PRIVATE_RAW_CONTENT_TEXT_IMPORT_001"
+    canary_filename = "canary-secret-filename.ics"
+    canary_token = "jrc_canary_token_value_do_not_leak"
+    canary_actor = "canaryactor"
+    canary_ref = "canary:source-ref-secret"
+    fact_hash = hashlib.sha256(FACT.encode("utf-8")).hexdigest()
+
+    def rows(storage, sql):
+        return [dict(row) for row in storage.execute(sql).fetchall()]
+
+    def snapshot(storage):
+        return {
+            "raw_objects": rows(storage, "SELECT * FROM raw_objects ORDER BY rowid"),
+            "inbox": rows(storage, "SELECT * FROM inbox ORDER BY rowid"),
+            "knowledge_objects": rows(storage, "SELECT * FROM knowledge_objects ORDER BY rowid"),
+            "audit_log": rows(storage, "SELECT * FROM audit_log ORDER BY rowid"),
+        }
+
+    def typed_equal(actual, expected):
+        assert type(actual) is type(expected), (actual, expected)
+        if isinstance(expected, dict):
+            assert actual.keys() == expected.keys()
+            for key, value in expected.items():
+                typed_equal(actual[key], value)
+        elif isinstance(expected, list):
+            assert len(actual) == len(expected)
+            for item, value in zip(actual, expected, strict=True):
+                typed_equal(item, value)
+        else:
+            assert actual == expected
+
+    def encoded(value):
+        return json_mod.dumps(value, ensure_ascii=False, sort_keys=True)
+
+    def opaque(value, prefix):
+        assert type(value) is str
+        assert re.fullmatch(rf"{prefix}_[0-9a-f]{{16}}", value)
+        return value
+
+    def timestamp(value):
+        assert type(value) is str
+        parsed = datetime.fromisoformat(value)
+        assert value == parsed.astimezone(UTC).isoformat(timespec="seconds")
+        assert request_started <= parsed <= request_finished
+        return value
+
+    assessment = {
+        "category": "knowledge",
+        "confidence": 0.9,
+        "action": "promote",
+        "promotion_score": 0.7,
+        "quality_score": 0.6819999999999999,
+        "knowledge_kind": "fact",
+        "reason": "specific named factual relationship",
+        "signals": ["durable_subject", "declarative_fact", "specific_value", "named_subject"],
+        "penalties": [],
+        "policy_version": "moderate-v6",
+    }
+    tags = [
+        "atlas",
+        "fact",
+        "ubuntu",
+        "внутренний",
+        "компании",
+        "обслуживает",
+        "работает",
+        "реестр",
+        "сервер",
+    ]
+    enrichment_metadata = {
+        "enrichment_version": "moderate-v6",
+        "knowledge_kind": "fact",
+        "urls": [],
+        "dates": [],
+        "action_items": [],
+        "entity_suggestion_count": 2,
+        "structure": {"has_list": False, "has_code": False, "sentence_count": 1, "word_count": 11},
+        "promotion_assessment": assessment,
+    }
+    suggestions = {
+        "title": "Сервер Atlas работает на Ubuntu 24.04 и обслуживает внутренний реестр компании",
+        "summary": FACT,
+        "tags": tags,
+        "importance": 0.41600000000000004,
+        "quality_score": 0.7,
+        "knowledge_kind": "fact",
+        "entities": [
+            {
+                "name": "Ubuntu",
+                "entity_type": "concept",
+                "confidence": 0.92,
+                "method": "explicit_technology_version",
+                "version": "24.04",
+                "matched_as": "Ubuntu 24.04",
+            },
+            {
+                "name": "Atlas",
+                "entity_type": "concept",
+                "confidence": 0.89,
+                "method": "explicit_infrastructure_marker",
+            },
+        ],
+        "metadata": enrichment_metadata,
+    }
+
+    def seed_canaries(storage):
+        storage.ensure_user(
+            LEGACY_OWNER_USER_ID, source="api-token", display_name="Owner", preset_key="owner"
         )
+        raw = storage.store_raw_object(
+            RawObject(
+                id=new_id("raw"),
+                user_id=LEGACY_OWNER_USER_ID,
+                source="api",
+                source_ref=canary_ref,
+                raw_content=canary_content,
+                content_type="text",
+                content_hash=hashlib.sha256(canary_content.encode("utf-8")).hexdigest(),
+                metadata_json={"uploaded_by": canary_actor, "filename": canary_filename},
+            )
+        )
+        ko = storage.store_knowledge_object(
+            KnowledgeObject(
+                id=new_id("ko"),
+                user_id=LEGACY_OWNER_USER_ID,
+                raw_object_id=raw.id,
+                content=canary_content,
+                title="canary-ko",
+            )
+        )
+        storage.store_inbox_item(
+            InboxItem(
+                id=new_id("inbox"),
+                user_id=LEGACY_OWNER_USER_ID,
+                raw_object_id=raw.id,
+                knowledge_object_id=ko.id,
+                status="pending",
+            )
+        )
+
+    app = create_app(dataclasses.replace(settings, ingestion_review_policy=policy, shared_archive=True))
+    with TestClient(app) as client:
+        storage = app.state.storage
+        _issue(storage, person, "user", secret)
+        headers = {"Authorization": f"Bearer {secret}"}
+        seed_canaries(storage)
+        before = snapshot(storage)
+        me = client.get("/api/me", headers=headers)
+        assert me.status_code == 200, me.text
+        assert me.json()["actor"]["user_id"] == person
+        assert me.json()["actor"]["preset_key"] == "user"
+        request_started = datetime.now(UTC).replace(microsecond=0)
+        response = client.post(
+            "/api/ingest",
+            json={"content": FACT, "source_ref": "t:1"},
+            headers=headers,
+        )
+        request_finished = datetime.now(UTC)
+        assert response.status_code == 200, response.text
+        receipt = response.json()
+        after = snapshot(storage)
+
+        new_raws = after["raw_objects"][len(before["raw_objects"]) :]
+        new_inbox = after["inbox"][len(before["inbox"]) :]
+        new_ko = after["knowledge_objects"][len(before["knowledge_objects"]) :]
+        new_audit = after["audit_log"][len(before["audit_log"]) :]
+        assert after["audit_log"] == before["audit_log"]
+        assert new_audit == []
+        assert after["raw_objects"][: len(before["raw_objects"])] == before["raw_objects"]
+        assert after["inbox"][: len(before["inbox"])] == before["inbox"]
+        assert after["knowledge_objects"][: len(before["knowledge_objects"])] == before["knowledge_objects"]
+        assert len(new_raws) == 1
+        raw = new_raws[0]
+        typed_equal(
+            raw,
+            {
+                "id": opaque(raw["id"], "raw"),
+                "user_id": LEGACY_OWNER_USER_ID,
+                "source": "api",
+                "source_ref": "t:1",
+                "raw_content": FACT,
+                "content_type": "text",
+                "metadata_json": encoded(
+                    {
+                        "uploaded_by": person,
+                        "promotion_assessment": assessment,
+                        "classification": "knowledge",
+                        "classification_confidence": 0.9,
+                        "classification_reason": "specific named factual relationship",
+                    }
+                ),
+                "content_hash": fact_hash,
+                "version": 1,
+                "received_at": timestamp(raw["received_at"]),
+                "created_at": timestamp(raw["created_at"]),
+                "deleted_at": None,
+            },
+        )
+        assert raw["received_at"] <= raw["created_at"]
+        assert len(new_inbox) == 1
+        assert receipt["raw_object_id"] == raw["id"]
+        assert receipt["inbox_id"] == new_inbox[0]["id"]
+        inbox = new_inbox[0]
+        if policy == "assessed":
+            assert len(new_ko) == 1
+            ko = new_ko[0]
+            persisted_suggestions = json_mod.loads(inbox["suggestions_json"])
+            links = persisted_suggestions["graph_links"]
+            assert len(links) == 2
+            ubuntu_id = opaque(links[0]["entity_id"], "ent")
+            atlas_id = opaque(links[1]["entity_id"], "ent")
+            ubuntu_link_id = opaque(links[0]["id"], "kel")
+            atlas_link_id = opaque(links[1]["id"], "kel")
+            assert ubuntu_id != atlas_id
+            assert ubuntu_link_id != atlas_link_id
+            candidates = persisted_suggestions["relation_candidates"]
+            assert len(candidates) == 1
+            candidate = candidates[0]
+            # Opaque graph IDs are bound across these selected rows; the graph
+            # tables themselves are outside this intake test's persisted scope.
+            suggestions.update(
+                {
+                    "graph_links": [
+                        {
+                            "id": ubuntu_link_id,
+                            "entity_id": ubuntu_id,
+                            "entity_name": "Ubuntu",
+                            "entity_type": "concept",
+                            "status": "accepted",
+                            "confidence": 0.92,
+                            "created": True,
+                        },
+                        {
+                            "id": atlas_link_id,
+                            "entity_id": atlas_id,
+                            "entity_name": "Atlas",
+                            "entity_type": "concept",
+                            "status": "accepted",
+                            "confidence": 0.89,
+                            "created": True,
+                        },
+                    ],
+                    "unresolved_entities": [],
+                    "relation_candidates": [
+                        {
+                            "id": opaque(candidate["id"], "relc"),
+                            "user_id": LEGACY_OWNER_USER_ID,
+                            "source_entity_id": atlas_id,
+                            "target_entity_id": ubuntu_id,
+                            "relation_type": "uses",
+                            "confidence": 0.9,
+                            "evidence_json": {
+                                "knowledge_object_id": ko["id"],
+                                "source_name": "Atlas",
+                                "target_name": "Ubuntu",
+                                "phrase": "работает на",
+                                "excerpt": "Сервер Atlas работает на Ubuntu 24.04 и обслуживает внутренни",
+                                "method": "explicit_local_relation_phrase",
+                            },
+                            "status": "suggested",
+                            "created_at": timestamp(candidate["created_at"]),
+                            "reviewed_at": None,
+                            "reviewed_by": None,
+                            "source_name": "Atlas",
+                            "target_name": "Ubuntu",
+                        }
+                    ],
+                    "conflict_candidates": [],
+                }
+            )
+            typed_equal(
+                ko,
+                {
+                    "id": opaque(ko["id"], "ko"),
+                    "user_id": LEGACY_OWNER_USER_ID,
+                    "raw_object_id": raw["id"],
+                    "entity_id": ubuntu_id,
+                    "content": FACT,
+                    "content_type": "text",
+                    "title": suggestions["title"],
+                    "summary": FACT,
+                    "tags_json": encoded(tags),
+                    "metadata_json": encoded(enrichment_metadata),
+                    "knowledge_kind": "fact",
+                    "importance": 0.41600000000000004,
+                    "quality_score": 0.7,
+                    "promotion_score": 0.7,
+                    "lifecycle_stage": "active",
+                    "version": 1,
+                    "superseded_by_id": None,
+                    "created_at": timestamp(ko["created_at"]),
+                    "updated_at": timestamp(ko["updated_at"]),
+                    "deleted_at": None,
+                },
+            )
+            assert raw["created_at"] <= ko["created_at"] <= ko["updated_at"] <= candidate["created_at"]
+            assert candidate["created_at"] <= timestamp(inbox["created_at"])
+            expected = {
+                "promoted": True,
+                "queued_for_review": True,
+                "persisted": True,
+                "auto_classified": False,
+                "raw_object_id": raw["id"],
+                "inbox_id": inbox["id"],
+                "knowledge_object": {"id": ko["id"], "user_id": LEGACY_OWNER_USER_ID},
+                "action": "promote",
+                "category": "knowledge",
+                "reason": "specific named factual relationship",
+                "confidence": 0.9,
+                "promotion_score": 0.7,
+                "quality_score": 0.7,
+            }
+        else:
+            assert new_ko == []
+            assert inbox["knowledge_object_id"] is None
+            expected = {
+                "promoted": False,
+                "queued_for_review": True,
+                "persisted": True,
+                "strict_review": True,
+                "raw_object_id": raw["id"],
+                "inbox_id": inbox["id"],
+                "action": "review",
+                "assessed_action": "promote",
+                "category": "knowledge",
+                "reason": "specific named factual relationship",
+                "confidence": 0.9,
+                "promotion_score": 0.7,
+                "quality_score": 0.7,
+            }
+        typed_equal(
+            inbox,
+            {
+                "id": opaque(inbox["id"], "inbox"),
+                "user_id": LEGACY_OWNER_USER_ID,
+                "raw_object_id": raw["id"],
+                "knowledge_object_id": ko["id"] if policy == "assessed" else None,
+                "status": "pending",
+                "suggested_entity_id": None,
+                "suggested_tags_json": encoded(tags),
+                "suggestions_json": encoded(suggestions),
+                "suggested_action": "review_links" if policy == "assessed" else "promote",
+                "promotion_score": 0.7,
+                "quality_score": 0.7,
+                "classification_notes": (
+                    "promoted; category=knowledge; promotion=0.70; quality=0.70; graph_links=2; unresolved_entities=0"
+                    if policy == "assessed"
+                    else "action=promote; category=knowledge; promotion=0.70; quality=0.70; "
+                    "reason=specific named factual relationship"
+                ),
+                "created_at": timestamp(inbox["created_at"]),
+                "reviewed_at": None,
+                "reviewed_by": None,
+            },
+        )
+        assert raw["created_at"] <= inbox["created_at"]
+        typed_equal(receipt, expected)
+        leaked = json_mod.dumps(receipt, ensure_ascii=False) + response.text
+        for marker in (
+            canary_content,
+            canary_filename,
+            canary_token,
+            canary_actor,
+            canary_ref,
+            secret,
+            FACT,
+        ):
+            assert marker not in leaked
 
 
 @pytest.mark.parametrize("policy", REVIEW_POLICIES)

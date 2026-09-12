@@ -36,6 +36,9 @@ def _isolate_acceptance_lock_protocol(monkeypatch: pytest.MonkeyPatch, tmp_path:
     # different xdist worker.  Production keeps its fixed protocol constant.
     protocol = f"friday.synthetic-live-acceptance.unit.{os.getpid()}.{tmp_path.name}"
     monkeypatch.setattr(acceptance, "_ACCEPTANCE_LOCK_PROTOCOL", protocol.encode("ascii"))
+    monkeypatch.setattr(
+        acceptance, "_acceptance_lock_path", lambda: tmp_path / "runtime" / "locks" / "acceptance.lock"
+    )
 
 
 def test_pre_release_inventory_is_exact_unique_and_candidate_bound() -> None:
@@ -58,6 +61,8 @@ def test_pre_release_inventory_is_exact_unique_and_candidate_bound() -> None:
     candidate_files = battery._candidate_source_paths(instrument_path=acceptance.RUNNER_PATH)
     assert acceptance.RUNNER_RELATIVE_PATH in candidate_files
     assert "tools/synthetic_live_battery.py" in candidate_files
+    assert "tools/synthetic_live_b09_evidence.py" in candidate_files
+    assert "tools/synthetic_live_b09_lab.py" in candidate_files
     assert "friday_host_agent/__init__.py" in candidate_files
     assert "friday_package_broker/__init__.py" in candidate_files
     assert "sol/LIVE_TEST_2026-08-08.md" not in candidate_files
@@ -410,6 +415,53 @@ def test_acceptance_dispatcher_environment_fails_closed(
 ) -> None:
     with pytest.raises(battery.BatteryContractError, match=rf"^{code}$"):
         acceptance._assert_frozen_dispatcher_environment(environment)
+
+
+@pytest.mark.parametrize("legacy_only", [False, True])
+def test_explicit_native_config_preserves_effective_registered_profile_and_model(
+    legacy_only: bool,
+) -> None:
+    environment = {
+        "JERICHO_PROFILE": "qwen38-27b-nvfp4-sglang",
+        "JERICHO_LLM_MODEL": "configured-model",
+    }
+    if not legacy_only:
+        environment.update(
+            FRIDAY_PROFILE="qwen38-27b-nvfp4-sglang",
+            FRIDAY_LLM_MODEL="configured-model",
+            JERICHO_PROFILE="ignored-old-profile",
+            JERICHO_LLM_MODEL="ignored-old-model",
+        )
+    frozen = dict(environment)
+
+    acceptance._assert_configured_model_environment(environment)
+
+    assert environment == frozen
+
+
+@pytest.mark.parametrize(
+    ("overrides", "code"),
+    [
+        ({"FRIDAY_PROFILE": ""}, "acceptance_profile_missing"),
+        ({"FRIDAY_PROFILE": "unknown"}, "acceptance_profile_unknown"),
+        ({"FRIDAY_PROFILE": " qwen38-27b-nvfp4-sglang "}, "acceptance_profile_unknown"),
+        ({"FRIDAY_LLM_MODEL": " "}, "acceptance_model_missing"),
+        ({"FRIDAY_LLM_MODEL": None}, "model_environment_invalid"),
+    ],
+)
+def test_explicit_native_config_never_falls_back_past_invalid_friday_values(
+    overrides: dict[str, Any],
+    code: str,
+) -> None:
+    environment = {
+        "FRIDAY_PROFILE": "qwen38-27b-nvfp4-sglang",
+        "JERICHO_PROFILE": "qwen36-27b-nvfp4-nvidia",
+        "FRIDAY_LLM_MODEL": "configured-model",
+        "JERICHO_LLM_MODEL": "dispatcher",
+        **overrides,
+    }
+    with pytest.raises(battery.BatteryContractError, match=rf"^{code}$"):
+        acceptance._assert_configured_model_environment(environment)
 
 
 def _vllm_metrics(*, running: int = 0, waiting: int = 0, epoch: int = 1_700_000_000) -> str:
@@ -1099,11 +1151,18 @@ def test_readiness_timeout_is_closed_before_any_acceptance_dispatch(
     assert dispatched is False
 
 
+@pytest.mark.parametrize("ambient_env_file", [False, True])
 def test_invalid_dispatcher_profile_precedes_readiness_and_every_dispatch(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
+    ambient_env_file: bool,
 ) -> None:
     _isolate_acceptance_lock_protocol(monkeypatch, tmp_path)
+    if ambient_env_file:
+        monkeypatch.setenv("FRIDAY_ENV_FILE", str(tmp_path / "ambient.env"))
+    else:
+        monkeypatch.delenv("FRIDAY_ENV_FILE", raising=False)
+        monkeypatch.delenv("JERICHO_ENV_FILE", raising=False)
     run_root = tmp_path / "must-not-be-created"
     readiness_called = False
     dispatch_called = False
@@ -1140,6 +1199,48 @@ def test_invalid_dispatcher_profile_precedes_readiness_and_every_dispatch(
     assert readiness_called is False
     assert dispatch_called is False
     assert run_root.exists() is False
+
+
+def test_explicit_config_reaches_readiness_with_effective_environment_unchanged(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _isolate_acceptance_lock_protocol(monkeypatch, tmp_path)
+    environment = _readiness_environment()
+    environment.update(
+        FRIDAY_PROFILE="qwen38-27b-nvfp4-sglang",
+        JERICHO_PROFILE="ignored-old-profile",
+        FRIDAY_LLM_MODEL="configured-model",
+        JERICHO_LLM_MODEL="ignored-old-model",
+    )
+    frozen = dict(environment)
+    observed = False
+
+    class ReadinessReached(Exception):
+        pass
+
+    def readiness(model_environment: dict[str, str], **kwargs: Any) -> Any:
+        nonlocal observed
+        observed = True
+        assert model_environment == frozen
+        assert kwargs == {"require_authoritative_metrics": True}
+        raise ReadinessReached
+
+    monkeypatch.setattr(battery, "_inherit_model_environment", lambda: environment)
+    monkeypatch.setattr(acceptance, "_preseal_passes", lambda *_args: [])
+    monkeypatch.setattr(acceptance, "_model_readiness_barrier", readiness)
+
+    with pytest.raises(ReadinessReached):
+        acceptance.run_acceptance(
+            "all",
+            run_directory=tmp_path / "configured-run",
+            concurrency=4,
+            artifact_id="PRE-RELEASE-ALL-0123456789abcdef",
+            configured_model=True,
+        )
+
+    assert observed
+    assert environment == frozen
 
 
 def test_official_all_acceptance_refuses_reduced_execution_concurrency(
@@ -1402,6 +1503,7 @@ def test_acceptance_audit_only_does_not_select_or_read_env_file(
 
     monkeypatch.setattr(battery, "_select_live_env_file", refuse)
     monkeypatch.setattr(acceptance, "_assert_frozen_dispatcher_environment", refuse_model_contract)
+    monkeypatch.setattr(acceptance, "_assert_configured_model_environment", refuse_model_contract)
 
     assert acceptance.main(["--suite", "all", "--audit-only", "--env-file", str(private_path)]) == 0
     output = capsys.readouterr().out
@@ -1427,8 +1529,10 @@ def test_acceptance_selects_explicit_env_without_publishing_its_path(
         run_directory: Path,
         concurrency: int,
         artifact_id: str,
+        configured_model: bool,
     ) -> tuple[int, dict[str, Any]]:
         assert suite == "all"
+        assert configured_model is True
         assert run_directory.parent == ROOT / "data" / "live-battery-runs"
         assert concurrency == battery.DEFAULT_CONCURRENCY
         return 4, {
@@ -1502,8 +1606,10 @@ def test_custom_run_directory_name_never_reaches_stdout(
         run_directory: Path,
         concurrency: int,
         artifact_id: str,
+        configured_model: bool,
     ) -> tuple[int, dict[str, Any]]:
         nonlocal captured_artifact_id
+        assert configured_model is False
         assert suite == "p06"
         assert run_directory.name == secret_name
         assert concurrency == 1
@@ -1547,8 +1653,10 @@ def test_default_artifact_id_is_the_default_directory_locator(
         run_directory: Path,
         concurrency: int,
         artifact_id: str,
+        configured_model: bool,
     ) -> tuple[int, dict[str, Any]]:
         nonlocal captured_directory
+        assert configured_model is False
         assert suite == "all"
         assert concurrency == battery.DEFAULT_CONCURRENCY
         captured_directory = run_directory

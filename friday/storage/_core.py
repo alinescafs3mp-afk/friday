@@ -7,6 +7,7 @@ signatures and bodies. Mixed back into that class, so ``self.execute`` and
 
 from __future__ import annotations
 
+import math
 import os
 import re
 import secrets
@@ -150,6 +151,9 @@ _CONVERSATION_PASSAGE_FTS_RECEIPT_KEY = "conversation_passage_fts_build"
 # Tests and clock adapters replace ``datetime`` to control wall time. Timestamp
 # parsing must remain the real stdlib implementation under that substitution.
 _TIMESTAMP_DATETIME = datetime
+_CONNECTION_OPEN_DEADLINE: ContextVar[tuple[object, float] | None] = ContextVar(
+    "friday_connection_open_deadline", default=None
+)
 _GUARDED_TRANSACTION_CONTEXT: ContextVar[
     tuple[
         object,
@@ -2300,7 +2304,9 @@ def guarded_storage_transaction(
 
 
 @contextmanager
-def read_only_storage_snapshot(storage: Any) -> Iterator[sqlite3.Connection]:
+def read_only_storage_snapshot(
+    storage: Any, *, absolute_deadline: float | None = None
+) -> Iterator[sqlite3.Connection]:
     """Hold one effect-free SQLite snapshot and always roll it back.
 
     ``FridayStorage.transaction()`` is deliberately a writer boundary: even a
@@ -2311,31 +2317,92 @@ def read_only_storage_snapshot(storage: Any) -> Iterator[sqlite3.Connection]:
     needs no process-wide writer lock under WAL.
     """
 
-    conn: sqlite3.Connection = storage.conn
-    nested = conn.in_transaction
-    savepoint = new_id("friday_read_only") if nested else ""
-    if savepoint:
-        # Legacy callers may have an intentional, still-uncommitted prelude on
-        # this thread-local connection.  Preserve that prelude while giving the
-        # admission probe its own rollback boundary.  Generated identifiers are
-        # limited to the storage ID alphabet and never contain SQL input.
-        conn.execute(f"SAVEPOINT {savepoint}")  # nosec B608 - generated identifier
-    else:
-        conn.execute("BEGIN DEFERRED")
+    if absolute_deadline is not None and (
+        type(absolute_deadline) not in {int, float} or not math.isfinite(absolute_deadline)
+    ):
+        raise ValueError("storage read deadline is invalid")
+
+    def require_budget() -> None:
+        if absolute_deadline is not None and time.monotonic() >= absolute_deadline:
+            raise TimeoutError("storage read deadline expired")
+
+    require_budget()
+    conn = _connection_before_deadline(storage, absolute_deadline)
+    old_busy_timeout: int | None = None
     try:
-        yield conn
-    finally:
+        if absolute_deadline is not None:
+            row = conn.execute("PRAGMA busy_timeout").fetchone()
+            old_busy_timeout = int(row[0]) if row is not None else 10_000
+            remaining_ms = max(0, int((absolute_deadline - time.monotonic()) * 1000))
+            timeout_ms = min(old_busy_timeout, remaining_ms)
+            conn.execute(f"PRAGMA busy_timeout={timeout_ms}")  # nosec B608 - bounded int
+        require_budget()
+        nested = conn.in_transaction
+        savepoint = new_id("friday_read_only") if nested else ""
         if savepoint:
-            if not conn.in_transaction:
-                raise RuntimeError("read-only storage snapshot lost its outer transaction")
-            conn.execute(
-                f"ROLLBACK TO SAVEPOINT {savepoint}"  # nosec B608 - generated identifier
-            )
-            conn.execute(
-                f"RELEASE SAVEPOINT {savepoint}"  # nosec B608 - generated identifier
-            )
-        elif conn.in_transaction:
-            conn.rollback()
+            # Preserve an intentional uncommitted prelude, while this read
+            # scope always rolls back its own work. Generated identifiers
+            # contain only the storage ID alphabet, never SQL input.
+            conn.execute(f"SAVEPOINT {savepoint}")  # nosec B608 - generated identifier
+        else:
+            conn.execute("BEGIN DEFERRED")
+        try:
+            yield conn
+            require_budget()
+        finally:
+            if savepoint:
+                if not conn.in_transaction:
+                    raise RuntimeError("read-only storage snapshot lost its outer transaction")
+                conn.execute(f"ROLLBACK TO SAVEPOINT {savepoint}")  # nosec B608 - generated identifier
+                conn.execute(f"RELEASE SAVEPOINT {savepoint}")  # nosec B608 - generated identifier
+            elif conn.in_transaction:
+                conn.rollback()
+    except sqlite3.OperationalError as exc:
+        if absolute_deadline is not None and "locked" in str(exc).casefold():
+            raise TimeoutError("storage SQLite read deadline expired") from exc
+        raise
+    finally:
+        if old_busy_timeout is not None:
+            with suppress(sqlite3.Error):
+                conn.execute(f"PRAGMA busy_timeout={old_busy_timeout}")  # nosec B608 - prior int
+
+
+def _connection_before_deadline(storage: Any, absolute_deadline: float | None) -> sqlite3.Connection:
+    """Include cold connection setup in the caller's existing read deadline."""
+
+    if absolute_deadline is None:
+        return storage.conn
+    if type(absolute_deadline) not in {int, float} or not math.isfinite(absolute_deadline):
+        raise ValueError("storage read deadline is invalid")
+    previous = _CONNECTION_OPEN_DEADLINE.get()
+    deadline = float(absolute_deadline)
+    if previous is not None and previous[0] is storage:
+        deadline = min(deadline, previous[1])
+    _connection_open_remaining(deadline)
+    token = _CONNECTION_OPEN_DEADLINE.set((storage, deadline))
+    try:
+        return storage.conn
+    finally:
+        _CONNECTION_OPEN_DEADLINE.reset(token)
+
+
+def _connection_open_deadline(storage: object) -> float | None:
+    context = _CONNECTION_OPEN_DEADLINE.get()
+    return context[1] if context is not None and context[0] is storage else None
+
+
+def _connection_open_remaining(deadline: float | None) -> float:
+    if deadline is None:
+        return 10.0
+    remaining = deadline - time.monotonic()
+    if remaining <= 0:
+        raise TimeoutError("storage connection open deadline expired")
+    return remaining
+
+
+def _connection_open_busy_timeout(conn: sqlite3.Connection, deadline: float | None) -> None:
+    timeout_ms = int(min(10.0, _connection_open_remaining(deadline)) * 1000)
+    conn.execute(f"PRAGMA busy_timeout={timeout_ms}")  # nosec B608 - bounded int
 
 
 class CoreMixin(StorageShared):
@@ -2475,18 +2542,26 @@ class CoreMixin(StorageShared):
         idempotent initialization avoids exposing a half-configured connection.
         """
 
+        read_deadline = _connection_open_deadline(self)
         deadline = time.monotonic() + 15.0
+        if read_deadline is not None:
+            deadline = min(deadline, read_deadline)
         delay = 0.025
         while True:
+            _connection_open_remaining(read_deadline)
             try:
                 return self._open_once()
             except sqlite3.OperationalError as exc:
+                if read_deadline is not None and time.monotonic() >= read_deadline:
+                    raise TimeoutError("storage connection open deadline expired") from exc
                 if not self._is_sqlite_busy(exc) or time.monotonic() >= deadline:
                     raise
-                time.sleep(delay)
+                time.sleep(min(delay, max(0.0, deadline - time.monotonic())))
                 delay = min(delay * 1.8, 0.5)
 
     def _open_once(self) -> sqlite3.Connection:
+        read_deadline = _connection_open_deadline(self)
+        _connection_open_remaining(read_deadline)
         if not bool(getattr(self._local, "database_restore_open_authorized", False)):
             # This check precedes prepare_private_sqlite(), URI open, every PRAGMA,
             # and schema migration.  A backend restart after restore-process death
@@ -2523,7 +2598,7 @@ class CoreMixin(StorageShared):
             conn = sqlite3.connect(
                 database_target,
                 check_same_thread=False,
-                timeout=10.0,
+                timeout=min(10.0, _connection_open_remaining(read_deadline)),
                 uri=must_exist,
             )
         except BaseException:
@@ -2533,6 +2608,10 @@ class CoreMixin(StorageShared):
             raise
         conn.row_factory = sqlite3.Row
         try:
+            if read_deadline is not None:
+                # Keep the worker joined while SQLite stops long initialization
+                # statements itself. Busy waits are bounded separately below.
+                conn.set_progress_handler(lambda: int(time.monotonic() >= read_deadline), 1000)
             _require_held_main_file_provenance(
                 self._db_path,
                 provenance_fd,
@@ -2552,7 +2631,7 @@ class CoreMixin(StorageShared):
             # persistent in the database header (idempotent to re-issue), but
             # foreign_keys and synchronous are per-connection and non-persistent, so
             # every connection must set them or FK enforcement silently disappears.
-            conn.execute("PRAGMA busy_timeout=10000")
+            _connection_open_busy_timeout(conn, read_deadline)
             conn.execute("PRAGMA journal_mode=WAL")
             # Existing sidecars may predate the owner-only policy.  A new WAL/SHM
             # inherits the pre-secured main database mode; this second pass also
@@ -2608,6 +2687,7 @@ class CoreMixin(StorageShared):
             # Schema creation/migration/FTS is applied exactly once, by the first
             # connection; later connections open against the already-migrated file.
             self._ensure_schema(conn)
+            _connection_open_busy_timeout(conn, read_deadline)
             # UDF-backed views/rebuild triggers are connection-local by design:
             # persistent SQLite schema must remain reparsable by offline tools.
             # Every thread owns a distinct connection and therefore installs its
@@ -2618,6 +2698,7 @@ class CoreMixin(StorageShared):
             # Unicode TEMP runtime exists and before any reader can observe it.
             # Recheck after BEGIN IMMEDIATE: another opener may have repaired the
             # same global state while this connection waited for the lock.
+            _connection_open_busy_timeout(conn, read_deadline)
             conn.execute("BEGIN IMMEDIATE")
             _invalidate_private_material_on_rule_change(conn)
             material_rebuilt = False
@@ -2643,11 +2724,14 @@ class CoreMixin(StorageShared):
                     fresh_entity_rebuild_from_live=material_rebuilt,
                     fresh_derivative_rebuild_from_live=derivative_rebuilt,
                 )
+            _connection_open_remaining(read_deadline)
             conn.commit()
             _install_private_material_authorizer(conn)
             # The core migration transiently lowers busy_timeout (a PRAGMA embedded
             # in CORE_SCHEMA); restore the uniform value on the migrating connection.
             conn.execute("PRAGMA busy_timeout=10000")
+            if read_deadline is not None:
+                conn.set_progress_handler(None, 0)
             token = _MainFileProvenanceToken(
                 connection=conn,
                 fd=provenance_fd,
@@ -2677,11 +2761,22 @@ class CoreMixin(StorageShared):
 
         if self._schema_ready:
             return
-        with self._init_lock:
+        read_deadline = _connection_open_deadline(self)
+        acquired = (
+            self._init_lock.acquire()
+            if read_deadline is None
+            else self._init_lock.acquire(timeout=_connection_open_remaining(read_deadline))
+        )
+        if not acquired:
+            raise TimeoutError("storage schema initialization deadline expired")
+        try:
             if self._schema_ready:
                 return
+            _connection_open_busy_timeout(conn, read_deadline)
             self._migrate_schema(conn)
             self._schema_ready = True
+        finally:
+            self._init_lock.release()
 
     def _migrate_schema(self, conn: sqlite3.Connection) -> None:
         # Create/recognize tables first, then add legacy columns, and only then

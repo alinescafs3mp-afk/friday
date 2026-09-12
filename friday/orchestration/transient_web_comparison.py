@@ -34,6 +34,10 @@ from typing import Any, Protocol
 from friday.orchestration.current_file_web_query import (
     extract_compare_current_file_public_web_query,
 )
+from friday.orchestration.mixed_file_archive_web_query import (
+    extract_mixed_file_archive_public_web_query,
+    mixed_file_archive_web_cues_present,
+)
 from friday.orchestration.supervisor_contracts import SupervisorContractError, parse_query_intent
 from friday.orchestration.turn_context_runtime import current_primary_authenticated_turn_context
 from friday.orchestration.web_currentness_policy import WebCurrentnessDecision
@@ -202,7 +206,14 @@ def _extract_explicit_public_query(current_user_message: object) -> tuple[str, s
 
 def _extract_compare_current_file_public_query(current_user_message: object) -> tuple[str, str]:
     encoded = _message_bytes(current_user_message)
-    query = extract_compare_current_file_public_web_query(current_user_message)
+    # Mixed comparisons carry a separate archive selector. Strip that private
+    # carrier before sealing; never fall back to the generic topic when the
+    # mixed topic is unavailable. The binding still covers the original turn.
+    query = (
+        extract_mixed_file_archive_public_web_query(current_user_message)
+        if mixed_file_archive_web_cues_present(current_user_message)
+        else extract_compare_current_file_public_web_query(current_user_message)
+    )
     if not query:
         raise TransientWebComparisonError("compare-current-file public-web topic is not separable")
     return query, _sha256_bytes(encoded)
@@ -524,10 +535,7 @@ class TransientWebComparisonEvidence:
         for provider_id in (self.selected_provider_id, self.provider_primary_id):
             if provider_id is None:
                 continue
-            if (
-                type(provider_id) is not str
-                or self.status is not TransientWebEvidenceStatus.SOURCED
-            ):
+            if type(provider_id) is not str or self.status is not TransientWebEvidenceStatus.SOURCED:
                 raise TransientWebComparisonError("transient web evidence provider is invalid")
             try:
                 if WebProviderId(provider_id).value != provider_id:
@@ -575,9 +583,7 @@ class TransientWebComparisonEvidence:
             "projection_truncated": self.projection_truncated,
             "selected_provider_id": self.selected_provider_id,
             "provider_primary_id": self.provider_primary_id,
-            "provider_decision": (
-                None if self.provider_decision is None else self.provider_decision.value
-            ),
+            "provider_decision": (None if self.provider_decision is None else self.provider_decision.value),
             "source_sha256": [source.content_sha256 for source in self.sources],
             "citation_labels": [source.label for source in self.sources],
         }
@@ -690,11 +696,7 @@ def _report_provider_provenance(
     selected = _report_provider_id(report, "selected_provider_id")
     if fields == {"selected_provider_id"}:
         return selected, None, None
-    if (
-        selected is None
-        or "provider_primary_id" not in fields
-        or "provider_used_fallback" not in fields
-    ):
+    if selected is None or "provider_primary_id" not in fields or "provider_used_fallback" not in fields:
         raise TransientWebComparisonError("web report provider provenance is incomplete")
     primary = _report_provider_id(report, "provider_primary_id")
     used_fallback = report["provider_used_fallback"]
@@ -702,11 +704,7 @@ def _report_provider_provenance(
         raise TransientWebComparisonError("web report provider provenance is malformed")
     if used_fallback != (primary != selected):
         raise TransientWebComparisonError("web report provider provenance is contradictory")
-    decision = (
-        WebProviderDecision.FALLBACK_USED
-        if used_fallback
-        else WebProviderDecision.PRIMARY_OK
-    )
+    decision = WebProviderDecision.FALLBACK_USED if used_fallback else WebProviderDecision.PRIMARY_OK
     return selected, primary, decision
 
 
@@ -846,9 +844,7 @@ def _project_report(
             search_timed_out=False,
         )
     try:
-        selected_provider_id, provider_primary_id, provider_decision = (
-            _report_provider_provenance(report)
-        )
+        selected_provider_id, provider_primary_id, provider_decision = _report_provider_provenance(report)
     except TransientWebComparisonError:
         return _evidence(
             plan,

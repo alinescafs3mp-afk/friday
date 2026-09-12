@@ -72,23 +72,44 @@ def encrypt_file(source: Path, destination: Path, key_file: Path) -> None:
     restrict_private_file(destination)
 
 
-def decrypt_file(source: Path, destination: Path, key_file: Path) -> None:
+def decrypt_file(source: Path, destination: Path, key_file: Path, *, overwrite: bool = True) -> None:
+    """Publish plaintext only after the complete decryption succeeds."""
+
     if not key_file.is_file():
         raise BackupMirrorError(f"Файл ключа шифрования не найден: {key_file}")
-    prepare_private_file(destination)
-    _run_openssl(
-        [
-            *_OPENSSL_ARGS,
-            "-d",
-            "-in",
-            str(source),
-            "-out",
-            str(destination),
-            "-pass",
-            f"file:{key_file}",
-        ]
-    )
-    restrict_private_file(destination)
+    parent = destination.parent
+    if parent.is_symlink() or destination.is_symlink():
+        raise BackupMirrorError("Путь расшифровки не должен быть символической ссылкой")
+    if not parent.exists():
+        ensure_private_directory(parent)
+    try:
+        with tempfile.TemporaryDirectory(prefix=".friday-decrypt-", dir=parent) as temporary:
+            pending = Path(temporary) / "plaintext"
+            prepare_private_file(pending)
+            _run_openssl(
+                [
+                    *_OPENSSL_ARGS,
+                    "-d",
+                    "-in",
+                    str(source),
+                    "-out",
+                    str(pending),
+                    "-pass",
+                    f"file:{key_file}",
+                ]
+            )
+            with pending.open("rb") as handle:
+                os.fsync(handle.fileno())
+            if overwrite:
+                if destination.is_symlink() or (destination.exists() and not destination.is_file()):
+                    raise BackupMirrorError("Файл назначения расшифровки не является обычным файлом")
+                os.replace(pending, destination)
+            else:
+                # A racing creator, including a dangling symlink, must win:
+                # the CLI promises never to overwrite an existing destination.
+                os.link(pending, destination, follow_symlinks=False)
+    except OSError as exc:
+        raise BackupMirrorError("Не удалось опубликовать расшифрованный файл") from exc
 
 
 def _verify_encrypted_copy(encrypted: Path, key_file: Path, expected_sha256: str) -> None:

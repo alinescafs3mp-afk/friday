@@ -461,3 +461,98 @@ def test_ambiguous_ack_keeps_the_claim_uncertain_and_unclaimable(storage) -> Non
         0,
         pointer["dedup_key"],
     )
+
+
+@pytest.mark.parametrize("dismiss_via", ["queue-id", "event-key"])
+@pytest.mark.parametrize("outcome", ["sent", "failed", "uncertain"])
+def test_dismissal_after_claim_cannot_be_reversed_by_late_ack(storage, dismiss_via, outcome):
+    pointer = _queued_reminder(storage, occurred_at=NOW.date().isoformat())
+    assert _claim(storage, pointer) is not None
+    if dismiss_via == "queue-id":
+        assert storage.dismiss_notification("alice", pointer["id"])
+    else:
+        assert storage.silence_reminder("alice", pointer["dedup_key"], chat_id="5001")
+    before = dict(
+        storage.execute("SELECT * FROM outbound_notifications WHERE id=?", (pointer["id"],)).fetchone()
+    )
+    assert before["status"] == "dismissed"
+    states = storage.acknowledge_notifications(**{f"{outcome}_ids": [pointer["id"]]}, max_attempts=1)
+    assert states["dismissed"] == [pointer["id"]]
+    assert (
+        dict(storage.execute("SELECT * FROM outbound_notifications WHERE id=?", (pointer["id"],)).fetchone())
+        == before
+    )
+    assert not storage.enqueue_notification(
+        "alice", "5009", pointer["body"], kind="reminder", dedup_key=pointer["dedup_key"]
+    )
+    assert _claim(storage, pointer) is None
+
+
+def _unqueued_personal_reminder_key(storage):
+    storage.ensure_user("alice", metadata={"chat_id": "5001"})
+    graph = KnowledgeGraph(storage)
+    event = graph.create_entity("alice", "Personal reminder", EntityType.EVENT, deduplicate=False)
+    graph.set_event_time("alice", event["id"], NOW.date().isoformat(), source="reminder:alice")
+    return f"reminder:{event['id']}:{NOW.date().isoformat()}"
+
+
+def test_personal_reminder_dedup_is_atomic_across_different_chats(settings, storage):
+    key = _unqueued_personal_reminder_key(storage)
+    second = init_storage(settings)
+    barrier = Barrier(2)
+
+    def enqueue(pair):
+        instance, chat = pair
+        barrier.wait(timeout=5)
+        return instance.enqueue_notification("alice", chat, "One reminder", kind="reminder", dedup_key=key)
+
+    try:
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            results = list(pool.map(enqueue, ((storage, "5001"), (second, "5009"))))
+    finally:
+        second.close()
+    assert sorted(results) == [False, True]
+    rows = storage.execute(
+        "SELECT chat_id, status FROM outbound_notifications WHERE user_id='alice' AND dedup_key=?", (key,)
+    ).fetchall()
+    assert len(rows) == 1 and rows[0]["chat_id"] in {"5001", "5009"}
+    assert rows[0]["status"] == "pending"
+
+
+def test_repeat_prescan_dismissal_after_chat_move_preserves_one_tombstone(storage):
+    key = _unqueued_personal_reminder_key(storage)
+    assert storage.silence_reminder("alice", key, chat_id="5001")
+    before = [dict(row) for row in storage.execute("SELECT * FROM outbound_notifications").fetchall()]
+    storage.ensure_user("alice", metadata={"chat_id": "5009"})
+    assert not storage.silence_reminder("alice", key, chat_id="5009")
+    assert not storage.enqueue_notification("alice", "5009", "Again", kind="reminder", dedup_key=key)
+    assert [dict(row) for row in storage.execute("SELECT * FROM outbound_notifications").fetchall()] == before
+    assert len(before) == 1 and before[0]["chat_id"] == "5001" and before[0]["status"] == "dismissed"
+
+
+def test_personal_reminder_dedup_keeps_other_kinds_and_empty_keys_compatible(storage):
+    key = _unqueued_personal_reminder_key(storage)
+    assert storage.silence_reminder("alice", key, chat_id="5001")
+    # A private reminder identity cannot be carried by a different kind.
+    assert not storage.enqueue_notification("alice", "5009", "Other kind", kind="sentinel", dedup_key=key)
+    for chat in ("5001", "5009"):
+        assert storage.enqueue_notification(
+            "alice", chat, "Ordinary status", kind="sentinel", dedup_key="sentinel:public-status"
+        )
+    for _ in range(2):
+        assert storage.enqueue_notification("alice", "5001", "No key", kind="reminder", dedup_key="")
+
+
+@pytest.mark.parametrize("outcome", ["sent", "failed"])
+def test_delivered_or_failed_queue_id_stays_person_scoped_and_cancellable(storage, outcome):
+    pointer = _queued_reminder(storage, occurred_at=NOW.date().isoformat())
+    assert _claim(storage, pointer) is not None
+    states = storage.acknowledge_notifications(**{f"{outcome}_ids": [pointer["id"]]}, max_attempts=1)
+    assert states[outcome] == [pointer["id"]]
+    assert not storage.dismiss_notification("bob", pointer["id"])
+    assert storage.dismiss_notification("alice", pointer["id"])
+    assert not storage.dismiss_notification("alice", pointer["id"])
+    row = storage.execute(
+        "SELECT status, dedup_key FROM outbound_notifications WHERE id=?", (pointer["id"],)
+    ).fetchone()
+    assert row["status"] == "dismissed" and row["dedup_key"] == pointer["dedup_key"]

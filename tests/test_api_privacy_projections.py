@@ -672,16 +672,28 @@ def test_chat_keeps_only_an_owned_inbox_handle_and_revalidates_it_on_replay(sett
                 "inbox_id": inbox.id,
             }
 
+        # The replay boundary authenticates the durable answer as well as
+        # the inbox handle. Script generation, but keep that owned row real.
+        conversation = storage.create_conversation(LEGACY_OWNER_USER_ID, "Inbox projection")
+        storage.store_message(
+            conversation["id"], LEGACY_OWNER_USER_ID, "user", "synthetic candidate for review"
+        )
+        answer = storage.store_message(conversation["id"], LEGACY_OWNER_USER_ID, "assistant", "ok")
+        chat_calls = 0
+
         async def quiet_chat(*_args, **_kwargs):
+            nonlocal chat_calls
+            chat_calls += 1
             return {
-                "conversation_id": "conv_synthetic",
-                "message_id": "msg_0123456789abcdef",
+                "conversation_id": conversation["id"],
+                "message_id": answer["id"],
                 "message": "ok",
             }
 
         request = {
             "message": "synthetic candidate for review",
             "source_ref": "projection-authority:replay",
+            "conversation_id": conversation["id"],
         }
         app.state.ingestion.ingest_text = review_ingest
         app.state.agent.chat = quiet_chat
@@ -694,6 +706,7 @@ def test_chat_keeps_only_an_owned_inbox_handle_and_revalidates_it_on_replay(sett
         storage.commit()
         after_removal = client.post("/api/chat", json=request, headers=headers)
 
+    assert chat_calls == 1
     assert first.status_code == 200, first.text
     assert replay.status_code == 200, replay.text
     for payload in (first.json(), replay.json()):

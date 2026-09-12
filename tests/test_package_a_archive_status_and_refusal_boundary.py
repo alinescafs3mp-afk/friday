@@ -1186,6 +1186,12 @@ async def test_k11_does_not_rewrite_the_structural_model_outage_message(
     assert reply["files"] == []
     assert late_builder_calls == 0
 
+    for request in ("Оформи ответ как документ.", "Оформи результат в виде справки."):
+        reply = await runtime.chat("alice", request, actor=_actor(), enable_tools=False)
+        assert reply["message"] == outage
+        assert reply["files"] == []
+        assert late_builder_calls == 0
+
 
 @pytest.mark.asyncio
 async def test_k11_explicit_local_file_alternative_allows_the_late_builder(

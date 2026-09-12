@@ -1,0 +1,76 @@
+{
+  "schema": "friday.astra-soak-load-freeze.v1",
+  "frozen_at": "2026-09-11T09:38:34.267889+00:00",
+  "frozen_by": "Astra integration/release owner",
+  "status": "DURATION_LOAD_LIMITS_FROZEN_EXECUTION_IDENTITY_PENDING",
+  "authority": {
+    "path": "/home/jericho/jericho/02_ASTRA_CHECKPOINT_AND_RELEASE_ACCEPTANCE_v2_1bfd839.md",
+    "sha256": "3429bc3d0dfa1e49194d4c32e7a955fc70486404f0957f4dbc30292b19dd7740"
+  },
+  "parent_scope": {
+    "path": "/home/jericho/.jericho/grok-takeover/ASTRA-163-soak-driver-scope.md",
+    "sha256": "53dff7eb4ddc819e6a59a1552dd96088a3c6d933f4b92a959776ea435cdbeaa6"
+  },
+  "duration_sec": 3600,
+  "cadence_sec": 15,
+  "deadline_sec": 3720,
+  "outer_cap_sec": 3780,
+  "owned_cleanup_sec": 30,
+  "principals": {
+    "count": 4,
+    "owner": 1,
+    "distinct_user_accounts": 3,
+    "sharing": false,
+    "identity_source": "Real isolated admin/identity APIs and signed API/me with independent storage binding; four aliases of owner do not count"
+  },
+  "request_concurrency": 4,
+  "per_principal_inflight_limit": 1,
+  "max_requests": 1024,
+  "admission_request_floor": 981,
+  "workload": {
+    "startup_once": [
+      "real owner and three distinct users/identity links",
+      "owner upload, source query, source-file readback, foreign-source and foreign-file refusal",
+      "public reminder creation, due scan, claim, in-process destination, ACK and replay when predecessor actually succeeds"
+    ],
+    "cadence": "Four real signed GET /api/me requests per15s round, one persistent app lifespan; record RSS/FD/thread/database/WAL/evidence observations",
+    "model_scope": "Model-disabled persistent app/API lifecycle profile; separate configured-model acceptance and live Telegram are mandatory and receive no credit from this profile",
+    "delivery_class": "in_process_synthetic_destination; no real Telegram proof"
+  },
+  "resources": {
+    "max_rss_bytes": 1073741824,
+    "max_fd_count": 512,
+    "max_thread_count": 128,
+    "max_database_bytes": 268435456,
+    "max_wal_bytes": 134217728,
+    "max_evidence_bytes": 33554432
+  },
+  "os_limits": {
+    "address_space_bytes": 4294967296,
+    "cpu_seconds": 300,
+    "open_files": 1024
+  },
+  "first_failure_policy": {
+    "nonfatal_functional_failure": "Retain FAIL and exact predecessor cause; dependent operations NOT_RUN; independently safe duration/read-only traffic may continue and must identify changed executed workload",
+    "stop_contour": [
+      "privacy failure",
+      "unexpected effect",
+      "identity/control failure",
+      "resource/request/deadline limit",
+      "untrusted or missing evidence",
+      "unknown exception or unproved continuation safety"
+    ],
+    "no_retry": true,
+    "no_success_row_seeding": true,
+    "read_only_duration_cannot_prove_full_mixed_soak": true
+  },
+  "execution_requirements": [
+    "Reviewed corrected Sol081 harness, current57+later Telegram changes do not affect this local profile unless integrated",
+    "Exact frozen candidate/harness/config identities bound before first process; this load manifest hash is an input",
+    "Canonical exclusive acceptance slot and outer103 complete descendant ownership; isolated HOME and network-denied local profile",
+    "Reserve owned cleanup independently of profile duration and retain original failures; no cancellation by watchdog timeout assumption",
+    "Acceptance still needs all prescribed gates/model/native/live/installed/recovery evidence on correct final artifact"
+  ],
+  "GO": false,
+  "run_started": false
+}

@@ -148,27 +148,102 @@ async def test_a_stopped_monitor_stops(settings, storage):
 
 def test_monitors_are_self_service_over_http(settings):
     """Свой монитор заводится и снимается своими руками, под `chat.use`."""
+    import json
+
+    from friday.permissions import LEGACY_OWNER_USER_ID
+
     app = create_app(settings)
     with TestClient(app) as client:
         headers = {"Authorization": f"Bearer {settings.api_token}"}
+        storage = app.state.storage
+        storage.ensure_user("foreign-monitor-person", preset_key="user")
+        foreign = storage.create_monitor(
+            "foreign-monitor-person", "чужой закрытый план", created_by="foreign-monitor-person"
+        )
+
+        def rows():
+            return [dict(row) for row in storage.execute("SELECT * FROM monitors ORDER BY id").fetchall()]
+
+        def audits():
+            return [dict(row) for row in storage.execute("SELECT * FROM audit_log ORDER BY rowid").fetchall()]
+
+        prior_audit = audits()
+        bodies = []
 
         created = client.post("/api/me/monitors", json={"query": "поверка весов"}, headers=headers)
         assert created.status_code == 200, created.text
-        monitor_id = created.json()["monitor"]["id"]
+        monitor = created.json()["monitor"]
+        monitor_id = monitor["id"]
+        assert monitor_id and monitor_id != foreign["id"]
+        persisted = dict(storage.execute("SELECT * FROM monitors WHERE id=?", (monitor_id,)).fetchone())
+        assert monitor == persisted, "monitor_http_create_persistence"
+        assert {
+            key: monitor[key]
+            for key in ("user_id", "created_by", "query", "chat_id", "active", "matches_reported")
+        } == {
+            "user_id": LEGACY_OWNER_USER_ID,
+            "created_by": LEGACY_OWNER_USER_ID,
+            "query": "поверка весов",
+            "chat_id": "",
+            "active": 1,
+            "matches_reported": 0,
+        }, "monitor_http_identity"
+        assert monitor["created_at"] and monitor["last_seen_at"] == monitor["created_at"]
+        assert monitor["last_checked_at"] is None
+        bodies.append(created.text)
 
         listed = client.get("/api/me/monitors", headers=headers)
         assert listed.status_code == 200
-        assert [item["query"] for item in listed.json()["items"]] == ["поверка весов"]
+        assert listed.json() == {"count": 1, "items": [persisted]}, "monitor_http_list_membership"
+        bodies.append(listed.text)
 
+        before_refusals, audit_before_refusals = rows(), audits()
         short = client.post("/api/me/monitors", json={"query": "a"}, headers=headers)
         assert short.status_code == 400, "односимвольный запрос принят как условие"
+        assert rows() == before_refusals and audits() == audit_before_refusals
+        foreign_stop = client.post(f"/api/me/monitors/{foreign['id']}/stop", headers=headers)
+        assert foreign_stop.status_code == 404
+        assert rows() == before_refusals and audits() == audit_before_refusals
+        bodies.extend([short.text, foreign_stop.text])
 
         stopped = client.post(f"/api/me/monitors/{monitor_id}/stop", headers=headers)
         assert stopped.status_code == 200
-        assert client.post(f"/api/me/monitors/{monitor_id}/stop", headers=headers).status_code == 404
+        assert stopped.json() == {"stopped": True, "id": monitor_id}
+        stopped_row = dict(storage.execute("SELECT * FROM monitors WHERE id=?", (monitor_id,)).fetchone())
+        assert stopped_row == {**persisted, "active": 0}, "monitor_http_stop_persistence"
+        after_stop = client.get("/api/me/monitors", headers=headers)
+        assert after_stop.status_code == 200 and after_stop.json() == {"count": 0, "items": []}
+        before_repeat, audit_before_repeat = rows(), audits()
+        repeated = client.post(f"/api/me/monitors/{monitor_id}/stop", headers=headers)
+        assert repeated.status_code == 404
+        assert rows() == before_repeat and audits() == audit_before_repeat
+        bodies.extend([stopped.text, after_stop.text, repeated.text])
 
-        audit = {row.get("action") for row in app.state.storage.list_audit_log(None, limit=50)}
-        assert {"monitor.create", "monitor.stop"} <= audit, "действия с монитором не в аудите"
+        audit_after = audits()
+        assert audit_after[: len(prior_audit)] == prior_audit
+        assert [
+            (row["action"], row["user_id"], row["target_type"], row["target_id"])
+            for row in audit_after[len(prior_audit) :]
+        ] == [
+            (action, LEGACY_OWNER_USER_ID, "monitor", monitor_id)
+            for action in ("monitor.create", "monitor.stop")
+        ], "monitor_http_audit_sequence"
+        assert storage.get_monitor(foreign["id"], "foreign-monitor-person") == foreign
+
+        anonymous = client.get("/api/me/monitors")
+        assert anonymous.status_code == 401
+        assert rows() == before_repeat
+        storage.set_permission_override(LEGACY_OWNER_USER_ID, "chat.use", "deny")
+        denied = client.get("/api/me/monitors", headers=headers)
+        assert denied.status_code == 403
+        assert rows() == before_repeat
+        bodies.extend([anonymous.text, denied.text])
+        for body in bodies + [json.dumps(audit_after, ensure_ascii=False)]:
+            assert settings.api_token not in body
+            assert foreign["query"] not in body
+            assert foreign["id"] not in body
+        for refusal in (short, foreign_stop, repeated, anonymous, denied):
+            assert "поверка весов" not in refusal.text
 
 
 def test_a_foreign_monitor_cannot_be_stopped(settings, storage):

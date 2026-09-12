@@ -968,7 +968,15 @@ async def relation_path(
     for value in (source, target):
         entity = await run_blocking(kg.storage.get_entity, str(value).strip(), actor.user_id)
         if entity is None:
-            entity = await run_blocking(kg.storage.find_entity_by_alias, actor.user_id, str(value).strip())
+            matches = await run_blocking(
+                kg.storage.find_entities_by_normalized_names,
+                actor.user_id,
+                [str(value).strip()],
+                limit=2,
+            )
+            if len(matches) > 1:
+                raise HTTPException(status_code=400, detail="Неоднозначное имя сущности: укажите id")
+            entity = matches[0] if matches else None
         if entity is None:
             raise HTTPException(status_code=404, detail=f"Объект не найден: {value}")
         resolved.append(str(entity["id"]))

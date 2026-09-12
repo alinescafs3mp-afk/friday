@@ -7,6 +7,7 @@ owns ``/api/admin`` and the order these modules are included in.
 
 from __future__ import annotations
 
+import math
 from dataclasses import replace
 
 from fastapi import APIRouter
@@ -357,8 +358,14 @@ async def list_identities(request: Request, user_id: str | None = None) -> dict[
     принадлежит вот этому человеку» — персональные данные, и связь между номером и
     аккаунтом узнаётся именно здесь.
     """
-    _require(request, "admin.users.read")
-    _audit_cross_tenant_read(request, "admin.identities.read", user_id)
+    actor = _require(request, "admin.users.read")
+    if user_id is not None and getattr(actor, "shared_tenant", False) and user_id == actor.user_id:
+        # This endpoint's explicit filter names a person account.  The generic
+        # shared-archive read helper deliberately collapses the archive tenant
+        # to ``*``; doing that here would discard the person the admin selected.
+        _audit(request, "admin.identities.read", "user", user_id)
+    else:
+        _audit_cross_tenant_read(request, "admin.identities.read", user_id)
     items = _services(request).storage.list_identities(user_id)
     return {"items": items, "count": len(items)}
 
@@ -380,26 +387,29 @@ async def link_identity(request: Request) -> dict[str, Any]:
     target = str(body.get("user_id") or "").strip()
     if not source or not external_id or not target:
         raise HTTPException(status_code=400, detail="Нужны source, external_id и user_id")
-    _protect_owner_target(request, target)
     state = _services(request)
-    before = state.storage.resolve_identity(source, external_id)
-    try:
-        link = state.storage.link_identity(source, external_id, target, linked_by=actor.user_id)
-    except DeletedAccountError as exc:
-        raise HTTPException(
-            status_code=409,
-            detail="Этот способ входа принадлежал навсегда удалённой учётной записи",
-        ) from exc
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-    _audit(
-        request,
-        "admin.identity.link",
-        "user",
-        target,
-        before={"user_id": before} if before else None,
-        after=link,
-    )
+    with state.storage.transaction():
+        before = state.storage.resolve_identity(source, external_id)
+        if before is not None:
+            _protect_owner_target(request, before)
+        _protect_owner_target(request, target)
+        try:
+            link = state.storage.link_identity(source, external_id, target, linked_by=actor.own_id)
+        except DeletedAccountError as exc:
+            raise HTTPException(
+                status_code=409,
+                detail="Этот способ входа принадлежал навсегда удалённой учётной записи",
+            ) from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        _audit(
+            request,
+            "admin.identity.link",
+            "user",
+            target,
+            before={"user_id": before} if before else None,
+            after=link,
+        )
     return {"identity": link}
 
 
@@ -485,12 +495,15 @@ async def create_token(request: Request) -> dict[str, Any]:
     ttl_seconds: int | None = None
     raw_ttl = body.get("ttl_seconds")
     if raw_ttl is not None:
-        # bool is an int subclass — reject it explicitly so `true` is not read as 1s.
-        if isinstance(raw_ttl, bool):
+        # Preserve the integral representations accepted by the HTTP contract,
+        # but never truncate a fractional or non-finite JSON number.
+        if isinstance(raw_ttl, bool) or (
+            isinstance(raw_ttl, float) and (not math.isfinite(raw_ttl) or not raw_ttl.is_integer())
+        ):
             raise HTTPException(status_code=400, detail="ttl_seconds должен быть целым числом")
         try:
             ttl_seconds = int(raw_ttl)
-        except (TypeError, ValueError) as exc:
+        except (TypeError, ValueError, OverflowError) as exc:
             raise HTTPException(status_code=400, detail="ttl_seconds должен быть целым числом") from exc
         # Range-check before minting so a huge value is a 400, not a timedelta OverflowError (500).
         if ttl_seconds <= 0 or ttl_seconds > MAX_API_TOKEN_TTL_SECONDS:
@@ -784,16 +797,34 @@ async def create_preset(request: Request) -> dict[str, Any]:
     requested_capabilities = {str(item) for item in capabilities}
     for security_id in requested_capabilities:
         _require_delegable_capability(request, security_id)
-    try:
-        preset = _services(request).auth_service.create_custom_preset(
-            str(body.get("preset_key") or ""),
-            str(body.get("name") or ""),
-            requested_capabilities,
-            description=str(body.get("description") or ""),
-            created_by=actor.user_id,
-            acting_actor=actor,
+    state = _services(request)
+    preset_key = str(body.get("preset_key") or "")
+    with state.storage.transaction() as conn:
+        before = state.storage.get_custom_preset(preset_key)
+        if before is not None:
+            assigned = conn.execute(
+                "SELECT id FROM users WHERE preset_key=? ORDER BY id",
+                (preset_key,),
+            ).fetchall()
+            for row in assigned:
+                _protect_owner_target(request, str(row["id"]))
+        try:
+            preset = state.auth_service.create_custom_preset(
+                preset_key,
+                str(body.get("name") or ""),
+                requested_capabilities,
+                description=str(body.get("description") or ""),
+                created_by=actor.own_id,
+                acting_actor=actor,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        _audit(
+            request,
+            "admin.preset.upsert",
+            "preset",
+            preset.get("preset_key"),
+            before=before,
+            after=preset,
         )
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-    _audit(request, "admin.preset.upsert", "preset", preset.get("preset_key"), after=preset)
     return {"preset": preset}

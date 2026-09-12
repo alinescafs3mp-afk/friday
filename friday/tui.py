@@ -374,6 +374,8 @@ def _loop(stdscr, state: LauncherState, settings, target: Path) -> Command:
             # Never launch the backend on stale config: flush pending edits first.
             if state.dirty:
                 _save(state, target)
+                if state.dirty:
+                    continue
             return command
         if command == Command.SHOW_STATUS:
             state.status_text = _gather_status(settings, state.values)

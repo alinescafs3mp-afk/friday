@@ -58,6 +58,10 @@ from friday.orchestration.file_read_contract import (
     build_file_verifier_prompt,
     require_file_verifier_clear,
 )
+from friday.orchestration.output_request_clause import (
+    mask_output_request_markup,
+    output_request_clause_prefix,
+)
 from friday.orchestration.transient_web_comparison import (
     TransientWebComparisonEvidence,
     TransientWebEvidenceStatus,
@@ -73,6 +77,28 @@ _DIGEST_RE = re.compile(r"[0-9a-f]{64}\Z")
 _CITATION_RE = re.compile(r"\[(F1|A1|W[1-3])\]")
 _SERVICE_MARKUP_RE = re.compile(
     r"</?(?:think|tool_call|function|tool)(?:\s[^>]*)?>",
+    re.IGNORECASE,
+)
+_QUOTED_REQUEST_RE = re.compile(r'```[\s\S]*?```|~~~[\s\S]*?~~~|`[^`\n]*`|«[^»]*»|“[^”]*”|"[^"]*"|\'[^\']*\'')
+_MARKDOWN_QUOTED_REQUEST_RE = re.compile(r"(?m)^[ \t]{0,3}>[^\n]*(?:\n(?![ \t]*\n)[^\n]+)*")
+_TABLE_ACTION = (
+    r"(?:сравни(?:те)?|сопоставь(?:те)?|оформи(?:те)?|представь(?:те)?|покажи(?:те)?|"
+    r"выведи(?:те)?|сведи(?:те)?|сделай(?:те)?|дай(?:те)?|верни(?:те)?)"
+)
+_TABLE_REQUEST_RE = re.compile(
+    rf"\b(?:(?:(?:ответ|результат|сравнение)\s+)?{_TABLE_ACTION}\b[^.!?;:\n]{{0,70}}?|"
+    r"(?:ответ|результат|сравнение)\s+)\b(?:таблицей|в\s+виде\s+таблицы|в\s+таблиц[еу]|таблицу)\b",
+    re.IGNORECASE,
+)
+_TABLE_POLITE_PREFIX = r"(?:(?:пожалуйста|пятница)[,\s]+|(?:а|и|теперь|затем)\s+){0,3}"
+_TABLE_ACTIVE_PREFIX = re.compile(
+    rf"\s*{_TABLE_POLITE_PREFIX}"
+    rf"(?:(?:уточнение|моя\s+просьба|мой\s+запрос|прошу)\s*:\s*)?{_TABLE_POLITE_PREFIX}",
+    re.IGNORECASE,
+)
+_TABLE_NEGATED_TARGET_RE = re.compile(
+    r"\b(?:не|без|вместо)\s+(?:в\s+(?:виде\s+)?)?таблиц\w*\b|"
+    rf"\bне\s+{_TABLE_ACTION}\b",
     re.IGNORECASE,
 )
 _MAX_REQUEST_UTF8_BYTES = 768
@@ -99,6 +125,12 @@ _SYNTHESIS_SYSTEM = """\
 выдумывай факты, страницы, источники или метки.
 Верни один законченный ответ на русском без JSON, служебных тегов, инструментов, \
 файлов, эффектов и обещаний будущей работы. Префикс неполного охвата добавляет код.
+Если trusted_control.answer_shape равно markdown_table, ответ должен содержать \
+одну таблицу Markdown: заголовок, строку разделителей --- и строки сравнения; \
+во всех строках одинаковое число колонок, каждая строка начинается и заканчивается |. \
+Все ожидаемые метки источников должны находиться в содержательных ячейках, \
+а не только в заголовке или тексте вокруг таблицы. Не заключай таблицу или ячейки \
+в обратные кавычки и не используй символ | внутри ячеек.
 """
 _VERIFIER_SYSTEM = (
     V12_FILE_VERIFIER_SYSTEM
@@ -596,6 +628,60 @@ def _citation_labels(web_evidence: TransientWebComparisonEvidence) -> tuple[str,
     return ("F1", "A1", *(source.label for source in web_evidence.sources))
 
 
+def _comparison_table_requested(request: str) -> bool:
+    # Only the user's active presentation request controls shape. Source names,
+    # quotes and reported instructions cannot promote themselves to this field.
+    visible = mask_output_request_markup(request)
+    visible = _QUOTED_REQUEST_RE.sub(lambda match: re.sub(r"[^\n]", " ", match.group()), visible)
+    visible = _MARKDOWN_QUOTED_REQUEST_RE.sub(lambda match: re.sub(r"[^\n]", " ", match.group()), visible)
+    for match in _TABLE_REQUEST_RE.finditer(visible):
+        # A line wrap, comma or colon cannot discard an unknown narrator.
+        # Only a complete active prefix after a sentence/paragraph boundary
+        # grants authority; filenames' periods are not sentence boundaries.
+        prefix = output_request_clause_prefix(visible, match.start())
+        if _TABLE_ACTIVE_PREFIX.fullmatch(prefix) is None:
+            continue
+        if _TABLE_NEGATED_TARGET_RE.search(match.group()):
+            continue
+        return True
+    return False
+
+
+def _comparison_table_body(answer: str) -> str | None:
+    """Recognize the bounded pipe-table subset understood by our renderers."""
+    # Keep the transport's physical lines and 0..3 spaces/tabs row grammar.
+    # splitlines()/unbounded strip would admit CRLF, Unicode separators and
+    # indentation that downstream renderers subsequently treat as raw pipes.
+    lines = answer.split("\n")
+    positions = [index for index, line in enumerate(lines) if line.lstrip().startswith("|")]
+    if len(positions) < 3 or positions != list(range(positions[0], positions[-1] + 1)):
+        return None
+    if "```" in answer or "~~~" in answer:
+        return None
+    if any(
+        re.fullmatch(r"[ \t]{0,3}\|[^\r\n\v\f\x85\u2028\u2029]*\|[ \t]*", lines[index]) is None
+        for index in positions
+    ):
+        return None
+    block = [lines[index].strip() for index in positions]
+    if any(not line.endswith("|") or "\\|" in line or "`" in line for line in block):
+        return None
+    rows = [[cell.strip() for cell in line[1:-1].split("|")] for line in block]
+    width = len(rows[0])
+    if width < 2 or not all(rows[0]) or any(len(row) != width for row in rows):
+        return None
+    if not all(re.fullmatch(r":?-{3,}:?", cell) for cell in rows[1]):
+        return None
+    if any(not any(cell and not re.fullmatch(r":?-+:?", cell) for cell in row) for row in rows[2:]):
+        return None
+    return "\n".join(block[2:])
+
+
+def mixed_file_archive_web_answer_format(answer: str) -> str:
+    """Derive presentation from the verified body, including durable replay."""
+    return "markdown" if _comparison_table_body(answer) is not None else "plain"
+
+
 def _synthesis_messages(
     *,
     request: str,
@@ -611,6 +697,7 @@ def _synthesis_messages(
                 {
                     "schema": "friday.mixed-file-archive-web-comparison-synthesis.v1",
                     "trusted_control": {
+                        "answer_shape": "markdown_table" if _comparison_table_requested(request) else "text",
                         "citation_labels": list(labels),
                         "citation_tokens": [f"[{label}]" for label in labels],
                         "effects_allowed": False,
@@ -911,6 +998,10 @@ class MixedFileArchiveWebComparison:
 
     def __post_init__(self) -> None:
         self._require_process_owned()
+
+    @property
+    def message_format(self) -> str:
+        return mixed_file_archive_web_answer_format(self.answer)
 
     def identity_payload(self) -> dict[str, object]:
         return _result_identity_payload(
@@ -1270,6 +1361,10 @@ async def compare_current_file_archive_with_web(
         status = MixedFileArchiveWebComparisonStatus.PARTIAL
     try:
         answer = _validate_answer(synthesis["content"], labels, max_utf8_bytes=answer_budget)
+        if _comparison_table_requested(request):
+            body = _comparison_table_body(answer)
+            if body is None or set(_CITATION_RE.findall(body)) != set(labels):
+                raise _AnswerRejected("requested comparison table is incomplete", code="table_shape")
     except _AnswerRejected as rejected:
         raise MixedFileArchiveWebComparisonError(
             "comparison synthesis was rejected",

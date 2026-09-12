@@ -9,6 +9,7 @@ from typing import Any, Literal, cast
 
 import httpx
 import pytest
+from test_telegram_delivery_uncertainty import _progress_payload
 
 import friday.telegram_bridge._callbacks as callbacks_module
 import friday.telegram_bridge._commands as commands_module
@@ -47,6 +48,7 @@ class _Telegram:
         self.target_attempts = 0
         self.failure_fired = False
         self.accepted: list[dict[str, Any]] = []
+        self.status_accepted: list[dict[str, Any]] = []
 
     @staticmethod
     def _record(endpoint: str, kwargs: dict[str, Any]) -> dict[str, Any]:
@@ -64,6 +66,9 @@ class _Telegram:
     async def post(self, url: str, **kwargs: Any) -> httpx.Response:
         endpoint = url.rsplit("/", 1)[-1]
         request = httpx.Request("POST", url)
+        if endpoint == "sendMessage" and _progress_payload(dict(kwargs.get("json") or {})):
+            self.status_accepted.append(self._record(endpoint, kwargs))
+            return httpx.Response(200, json={"ok": True, "result": {"message_id": 89_000}}, request=request)
         if endpoint == self.target:
             self.target_attempts += 1
         should_fail = (

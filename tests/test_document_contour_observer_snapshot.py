@@ -224,21 +224,95 @@ def test_snapshot_requires_this_process_to_own_the_backend_lease(settings, stora
 
 
 def test_http_snapshot_is_owner_only_and_numeric_loopback_only(settings):
+    import hashlib
+    import sqlite3
+    from contextlib import closing
+
     from friday.server import create_app
+    from friday.telegram_bridge import _UpdateInbox
+
+    queue_path = settings.state_dir / "telegram-inbox.sqlite3"
+
+    def _snapshot(store):
+        selected = {
+            table: [dict(row) for row in store.execute(f"SELECT * FROM {table} ORDER BY rowid").fetchall()]
+            for table in ("outbound_notifications", "audit_log")
+        }
+        # Only inspect the already closed/checkpointed fixture. An ordinary
+        # mode=ro open of a WAL database itself creates -wal/-shm sidecars.
+        for suffix in ("-wal", "-shm", "-journal"):
+            assert not queue_path.with_name(queue_path.name + suffix).exists()
+        with closing(sqlite3.connect(queue_path.as_uri() + "?mode=ro&immutable=1", uri=True)) as conn:
+            conn.row_factory = sqlite3.Row
+            conn.execute("PRAGMA query_only=ON")
+            selected["updates"] = [
+                dict(row) for row in conn.execute("SELECT * FROM updates ORDER BY update_id")
+            ]
+        return selected
 
     app = create_app(settings)
     headers = {"Authorization": f"Bearer {settings.api_token}"}
+    route = "/api/admin/document-contour-observer-snapshot"
     with TestClient(app, client=("127.0.0.1", 9000)) as local:
         _stopped_queue(settings)
-        response = local.get("/api/admin/document-contour-observer-snapshot", headers=headers)
-        assert response.status_code == 200
+        store = local.app.state.storage
+        private_canary = _hide_pending_notification(store)
+        assert store.diagnostics()["outbound_pending"] == 0
+        inbox = _UpdateInbox(str(queue_path))
+        try:
+            assert inbox.store({"update_id": 1, "message": {"text": "pending-private-body"}})
+            assert inbox.store({"update_id": 2, "message": {"text": "dead-private-body"}})
+            inbox.mark_dead_letter(2, "SECRET-LAST-ERROR-0bc6")
+        finally:
+            inbox.close()
+        delegate = "observer-delegate"
+        token = "observer-delegate-secret-" + "D" * 32
+        store.ensure_user(delegate, preset_key="admin")
+        store.create_api_token(
+            delegate, hashlib.sha256(token.encode()).hexdigest(), label="observer", created_by="test"
+        )
+        before = _snapshot(store)
+        assert len(before["outbound_notifications"]) == 1
+        assert before["outbound_notifications"][0]["status"] == "pending"
+        assert [row["status"] for row in before["updates"]] == ["pending", "dead_letter"]
+        response = local.get(route, headers=headers)
+        assert response.status_code == 200, response.text
         assert response.json()["backend_pid"] == os.getpid()
+        expected = {
+            "schema": "friday.document-contour-observer-snapshot.v1",
+            "backend_pid": os.getpid(),
+            "backend_lease_owned": True,
+            "physical_outbound_pending": 1,
+            "bridge_queue_state": "present",
+            "bridge_lease_acquired_for_snapshot": True,
+            "bridge_lease_released": True,
+            "inbound_pending": 1,
+            "dead_letter": 1,
+        }
+        observed = response.json()
+        assert observed == expected
+        assert all(type(observed[key]) is type(value) for key, value in expected.items())
+        assert _snapshot(store) == before
+        for forbidden in (
+            private_canary,
+            "pending-private-body",
+            "dead-private-body",
+            "SECRET-LAST-ERROR",
+            str(queue_path),
+        ):
+            assert forbidden not in response.text
+        denied = local.get(route, headers={"Authorization": f"Bearer {token}"})
+        assert denied.status_code == 403
+        assert denied.json() == {"detail": "Проверять барьер релиза может только владелец"}
+        assert _snapshot(store) == before
 
     remote_app = create_app(settings)
     with TestClient(remote_app, client=("203.0.113.9", 9000)) as remote:
-        response = remote.get("/api/admin/document-contour-observer-snapshot", headers=headers)
+        before_remote = _snapshot(remote.app.state.storage)
+        response = remote.get(route, headers=headers)
         assert response.status_code == 403
         assert response.json() == {"detail": "Проверка барьера релиза доступна только локально на сервере"}
+        assert _snapshot(remote.app.state.storage) == before_remote
 
 
 def test_delegated_diagnostics_capability_is_not_owner_authority(settings, storage):

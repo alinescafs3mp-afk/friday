@@ -50,6 +50,83 @@ def test_normalize_event_date_by_precision_and_rejects_garbage():
 # --- KG set/get/timeline --------------------------------------------------
 
 
+@pytest.mark.parametrize(
+    ("day", "previous", "following"),
+    [
+        ("2024-02-29", "2024-02-28", "2024-03-01"),
+        ("2024-12-31", "2024-12-30", "2025-01-01"),
+        ("9999-12-31", "9999-12-30", None),
+    ],
+    ids=["leap-day", "year-end", "maximum-date"],
+)
+def test_person_timeline_calendar_end_includes_clock_times_without_next_day(
+    storage, day, previous, following
+):
+    graph = KnowledgeGraph(storage)
+    stamps = [previous + "T23:59:59", day, day + "T00:00:00", day + "T23:59:59.999999"]
+    if following is not None:
+        stamps.extend([following, following + "T00:00:00"])
+    for index, stamp in enumerate(stamps):
+        event = graph.create_entity("alice", f"Calendar event {index}", EntityType.EVENT)
+        storage.set_entity_time(event["id"], "alice", stamp, source="user")
+    rows = _bounded_visible_timeline_event_rows(storage, "alice", "alice", start=day, end=day, limit=20)
+    assert [row["occurred_at"] for row in rows] == stamps[1:4]
+    assert _count_visible_timeline_events(storage, "alice", "alice", start=day, end=day) == 3
+    limited = _bounded_visible_timeline_event_rows(storage, "alice", "alice", start=day, end=day, limit=2)
+    assert [row["occurred_at"] for row in limited] == stamps[1:3]
+
+
+def test_person_timeline_explicit_timestamp_end_and_exact_window_keep_precision(storage):
+    graph = KnowledgeGraph(storage)
+    stamps = ["2035-09-08", "2035-09-08T12:00:00", "2035-09-08T12:00:00.000001", "2035-09-08T23:59:59"]
+    for index, stamp in enumerate(stamps):
+        event = graph.create_entity("alice", f"Precision event {index}", EntityType.EVENT)
+        storage.set_entity_time(event["id"], "alice", stamp, source="user")
+    rows = _bounded_visible_timeline_event_rows(
+        storage, "alice", "alice", start="2035-09-08", end="2035-09-08T12:00:00"
+    )
+    assert [row["occurred_at"] for row in rows] == stamps[:2]
+    assert (
+        _count_visible_timeline_events(
+            storage, "alice", "alice", start="2035-09-08", end="2035-09-08T12:00:00"
+        )
+        == 2
+    )
+    rows = _bounded_visible_timeline_event_rows(
+        storage,
+        "alice",
+        "alice",
+        start="2035-09-08",
+        end="2035-09-08",
+        exact_since="2035-09-08T12:00:00",
+        exact_until="2035-09-08T12:00:00",
+    )
+    # The existing exact-window contract compares whole seconds, not fractions.
+    assert [row["occurred_at"] for row in rows] == stamps[1:3]
+    rows = _bounded_visible_timeline_event_rows(
+        storage,
+        "alice",
+        "alice",
+        start="2035-09-08",
+        end="2035-09-08",
+        not_before="2035-09-08T12:00:00",
+    )
+    # A document event without a clock remains possible today; only explicit
+    # clock times at or before noon are excluded by the existing contract.
+    assert [row["occurred_at"] for row in rows] == [stamps[0], stamps[3]]
+    assert (
+        _count_visible_timeline_events(
+            storage,
+            "alice",
+            "alice",
+            start="2035-09-08",
+            end="2035-09-08",
+            not_before="2035-09-08T12:00:00",
+        )
+        == 2
+    )
+
+
 def test_set_event_time_validates_type_dates_and_range(storage):
     graph = KnowledgeGraph(storage)
     person = graph.create_entity("alice", "Ivan", EntityType.PERSON)
@@ -446,12 +523,29 @@ def test_timeline_and_set_time_over_http(settings):
         owner = {"Authorization": f"Bearer {settings.api_token}"}
         event = app.state.kg.create_entity(LEGACY_OWNER_USER_ID, "Product Launch", EntityType.EVENT)
         person = app.state.kg.create_entity(LEGACY_OWNER_USER_ID, "Ivan", EntityType.PERSON)
+        storage = app.state.storage
+        audit_before = [
+            dict(row) for row in storage.execute("SELECT * FROM audit_log ORDER BY rowid").fetchall()
+        ]
 
         ok = client.post(
             f"/api/kg/entities/{event['id']}/time", json={"occurred_at": "2024-06-12"}, headers=owner
         )
         assert ok.status_code == 200
-        assert ok.json()["event_time"]["occurred_at"] == "2024-06-12"
+        expected_time = {
+            "entity_id": event["id"],
+            "occurred_at": "2024-06-12",
+            "occurred_end": None,
+            "precision": "day",
+            "source": "user",
+        }
+        assert {key: ok.json()["event_time"][key] for key in expected_time} == expected_time, (
+            "event_time_http_projection"
+        )
+        assert ok.json()["event_time"]["relation"] == "occurred_at"
+        persisted = storage.get_entity_time(event["id"], LEGACY_OWNER_USER_ID)
+        assert persisted is not None
+        assert {key: persisted[key] for key in expected_time} == expected_time, "event_time_http_persistence"
 
         # Non-event and invalid dates are rejected.
         assert (
@@ -462,6 +556,10 @@ def test_timeline_and_set_time_over_http(settings):
             ).status_code
             == 400
         )
+        assert storage.get_entity_time(person["id"], LEGACY_OWNER_USER_ID) is None
+        assert storage.get_entity_time(event["id"], LEGACY_OWNER_USER_ID) == persisted, (
+            "event_time_refusal_state"
+        )
         assert (
             client.post(
                 f"/api/kg/entities/{event['id']}/time",
@@ -471,10 +569,43 @@ def test_timeline_and_set_time_over_http(settings):
             == 400
         )
 
+        assert storage.get_entity_time(person["id"], LEGACY_OWNER_USER_ID) is None
+        assert storage.get_entity_time(event["id"], LEGACY_OWNER_USER_ID) == persisted, (
+            "event_time_invalid_date_state"
+        )
+
         timeline = client.get("/api/kg/timeline", headers=owner)
         assert timeline.status_code == 200
-        names = [item["name"] for item in timeline.json()["items"]]
-        assert names == ["Product Launch"]
+        page = timeline.json()
+        assert (page["count"], page["total"], page["truncated"], page["start"], page["end"]) == (
+            1,
+            1,
+            False,
+            None,
+            None,
+        )
+        expected_item = {
+            **expected_time,
+            "name": "Product Launch",
+            "entity_type": "event",
+            "description": "",
+            "kind": "event",
+            "at": "2024-06-12",
+            "boundary": "occurred_at",
+            "relation": "occurred_at",
+        }
+        assert [{key: item[key] for key in expected_item} for item in page["items"]] == [expected_item], (
+            "event_timeline_http_item"
+        )
+        audit_after = [
+            dict(row) for row in storage.execute("SELECT * FROM audit_log ORDER BY rowid").fetchall()
+        ]
+        assert audit_after[: len(audit_before)] == audit_before, "event_time_audit_prefix"
+        delta = audit_after[len(audit_before) :]
+        assert [(row["action"], row["user_id"], row["target_type"], row["target_id"]) for row in delta] == [
+            ("entity.time_set", LEGACY_OWNER_USER_ID, "entity", event["id"])
+        ], "event_time_audit_delta"
+        assert all(word not in json.dumps(audit_after) for word in ("Product Launch", "Ivan"))
 
 
 def test_unified_timeline_page_is_exposed_over_http(settings):
@@ -508,6 +639,34 @@ def test_unified_timeline_page_is_exposed_over_http(settings):
         assert body["total"] == 3
         assert body["truncated"] is True
         assert [item["kind"] for item in body["items"]] == ["relation", "event"]
+        relation_item, event_item = body["items"]
+        expected_relation = {
+            "kind": "relation",
+            "at": "2024-03-01",
+            "boundary": "confirmed",
+            "relation_id": relation.id,
+            "relation_type": "works_on",
+            "source": {"id": source["id"], "name": "Иван"},
+            "target": {"id": target["id"], "name": "Проект"},
+            "valid_from": "2024-03-01",
+            "valid_to": "2024-03-03",
+            "superseded_by": None,
+        }
+        assert {key: relation_item[key] for key in expected_relation} == expected_relation, (
+            "timeline_http_relation"
+        )
+        expected_event = {
+            "kind": "event",
+            "at": "2024-03-02",
+            "boundary": "occurred_at",
+            "entity_id": event["id"],
+            "name": "Приёмка",
+            "occurred_at": "2024-03-02",
+            "occurred_end": None,
+            "precision": "day",
+            "source": "user",
+        }
+        assert {key: event_item[key] for key in expected_event} == expected_event, "timeline_http_event"
 
         reversed_window = client.get(
             "/api/kg/timeline?start=2025&end=2024",

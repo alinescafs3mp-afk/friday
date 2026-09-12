@@ -2015,7 +2015,7 @@ class FilesMixin(PipelineShared):
                     filename,
                 )
 
-        self.storage.ensure_user(user_id, source="upload")
+        self.storage.ensure_user(user_id)
         existing = find_existing_source()
         if opaque_exact_bytes_only:
             # Engineer uploads are executable inputs, not knowledge candidates.

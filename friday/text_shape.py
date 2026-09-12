@@ -38,8 +38,18 @@ class ExplicitTextShapeContract:
     control: str
     count: int | None = None
     word_list: bool = False
+    literal_first_item: bool = False
     list_style: Literal["bullet", "numbered"] | None = None
     emphasis_style: Literal["bold"] | None = None
+    required_symbols: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
+class ExplicitEmphasisLabelContract:
+    """One exact, local label/value composition owned by the request."""
+
+    label: str
+    value: str
 
 
 _DIRECT_COMPOSITION = re.compile(
@@ -64,6 +74,14 @@ _NAMED_LITERAL = re.compile(
 )
 _PLAIN_LIST_TOKEN_PATTERN = r"[A-Za-zА-Яа-яЁё0-9](?:[A-Za-zА-Яа-яЁё0-9_.:-]{0,158}[A-Za-zА-Яа-яЁё0-9])?"
 _PLAIN_LIST_TOKEN = re.compile(rf"^{_PLAIN_LIST_TOKEN_PATTERN}$")
+_CLOSED_EMPHASIS_LABEL_CONTRACT = re.compile(
+    rf"(?:подчеркни|выдели)[ \t]+словом[ \t]+"
+    rf"(?P<label>[A-Za-zА-Яа-яЁё][A-Za-zА-Яа-яЁё-]{{0,63}})[ \t]+"
+    rf"(?:значение|маркер|токен|идентификатор)[ \t]+"
+    rf"(?P<value>{_PLAIN_LIST_TOKEN_PATTERN})"
+    rf"(?:[ \t]+в[ \t]+(?:коротком|кратком)[ \t]+ответе)?[.!]?[ \t]*",
+    re.IGNORECASE,
+)
 _LITERAL_SUFFIX_LABEL_PATTERN = r"(?:маркер\w*|идентификатор\w*|токен\w*|marker|identifier|token)"
 _CONTROL_SUFFIX_RU_LABEL_PATTERN = r"(?:контрол\w*|проверк\w*)"
 _CONTROL_SUFFIX_EN_LABEL_PATTERN = r"(?:control|check)"
@@ -122,6 +140,15 @@ _TRAILING_CONTROL_METADATA = re.compile(
     rf"(?:control|check)(?:[ \t]+(?:id|identifier|token|marker))?"
     rf"[ \t]*[:=—–][ \t]*(?P<en>{_PLAIN_LIST_TOKEN_PATTERN})"
     rf")[.!?]?[ \t]*$",
+    re.IGNORECASE,
+)
+_CLOSED_RU_LITERAL_FIRST_TWO_ITEM_CONTRACT = re.compile(
+    rf"[ \t]*(?:сформируй(?:те)?|составь(?:те)?|подготовь(?:те)?|"
+    rf"напиши(?:те)?|дай(?:те)?|верни(?:те)?|оформи(?:те)?)[ \t]+"
+    rf"(?:ровно[ \t]+)?(?:два|2)[ \t]+пункт\w*[ \t]*,[ \t]*"
+    rf"перв(?:ый|ым)[ \t]+из[ \t]+котор(?:ых|ого)[ \t]+(?:дословно|точно)[ \t]+"
+    rf"(?P<literal>{_PLAIN_LIST_TOKEN_PATTERN})[ \t]*\.[ \t]+"
+    rf"(?:контроль|проверка)[ \t]+(?P<control>{_PLAIN_LIST_TOKEN_PATTERN})[ \t]*\.[ \t]*",
     re.IGNORECASE,
 )
 _LIST_CUE = re.compile(r"\b(?:спис\w*|пункт\w*|элемент\w*|list|items?)\b", re.IGNORECASE)
@@ -505,6 +532,22 @@ _REGENERABLE_EN_SENTENCE_PREFIX = re.compile(
     rf"[ \t]*\.[ \t]+",
     re.IGNORECASE,
 )
+_REGENERABLE_RU_SYMBOL_PAIR_SUFFIX = re.compile(
+    r"[ \t]+(?:с|со)[ \t]+(?:(?:безопасн\w*|буквальн\w*)[ \t]+)?"
+    r"(?:символ\w*|знак\w*)[ \t]+(?:"
+    r"меньше[ \t]+и[ \t]+больше|больше[ \t]+и[ \t]+меньше"
+    r")[ \t]*\.[ \t]+$",
+    re.IGNORECASE,
+)
+_REGENERABLE_EN_SYMBOL_PAIR_SUFFIX = re.compile(
+    r"[ \t]+with[ \t]+(?:(?:safe|literal)[ \t]+)?(?:"
+    r"(?:less[- ]than[ \t]+and[ \t]+greater[- ]than|"
+    r"greater[- ]than[ \t]+and[ \t]+less[- ]than)[ \t]+(?:symbols?|signs?)|"
+    r"(?:symbols?|signs?)[ \t]+(?:less[- ]than[ \t]+and[ \t]+greater[- ]than|"
+    r"greater[- ]than[ \t]+and[ \t]+less[- ]than)"
+    r")[ \t]*\.[ \t]+$",
+    re.IGNORECASE,
+)
 _REGENERABLE_RU_BOLD_PHRASE_PREFIX = re.compile(
     r"(?:сформируй|составь|напиши|верни|дай|подготовь)(?:те)?[ \t]+"
     r"одну[ \t]+(?:короткую|лаконичную)[ \t]+фразу[ \t]+"
@@ -821,6 +864,19 @@ def _closed_single_sentence_regeneration_prefix(prefix: str) -> bool:
     )
 
 
+def _closed_single_sentence_required_symbols(prefix: str) -> tuple[str, ...] | None:
+    """Recognise a closed request for standalone comparison symbols."""
+
+    for pattern in (_REGENERABLE_RU_SYMBOL_PAIR_SUFFIX, _REGENERABLE_EN_SYMBOL_PAIR_SUFFIX):
+        match = pattern.search(prefix)
+        if match is None:
+            continue
+        base = f"{prefix[: match.start()]}. "
+        if _closed_single_sentence_regeneration_prefix(base):
+            return ("<", ">")
+    return None
+
+
 def _closed_bold_phrase_regeneration_prefix(prefix: str) -> bool:
     """Recognise one whole-line Markdown-bold phrase contract."""
 
@@ -838,6 +894,60 @@ def _closed_bold_phrase_regeneration_prefix(prefix: str) -> bool:
         _REGENERABLE_RU_BOLD_PHRASE_PREFIX.fullmatch(prefix)
         or _REGENERABLE_EN_BOLD_PHRASE_PREFIX.fullmatch(prefix)
     )
+
+
+def explicit_emphasis_label_contract(request: str) -> ExplicitEmphasisLabelContract | None:
+    """Parse one whole, source-free instruction to emphasize ``label value``.
+
+    Words such as ``файл`` and ``напоминание`` are literal content when they
+    occupy the closed label/value slots.  Source and effect authority cannot be
+    inferred from them: any surrounding source, carrier, effect, quote,
+    negation, or second instruction makes the whole-request match fail.
+    """
+
+    if (
+        not isinstance(request, str)
+        or not request
+        or len(request) > _MAX_REQUEST_CHARS
+        or "\n" in request
+        or "\r" in request
+    ):
+        return None
+    surface = request.strip()
+    control = _trailing_control_metadata_token(surface)
+    if control is not None:
+        suffix = _TRAILING_CONTROL_METADATA.search(surface)
+        if suffix is not None:
+            surface = surface[: suffix.start()].rstrip()
+    instruction = _CLOSED_EMPHASIS_LABEL_CONTRACT.fullmatch(surface)
+    if instruction is None:
+        return None
+    label, value = instruction.group("label", "value")
+    if label.casefold() == value.casefold():
+        return None
+    return ExplicitEmphasisLabelContract(label=label, value=value)
+
+
+def exact_emphasis_label_literal_owned(
+    request: str,
+    answer: str,
+    *,
+    allow_value_only: bool = False,
+) -> bool:
+    """Whether exact answer bytes are owned by the closed label contract."""
+
+    if not isinstance(answer, str) or not answer or len(answer) > _MAX_ANSWER_CHARS:
+        return False
+    contract = explicit_emphasis_label_contract(request)
+    if contract is None:
+        return False
+    complete = f"{contract.label} {contract.value}"
+    for delimiter in ("**", "__", "*", "_"):
+        if answer == f"{delimiter}{complete}{delimiter}":
+            return True
+        if allow_value_only and answer == f"{delimiter}{contract.value}{delimiter}":
+            return True
+    return False
 
 
 def regenerable_text_shape_contract(request: str) -> ExplicitTextShapeContract | None:
@@ -866,6 +976,29 @@ def regenerable_text_shape_contract(request: str) -> ExplicitTextShapeContract |
         or _REGENERABLE_REQUEST_UNSAFE_CUE.search(request)
         or any(character in request for character in "`<>[]{}")
     ):
+        return None
+    literal_first = _CLOSED_RU_LITERAL_FIRST_TWO_ITEM_CONTRACT.fullmatch(request)
+    if literal_first is not None:
+        literal = str(literal_first.group("literal") or "")  # type: str | None
+        control = str(literal_first.group("control") or "")  # type: str | None
+        if (
+            literal
+            and control
+            and literal.casefold() != control.casefold()
+            and control.casefold() not in literal.casefold()
+            and _safe_regeneration_identifier(literal)
+            and _safe_regeneration_identifier(control)
+            and len(_literal_occurrences(request, literal)) == 1
+            and len(_literal_occurrences(request, control)) == 1
+        ):
+            return ExplicitTextShapeContract(
+                kind="list",
+                literal=literal,
+                control=control,
+                count=2,
+                literal_first_item=True,
+                list_style="bullet",
+            )
         return None
     literal = _single_named_literal(request)
     control = _trailing_control_metadata_token(request)
@@ -923,7 +1056,8 @@ def regenerable_text_shape_contract(request: str) -> ExplicitTextShapeContract |
             list_style="numbered" if numbered_style else "bullet",
         )
     bold_phrase = _closed_bold_phrase_regeneration_prefix(prefix)
-    plain_sentence = _closed_single_sentence_regeneration_prefix(prefix)
+    required_symbols = _closed_single_sentence_required_symbols(prefix)
+    plain_sentence = bool(required_symbols) or _closed_single_sentence_regeneration_prefix(prefix)
     if plain_sentence and _requested_emphasis_styles(prefix):
         return None
     if bold_phrase or plain_sentence:
@@ -932,6 +1066,7 @@ def regenerable_text_shape_contract(request: str) -> ExplicitTextShapeContract |
             literal=literal,
             control=control,
             emphasis_style="bold" if bold_phrase else None,
+            required_symbols=required_symbols or (),
         )
     return None
 
@@ -960,6 +1095,7 @@ def owns_closed_text_shape(request: str) -> bool:
     return bool(
         regenerable_text_shape_contract(request) is not None
         or _closed_quote_explanation_contract(request) is not None
+        or explicit_emphasis_label_contract(request) is not None
     )
 
 
@@ -1074,8 +1210,11 @@ def _exact_regenerable_list_is_valid(contract: ExplicitTextShapeContract, answer
         return False
     if _REGENERABLE_ANSWER_REFUSAL_CUE.search(answer):
         return False
+    semantic_values = values[1:] if contract.literal_first_item else values
+    if contract.literal_first_item and values[0] != contract.literal:
+        return False
     if not contract.word_list:
-        for value in values:
+        for value in semantic_values:
             without_identifiers = re.sub(
                 rf"(?<![\w-]){re.escape(contract.literal)}(?![\w-])",
                 " ",
@@ -1113,6 +1252,16 @@ def _exact_regenerable_sentence_is_valid(contract: ExplicitTextShapeContract, an
             return False
     elif _SIMPLE_EMPHASIS.search(answer) or _has_unresolved_emphasis_marker(answer):
         return False
+    required_symbols = frozenset(contract.required_symbols)
+    observed_symbols = frozenset(character for character in answer if character in "<>")
+    symbols_valid = bool(
+        required_symbols.issubset({"<", ">"})
+        and observed_symbols == required_symbols
+        and all(
+            answer.count(symbol) == 1 and re.search(rf"(?<!\S){re.escape(symbol)}(?!\S)", answer) is not None
+            for symbol in required_symbols
+        )
+    )
     if (
         "\n" in answer
         or "\r" in answer
@@ -1120,7 +1269,8 @@ def _exact_regenerable_sentence_is_valid(contract: ExplicitTextShapeContract, an
         or len(_TERMINAL_SENTENCE_BOUNDARY.findall(body)) > 1
         or _answer_refuses_exact_literal(answer, contract.literal)
         or _REGENERABLE_ANSWER_REFUSAL_CUE.search(answer)
-        or any(character in answer for character in '`<>~[]«»“”"')
+        or not symbols_valid
+        or any(character in answer for character in '`~[]«»“”"')
         or _MARKDOWN_LINK.search(answer)
         or _ANSWER_QUOTED_FRAGMENT.search(answer)
         or re.search(r"https?://|\bwww\.", answer, re.IGNORECASE)
@@ -1282,7 +1432,9 @@ def render_structured_list_regeneration_result(
     """Validate semantic items and return a code-owned list plus a safe reason."""
 
     count = contract.count
-    semantic_count = count - 1 if contract.word_list and count is not None else count
+    semantic_count = (
+        count - 1 if (contract.word_list or contract.literal_first_item) and count is not None else count
+    )
     if contract.kind != "list" or count is None or semantic_count is None:
         return "", "render"
     if type(items) is not list or any(type(item) is not str for item in items):
@@ -1323,7 +1475,7 @@ def render_structured_list_regeneration_result(
         if contract.word_list and _PLAIN_LIST_TOKEN.fullmatch(item) is None:
             return "", "item"
         values.append(item)
-    if contract.word_list:
+    if contract.word_list or contract.literal_first_item:
         values.insert(0, contract.literal)
     else:
         values[0] = f"{values[0]} {contract.literal}"
@@ -1986,6 +2138,35 @@ def _repair_bullet_colon_prefix(
     ):
         return True, answer
     return True, result
+
+
+def _repair_ampersand_after_literal(request: str, answer: str) -> tuple[bool, str]:
+    """Complete one requested literal/symbol pair, without rewriting prose.
+
+    The transport renderer owns escaping. A dangling backslash after the
+    requested literal is not a delivered ampersand; emit the visible symbol
+    and let that renderer encode it for its actual transport.
+    """
+
+    control = _TRAILING_CONTROL_METADATA.search(request)
+    speech = request[: control.start()] if control is not None else request
+    matched = re.fullmatch(
+        r"[ \t]*экранируй\s+амперсанд\s+после\s+"
+        r"(?:контрольной\s+строки|маркера|токена|идентификатора)\s+"
+        rf"(?P<literal>{_PLAIN_LIST_TOKEN_PATTERN})[.!]?[ \t]*",
+        speech,
+        re.IGNORECASE,
+    )
+    if matched is None or _has_source_authority(request):
+        return False, answer
+    literal = matched.group("literal")
+    if not _safe_regeneration_identifier(literal):
+        return False, answer
+    # Preserve refusals, claims, other text, duplicate literals and existing
+    # symbols byte-for-byte. Only the otherwise empty pair can be completed.
+    if re.fullmatch(re.escape(literal) + r"(?:[ \t]+\\?)?", answer) is None:
+        return True, answer
+    return True, literal + " &"
 
 
 def _repair_missing_ampersand_carrier(
@@ -2725,6 +2906,26 @@ def _requested_emphasis_styles(request: str) -> set[str]:
     return styles
 
 
+def _repair_missing_emphasis_label(request: str, answer: str) -> str:
+    """Retain an explicitly supplied word beside one emphasized literal.
+
+    The entire request must be a local two-literal composition instruction.
+    Only a draft containing the exact value in one simple emphasis span can
+    be repaired; refusals, factual replies and unrelated prose stay untouched.
+    """
+
+    contract = explicit_emphasis_label_contract(request)
+    if contract is None:
+        return answer
+    # The input literal cannot contain Markdown delimiter runs except
+    # intraword underscores. Match its exact framing instead of asking the
+    # generic span lexer to reinterpret those literal underscores.
+    for delimiter in ("**", "__", "*", "_"):
+        if answer == delimiter + contract.value + delimiter:
+            return delimiter + contract.label + " " + contract.value + delimiter
+    return answer
+
+
 def _repair_missing_requested_emphasis(
     request: str,
     answer: str,
@@ -2832,6 +3033,9 @@ def repair_explicit_text_shape(request: str, answer: str) -> str:
         or _NEGATED_SHAPE.search(request)
     ):
         return answer
+    ampersand_pair_owned, ampersand_pair = _repair_ampersand_after_literal(request, answer)
+    if ampersand_pair_owned:
+        return ampersand_pair
     literal = _single_named_literal(request)
     source_authority = _has_source_authority(request)
     if literal is not None:
@@ -2899,6 +3103,7 @@ def repair_explicit_text_shape(request: str, answer: str) -> str:
                 break
     if not source_authority:
         candidate = _repair_single_sentence_punctuation(request, candidate, literal)
+    candidate = _repair_missing_emphasis_label(request, candidate)
     candidate = _repair_missing_requested_emphasis(request, candidate, literal)
     candidate = _repair_unrequested_emphasis(request, candidate, literal)
     return candidate

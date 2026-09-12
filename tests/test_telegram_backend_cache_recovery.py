@@ -9,6 +9,7 @@ from typing import Any, Literal
 
 import httpx
 import pytest
+from test_telegram_delivery_uncertainty import _progress_payload
 
 import friday.telegram_bridge._transport as transport_module
 from friday.telegram_bridge import TelegramBridge, TelegramConfig, _UpdateInbox
@@ -76,11 +77,14 @@ class _CommitFaultConnection:
 class _Telegram:
     def __init__(self) -> None:
         self.send_messages: list[dict[str, Any]] = []
+        self.status_messages: list[dict[str, Any]] = []
 
     async def post(self, url: str, **kwargs: Any) -> httpx.Response:
         request = httpx.Request("POST", url)
         if url.endswith("/sendMessage"):
-            self.send_messages.append(dict(kwargs.get("json") or {}))
+            payload = dict(kwargs.get("json") or {})
+            target = self.status_messages if _progress_payload(payload) else self.send_messages
+            target.append(payload)
         return httpx.Response(
             200,
             json={"ok": True, "result": {"message_id": 80_000 + len(self.send_messages)}},

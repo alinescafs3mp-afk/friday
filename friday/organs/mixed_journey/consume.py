@@ -165,6 +165,7 @@ _PROCESS_LEDGER = MixedJourneyConsumeLedger()
 def _chat_dict(
     *,
     message: str,
+    message_format: str = "plain",
     conversation_id: str = "",
     message_id: str | None = None,
     citations: list[dict[str, str]] | None = None,
@@ -179,7 +180,7 @@ def _chat_dict(
         "conversation_id": conversation_id,
         "message_id": message_id,
         "message": message,
-        "message_format": "plain",
+        "message_format": message_format,
         "verified": False,
         "citations": citations or [],
         "tools_used": [],
@@ -206,14 +207,14 @@ def _plan_sha256(message: str, source_identity: str) -> str:
 def _web_consumption(
     turn_id: str,
     evidence: TransientWebComparisonEvidence,
+    *,
+    consumption_id: str = "mixed.file.archive.web",
 ) -> WebResearchConsumptionV1:
     source_count = len(evidence.sources)
     provider_selection: dict[str, object] | None
     if evidence.selected_provider_id is None:
         provider_selection = (
-            {}
-            if evidence.unavailable_reason is TransientWebUnavailableReason.PROVIDER_ERROR
-            else None
+            {} if evidence.unavailable_reason is TransientWebUnavailableReason.PROVIDER_ERROR else None
         )
     else:
         provider_selection = {
@@ -223,12 +224,10 @@ def _web_consumption(
         if evidence.provider_decision is not None:
             provider_selection.update(
                 decision=evidence.provider_decision.value,
-                used_fallback=(
-                    evidence.provider_decision is WebProviderDecision.FALLBACK_USED
-                ),
+                used_fallback=(evidence.provider_decision is WebProviderDecision.FALLBACK_USED),
             )
     return build_web_research_consumption(
-        "mixed.file.archive.web",
+        consumption_id,
         turn_id,
         WebCurrentnessDecision.SEARCH_REQUIRED,
         provider_selection,
@@ -242,19 +241,16 @@ def _observe_identity(
     prepared_file: PreparedFileEvidence,
     prepared_archive: PreparedFileEvidence,
     web_consumption: WebResearchConsumptionV1,
-    answer_sha256: str,
 ) -> Any:
     file_id = prepared_file.raw_ids[0]
     archive_id = prepared_archive.raw_ids[0]
     file_digest = prepared_file.snapshot_tokens[0].source.identity_sha256
     archive_digest = prepared_archive.snapshot_tokens[0].source.identity_sha256
-    table_id = f"tbl_{answer_sha256[:16]}"
     return observe_mixed_journey(
         projection_id,
         turn_id,
         files=({"id": file_id, "sha256": file_digest},),
         archives=({"id": archive_id, "sha256": archive_digest, "member_count": 1},),
-        tables=({"id": table_id, "sha256": answer_sha256},),
         web=web_consumption,
     )
 
@@ -426,23 +422,42 @@ async def handle_mixed_file_archive_web_turn(
     if cancel_event is not None:
         cancel_waiter = asyncio.create_task(cancel_event.wait())
         waiters.add(cancel_waiter)
-    done, _pending = await asyncio.wait(waiters, return_when=asyncio.FIRST_COMPLETED)
-    if cancel_event is not None and cancel_event.is_set():
-        compare_task.cancel()
-        if cancel_waiter is not None:
-            cancel_waiter.cancel()
-        active_ledger.cancel(key)
-        return _chat_dict(message=_CANCELLED, conversation_id=conversation_id or "")
-    if cancel_waiter is not None and not cancel_waiter.done():
-        cancel_waiter.cancel()
     try:
+        await asyncio.wait(waiters, return_when=asyncio.FIRST_COMPLETED)
+        if cancel_event is not None and cancel_event.is_set():
+            active_ledger.cancel(key)
+            return _chat_dict(message=_CANCELLED, conversation_id=conversation_id or "")
         comparison = compare_task.result()
+    except asyncio.CancelledError:
+        active_ledger.cancel(key)
+        raise
     except MixedFileArchiveWebComparisonError:
         active_ledger.mark(key, MixedJourneyConsumeState.FAILED)
         return _chat_dict(message=_FAILED, conversation_id=conversation_id or "")
     except Exception:
         active_ledger.mark(key, MixedJourneyConsumeState.FAILED)
         return _chat_dict(message=_FAILED, conversation_id=conversation_id or "")
+    finally:
+        # Both children belong to this consume call, including the unused
+        # cancellation waiter after success. Repeated caller cancellation must
+        # not interrupt a model adapter's already-running cleanup.
+        for waiter in waiters:
+            if not waiter.done():
+                waiter.cancel()
+        cleanup = asyncio.gather(*waiters, return_exceptions=True)
+        interrupted = False
+        while not cleanup.done():
+            try:
+                await asyncio.shield(cleanup)
+            except asyncio.CancelledError:
+                active_ledger.cancel(key)
+                interrupted = True
+        if interrupted:
+            raise asyncio.CancelledError
+    # Cancellation may arrive while the unused waiter is being drained.
+    if cancel_event is not None and cancel_event.is_set():
+        active_ledger.cancel(key)
+        return _chat_dict(message=_CANCELLED, conversation_id=conversation_id or "")
     if type(comparison) is not MixedFileArchiveWebComparison:
         active_ledger.mark(key, MixedJourneyConsumeState.FAILED)
         return _chat_dict(message=_FAILED, conversation_id=conversation_id or "")
@@ -456,7 +471,6 @@ async def handle_mixed_file_archive_web_turn(
         if (payload := source.synthesis_payload()) and str(payload.get("url") or "").strip()
     ]
     citations = [{"label": label} for label in comparison.citation_labels]
-    answer_sha256 = hashlib.sha256(comparison.answer.encode("utf-8")).hexdigest()
     web_consumption = _web_consumption(
         turn_id,
         web_evidence,
@@ -467,9 +481,7 @@ async def handle_mixed_file_archive_web_turn(
         prepared_file=prepared_file,
         prepared_archive=prepared_archive,
         web_consumption=web_consumption,
-        answer_sha256=answer_sha256,
     )
-    table_id = f"tbl_{answer_sha256[:16]}"
     context = {
         "interaction_mode": "mixed",
         "carrier": EngineerResultCarrierKind.TEXT.value,
@@ -480,6 +492,7 @@ async def handle_mixed_file_archive_web_turn(
     }
     metadata = {
         "carrier": EngineerResultCarrierKind.TEXT.value,
+        "message_format": comparison.message_format,
         "mixed_source_identity_sha256": source_identity,
         "web_evidence_status": "sourced" if web_sources else "empty",
     }
@@ -493,6 +506,7 @@ async def handle_mixed_file_archive_web_turn(
     )
     reply = _chat_dict(
         message=comparison.answer,
+        message_format=comparison.message_format,
         conversation_id=persisted_id,
         message_id=assistant_id,
         citations=citations,
@@ -500,7 +514,6 @@ async def handle_mixed_file_archive_web_turn(
         web_evidence_status="sourced" if web_sources else "empty",
         context=context,
         files=[],
-        knowledge_objects=[{"id": table_id, "knowledge_kind": "table", "sha256": answer_sha256}],
         web_research_consumption=web_consumption,
     )
     active_ledger.mark(key, MixedJourneyConsumeState.COMPLETED, reply=reply)

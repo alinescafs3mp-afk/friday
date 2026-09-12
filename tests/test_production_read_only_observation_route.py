@@ -23,14 +23,220 @@ def _owner_headers(settings, *challenge_values: str) -> list[tuple[str, str]]:
 
 
 def test_real_lifespan_collector_uses_the_existing_storage_connection(settings) -> None:
+    import hashlib
+    import os
+    import sqlite3
+    from contextlib import closing
+    from pathlib import Path
+
     from friday.permissions import LEGACY_OWNER_USER_ID
     from friday.server import create_app
+    from friday.storage.models import AuditEntry, Mission, MissionStatus, MissionTask, TaskKind, new_id
+
+    def snapshot():
+        # Fresh SQL reads, independent of the collector's aggregate projection.
+        with closing(sqlite3.connect(settings.database_path.as_uri() + "?mode=ro", uri=True)) as conn:
+            conn.row_factory = sqlite3.Row
+            conn.execute("PRAGMA query_only=ON")
+            return {
+                table: [dict(row) for row in conn.execute(f'SELECT rowid, * FROM "{table}" ORDER BY rowid')]
+                for table in (
+                    "missions",
+                    "mission_tasks",
+                    "outbound_notifications",
+                    "runtime_kv",
+                    "schema_meta",
+                    "users",
+                    "audit_log",
+                )
+            }
+
+    def process_epoch():
+        # Observe Linux identity directly; never ask the production digest helper.
+        boot = Path("/proc/sys/kernel/random/boot_id").read_text(encoding="ascii").strip()
+        process_id = os.getpid()
+        raw_stat = Path(f"/proc/{process_id}/stat").read_text(encoding="ascii")
+        suffix = raw_stat[raw_stat.rindex(")") + 2 :].split()
+        assert suffix[19].isdigit()
+        assert Path("/proc/sys/kernel/random/boot_id").read_text(encoding="ascii").strip() == boot
+        return hashlib.sha256(
+            b"friday.primary-process-epoch.v2\0"
+            + boot.encode("ascii")
+            + b"\0"
+            + str(process_id).encode("ascii")
+            + b"\0"
+            + suffix[19].encode("ascii")
+        ).hexdigest()
 
     app = create_app(settings)
     with TestClient(app, client=("127.0.0.1", 9000)) as client:
-        owner_before = app.state.storage.get_user(LEGACY_OWNER_USER_ID)
+        storage = app.state.storage
+        tenant = "observation-other-tenant"
+        storage.ensure_user(tenant)
+        mission = Mission(
+            id=new_id("mis"),
+            user_id=tenant,
+            goal="PRIVATE-OBS-MISSION-081",
+            status=MissionStatus.READY,
+            created_by=tenant,
+        )
+        storage.create_mission(mission)
+        task = MissionTask(
+            id=new_id("mst"),
+            mission_id=mission.id,
+            user_id=tenant,
+            seq=1,
+            kind=TaskKind.GATHER,
+            instruction="PRIVATE-OBS-TASK-081",
+        )
+        assert (
+            storage.set_mission_plan(
+                mission.id,
+                tenant,
+                [task],
+                plan_summary="PRIVATE-OBS-PLAN-081",
+                status=MissionStatus.READY,
+            )
+            is not None
+        )
+        assert storage.enqueue_notification(
+            tenant,
+            "5001",
+            "PRIVATE-OBS-REMINDER-081",
+            kind="reminder",
+            dedup_key="reminder:observation:pending",
+        )
+        assert storage.silence_reminder(tenant, "reminder:observation:dismissed", chat_id="5001")
+        assert storage.enqueue_notification(
+            tenant,
+            "5001",
+            "PRIVATE-OBS-GENERAL-081",
+            kind="general",
+            dedup_key="observation:general",
+        )
+        health = {
+            "workers:health:mission_runner": {"status": "ok", "error": "PRIVATE-OBS-WORKER-081"},
+            "workers:health:reminders_scan": {"status": "running", "detail": "PRIVATE-OBS-DETAIL-081"},
+            "workers:health:scheduled_backup": {"status": "error", "error": "PRIVATE-OBS-UNRELATED-081"},
+        }
+        for key, value in health.items():
+            storage.kv_set(key, json.dumps(value, sort_keys=True))
+        storage.log_audit(
+            AuditEntry(
+                id=new_id("aud"),
+                user_id=tenant,
+                action="mission.created",
+                target_type="mission",
+                target_id=mission.id,
+                after_json={"status": "ready"},
+            )
+        )
+        before = snapshot()
+        assert [
+            (row["id"], row["user_id"], row["status"], row["task_count"]) for row in before["missions"]
+        ] == [(mission.id, tenant, "ready", 1)]
+        assert [
+            (row["id"], row["mission_id"], row["user_id"], row["status"]) for row in before["mission_tasks"]
+        ] == [(task.id, mission.id, tenant, "pending")]
+        assert sorted(
+            (row["kind"], row["status"], row["user_id"]) for row in before["outbound_notifications"]
+        ) == [
+            ("general", "pending", tenant),
+            ("reminder", "dismissed", tenant),
+            ("reminder", "pending", tenant),
+        ]
+        assert {
+            row["key"]: json.loads(row["value"])
+            for row in before["runtime_kv"]
+            if row["key"].startswith("workers:health:")
+        } == health
+        assert before["audit_log"]
+        # This unregistered fixture action is deliberately sanitized by log_audit.
+        assert [(row["user_id"], row["action"], row["target_id"]) for row in before["audit_log"]] == [
+            (tenant, "audit.unknown", mission.id)
+        ]
+        owner_before = storage.get_user(LEGACY_OWNER_USER_ID)
+        epoch = process_epoch()
+        expected = {
+            "schema": "friday.production-read-only-observation.v1",
+            "challenge_sha256": _CHALLENGE,
+            "backend_process_epoch_sha256": epoch,
+            "backend_lease_owned": True,
+            "database": {
+                "schema_version": 50,
+                "schema_attestation_sha256": "726ded0b802ee1c6bf82663fd0918efb7f3d509f382c0d2aaa3540d4a1790561",
+                "integrity": "ok",
+                "foreign_key_violations": 0,
+            },
+            "scheduled_work": {
+                "missions": {
+                    "proposed": 0,
+                    "ready": 1,
+                    "running": 0,
+                    "paused": 0,
+                    "blocked": 0,
+                    "completed": 0,
+                    "failed": 0,
+                    "cancelled": 0,
+                },
+                "mission_tasks": {
+                    "pending": 1,
+                    "running": 0,
+                    "done": 0,
+                    "failed": 0,
+                    "skipped": 0,
+                    "uncertain": 0,
+                    "compensated": 0,
+                },
+                "reminders": {"pending": 1, "uncertain": 0, "sent": 0, "failed": 0, "dismissed": 1},
+                "workers": {
+                    "present": 2,
+                    "missing": 0,
+                    "health_states": {
+                        "scheduled": 0,
+                        "running": 1,
+                        "ok": 1,
+                        "error": 0,
+                        "timeout": 0,
+                        "skipped": 0,
+                        "unknown": 0,
+                    },
+                },
+            },
+            "hard_contradictions": 0,
+        }
         response = client.get(_PATH, headers=_owner_headers(settings, _CHALLENGE))
-        owner_after = app.state.storage.get_user(LEGACY_OWNER_USER_ID)
+        assert response.status_code == 200
+        assert response.headers["content-type"] == "application/json"
+        assert response.json() == expected
+        # Comparing expected bytes also rejects Python's True == 1 and float == int.
+        assert response.content == json.dumps(
+            expected,
+            ensure_ascii=True,
+            sort_keys=True,
+            separators=(",", ":"),
+            allow_nan=False,
+        ).encode("ascii")
+        assert snapshot() == before
+        assert process_epoch() == epoch
+        for forbidden in (
+            "PRIVATE-OBS-",
+            tenant,
+            mission.id,
+            task.id,
+            "mission_runner",
+            "reminders_scan",
+            "scheduled_backup",
+            str(settings.database_path),
+            str(settings.state_dir),
+        ):
+            assert forbidden.encode() not in response.content
+
+        refused = client.get(_PATH, headers=_owner_headers(settings))
+        assert refused.status_code == 400
+        assert refused.json() == {"detail": "Некорректный challenge production-наблюдения"}
+        assert snapshot() == before
+        owner_after = storage.get_user(LEGACY_OWNER_USER_ID)
 
     assert response.status_code == 200
     assert owner_before is not None

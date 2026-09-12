@@ -9,16 +9,19 @@ home. This runner does not rewrite sealed A/B manifests.
 from __future__ import annotations
 
 import argparse
+import base64
+import csv
 import hashlib
+import hmac
 import io
 import json
-import os
 import shutil
 import sqlite3
 import sys
 import tempfile
 import zipfile
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Sequence
+from dataclasses import fields, replace
 from pathlib import Path
 from typing import Any
 
@@ -47,7 +50,9 @@ def _issue_token(storage: Any, user_id: str, preset: str, secret: str) -> None:
     storage.create_api_token(user_id, token_hash, label="r10", created_by="r10")
 
 
-def _upload_bytes(client: TestClient, headers: dict[str, str], filename: str, payload: bytes, mime: str) -> dict[str, Any]:
+def _upload_bytes(
+    client: TestClient, headers: dict[str, str], filename: str, payload: bytes, mime: str
+) -> dict[str, Any]:
     response = client.post(
         "/api/files",
         headers=headers,
@@ -68,134 +73,217 @@ def _canary(case_id: str) -> str:
     return f"CANARY_{case_id.replace('-', '_')}_R10"
 
 
+def _json_object(response: Any) -> dict[str, Any]:
+    try:
+        value = response.json()
+    except (TypeError, ValueError):
+        return {}
+    return value if isinstance(value, dict) else {}
+
+
+def _listed_raw_ids(body: dict[str, Any]) -> set[str]:
+    return {
+        str(item["id"]) for item in (body.get("items") or []) if isinstance(item, dict) and item.get("id")
+    }
+
+
 def run_j01(settings: Any) -> dict[str, Any]:
     from friday.server import create_app
 
     canary = _canary("R10_J01")
     payload = f"event kitchen participants 4 {canary}\n".encode()
-    app = create_app(settings)
+    expected_digest = hashlib.sha256(payload).hexdigest()
     headers = _owner_headers(settings)
-    with TestClient(app) as client:
-        uploaded = _upload_bytes(client, headers, "r10-j01.txt", payload, "text/plain")
-        files = client.get("/api/files", headers=headers)
-        inbox = client.get("/api/admin/inbox", headers=headers)
-        search = client.get("/api/search", params={"q": canary}, headers=headers)
-        listed = files.json().get("items") or []
-        inbox_items = inbox.json().get("items") or inbox.json().get("groups") or []
-        search_text = json.dumps(search.json(), ensure_ascii=False)
-        first = {
-            "upload_status": uploaded["status_code"],
-            "file_count": files.json().get("count"),
-            "inbox_status": inbox.status_code,
-            "search_status": search.status_code,
-            "raw_id": (listed[0] or {}).get("id") if listed else None,
-        }
-    app2 = create_app(settings)
-    with TestClient(app2) as client:
-        files_after = client.get("/api/files", headers=headers)
-        restart_items = files_after.json().get("items") or []
-        restart_blob = json.dumps(restart_items, ensure_ascii=False)
-    observed = {
-        "status_code": first["upload_status"],
-        "count": first["file_count"],
-        "body": f"{canary} {first['raw_id']} inbox={first['inbox_status']} {search_text} {restart_blob}",
-        "collected": True,
-        "effect": False,
+    failures: list[str] = []
+    observations: list[dict[str, Any]] = []
+    raw_id = ""
+    for phase in ("initial", "restart"):
+        with TestClient(create_app(settings)) as client:
+            if phase == "initial":
+                uploaded = _upload_bytes(client, headers, "r10-j01.txt", payload, "text/plain")
+                raw_id = str(uploaded["body"].get("raw_object_id") or "")
+                if uploaded["status_code"] != 200 or not raw_id:
+                    failures.append("upload_missing_handle")
+            inbox = client.get("/api/admin/inbox", headers=headers)
+            if inbox.status_code != 200:
+                failures.append(f"{phase}_inbox_unreachable")
+            search = client.get("/api/search", params={"q": canary}, headers=headers)
+            results = search.json().get("results", []) if search.status_code == 200 else []
+            hits = [
+                item
+                for item in results
+                if isinstance(item, dict) and canary in str(item.get("content") or "")
+            ]
+            sources = [
+                item for item in hits if raw_id and item.get("raw_object_id") == raw_id and item.get("id")
+            ]
+            if search.status_code != 200:
+                failures.append(f"{phase}_search_failed")
+            elif not hits:
+                failures.append(f"{phase}_search_missing_hit")
+            elif not sources:
+                failures.append(f"{phase}_search_wrong_source")
+            if sources:
+                citation = client.get(f"/api/knowledge/{sources[0]['id']}", headers=headers)
+                cited = citation.json().get("item", {}) if citation.status_code == 200 else {}
+                if cited.get("raw_object_id") != raw_id or canary not in str(cited.get("content") or ""):
+                    failures.append(f"{phase}_search_citation_unreadable")
+            download = client.get(f"/api/files/{raw_id or 'raw_missing_r10'}", headers=headers)
+            digest = hashlib.sha256(download.content).hexdigest() if download.status_code == 200 else ""
+            if digest != expected_digest:
+                failures.append(f"{phase}_artifact_missing_or_changed")
+            observations.append(
+                {
+                    "phase": phase,
+                    "search_status": search.status_code,
+                    "hits": len(sources),
+                    "download_status": download.status_code,
+                    "file_sha256": digest,
+                }
+            )
+    return {
+        "id": "R10-J01-UPLOAD-SEARCH-RESTART",
+        "status": "FAIL" if failures else "PASS",
+        "failure_codes": failures,
+        "observed_safe": observations,
     }
-    expected = {
-        "status_code": 200,
-        "min_count": 1,
-        "must_contain": [canary],
-        "expected_outcome": "pass",
-    }
-    verdict = acceptance.evaluate_oracle(expected, observed)
-    if first["inbox_status"] != 200:
-        verdict["failure_codes"] = [*verdict["failure_codes"], "inbox_not_reachable"]
-        verdict["status"] = "FAIL"
-    if first["raw_id"] not in restart_blob:
-        verdict["failure_codes"] = [*verdict["failure_codes"], "restart_lost_file"]
-        verdict["status"] = "FAIL"
-    return {"id": "R10-J01-UPLOAD-SEARCH-RESTART", **verdict, "observed_safe": first}
 
 
 def run_j02(settings: Any) -> dict[str, Any]:
     from friday.server import create_app
 
-    canary = _canary("R10_J02")
+    owner_canary = _canary("R10_J02_OWNER")
+    guest_canary = _canary("R10_J02_GUEST")
     app = create_app(settings)
     owner = _owner_headers(settings)
-    guest_secret = "jrc_r10_guest_" + hashlib.sha256(canary.encode()).hexdigest()[:12]
+    guest_secret = "jrc_r10_guest_" + hashlib.sha256(owner_canary.encode()).hexdigest()[:12]
     guest = {"Authorization": f"Bearer {guest_secret}"}
     with TestClient(app) as client:
         _issue_token(app.state.storage, "r10-guest", "user", guest_secret)
-        _upload_bytes(client, owner, "r10-j02.txt", canary.encode(), "text/plain")
+        owner_upload = _upload_bytes(client, owner, "owner-r10-j02.txt", owner_canary.encode(), "text/plain")
+        guest_upload = _upload_bytes(client, guest, "guest-r10-j02.txt", guest_canary.encode(), "text/plain")
         owner_files = client.get("/api/files", headers=owner)
         guest_files = client.get("/api/files", headers=guest)
         guest_admin = client.get("/api/admin/overview", headers=guest)
-        owner_ids = [item.get("id") for item in (owner_files.json().get("items") or [])]
-        guest_ids = [item.get("id") for item in (guest_files.json().get("items") or [])]
-        leak = bool(set(owner_ids) & set(guest_ids))
-        guest_body = json.dumps(guest_files.json(), ensure_ascii=False)
-    observed = {
-        "status_code": owner_files.status_code,
-        "count": owner_files.json().get("count"),
-        "body": guest_body,
-        "effect": guest_admin.status_code == 200,
-        "collected": True,
-        "foreign_canaries": [canary] if leak or canary in guest_body else [],
-    }
-    expected = {
-        "status_code": 200,
-        "min_count": 1,
-        "effect_forbidden": True,
-        "foreign_canaries": [canary],
-        "expected_outcome": "refuse",
-    }
-    # Guest body must NOT contain the canary; evaluate_oracle treats presence as fail.
-    # So expected.foreign_canaries + guest body without canary => PASS.
-    if leak:
-        observed["body"] = canary
-    verdict = acceptance.evaluate_oracle(expected, observed)
+        owner_body = _json_object(owner_files)
+        guest_body = _json_object(guest_files)
+    owner_id = str(owner_upload["body"].get("raw_object_id") or "")
+    guest_id = str(guest_upload["body"].get("raw_object_id") or "")
+    owner_ids = _listed_raw_ids(owner_body)
+    guest_ids = _listed_raw_ids(guest_body)
+    failures: list[str] = []
+    if owner_upload["status_code"] != 200 or not owner_id:
+        failures.append("owner_upload_missing_handle")
+    if guest_upload["status_code"] != 200 or not guest_id:
+        failures.append("guest_upload_missing_handle")
+    if owner_id and guest_id and owner_id == guest_id:
+        failures.append("principal_handles_not_distinct")
+    if owner_files.status_code != 200:
+        failures.append("owner_file_listing_unavailable")
+    if guest_files.status_code != 200:
+        failures.append("guest_file_listing_unavailable")
+    if owner_id and owner_id not in owner_ids:
+        failures.append("owner_handle_missing_from_owner_listing")
+    if guest_id and guest_id not in guest_ids:
+        failures.append("guest_handle_missing_from_guest_listing")
+    if guest_id and guest_id in owner_ids:
+        failures.append("guest_handle_exposed_to_owner")
+    if owner_id and owner_id in guest_ids:
+        failures.append("owner_handle_exposed_to_guest")
+    owner_blob = json.dumps(owner_body, ensure_ascii=False)
+    guest_blob = json.dumps(guest_body, ensure_ascii=False)
+    if guest_canary in owner_blob or owner_canary in guest_blob:
+        failures.append("foreign_canary_exposed")
     if guest_admin.status_code not in {401, 403}:
-        verdict["failure_codes"] = [*verdict["failure_codes"], "guest_admin_not_refused"]
-        verdict["status"] = "FAIL"
-    return {"id": "R10-J02-CROSS-CONV-PRIVACY", **verdict, "observed_safe": {"guest_admin": guest_admin.status_code, "leak": leak}}
+        failures.append("guest_admin_not_refused")
+    return {
+        "id": "R10-J02-CROSS-CONV-PRIVACY",
+        "status": "FAIL" if failures else "PASS",
+        "failure_codes": failures,
+        "expected_outcome": "refuse",
+        "observed_safe": {
+            "owner_upload": owner_upload["status_code"],
+            "guest_upload": guest_upload["status_code"],
+            "owner_listing": owner_files.status_code,
+            "guest_listing": guest_files.status_code,
+            "guest_admin": guest_admin.status_code,
+        },
+    }
 
 
 def run_j03(settings: Any) -> dict[str, Any]:
     from friday.server import create_app
 
-    v1 = "id,name\nBRK.A,alpha-r10\n".encode()
-    v2 = "id,name\nBRK.B,beta-r10\n".encode()
-    app = create_app(settings)
+    fixtures = (
+        ("holdings-v1.csv", b"id,name\nBRK.A,alpha-r10\n", [{"id": "BRK.A", "name": "alpha-r10"}]),
+        ("holdings-v2.csv", b"id,name\nBRK.B,beta-r10\n", [{"id": "BRK.B", "name": "beta-r10"}]),
+    )
     headers = _owner_headers(settings)
-    with TestClient(app) as client:
-        _upload_bytes(client, headers, "holdings-v1.csv", v1, "text/csv")
-        _upload_bytes(client, headers, "holdings-v2.csv", v2, "text/csv")
-        listed = client.get("/api/files", headers=headers)
-        items = listed.json().get("items") or []
-        ids = [item.get("id") for item in items]
-        blob = json.dumps(items, ensure_ascii=False)
-        raw_store = app.state.storage.execute(
-            "SELECT id, source_ref FROM raw_objects WHERE content_type='file' AND deleted_at IS NULL"
-        ).fetchall()
-    observed = {
-        "status_code": listed.status_code,
-        "count": len(ids),
-        "body": blob + " " + " ".join(str(row["source_ref"]) for row in raw_store),
-        "collected": True,
+    failures: list[str] = []
+    ids = []
+    digests = []
+    with TestClient(create_app(settings)) as client:
+        for filename, payload, expected_rows in fixtures:
+            uploaded = _upload_bytes(client, headers, filename, payload, "text/csv")
+            raw_id = uploaded["body"].get("raw_object_id")
+            if uploaded["status_code"] != 200 or not raw_id:
+                failures.append("table_upload_missing_handle")
+                continue
+            ids.append(raw_id)
+            download = client.get(f"/api/files/{raw_id}", headers=headers)
+            if download.status_code != 200:
+                failures.append("table_artifact_missing")
+                continue
+            digest = hashlib.sha256(download.content).hexdigest()
+            digests.append(digest)
+            if digest != hashlib.sha256(payload).hexdigest():
+                failures.append("table_bytes_changed_or_swapped")
+            try:
+                rows = list(csv.DictReader(io.StringIO(download.content.decode("utf-8"))))
+            except (UnicodeError, csv.Error):
+                rows = []
+            if rows != expected_rows:
+                failures.append("table_values_changed_or_swapped")
+        if len(set(ids)) != 2:
+            failures.append("versions_not_distinct")
+    return {
+        "id": "R10-J03-TABLE-VERSIONS",
+        "status": "FAIL" if failures else "PASS",
+        "failure_codes": failures,
+        "observed_safe": {"count": len(set(ids)), "file_sha256": digests},
     }
-    expected = {
-        "status_code": 200,
-        "min_count": 2,
-        "must_contain": ["r10:holdings-v1.csv", "r10:holdings-v2.csv"],
-        "expected_outcome": "pass",
-    }
-    verdict = acceptance.evaluate_oracle(expected, observed)
-    if len(set(ids)) < 2:
-        verdict["failure_codes"] = [*verdict["failure_codes"], "versions_not_distinct"]
-        verdict["status"] = "FAIL"
-    return {"id": "R10-J03-TABLE-VERSIONS", **verdict, "observed_safe": {"count": len(ids)}}
+
+
+def _url_refusal_state(app: Any) -> str:
+    tables = (
+        "raw_objects",
+        "file_source_aliases",
+        "inbox",
+        "knowledge_objects",
+        "knowledge_object_versions",
+    )
+    digest = hashlib.sha256()
+    size = 0
+
+    def observe(value: Any) -> None:
+        nonlocal size
+        payload = json.dumps(value, ensure_ascii=False, separators=(",", ":"), sort_keys=True).encode()
+        size += len(payload)
+        if size > 64 * 1024 * 1024:
+            raise JourneyError("url_refusal_state_limit")
+        digest.update(len(payload).to_bytes(8, "big"))
+        digest.update(payload)
+
+    for table in tables:
+        observe(table)
+        for row in app.state.storage.execute(f"SELECT * FROM {table} ORDER BY rowid"):
+            observe(tuple(row))
+    files_dir = app.state.settings.files_dir
+    if files_dir.is_symlink():
+        raise JourneyError("url_refusal_files_symlink")
+    files = _snapshot_files(files_dir) if files_dir.exists() else {}
+    observe(files)
+    return digest.hexdigest()
 
 
 def run_j04(settings: Any) -> dict[str, Any]:
@@ -205,24 +293,69 @@ def run_j04(settings: Any) -> dict[str, Any]:
     headers = _owner_headers(settings)
     with TestClient(app) as client:
         before = client.get("/api/knowledge", headers=headers)
+        before_state = _url_refusal_state(app)
         response = client.post("/api/ingest/url", headers=headers, json={"url": CANONICAL_PRIVATE_URL})
+        after_state = _url_refusal_state(app)
         after = client.get("/api/knowledge", headers=headers)
-        before_count = int((before.json() or {}).get("count") or len((before.json() or {}).get("items") or []))
-        after_count = int((after.json() or {}).get("count") or len((after.json() or {}).get("items") or []))
-        detail = json.dumps(response.json(), ensure_ascii=False)
-    observed = {
-        "status_code": response.status_code,
-        "body": detail,
-        "effect": after_count > before_count,
-        "collected": True,
-    }
-    expected = {
-        "status_code": 422,
-        "must_contain": ["source_fact_private"],
-        "effect_forbidden": True,
+    failures: list[str] = []
+    if before.status_code != 200:
+        failures.append("knowledge_listing_before_unavailable")
+    if after.status_code != 200:
+        failures.append("knowledge_listing_after_unavailable")
+    if response.status_code != 422:
+        failures.append("private_url_not_refused")
+    if "source_fact_private" not in response.text:
+        failures.append("private_url_reason_missing")
+    if after_state != before_state:
+        failures.append("private_url_persistent_effect")
+    return {
+        "id": "R10-J04-PRIVATE-URL",
+        "status": "FAIL" if failures else "PASS",
+        "failure_codes": failures,
         "expected_outcome": "refuse",
+        "observed_safe": {
+            "before_listing": before.status_code,
+            "refusal": response.status_code,
+            "after_listing": after.status_code,
+            "before_state_sha256": before_state,
+            "after_state_sha256": after_state,
+        },
     }
-    return {"id": "R10-J04-PRIVATE-URL", **acceptance.evaluate_oracle(expected, observed)}
+
+
+def _engineer_refusal_state(app: Any) -> str:
+    # Observe actual channel/conversation rows and the command ledger/workspace
+    # bytes. sqlite_master only describes schemas and cannot prove no effects.
+    rows = []
+    for table in ("conversations", "channel_sessions"):
+        rows.append(
+            [
+                tuple(row)
+                for row in app.state.storage.execute(f"SELECT * FROM {table} ORDER BY rowid").fetchall()
+            ]
+        )
+    root = app.state.settings.engineer_command_store_dir
+    file_rows = []
+    remaining = 64 * 1024 * 1024
+    if root.is_symlink():
+        raise JourneyError("command_store_snapshot_symlink")
+    if root.exists():
+        for path in sorted(root.rglob("*")):
+            relative = path.relative_to(root).as_posix()
+            if path.is_symlink():
+                file_rows.append((relative, "symlink"))
+            elif path.is_file():
+                with path.open("rb") as handle:
+                    content = handle.read(remaining + 1)
+                remaining -= len(content)
+                if remaining < 0:
+                    raise JourneyError("command_store_snapshot_limit")
+                file_rows.append((relative, hashlib.sha256(content).hexdigest()))
+            elif path.is_dir():
+                file_rows.append((relative, "directory"))
+            else:
+                raise JourneyError("command_store_snapshot_special_file")
+    return hashlib.sha256(json.dumps([rows, file_rows], sort_keys=True).encode()).hexdigest()
 
 
 def run_j05(settings: Any) -> dict[str, Any]:
@@ -231,30 +364,28 @@ def run_j05(settings: Any) -> dict[str, Any]:
     app = create_app(settings)
     headers = _owner_headers(settings)
     with TestClient(app) as client:
+        before = _engineer_refusal_state(app)
         response = client.post(
             "/api/conversations/channel/mode",
             headers=headers,
             json={"channel": "api", "channel_id": "r10", "mode": "engineer"},
         )
-        jobs = app.state.storage.execute(
-            "SELECT COUNT(*) AS count FROM sqlite_master WHERE name LIKE '%engineer%'"
-        ).fetchone()
-    observed = {
-        "status_code": response.status_code,
-        "body": response.text,
-        "effect": False,
-        "collected": True,
-        "count": int(jobs["count"] if jobs else 0),
-    }
-    expected = {
-        "effect_forbidden": True,
-        "expected_outcome": "refuse",
-    }
+        after = _engineer_refusal_state(app)
+    observed = {"status_code": response.status_code, "effect": after != before, "collected": True}
+    expected = {"effect_forbidden": True, "expected_outcome": "refuse"}
     verdict = acceptance.evaluate_oracle(expected, observed)
     if response.status_code not in {400, 403, 503}:
-        verdict["failure_codes"] = [*verdict["failure_codes"], "engineer_not_refused"]
+        verdict["failure_codes"].append("engineer_not_refused")
         verdict["status"] = "FAIL"
-    return {"id": "R10-J05-ENGINEER-REFUSE-UNSIGNED", **verdict, "observed_safe": {"status_code": response.status_code}}
+    return {
+        "id": "R10-J05-ENGINEER-REFUSE-UNSIGNED",
+        **verdict,
+        "observed_safe": {
+            "status_code": response.status_code,
+            "before_sha256": before,
+            "after_sha256": after,
+        },
+    }
 
 
 def run_j06(settings: Any) -> dict[str, Any]:
@@ -278,7 +409,8 @@ def run_j06(settings: Any) -> dict[str, Any]:
     observed = {
         "status_code": response.status_code,
         "body": f"{response.status_code} {claim.state}",
-        "effect": claim.state not in {
+        "effect": claim.state
+        not in {
             CodingModeExecuteClaimState.BLOCKED,
             CodingModeExecuteClaimState.EMPTY,
             CodingModeExecuteClaimState.STATIC,
@@ -299,7 +431,11 @@ def run_j06(settings: Any) -> dict[str, Any]:
         else:
             verdict["failure_codes"] = [*verdict["failure_codes"], "execute_claim_not_closed"]
             verdict["status"] = "FAIL"
-    return {"id": "R10-J06-CODING-EXECUTE-CLOSED", **verdict, "observed_safe": {"mode": response.status_code, "claim": str(claim.state)}}
+    return {
+        "id": "R10-J06-CODING-EXECUTE-CLOSED",
+        **verdict,
+        "observed_safe": {"mode": response.status_code, "claim": str(claim.state)},
+    }
 
 
 def run_j07(settings: Any) -> dict[str, Any]:
@@ -308,135 +444,320 @@ def run_j07(settings: Any) -> dict[str, Any]:
     app = create_app(settings)
     with TestClient(app) as client:
         health = client.get("/api/health")
-        body = health.json()
-    blob = json.dumps(body, ensure_ascii=False)
-    obsidian = body.get("obsidian") or body.get("obsidian_health") or {}
-    mode = str(obsidian.get("mode") or "")
-    if "obsidian" in body and not mode:
-        nested = body.get("obsidian")
-        if isinstance(nested, dict):
-            mode = str(nested.get("mode") or "")
-    observed = {
-        "status_code": health.status_code,
-        "body": blob,
-        "collected": True,
-        "effect": bool(getattr(settings, "obsidian_enabled", False)),
+        body = _json_object(health)
+    expected_obsidian = {
+        "mode": "disabled",
+        "root_sha256": hashlib.sha256(
+            str(settings.obsidian_effective_root).encode("utf-8", errors="strict")
+        ).hexdigest(),
     }
-    expected = {
-        "status_code": 200,
-        "must_contain": ["ok"],
-        "effect_forbidden": True,
+    obsidian = body.get("obsidian")
+    failures: list[str] = []
+    if health.status_code != 200:
+        failures.append("health_unavailable")
+    if body.get("status") != "ok":
+        failures.append("health_status_not_ok")
+    if getattr(settings, "obsidian_enabled", None) is not False:
+        failures.append("obsidian_setting_not_disabled")
+    if obsidian != expected_obsidian:
+        failures.append("obsidian_health_not_exactly_disabled")
+    return {
+        "id": "R10-J07-OBSIDIAN-DISABLED",
+        "status": "FAIL" if failures else "PASS",
+        "failure_codes": failures,
         "expected_outcome": "pass",
+        "observed_safe": {
+            "health": health.status_code,
+            "status_ok": body.get("status") == "ok",
+            "obsidian_sha256": hashlib.sha256(json.dumps(obsidian, sort_keys=True).encode()).hexdigest(),
+        },
     }
-    verdict = acceptance.evaluate_oracle(expected, observed)
-    if getattr(settings, "obsidian_enabled", False) is True:
-        verdict["failure_codes"] = [*verdict["failure_codes"], "obsidian_unexpectedly_enabled"]
-        verdict["status"] = "FAIL"
-    if "\"mode\": \"disabled\"" not in blob and "disabled" not in mode and "obsidian" in blob.lower():
-        # Health may omit the organ entirely when disabled; that is also honest.
-        pass
-    return {"id": "R10-J07-OBSIDIAN-DISABLED", **verdict, "observed_safe": {"obsidian_enabled": bool(getattr(settings, "obsidian_enabled", False))}}
+
+
+def _settings_in_home(settings: Any, home: Path) -> Any:
+    overrides = {}
+    for field in fields(settings):
+        value = getattr(settings, field.name)
+        if isinstance(value, Path) and value.is_relative_to(settings.home):
+            overrides[field.name] = home / value.relative_to(settings.home)
+    return replace(settings, **overrides)
+
+
+def _snapshot_files(root: Path) -> dict[str, str]:
+    inventory = {}
+    remaining = 64 * 1024 * 1024
+    for path in sorted(root.rglob("*")):
+        if path.is_symlink():
+            raise JourneyError("restore_snapshot_symlink")
+        if path.is_dir():
+            continue
+        if not path.is_file():
+            raise JourneyError("restore_snapshot_special_file")
+        with path.open("rb") as handle:
+            content = handle.read(remaining + 1)
+        remaining -= len(content)
+        if remaining < 0:
+            raise JourneyError("restore_snapshot_limit")
+        inventory[path.relative_to(root).as_posix()] = hashlib.sha256(content).hexdigest()
+    return inventory
+
+
+def _backup_listing(response: Any, failures: list[str], phase: str) -> dict[str, dict[str, Any]]:
+    body = _json_object(response)
+    items = body.get("items")
+    valid = (
+        response.status_code == 200
+        and isinstance(items, list)
+        and type(body.get("count")) is int
+        and body["count"] == len(items)
+    )
+    names = {}
+    for item in items if isinstance(items, list) else []:
+        name = item.get("database") if isinstance(item, dict) else None
+        if (
+            not isinstance(name, str)
+            or Path(name).name != name
+            or not name.endswith(".sqlite3")
+            or name in names
+        ):
+            valid = False
+        else:
+            names[name] = item
+    if not valid:
+        failures.append(f"backup_{phase}_listing_invalid")
+    return names
+
+
+def _observe_backup_api(
+    client: TestClient, settings: Any, raw_id: str, failures: list[str]
+) -> dict[str, Any]:
+    headers = _owner_headers(settings)
+    audit_before = {row["id"] for row in client.app.state.storage.list_audit_log(None, limit=500)}
+    key_row = client.app.state.storage.execute(
+        "SELECT value FROM schema_meta WHERE key='audit_privacy_hmac_key'"
+    ).fetchone()
+    encoded_key = key_row[0] if key_row else None
+    if (
+        not isinstance(encoded_key, str)
+        or len(encoded_key) != 64
+        or any(char not in "0123456789abcdef" for char in encoded_key)
+    ):
+        failures.append("backup_audit_key_unavailable")
+        return {}
+    # Freeze the existing isolated installation key before the operation. Do
+    # not use the product sanitizer to generate this independent expected ref.
+    audit_key = bytes.fromhex(encoded_key)
+    before = _backup_listing(client.get("/api/admin/backups", headers=headers), failures, "before")
+    created = client.post("/api/admin/backups", headers=headers, json={"label": "r10-j08"})
+    manifest = _json_object(created).get("backup")
+    name = manifest.get("database") if isinstance(manifest, dict) else None
+    if (
+        created.status_code != 200
+        or not isinstance(name, str)
+        or Path(name).name != name
+        or not name.endswith(".sqlite3")
+    ):
+        failures.append("backup_create_response_invalid")
+        return {"create_status": created.status_code}
+    after = _backup_listing(client.get("/api/admin/backups", headers=headers), failures, "after")
+    if set(after) != set(before) | {name} or name in before or name not in after:
+        failures.append("backup_created_item_not_listed")
+    downloaded = client.get(f"/api/admin/backups/{name}/download", headers=headers)
+    blob = downloaded.content
+    digest = hashlib.sha256(blob).hexdigest()
+    if (
+        downloaded.status_code != 200
+        or downloaded.headers.get("content-type") != "application/vnd.sqlite3"
+        or downloaded.headers.get("content-disposition") != f'attachment; filename="{name}"'
+        or not blob.startswith(b"SQLite format 3\x00")
+        or len(blob) > 64 * 1024 * 1024
+    ):
+        failures.append("backup_download_invalid")
+    else:
+        for entry in (manifest, after.get(name, {})):
+            if (
+                entry.get("sha256") != digest
+                or type(entry.get("size_bytes")) is not int
+                or entry["size_bytes"] != len(blob)
+                or entry.get("label") != "r10-j08"
+                or entry.get("integrity_check") != "ok"
+            ):
+                failures.append("backup_manifest_download_mismatch")
+        # Read only the actual downloaded bytes in a private temporary file.
+        # immutable avoids importing a sidecar or writing SQLite runtime state.
+        with tempfile.TemporaryDirectory(prefix="r10-download-", dir=settings.home) as scratch:
+            database_path = Path(scratch) / "download.sqlite3"
+            database_path.write_bytes(blob)
+            database_path.chmod(0o600)
+            try:
+                with sqlite3.connect(database_path.as_uri() + "?mode=ro&immutable=1", uri=True) as database:
+                    database.execute("PRAGMA trusted_schema=OFF")
+                    database.execute("PRAGMA query_only=ON")
+                    valid = database.execute("PRAGMA quick_check").fetchall() == [("ok",)]
+                    row = database.execute(
+                        "SELECT raw_content FROM raw_objects WHERE id=?", (raw_id,)
+                    ).fetchone()
+                if not valid or row is None or _canary("R10_J08") not in str(row[0]):
+                    failures.append("backup_download_source_missing")
+            except sqlite3.Error:
+                failures.append("backup_download_database_unreadable")
+    secret = "jrc_r10_backup_guest_" + "3" * 16
+    _issue_token(client.app.state.storage, "r10-backup-guest", "user", secret)
+    guest = {"Authorization": f"Bearer {secret}"}
+    for principal in ({}, guest):
+        responses = (
+            client.get("/api/admin/backups", headers=principal),
+            client.post("/api/admin/backups", headers=principal, json={"label": "r10-denied"}),
+            client.get(f"/api/admin/backups/{name}/download", headers=principal),
+        )
+        if any(response.status_code not in {401, 403} for response in responses):
+            failures.append("backup_unauthorized_access")
+        if any(response.content.startswith(b"SQLite format 3\x00") for response in responses):
+            failures.append("backup_unauthorized_bytes")
+    final = _backup_listing(client.get("/api/admin/backups", headers=headers), failures, "final")
+    if final != after:
+        failures.append("backup_denied_create_effect")
+    missing = client.get("/api/admin/backups/r10-missing.sqlite3/download", headers=headers)
+    # An owned outside-root canary proves the download path cannot follow an
+    # escaping symlink. This never addresses any existing installation file.
+    with tempfile.TemporaryDirectory(prefix="r10-escape-", dir=settings.home) as scratch:
+        outside = Path(scratch) / "canary.sqlite3"
+        outside.write_bytes(b"R10_BACKUP_OUTSIDE_ROOT")
+        link = settings.backups_dir / "r10-escape.sqlite3"
+        link.symlink_to(outside)
+        try:
+            escaped = client.get("/api/admin/backups/r10-escape.sqlite3/download", headers=headers)
+        finally:
+            link.unlink()
+    if missing.status_code != 404 or escaped.status_code != 404:
+        failures.append("backup_download_path_boundary")
+    rows = [
+        row
+        for row in client.app.state.storage.list_audit_log(None, limit=500)
+        if row["id"] not in audit_before
+    ]
+    audit_targets = []
+    expected_target = (
+        "backup:ref:"
+        + hmac.new(audit_key, ("target:backup\x00" + name).encode(), hashlib.sha256).hexdigest()[:24]
+    )
+    for action in ("admin.backup.create", "admin.backup.download"):
+        matches = [row for row in rows if row.get("action") == action]
+        if len(matches) != 1 or matches[0].get("target_type") != "backup" or not matches[0].get("target_id"):
+            failures.append("backup_audit_missing")
+        else:
+            audit_targets.append(matches[0]["target_id"])
+            if matches[0]["target_id"] != expected_target:
+                failures.append("backup_audit_private_target_invalid")
+        for row in matches:
+            projection = dict(row)
+            for field in ("before_json", "after_json"):
+                if isinstance(projection.get(field), str):
+                    try:
+                        projection[field] = json.loads(projection[field])
+                    except (TypeError, ValueError):
+                        failures.append("backup_audit_payload_invalid")
+            if name in json.dumps(projection, ensure_ascii=False):
+                failures.append("backup_audit_filename_exposed")
+    # Backup filenames are privacy-tokenized by the canonical audit writer.
+    # Require new, single create/download entries for the same opaque target.
+    if len(audit_targets) == 2 and audit_targets[0] != audit_targets[1]:
+        failures.append("backup_audit_target_mismatch")
+    return {"download_sha256": digest, "download_bytes": len(blob), "download_status": downloaded.status_code}
 
 
 def run_j08(settings: Any) -> dict[str, Any]:
-    from friday.config import ensure_runtime_dirs, load_settings
+    from friday.config import ensure_runtime_dirs
     from friday.diagnostics.runtime_lease import ProcessLease
     from friday.server import create_app
     from friday.storage import init_storage
 
-    canary = _canary("R10_J08")
-    payload = f"restore-me {canary}\n".encode()
-    app = create_app(settings)
-    headers = _owner_headers(settings)
-    backup_name = ""
-    with TestClient(app) as client:
-        uploaded = _upload_bytes(client, headers, "r10-j08.txt", payload, "text/plain")
-        created = client.post("/api/admin/backups", headers=headers, json={"label": "r10-j08"})
-        backup = (created.json() or {}).get("backup") or {}
-        backup_name = str(backup.get("database") or "")
-        verified = client.post(f"/api/admin/backups/{backup_name}/verify", headers=headers) if backup_name else None
-    if not backup_name:
-        return {
-            "id": "R10-J08-BACKUP-RESTORE-ISOLATED",
-            "status": "FAIL",
-            "failure_codes": ["backup_not_created"],
-            "observed_safe": {"upload": uploaded["status_code"], "create": created.status_code},
-        }
-    backup_path = settings.backups_dir / backup_name
-    manifest_path = backup_path.with_suffix(".manifest.json")
-    independent = False
-    with sqlite3.connect(str(backup_path)) as copy:
-        rows = copy.execute(
-            "SELECT source_ref FROM raw_objects WHERE content_type='file'"
-        ).fetchall()
-        independent = any("r10-j08.txt" in str(row[0]) for row in rows)
-    home_b = Path(settings.home).parent / "r10-restore-home"
-    previous_home = os.environ.get("FRIDAY_HOME")
-    restored_ok = False
-    restore_error = ""
-    found_after = False
-    try:
-        os.environ["FRIDAY_HOME"] = str(home_b)
-        loaded = load_settings()
-        ensure_runtime_dirs(loaded)
-        dest = loaded.backups_dir / backup_name
-        dest.write_bytes(backup_path.read_bytes())
-        if manifest_path.is_file():
-            (loaded.backups_dir / manifest_path.name).write_bytes(manifest_path.read_bytes())
-        src_files = getattr(settings, "files_dir", None)
-        if isinstance(src_files, Path) and src_files.is_dir():
-            shutil.copytree(src_files, loaded.files_dir, dirs_exist_ok=True)
-        storage_b = init_storage(loaded)
+    payload = f"restore-me {_canary('R10_J08')}\n".encode()
+    expected_digest = hashlib.sha256(payload).hexdigest()
+    failures = []
+    observed: dict[str, Any] = {}
+    # Everything moved or deleted below is newly created by this case. Neither
+    # the caller's HOME nor an existing installation is a recovery-drill target.
+    with tempfile.TemporaryDirectory(prefix="r10-recovery-", dir=Path(settings.home).parent) as scratch:
+        root = Path(scratch)
+        source = _settings_in_home(settings, root / "runtime-a")
+        ensure_runtime_dirs(source)
+        for path in (source.database_path, source.files_dir, source.backups_dir, source.state_dir):
+            if not path.is_relative_to(source.home):
+                raise JourneyError("configured_snapshot_path_outside_home")
+        with TestClient(create_app(source)) as client:
+            headers = _owner_headers(source)
+            uploaded = _upload_bytes(client, headers, "r10-j08.txt", payload, "text/plain")
+            raw_id = str(uploaded["body"].get("raw_object_id") or "")
+            if uploaded["status_code"] != 200 or not raw_id:
+                failures.append("backup_input_unavailable")
+            observed["backup_api"] = _observe_backup_api(client, source, raw_id, failures)
+        # Follow the stopped-snapshot runbook: fresh backup after service
+        # shutdown, then freeze one whole configured private runtime generation.
+        storage = init_storage(source)
         try:
-            with ProcessLease(loaded.state_dir / "backend.lock", protocol="friday.backend.v1"):
-                restored = storage_b.restore_backup(backup_name, safety_label="r10-j08-pre")
-            restored_ok = bool(restored.get("ok"))
-        except Exception as exc:  # noqa: BLE001 - journey records the boundary
-            restore_error = type(exc).__name__
+            backup = storage.create_backup(label="r10-j08-stopped")
+            backup_name = str(backup.get("database") or "")
+            verified = storage.verify_backup(backup_name)
         finally:
-            storage_b.close()
-        if restored_ok:
-            app_b = create_app(loaded)
-            with TestClient(app_b) as client:
-                listed = client.get("/api/files", headers=_owner_headers(loaded))
-                blob = json.dumps(listed.json(), ensure_ascii=False)
-                found_after = "r10-j08.txt" in blob or canary in blob
-    finally:
-        if previous_home is None:
-            os.environ.pop("FRIDAY_HOME", None)
-        else:
-            os.environ["FRIDAY_HOME"] = previous_home
-    observed = {
-        "status_code": created.status_code,
-        "body": f"independent={independent} restored={restored_ok} found={found_after} {restore_error}",
-        "count": int(independent) + int(restored_ok) + int(found_after),
-        "collected": True,
-    }
-    expected = {
-        "status_code": 200,
-        "min_count": 2,
-        "must_contain": ["independent=True"],
-        "expected_outcome": "pass",
-    }
-    verdict = acceptance.evaluate_oracle(expected, observed)
-    if not independent:
-        verdict["failure_codes"] = [*verdict["failure_codes"], "backup_missing_canary"]
-        verdict["status"] = "FAIL"
-    if not restored_ok or not found_after:
-        verdict["failure_codes"] = [*verdict["failure_codes"], "restore_separate_runtime_failed"]
-        verdict["status"] = "FAIL"
-    if verified is not None and verified.status_code != 200:
-        verdict["failure_codes"] = [*verdict["failure_codes"], "backup_verify_failed"]
-        verdict["status"] = "FAIL"
+            storage.close()
+        if not backup_name or verified.get("ok") is not True:
+            failures.append("backup_verify_failed")
+        with sqlite3.connect((source.backups_dir / backup_name).as_uri() + "?mode=ro", uri=True) as database:
+            row = database.execute("SELECT raw_content FROM raw_objects WHERE id=?", (raw_id,)).fetchone()
+            if row is None or _canary("R10_J08") not in str(row[0]):
+                failures.append("backup_missing_source")
+        inventory = _snapshot_files(source.home)
+        snapshot = root / "snapshot"
+        shutil.copytree(source.home, snapshot)
+        if _snapshot_files(snapshot) != inventory:
+            raise JourneyError("restore_snapshot_copy_mismatch")
+        observed["snapshot_sha256"] = hashlib.sha256(
+            json.dumps(inventory, sort_keys=True).encode()
+        ).hexdigest()
+        # The source pathname is unavailable for the entire restore and API
+        # read. All inputs below come from the frozen snapshot, never runtime A.
+        source.home.rename(root / "unavailable-source")
+        restored = _settings_in_home(source, root / "runtime-b")
+        shutil.copytree(snapshot, restored.home)
+        # Start with no active database: copied file listings cannot mask a
+        # missing backup or failed restore into the separate runtime.
+        for suffix in ("", "-wal", "-shm", "-journal"):
+            Path(str(restored.database_path) + suffix).unlink(missing_ok=True)
+        storage = init_storage(restored)
+        try:
+            with ProcessLease(restored.state_dir / "backend.lock", protocol="friday.backend.v1"):
+                result = storage.restore_backup(backup_name, safety_label="r10-j08-pre")
+            if result.get("ok") is not True:
+                failures.append("restore_separate_runtime_failed")
+        finally:
+            storage.close()
+        with TestClient(create_app(restored)) as client:
+            downloaded = client.get(
+                f"/api/files/{raw_id or 'raw_missing_r10'}", headers=_owner_headers(restored)
+            )
+            digest = hashlib.sha256(downloaded.content).hexdigest() if downloaded.status_code == 200 else ""
+            if digest != expected_digest:
+                failures.append("restored_file_missing_or_changed")
+            search = client.get(
+                "/api/search", headers=_owner_headers(restored), params={"q": _canary("R10_J08")}
+            )
+            hits = search.json().get("results", []) if search.status_code == 200 else []
+            if not any(
+                hit.get("raw_object_id") == raw_id and _canary("R10_J08") in str(hit.get("content") or "")
+                for hit in hits
+            ):
+                failures.append("restore_search_source_missing")
+            observed.update(
+                file_sha256=digest,
+                download_status=downloaded.status_code,
+                original_runtime_unavailable=not source.home.exists(),
+            )
     return {
         "id": "R10-J08-BACKUP-RESTORE-ISOLATED",
-        **verdict,
-        "observed_safe": {
-            "independent": independent,
-            "restored": restored_ok,
-            "found_after": found_after,
-            "restore_error": restore_error,
-        },
+        "status": "FAIL" if failures else "PASS",
+        "failure_codes": failures,
+        "observed_safe": observed,
     }
 
 
@@ -451,29 +772,51 @@ def run_j09(settings: Any) -> dict[str, Any]:
     with TestClient(app) as client:
         _issue_token(app.state.storage, "r10-user-a", "user", secret_a)
         _issue_token(app.state.storage, "r10-user-b", "user", secret_b)
-        _upload_bytes(client, headers_a, "a.txt", b"token-a-only R10J09A", "text/plain")
-        _upload_bytes(client, headers_b, "b.txt", b"token-b-only R10J09B", "text/plain")
+        upload_a = _upload_bytes(client, headers_a, "a.txt", b"token-a-only R10J09A", "text/plain")
+        upload_b = _upload_bytes(client, headers_b, "b.txt", b"token-b-only R10J09B", "text/plain")
         list_a = client.get("/api/files", headers=headers_a)
         list_b = client.get("/api/files", headers=headers_b)
-        ids_a = {item.get("id") for item in (list_a.json().get("items") or [])}
-        ids_b = {item.get("id") for item in (list_b.json().get("items") or [])}
-        blob_a = json.dumps(list_a.json(), ensure_ascii=False)
-        blob_b = json.dumps(list_b.json(), ensure_ascii=False)
-    leak = bool(ids_a & ids_b) or "R10J09B" in blob_a or "R10J09A" in blob_b
-    observed = {
-        "status_code": list_a.status_code,
-        "count": len(ids_a | ids_b),
-        "body": "isolated" if not leak else "R10J09A R10J09B leaked",
-        "foreign_canaries": ["R10J09A"] if leak else [],
-        "collected": True,
-    }
-    expected = {
-        "status_code": 200,
-        "min_count": 2,
-        "foreign_canaries": ["R10J09A"],
+        body_a = _json_object(list_a)
+        body_b = _json_object(list_b)
+    raw_a = str(upload_a["body"].get("raw_object_id") or "")
+    raw_b = str(upload_b["body"].get("raw_object_id") or "")
+    ids_a = _listed_raw_ids(body_a)
+    ids_b = _listed_raw_ids(body_b)
+    failures: list[str] = []
+    if upload_a["status_code"] != 200 or not raw_a:
+        failures.append("principal_a_upload_missing_handle")
+    if upload_b["status_code"] != 200 or not raw_b:
+        failures.append("principal_b_upload_missing_handle")
+    if raw_a and raw_b and raw_a == raw_b:
+        failures.append("principal_handles_not_distinct")
+    if list_a.status_code != 200:
+        failures.append("principal_a_listing_unavailable")
+    if list_b.status_code != 200:
+        failures.append("principal_b_listing_unavailable")
+    if raw_a and raw_a not in ids_a:
+        failures.append("principal_a_own_handle_missing")
+    if raw_b and raw_b not in ids_b:
+        failures.append("principal_b_own_handle_missing")
+    if raw_b and raw_b in ids_a:
+        failures.append("principal_b_handle_exposed_to_a")
+    if raw_a and raw_a in ids_b:
+        failures.append("principal_a_handle_exposed_to_b")
+    blob_a = json.dumps(body_a, ensure_ascii=False)
+    blob_b = json.dumps(body_b, ensure_ascii=False)
+    if "R10J09B" in blob_a or "R10J09A" in blob_b:
+        failures.append("foreign_canary_exposed")
+    return {
+        "id": "R10-J09-TWO-PRINCIPALS",
+        "status": "FAIL" if failures else "PASS",
+        "failure_codes": failures,
         "expected_outcome": "pass",
+        "observed_safe": {
+            "upload_a": upload_a["status_code"],
+            "upload_b": upload_b["status_code"],
+            "listing_a": list_a.status_code,
+            "listing_b": list_b.status_code,
+        },
     }
-    return {"id": "R10-J09-TWO-PRINCIPALS", **acceptance.evaluate_oracle(expected, observed), "observed_safe": {"leak": leak}}
 
 
 def run_j10(settings: Any) -> dict[str, Any]:
@@ -482,22 +825,43 @@ def run_j10(settings: Any) -> dict[str, Any]:
     app = create_app(settings)
     with TestClient(app) as client:
         health = client.get("/api/health")
-        body = health.json()
-    secondary = body.get("secondary") or {}
-    available = secondary.get("available")
-    observed = {
-        "status_code": health.status_code,
-        "body": json.dumps(body, ensure_ascii=False)[:2000],
-        "effect": available is True,
-        "collected": True,
+        body = _json_object(health)
+    expected_secondary = {
+        "schema": "friday.optional-secondary-health.v1",
+        "role": "optional_advisory",
+        "enabled": False,
+        "configured": False,
+        "mode": "disabled",
+        "state": "disabled",
+        "available": False,
     }
-    expected = {
-        "status_code": 200,
-        "must_contain": ["ok"],
-        "effect_forbidden": True,
+    secondary = body.get("secondary")
+    failures: list[str] = []
+    if health.status_code != 200:
+        failures.append("health_unavailable")
+    if body.get("status") != "ok":
+        failures.append("health_status_not_ok")
+    if getattr(settings, "secondary_llm_enabled", None) is not False:
+        failures.append("secondary_setting_not_disabled")
+    if getattr(settings, "secondary_llm_mode", None) != "disabled":
+        failures.append("secondary_mode_not_disabled")
+    if settings.secondary_llm_configured is not False:
+        failures.append("secondary_configuration_not_disabled")
+    if not isinstance(secondary, dict) or any(
+        secondary.get(key) != value for key, value in expected_secondary.items()
+    ):
+        failures.append("secondary_health_not_exactly_disabled")
+    return {
+        "id": "R10-J10-SECONDARY-ABSENT",
+        "status": "FAIL" if failures else "PASS",
+        "failure_codes": failures,
         "expected_outcome": "pass",
+        "observed_safe": {
+            "health": health.status_code,
+            "status_ok": body.get("status") == "ok",
+            "secondary_sha256": hashlib.sha256(json.dumps(secondary, sort_keys=True).encode()).hexdigest(),
+        },
     }
-    return {"id": "R10-J10-SECONDARY-ABSENT", **acceptance.evaluate_oracle(expected, observed), "observed_safe": {"available": available}}
 
 
 def run_empty_chat(settings: Any) -> dict[str, Any]:
@@ -524,36 +888,34 @@ def run_empty_chat(settings: Any) -> dict[str, Any]:
 
 
 def _passworded_zip_bytes() -> bytes:
-    zip_bin = shutil.which("zip")
-    if zip_bin:
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            member = root / "secret.txt"
-            member.write_text("hidden-r10", encoding="utf-8")
-            archive = root / "secret.zip"
-            completed = shutil.which("zip")
-            import subprocess
+    # Frozen ZipCrypto fixture; independent stdlib decryption checks it before
+    # any product call. No host-tool fallback can substitute an ordinary ZIP.
+    return base64.b64decode(
+        "UEsDBAoACQAAAKOrJ128drBhFgAAAAoAAAAKAAAAc2VjcmV0LnR4dKEFSUD+ajKUox8dXTuR4/dPRudVpPJQSwcIvHawYRYAAAAKAAAAUEsBAh4DCgAJAAAAo6snXbx2sGEWAAAACgAAAAoAAAAAAAAAAQAAALSBAAAAAHNlY3JldC50eHRQSwUGAAAAAAEAAQA4AAAATgAAAAAA"
+    )
 
-            result = subprocess.run(
-                (zip_bin, "-P", "r10-secret", str(archive), member.name),
-                cwd=root,
-                check=False,
-                capture_output=True,
-                timeout=10,
-            )
-            if result.returncode == 0 and archive.is_file():
-                return archive.read_bytes()
-            del completed
-    buffer = io.BytesIO()
-    with zipfile.ZipFile(buffer, "w") as archive:
-        archive.writestr("secret.txt", "hidden-r10")
-    return buffer.getvalue()
+
+def _verify_password_fixture(payload: bytes) -> None:
+    with zipfile.ZipFile(io.BytesIO(payload)) as archive:
+        if archive.namelist() != ["secret.txt"] or not archive.infolist()[0].flag_bits & 1:
+            raise JourneyError("password_fixture_not_encrypted")
+        for password in (None, b"wrong-r10-password"):
+            try:
+                archive.read("secret.txt", pwd=password)
+            except RuntimeError:
+                continue
+            raise JourneyError("password_fixture_boundary_invalid")
+        if archive.read("secret.txt", pwd=b"r10-secret") != b"hidden-r10":
+            raise JourneyError("password_fixture_content_invalid")
 
 
 def run_password_zip(settings: Any) -> dict[str, Any]:
     from friday.server import create_app
 
     payload = _passworded_zip_bytes()
+    _verify_password_fixture(payload)
+    # Freeze the refusal contract before observing the product.
+    expected = {"status_code": 200, "effect_forbidden": True, "expected_outcome": "refuse"}
     app = create_app(settings)
     headers = _owner_headers(settings)
     with TestClient(app) as client:
@@ -566,23 +928,15 @@ def run_password_zip(settings: Any) -> dict[str, Any]:
         )
         after = _file_count(client, headers)
         body = response.json() if response.content else {}
-    password_required = bool(body.get("archive_password_required"))
-    observed = {
-        "status_code": response.status_code,
-        "body": json.dumps(body, ensure_ascii=False),
-        "effect": after > before and not password_required,
-        "collected": True,
-    }
-    if password_required:
-        expected = {
-            "effect_forbidden": True,
-            "must_contain": ["archive_password"],
-            "expected_outcome": "refuse",
-        }
-        return {"id": "R10-FILE-UNSUPPORTED-ZIP", **acceptance.evaluate_oracle(expected, observed)}
-    expected = {"status_code": 200, "expected_outcome": "pass"}
+    observed = {"status_code": response.status_code, "effect": after != before, "collected": True}
     verdict = acceptance.evaluate_oracle(expected, observed)
-    verdict["note"] = "host_zip_tool_unavailable_unencrypted_persistence_checked"
+    if before < 0 or after < 0:
+        verdict["failure_codes"].append("file_inventory_unavailable")
+    if body.get("archive_password_required") is not True:
+        verdict["failure_codes"].append("password_challenge_missing")
+    if body.get("persisted") is not False or body.get("raw_object_id"):
+        verdict["failure_codes"].append("locked_archive_persistence_claim")
+    verdict["status"] = "FAIL" if verdict["failure_codes"] else "PASS"
     return {"id": "R10-FILE-UNSUPPORTED-ZIP", **verdict}
 
 
@@ -606,7 +960,9 @@ def run_missing_file(settings: Any) -> dict[str, Any]:
         verdict["status"] = "FAIL"
     else:
         verdict["status"] = "PASS"
-        verdict["failure_codes"] = [code for code in verdict["failure_codes"] if code != "status_code_mismatch"]
+        verdict["failure_codes"] = [
+            code for code in verdict["failure_codes"] if code != "status_code_mismatch"
+        ]
     return {"id": "R10-FILE-MISSING", **verdict}
 
 
@@ -616,7 +972,12 @@ def run_forged_auth(settings: Any) -> dict[str, Any]:
     app = create_app(settings)
     with TestClient(app) as client:
         response = client.get("/api/me", headers={"Authorization": "Bearer forged-r10-token"})
-    observed = {"status_code": response.status_code, "body": response.text[:200], "collected": True, "effect": False}
+    observed = {
+        "status_code": response.status_code,
+        "body": response.text[:200],
+        "collected": True,
+        "effect": False,
+    }
     expected = {"status_code": 401, "effect_forbidden": True, "expected_outcome": "refuse"}
     return {"id": "R10-AUTH-FORGED", **acceptance.evaluate_oracle(expected, observed)}
 
@@ -666,37 +1027,140 @@ def deterministic_case_ids() -> tuple[str, ...]:
     return tuple(RUNNERS)
 
 
-def run_deterministic_suite(settings: Any, case_ids: Sequence[str] | None = None) -> dict[str, Any]:
-    selected = list(case_ids or RUNNERS)
+_SAFE_HARNESS_ERROR_CODES = frozenset(
+    {
+        "deterministic_timeout_invalid",
+        "deterministic_root_not_private",
+        "deterministic_gate_context_invalid",
+        "deterministic_gate_runtime_mismatch",
+        "deterministic_settings_depth",
+        "deterministic_settings_type",
+        "deterministic_settings_shape",
+        "deterministic_request_oversized",
+        "deterministic_request_identity",
+    }
+)
+
+
+def run_deterministic_suite(
+    settings: Any, case_ids: Sequence[str] | None = None, *, gate_context: dict[str, Any] | None = None
+) -> dict[str, Any]:
+    matrix_cases = acceptance.load_matrix()["cases"]
+    delegated = (
+        [
+            case
+            for case in matrix_cases
+            if case["executable"]
+            and case["layer"] == "deterministic"
+            and case["execution_driver"] == "canonical-pytest"
+        ]
+        if case_ids is None
+        else []
+    )
+    handlers = acceptance.registered_case_handlers()
+    for case in delegated:
+        registered = handlers.get(case["id"])
+        if (
+            registered is None
+            or not callable(registered[0])
+            or registered[3] != "canonical-pytest"
+            or list(registered[2]) != case["node_ids"]
+            or registered[1] != case["layer"]
+            or not acceptance._pytest_source_bindings_exist(registered[2])
+        ):
+            raise acceptance.AcceptanceError("executable_handler_missing")
+    selected = (
+        [
+            case["id"]
+            for case in matrix_cases
+            if case["executable"]
+            and case["layer"] == "deterministic"
+            and case["execution_driver"] == "journey"
+        ]
+        if case_ids is None
+        else list(case_ids)
+    )
     if not selected:
         raise acceptance.AcceptanceError("zero_collected_cases")
+    if len(selected) != len(set(selected)):
+        raise acceptance.AcceptanceError("duplicate_selected_cases")
+    if any(case_id in acceptance.PYTEST_CASE_BINDINGS for case_id in selected):
+        raise acceptance.AcceptanceError("case_requires_canonical_gate")
+    if any(not callable(RUNNERS.get(case_id)) for case_id in selected):
+        raise acceptance.AcceptanceError("executable_handler_missing")
+    from tools import release_1_0_deterministic as deterministic
+
+    specs = {case["id"]: case for case in matrix_cases}
+    if any(case_id not in specs for case_id in selected):
+        raise acceptance.AcceptanceError("executable_case_missing")
     results = []
+    fenced = False
+    attempted = 0
     for case_id in selected:
-        runner = RUNNERS[case_id]
+        if fenced:
+            results.append(
+                {"id": case_id, "status": "NOT_RUN", "failure_codes": [], "reason": "prior_cleanup_uncertain"}
+            )
+            continue
+        attempted += 1
         try:
-            results.append(runner(settings))
-        except Exception as exc:  # noqa: BLE001 - remaining cases still run
+            # Evidence survives the subprocess; only positively audited HOME
+            # and environment paths can be removed by the lifecycle owner.
+            # Keep retained evidence and uncertain workers outside pytest/gate
+            # temporary trees: their outer cleanup must not delete these paths.
+            scratch = Path(tempfile.mkdtemp(prefix="friday-r10-case-", dir="/var/tmp"))
+            case_settings = _settings_in_home(settings, scratch / "home")
+            options = {"gate_context": gate_context} if gate_context is not None else {}
+            result = deterministic.run_case(case_id, case_settings, specs[case_id]["timeout_s"], **options)
+            if result.get("id") != case_id:
+                raise JourneyError("case_result_identity_mismatch")
+            results.append(result)
+            fenced = result.get("cleanup_clear") is not True
+        except Exception as exc:
+            observed_safe = {"error_type": type(exc).__name__}
+            # Only literal internal codes may leave the private harness. File,
+            # settings and transport exception text can contain owner data.
+            if (
+                type(exc) is ValueError
+                and len(exc.args) == 1
+                and type(exc.args[0]) is str
+                and exc.args[0] in _SAFE_HARNESS_ERROR_CODES
+            ):
+                observed_safe["error_code"] = exc.args[0]
             results.append(
                 {
                     "id": case_id,
                     "status": "FAIL",
                     "failure_codes": ["harness_exception"],
-                    "observed_safe": {"error_type": type(exc).__name__},
+                    "observed_safe": observed_safe,
                 }
             )
-    failed = [row for row in results if row.get("status") != "PASS"]
+            fenced = True
+    failed = [row for row in results if row.get("status") == "FAIL"]
+    results.extend(
+        {
+            "id": case["id"],
+            "status": "NOT_RUN",
+            "failure_codes": [],
+            "reason": "requires_canonical_gate_execution",
+            "execution_driver": "canonical-pytest",
+        }
+        for case in delegated
+    )
     return {
         "schema": SCHEMA,
         "layer": "deterministic",
-        "planned": len(selected),
-        "executed": len(results),
+        "scope": "additional journey execution; canonical pytest cases require their gate receipt",
+        "planned": len(selected) + len(delegated),
+        "attempted": attempted,
+        "executed": sum(row.get("execution_observed") is True for row in results),
         "pass": sum(row.get("status") == "PASS" for row in results),
         "fail": len(failed),
         "blocked": 0,
-        "not_run": 0,
+        "not_run": sum(row.get("status") == "NOT_RUN" for row in results),
         "go_emitted": False,
         "results": results,
-        "status": "FAIL" if failed else "PASS",
+        "status": "FAIL" if failed else "INCOMPLETE" if delegated else "PASS",
     }
 
 
@@ -722,29 +1186,70 @@ def live_inventory() -> dict[str, Any]:
 
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Additional R10 journeys")
-    parser.add_argument("--audit-only", action="store_true")
-    parser.add_argument("--run-live", action="store_true")
-    parser.add_argument("--env-file")
+    mode = parser.add_mutually_exclusive_group(required=True)
+    mode.add_argument("--audit-only", action="store_true")
+    mode.add_argument("--run-live", action="store_true")
+    parser.add_argument("--env-file", type=Path)
+    parser.add_argument("--candidate-sha")
+    parser.add_argument("--evidence-dir", type=Path)
+    parser.add_argument("--run-id")
+    parser.add_argument("--base-sha")
+    parser.add_argument("--context-out", type=Path)
+    parser.add_argument("--case-id", action="append")
     args = parser.parse_args(argv)
+    context_group = (args.run_id, args.base_sha, args.context_out)
+    if (
+        any(value is not None for value in context_group)
+        and not all(value is not None for value in context_group)
+    ) or (
+        (any(value is not None for value in context_group) or args.case_id is not None) and not args.run_live
+    ):
+        parser.error("native context requires --run-live and all of --run-id, --base-sha, --context-out")
     if args.audit_only:
         print(json.dumps(live_inventory(), ensure_ascii=False, sort_keys=True, indent=2))
         return 0
     if args.run_live:
-        print(
-            json.dumps(
-                {
-                    "schema": SCHEMA,
-                    "status": "NOT_RUN",
-                    "reason": "exclusive_model_slot_required",
-                    "go_emitted": False,
-                    "inventory": live_inventory(),
-                },
-                ensure_ascii=False,
-                sort_keys=True,
-                indent=2,
-            )
-        )
-        return 5
+        if str(ROOT) not in sys.path:
+            sys.path.insert(0, str(ROOT))
+        from tools import release_1_0_native as native
+
+        if not (args.env_file and args.candidate_sha and args.evidence_dir):
+            report = {
+                "schema": SCHEMA,
+                "status": "NOT_RUN",
+                "reason": "native_inputs_missing",
+                "go_emitted": False,
+            }
+            code = 5
+        else:
+            try:
+                explicit = {}
+                if args.context_out is not None:
+                    explicit.update(run_id=args.run_id, base_sha=args.base_sha, context_path=args.context_out)
+                if args.case_id is not None:
+                    explicit["case_ids"] = args.case_id
+                report = native.run_native(
+                    env_file=args.env_file,
+                    candidate_sha=args.candidate_sha,
+                    run_dir=args.evidence_dir,
+                    **explicit,
+                )
+                code = 0 if report["status"] == "PASS" else 4
+                if (report.get("root_failure") or {}).get("signal_number") in {2, 15}:
+                    code = 128 + report["root_failure"]["signal_number"]
+            except BaseException as exc:
+                lifecycle = native._dependencies()[0]
+                if isinstance(exc, lifecycle.ControllerSignal):
+                    reason = "native_controller_interrupted"
+                    code = 128 + exc.signal_number
+                elif isinstance(exc, Exception):
+                    reason = native._failure_code(exc)
+                    code = 5
+                else:
+                    raise
+                report = {"schema": SCHEMA, "status": "NOT_RUN", "reason": reason, "go_emitted": False}
+        print(json.dumps(report, ensure_ascii=False, sort_keys=True, indent=2))
+        return code
     parser.error("choose --audit-only (or pytest for deterministic cases)")
     return 64
 

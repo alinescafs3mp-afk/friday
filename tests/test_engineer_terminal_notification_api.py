@@ -3,22 +3,67 @@ from __future__ import annotations
 import base64
 import hashlib
 import json
+import time
+import uuid
 from dataclasses import replace
 from types import SimpleNamespace
 from typing import Any
 
 import pytest
 from fastapi import HTTPException
+from fastapi.testclient import TestClient
 from starlette.requests import Request
 
 from friday.api.notifications import notification_artifact, notifications_pending
 from friday.organs.engineer import EngineerOrgan
+from friday.organs.engineer.command_tools import provision_engineer_command_store
 from friday.organs.engineer.publication import exact_generated_file_batch
 from friday.organs.engineer.terminal_delivery import (
     TERMINAL_NOTIFICATION_KIND,
     stage_terminal_archive,
 )
 from friday.permissions import LEGACY_OWNER_USER_ID, AuthorizationService
+from friday.security import sign_bridge_request
+from friday.server import create_app
+
+
+def _engineer_http_settings(settings: Any):
+    from pathlib import Path
+
+    key = Path(settings.engineer_command_key_file)
+    key.parent.mkdir(parents=True, exist_ok=True)
+    key.write_bytes(b"K" * 32)
+    key.chmod(0o600)
+    Path(settings.engineer_command_store_dir).mkdir(parents=True, exist_ok=True)
+    enabled = replace(settings, engineer_mode_enabled=True, engineer_command_enabled=True)
+    provision_engineer_command_store(enabled)
+    return enabled
+
+
+def _bridge(client: TestClient, settings: Any, method: str, path: str, body: bytes = b""):
+    timestamp = int(time.time())
+    nonce = uuid.uuid4().hex
+    signer = "5001"
+    headers = {
+        "X-Friday-Timestamp": str(timestamp),
+        "X-Friday-User": signer,
+        "X-Friday-Chat": signer,
+        "X-Friday-Nonce": nonce,
+        "X-Friday-Signature": sign_bridge_request(
+            settings.telegram_bridge_secret,
+            timestamp=timestamp,
+            method=method,
+            path=path,
+            external_user_id=signer,
+            chat_id=signer,
+            nonce=nonce,
+            body=body,
+        ),
+    }
+    if method == "GET":
+        return client.get(path, headers=headers)
+    headers["Content-Type"] = "application/json"
+    return client.post(path, content=body, headers=headers)
 
 
 def _stage(storage: Any, settings: Any, *, chat_id: str = "5001"):
@@ -88,50 +133,85 @@ def _authority(storage: Any) -> AuthorizationService:
     return authorization
 
 
-@pytest.mark.asyncio
-async def test_pending_projects_no_raw_handle_and_artifact_is_exact(settings, storage) -> None:
-    enabled = replace(settings, engineer_mode_enabled=True, engineer_command_enabled=True)
-    staged, payload = _stage(storage, enabled)
-    request = _request(storage, enabled, _authority(storage))
+def test_pending_projects_no_raw_handle_and_artifact_is_exact(settings) -> None:
+    enabled = _engineer_http_settings(settings)
+    with TestClient(create_app(enabled)) as client:
+        storage = client.app.state.storage
+        staged, payload = _stage(storage, enabled)
+        job_id = "1" * 32
+        receipt_mac = "2" * 64
+        chat_id = "5001"
+        digest = hashlib.sha256(payload).hexdigest()
+        # Frozen from the fixture, not from production projection.
+        expected_dedup = f"engineer-terminal:archive:{job_id}:{receipt_mac}"
+        expected_caption = f"Engineer-задание {job_id} завершено. Проверенный архив результата приложен."
+        expected_filename = f"engineer-command-{job_id}.zip"
+        expected_path = f"/api/notifications/{staged.notification_id}/artifact"
+        expected_artifact = {
+            "filename": expected_filename,
+            "mime_type": "application/zip",
+            "size_bytes": len(payload),
+            "sha256": digest,
+            "path": expected_path,
+        }
+        expected_legacy_item = {
+            "id": staged.notification_id,
+            "chat_id": chat_id,
+            "kind": TERMINAL_NOTIFICATION_KIND,
+            "dedup_key": expected_dedup,
+            "caption": expected_caption,
+            "artifact": expected_artifact,
+        }
+        expected_status = {
+            "schema": "friday.telegram-status.v1",
+            "operation_id": f"engineer:{job_id}",
+            "revision": (1 << 63) - 1,
+            "terminal": True,
+            "stage": "completed",
+        }
+        assert staged.dedup_key == expected_dedup
+        assert payload == b"PK\x03\x04exact-terminal-archive"
 
-    legacy = await notifications_pending(request, limit=20)
-    assert set(legacy["items"][0]) == {
-        "id",
-        "chat_id",
-        "kind",
-        "dedup_key",
-        "caption",
-        "artifact",
-    }
-    pending = await notifications_pending(request, limit=20, status_messages=True)
-    assert pending["count"] == 1
-    item = pending["items"][0]
-    assert set(item) == {
-        "id",
-        "chat_id",
-        "kind",
-        "dedup_key",
-        "caption",
-        "artifact",
-        "status_update",
-    }
-    assert set(item["artifact"]) == {"filename", "mime_type", "size_bytes", "sha256", "path"}
-    assert item["id"] == staged.notification_id
-    assert item["kind"] == TERMINAL_NOTIFICATION_KIND
-    assert item["artifact"]["sha256"] == hashlib.sha256(payload).hexdigest()
-    assert item["status_update"] == {
-        "schema": "friday.telegram-status.v1",
-        "operation_id": f"engineer:{'1' * 32}",
-        "revision": (1 << 63) - 1,
-        "terminal": True,
-        "stage": "completed",
-    }
-    assert "raw_" not in json.dumps(item, sort_keys=True)
-    assert "content_base64" not in json.dumps(item, sort_keys=True)
+        legacy = _bridge(client, enabled, "GET", "/api/notifications/pending?limit=20")
+        assert legacy.status_code == 200, legacy.text
+        legacy_body = legacy.json()
+        assert legacy_body["count"] == 1
+        assert legacy_body["items"] == [expected_legacy_item]
+        pending = _bridge(
+            client,
+            enabled,
+            "GET",
+            "/api/notifications/pending?limit=20&status_messages=true",
+        )
+        assert pending.status_code == 200, pending.text
+        pending_body = pending.json()
+        assert pending_body["count"] == 1
+        item = pending_body["items"][0]
+        assert pending_body["items"] == [{**expected_legacy_item, "status_update": expected_status}]
+        dumped = json.dumps(item, sort_keys=True)
+        assert "raw_" not in dumped
+        assert "content_base64" not in dumped
 
-    response = await notification_artifact(staged.notification_id, request)
-    assert response.body == payload
-    assert response.headers["x-friday-sha256"] == hashlib.sha256(payload).hexdigest()
+        advertised = item["artifact"]["path"]
+        assert advertised == expected_path
+        artifact = _bridge(client, enabled, "GET", advertised)
+        assert artifact.status_code == 200, artifact.text
+        assert artifact.content == payload
+        assert artifact.headers["x-friday-sha256"] == digest
+
+        ack_payload = json.dumps({"sent": [staged.notification_id]}).encode()
+        ack = _bridge(client, enabled, "POST", "/api/notifications/ack", ack_payload)
+        assert ack.status_code == 200, ack.text
+        state_ids = ack.json()["state_ids"]
+        assert state_ids["sent"] == [staged.notification_id]
+        row = storage.execute(
+            "SELECT status FROM outbound_notifications WHERE id=?",
+            (staged.notification_id,),
+        ).fetchone()
+        assert row is not None and row["status"] == "sent"
+        after = _bridge(client, enabled, "GET", "/api/notifications/pending?limit=20")
+        assert after.status_code == 200, after.text
+        assert staged.notification_id not in {entry["id"] for entry in after.json()["items"]}
 
 
 @pytest.mark.asyncio

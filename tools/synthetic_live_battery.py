@@ -18,6 +18,7 @@ import base64
 import binascii
 import concurrent.futures
 import contextlib
+import csv
 import ctypes
 import errno
 import hashlib
@@ -50,6 +51,11 @@ from html.parser import HTMLParser
 from pathlib import Path
 from typing import Any, Protocol
 from urllib.parse import quote, unquote, urlsplit
+
+try:
+    from tools import synthetic_live_b09_evidence as b09_evidence
+except ModuleNotFoundError:  # direct ``tools/synthetic_live_battery.py`` execution
+    import synthetic_live_b09_evidence as b09_evidence
 
 ROOT = Path(__file__).resolve().parents[1]
 MANIFEST_PATHS = {
@@ -777,6 +783,40 @@ _A09_04_RESULT_DEPENDS_ON_CODE_RELATION = (
     r"(?:результат|итог|ответ)(?:\s+(?:проверки|теста|прогона))?\s+зависит)"
     r"\s+только\s+от\s+(?:(?:проверяемого|тестируемого|тестового)\s+)?кода"
     r"\.?\s*\Z"
+)
+# Task-faithful A09-04 extra path: isolated env + no outside influence
+# + stable/predictable results.  Prompt asks one sentence on the benefit of
+# an isolated test environment; "world" is not uniquely required.  Code-only
+# and mutual-test wording remain sufficient owned relations above.
+_A09_04_EXTERNAL_WORLD = r"(?:внешн\w*\s+(?:мир|фактор|зависимост)\w*)"
+_A09_04_NO_EXTERNAL_WORLD_INFLUENCE = (
+    rf"(?:без\s+влияни\w*\s+(?:со\s+стороны\s+)?{_A09_04_EXTERNAL_WORLD}|"
+    rf"(?:исключа|предотвращ|устраня)\w*\s+влияни\w*\s+"
+    rf"(?:со\s+стороны\s+)?{_A09_04_EXTERNAL_WORLD}|"
+    rf"{_A09_04_EXTERNAL_WORLD}[^.!?\n]{{0,32}}\bне\s+влия\w*)"
+)
+# Task-faithful extension: external factors/deps or random data/factors
+# excluded by the isolated environment, yielding stable/reproducible results.
+_A09_04_EXTERNAL_FACTOR_OR_RANDOM_DATA = (
+    r"(?:внешн\w*\s+(?:мир|фактор|зависимост)\w*|случайн\w*\s+(?:фактор|данн)\w*)"
+)
+_A09_04_NO_EXTERNAL_FACTOR_OR_RANDOM_DATA = (
+    rf"(?:"
+    rf"(?:исключ|предотвращ|устраня)\w*\s+(?:влияни\w*\s+)?"
+    rf"{_A09_04_EXTERNAL_FACTOR_OR_RANDOM_DATA}|"
+    rf"{_A09_04_EXTERNAL_FACTOR_OR_RANDOM_DATA}[^.!?\n]{{0,32}}"
+    r"\bне\s+(?:влия|искажа|определя)\w*"
+    r")"
+)
+_A09_04_STABLE_OR_PREDICTABLE_RESULT = (
+    r"(?:"
+    r"\bобеспеч\w*[^.!?\n]{0,24}\b(?:стабил|предсказ)\w*"
+    r"[^.!?\n]{0,40}\b(?:результат|итог|ответ)\w*|"
+    r"\b(?:стабил|предсказ|воспроизв)\w*[^.!?\n]{0,24}"
+    r"\b(?:результат|итог|ответ)\w*|"
+    r"\b(?:результат|итог|ответ)\w*[^.!?\n]{0,24}"
+    r"\b(?:стабил|предсказ|воспроизв)\w*"
+    r")"
 )
 _A09_06_RESILIENCE_RELATION = (
     r"\A"
@@ -4988,8 +5028,20 @@ _A09_14_PREVENT_RESIDUE_INFLUENCE = (
     r"не\s+(?:допуска|позволя)\w*|не\s+да[её]т\w*)"
     r"(?![^.!?\n]{0,96}\b(?:не|ни)\s+(?:влияни|воздейств)\w*)"
     r"[^.!?\n]{0,96}"
-    r"\b(?:влияни|воздейств)\w*\s+"
-    r"\b(?:остат|след|накоп|загряз|перенос|предыдущ|прошл|ранн|состояни)\w*"
+    r"\b(?:влияни|воздейств)\w*"
+    r"(?:"
+    r"\s+(?:остат|след|накоп|загряз|перенос|предыдущ|прошл|ранн|состояни)\w*"
+    r"|"
+    r"[^.!?\n]{0,24}\b(?:данн|состояни)\w*"
+    r"[^.!?\n]{0,32}\b(?:оставш|остал|остат|след)\w*"
+    r"[^.!?\n]{0,16}\b(?:от|из)\s+"
+    r"\b(?:предыдущ|прошл|ранн)\w*"
+    rf"\s+{_A09_14_RUN_SCOPE}"
+    r"|"
+    r"[^.!?\n]{0,24}\bданн\w*[^.!?\n]{0,24}"
+    r"\b(?:предыдущ|прошл|ранн)\w*"
+    rf"\s+{_A09_14_RUN_SCOPE}"
+    r")"
 )
 _A09_14_OWNED_FRESH_DATABASE_RELATION = (
     rf"{_A09_14_EACH_RUN_NEW_DATABASE}[^.!?\n]{{0,32}}"
@@ -5011,7 +5063,7 @@ _A09_14_LIVE_FRESH_DATABASE_RELATION = (
     rf"{_A09_14_EACH_RUN_NEW_DATABASE}[^.!?\n]{{0,32}}"
     r"\b(?:чтобы|для\s+того\s+чтобы)\b[^.!?\n]{0,32}"
     rf"(?:{_A09_14_PREVENT_RESIDUE_INFLUENCE}|{_A09_14_PRIOR_TEST_RESULT_RELATION})"
-    r"\.[\s\S]{0,720}\Z"
+    r"[.:][\s\S]{0,720}\Z"
 )
 _A09_14_SEPARATE_RUN_DATABASE_RELATION = (
     r"\A\s*чтобы\s+"
@@ -5025,6 +5077,26 @@ _A09_14_SEPARATE_RUN_DATABASE_RELATION = (
     r"(?:данн|состояни|изменени|результат)\w*[^.!?\n]{0,64}"
     r"\b(?:предыдущ|прошл|ранн)\w*\s+"
     rf"{_A09_14_RUN_SCOPE}[^.!?\n]{{0,160}}\.?\s*\Z"
+)
+# Mutual non-influence of run results is equivalent to exclude-previous for
+# the asked question; leftover counterfactuals are handled in the predicate.
+_A09_14_MUTUAL_RESULT_NONINFLUENCE = (
+    r"(?:результат|итог|ответ|проход|тест|прогон|запуск)\w*"
+    r"[^.!?\n]{0,32}"
+    r"(?:не\s+влия\w*\s+друг\s+на\s+друга|"
+    r"независим\w*\s+друг\s+от\s+друга)"
+)
+_A09_14_LIVE_MUTUAL_NONINFLUENCE_RELATION = (
+    r"\A\s*"
+    rf"{_A09_14_EACH_RUN_NEW_DATABASE}[^.!?\n]{{0,32}}"
+    r"\b(?:чтобы|для\s+того\s+чтобы)\b[^.!?\n]{0,48}"
+    rf"{_A09_14_MUTUAL_RESULT_NONINFLUENCE}"
+)
+_A09_14_MAIN_VERB_HEDGE = (
+    rf"\bкажд\w*[^,;.!?\n]{{0,24}}\b{_A09_14_RUN_SCOPE}"
+    r"[^,;.!?\n]{0,32}\bможет\s+"
+    r"(?:получа|созда|использу|выделя|поднима|открыва|инициализ|"
+    r"разворач|назнача)\w*"
 )
 _A09_14_AFFIRMATIVE_FRESH_DATABASE = (
     r"\A"
@@ -5423,8 +5495,194 @@ def _a09_14_relation_graph(message: str) -> bool:
     )
 
 
+def _a09_split_sentences(text: str) -> list[str]:
+    return [part.strip() for part in re.split(r"(?<=[.!?])\s+", text.strip()) if part.strip()]
+
+
+def _a09_04_later_noise_contradicts_result(message: str) -> bool:
+    """A later affirmative outside-noise claim cannot reverse the same result."""
+
+    sentences = _a09_split_sentences(message.casefold())
+    noise = r"\b(?:внешн\w*\s+фактор\w*|случайн\w*\s+данн\w*)"
+    effect = r"\b(?:влия|искажа|определя|наруша)\w*"
+    same_result = (
+        r"\b(?:эт(?:от|ого|ому|им)\s+(?:результат|итог|ответ)\w*|"
+        r"(?:результат|итог|ответ)\w*\s+"
+        r"эт(?:ой|ого|ому|им|их)\s+(?:проверк|тест|прогон|окружени)\w*)"
+    )
+    for sentence in sentences[1:]:
+        actor = re.search(noise, sentence, re.IGNORECASE)
+        influence = re.search(effect, sentence, re.IGNORECASE)
+        if actor is None or influence is None or influence.start() < actor.start():
+            continue
+        prefix = sentence[max(actor.end(), influence.start() - 16) : influence.start()]
+        if re.search(r"\b(?:не|ни)\s*$", prefix, re.IGNORECASE):
+            continue
+        if re.search(same_result, sentence[influence.end() :], re.IGNORECASE):
+            return True
+    return False
+
+
+def _a09_04_external_world_stable_relation(message: str) -> bool:
+    """Isolated env excludes outside noise and yields stable results."""
+
+    folded = message.casefold()
+    if _p09_non_authoritative(_p09_words(message)) or re.search(
+        _A09_AFFIRMATIVE_CLAIM_BLOCKER, folded, re.IGNORECASE
+    ):
+        return False
+    if re.search(r"\bне\s+изолир|\bнеизолир|\bнеизоляц", folded, re.IGNORECASE):
+        return False
+    if re.search(r"\bне\s+без\b", folded, re.IGNORECASE):
+        return False
+    if re.search(
+        r"\b(?:не|ни)\s+(?:исключ|предотвращ|устраня)\w*",
+        folded,
+        re.IGNORECASE,
+    ):
+        return False
+    if re.search(
+        r"\bне\s+(?:да[её]т|обеспеч|гарант|позвол)\w*[^.!?\n]{0,40}"
+        r"\b(?:предсказ|стабил|воспроизв)\w*",
+        folded,
+        re.IGNORECASE,
+    ):
+        return False
+    if re.search(
+        rf"{_A09_04_ISOLATED_SUBJECT}[^.!?\n]{{0,40}}\bможет\w*",
+        folded,
+        re.IGNORECASE,
+    ):
+        return False
+    for sentence in _a09_split_sentences(folded):
+        if not re.search(rf"\b{_A09_04_ISOLATED_SUBJECT}\b", sentence, re.IGNORECASE):
+            continue
+        stable = re.search(_A09_04_STABLE_OR_PREDICTABLE_RESULT, sentence, re.IGNORECASE)
+        if stable is None:
+            continue
+        if re.search(_A09_04_NO_EXTERNAL_WORLD_INFLUENCE, sentence, re.IGNORECASE):
+            return True
+        exclusion = re.search(_A09_04_NO_EXTERNAL_FACTOR_OR_RANDOM_DATA, sentence, re.IGNORECASE)
+        if exclusion is None:
+            continue
+        affirmative_noise = re.search(
+            rf"{_A09_04_EXTERNAL_FACTOR_OR_RANDOM_DATA}[^.!?\n]{{0,32}}"
+            r"\b(?:влия|искажа|определя)\w*",
+            sentence,
+            re.IGNORECASE,
+        )
+        negated_noise = re.search(
+            rf"{_A09_04_EXTERNAL_FACTOR_OR_RANDOM_DATA}[^.!?\n]{{0,16}}"
+            r"\bне\s+(?:влия|искажа|определя)\w*",
+            sentence,
+            re.IGNORECASE,
+        )
+        if affirmative_noise is not None and negated_noise is None:
+            continue
+        relation = sentence[min(exclusion.start(), stable.start()) : max(exclusion.end(), stable.end())]
+        if re.search(r"\b(?:а|но|зато)\b", relation, re.IGNORECASE):
+            continue
+        if not re.search(
+            r"\b(?:обеспеч|гарант|да[её]т|дела|поэтому|благодаря)\w*|"
+            r"\bтем\s+самым\b",
+            relation,
+            re.IGNORECASE,
+        ):
+            continue
+        return True
+    return False
+
+
+_A09_04_ASSET_MUTATION = re.compile(r"\b(?:поврежда|изменя|затрагива)\w*", re.IGNORECASE)
+_A09_04_DIFFERENT_OBJECT = re.compile(
+    r"\b(?:тестов|изолир|отдельн|друг)\w*\s+"
+    r"(?:копи|баз|систем|сервис|инфраструктур)\w*",
+    re.IGNORECASE,
+)
+
+
+def _a09_04_later_mutates_protected_asset(text: str, relation_end: int, asset: str) -> bool:
+    tail = text[relation_end:]
+    database = re.search(r"\b(?:баз|данн)\w*", asset) is not None
+    kind = r"(?:баз\w*(?:\s+данн\w*)?|данн\w*)" if database else (r"(?:систем\w*|сервис\w*|инфраструктур\w*)")
+    explicit_target = rf"(?:рабоч|основн|боев)\w*\s+{kind}"
+    same_target = rf"(?:ту\s+же\s+|эту\s+)?{explicit_target}"
+    pronoun_target = r"(?:е[её]|его|эту|этот)(?:\s+данн\w*)?"
+    pronoun_bound = True
+    cursor = 0
+    for mutation in _A09_04_ASSET_MUTATION.finditer(tail):
+        if _A09_04_DIFFERENT_OBJECT.search(tail[cursor : mutation.start()]):
+            pronoun_bound = False
+        prefix = tail[max(0, mutation.start() - 12) : mutation.start()]
+        target = tail[mutation.end() : mutation.end() + 96]
+        cursor = mutation.end()
+        if re.search(r"\bне\s+\Z", prefix):
+            continue
+        if re.match(rf"\s+{same_target}\b", target):
+            return True
+        different = re.match(rf"\s+(?:только\s+)?{_A09_04_DIFFERENT_OBJECT.pattern}\b", target)
+        if different is not None:
+            pronoun_bound = False
+            cursor += different.end()
+            continue
+        if pronoun_bound and re.match(rf"\s+{pronoun_target}\b", target):
+            return True
+    return False
+
+
+def _a09_04_working_asset_claim_state(message: str) -> tuple[bool, bool]:
+    folded = message.casefold()
+    working = (
+        r"(?P<asset>(?:стабильност\w*\s+)?(?:рабоч|основн|боев)\w*\s+"
+        r"(?:баз\w*(?:\s+данн\w*)?|систем\w*|сервис\w*|инфраструктур\w*|данн\w*))"
+    )
+    protect = r"\b(?:защища|сохраня|огражда|предохраня)\w*"
+    not_touch = r"\bне\s+(?:затрагива|изменя|поврежда|наруша)\w*"
+    no_risk = r"\bбез\s+риска\s+(?:повреди|наруш|затрон|измен)\w*"
+    isolation = r"\b(?:изолир\w*|песочниц\w*|sandbox\w*)"
+    gap = r"(?:(?!\b(?:поврежда|изменя|затрагива)\w*)[^.!?\n]){0,64}?"
+    if re.search(isolation, folded) is None:
+        return False, False
+    if re.search(r"\bне\s+(?:защища|сохраня|огражда|предохраня)\w*", folded):
+        return False, False
+    found = False
+    for isolated in re.finditer(isolation, folded):
+        isolation_prefix = folded[max(0, isolated.start() - 8) : isolated.start()]
+        if re.search(r"\bне\s+\Z", isolation_prefix):
+            continue
+        suffix = folded[isolated.end() :]
+        terminal = re.search(r"[.!?]", suffix)
+        sentence_end = isolated.end() + terminal.end() if terminal is not None else len(folded)
+        sentence = folded[isolated.start() : sentence_end]
+        relation = re.search(rf"{protect}{gap}{working}", sentence)
+        if relation is None:
+            relation = re.search(rf"{not_touch}{gap}{working}", sentence)
+        if relation is None:
+            relation = re.search(rf"{no_risk}{gap}{working}", sentence)
+        if relation is None:
+            continue
+        claim = sentence[: relation.end()]
+        if re.search(r"\b(?:мог|может|возможн|вероятн)\w*", claim):
+            continue
+        found = True
+        absolute_end = isolated.start() + relation.end()
+        if _a09_04_later_mutates_protected_asset(folded, absolute_end, relation.group("asset")):
+            return True, True
+    return found, False
+
+
+def _a09_04_working_asset_protection(message: str) -> bool:
+    found, contradicted = _a09_04_working_asset_claim_state(message)
+    return found and not contradicted
+
+
 def _a09_04_relation_is_exact(message: str) -> bool:
     folded = message.casefold()
+    if _a09_04_later_noise_contradicts_result(message):
+        return False
+    working_asset_protection, working_asset_contradicted = _a09_04_working_asset_claim_state(message)
+    if working_asset_contradicted:
+        return False
     live_infrastructure_relation = bool(
         re.search(_A09_04_LIVE_INFRASTRUCTURE_RELATION, folded, re.IGNORECASE)
         or re.search(_A09_04_SERVICE_AND_PRIOR_RUN_RELATION, folded, re.IGNORECASE)
@@ -5434,18 +5692,183 @@ def _a09_04_relation_is_exact(message: str) -> bool:
         or re.search(_A09_04_DATABASE_PROTECTION_RELATION, folded, re.IGNORECASE)
         or re.search(_A09_04_RESULT_DEPENDS_ON_CODE_RELATION, folded, re.IGNORECASE)
     )
+    task_faithful = _a09_04_external_world_stable_relation(message) or working_asset_protection
     if ":" not in message and re.search(r"\bзавис\w*\s+только\s+от\b", folded, re.IGNORECASE):
         return (
             live_infrastructure_relation
             or _a09_04_relation_graph(message)
             or _a09_04_affirmative_fallback_relation(message)
+            or task_faithful
         )
     return bool(
         live_infrastructure_relation
         or _a09_04_relation_graph(message)
         or re.search(_A09_04_AFFIRMATIVE_SCOPE, folded, re.IGNORECASE)
         or _a09_04_affirmative_fallback_relation(message)
+        or task_faithful
     )
+
+
+def _a09_unquote_emphasis(message: str) -> str:
+    """Single-word emphasis preserves a claim; a quoted statement does not."""
+
+    for opening, closing in (("«", "»"), ("“", "”"), ("„", "“"), ('"', '"')):
+        message = re.sub(
+            re.escape(opening) + r"([A-Za-zА-Яа-яЁё]+)" + re.escape(closing),
+            r"\1",
+            message,
+        )
+    return message
+
+
+_A09_06_COLLAPSE_MENTION = re.compile(
+    r"(?P<user>\bстолкнут\w*\s+с\s+пол\w*\s+(?:крах|отказ|паралич)\w*)|"
+    r"(?P<asset>\b(?:сервис|систем)\w*[^.!?\n]{0,32}?(?:рухн|крахн|паралич|парализ|умр|погибн)\w*)|"
+    r"(?P<bare>\bполностью\s+(?:не\s+)?(?:рухн|крахн|паралич|парализ)\w*)",
+    re.IGNORECASE,
+)
+_A09_06_COLLAPSE_VERB = re.compile(r"(?:рухн|крахн|паралич|парализ|умр|погибн)\w*", re.IGNORECASE)
+
+
+def _a09_06_has_unnegated_collapse(folded: str) -> bool:
+    """Check polarity for every collapse mention independently."""
+
+    for mention in _A09_06_COLLAPSE_MENTION.finditer(folded):
+        if mention.group("user") is not None:
+            prefix = folded[max(0, mention.start() - 4) : mention.start()]
+            if re.search(r"\bне\s+\Z", prefix, re.IGNORECASE):
+                continue
+            return True
+        phrase = mention.group(0)
+        verbs = list(_A09_06_COLLAPSE_VERB.finditer(phrase))
+        if not verbs:
+            continue
+        prefix = folded[max(0, mention.start() - 4) : mention.start()] + phrase[: verbs[-1].start()]
+        if re.search(r"(?:\bне\s+(?:полностью\s+)?|\bполностью\s+не\s*)\Z", prefix, re.IGNORECASE):
+            continue
+        return True
+    return False
+
+
+def _a09_06_task_faithful_purpose(message: str) -> bool:
+    """Purpose of checking FT: continue or fail-closed under fault.
+
+    Component wording is a fault locus, not a demand for unasked user-data.
+    Incidental parenthetical outcome notes are not a role-word ban.
+    User/report words in parentheses are rejected only as the failing part.
+    """
+
+    folded = _a09_unquote_emphasis(message).casefold()
+    if re.search(
+        r"(?:слома|сбо|откаж|перестанет\s+отвеча)\w*\s*\(\s*"
+        r"(?:пользовател|отчёт|отчет)",
+        folded,
+        re.IGNORECASE,
+    ):
+        return False
+    if re.search(
+        r"\bможет(?:\s+\w+){0,3}\s+(?:быть\s+)?(?:нужн|подтвержд|показыва|проверя)\w*",
+        folded,
+        re.IGNORECASE,
+    ):
+        return False
+    if (
+        re.search(
+            r"\b(?:отказоустойчивост|устойчивост\w*\s+к\s+отказ)\w*",
+            folded,
+            re.IGNORECASE,
+        )
+        is None
+    ):
+        return False
+    if re.search(
+        r"\bне\s+проверя\w*|"
+        r"\bнужн\w*\s+не\s+для\s+того\s*,?\s*чтобы|"
+        r"\bне\s+для\s+того\s*,?\s*чтобы",
+        folded,
+        re.IGNORECASE,
+    ):
+        return False
+    if (
+        re.search(
+            r"(?:проверя\w*|проверк\w*)[^.!?\n]{0,48}\bчтобы\b|"
+            r"\bчтобы\b[^.!?\n]{0,24}\bубед\w*",
+            folded,
+            re.IGNORECASE,
+        )
+        is None
+    ):
+        return False
+    if re.search(
+        r"\bчтобы\b[^.!?\n]{0,80}\bне\s+продолж\w*",
+        folded,
+        re.IGNORECASE,
+    ):
+        return False
+    if re.search(
+        r"\bесли\b[^.!?\n]{0,48}\bне\s+(?:слома|сбо|откаж|да[её]т\s+сбо)\w*",
+        folded,
+        re.IGNORECASE,
+    ):
+        return False
+    if re.search(
+        r"\b(?:на\s+деле|однако)\b[\s\S]{0,160}"
+        r"\b(?:перестан\w*[^.!?\n]{0,24}\bработ\w*|\bне\s+продолж\w*)",
+        folded,
+        re.IGNORECASE,
+    ):
+        return False
+    if _a09_06_has_unnegated_collapse(folded):
+        return False
+    if re.search(
+        r"(?:\bостальн\w*[^.!?\n]{0,40}\bперестан\w*[^.!?\n]{0,24}\bработ\w*|"
+        r"\bостальн\w*[^.!?\n]{0,40}\bне\s+продолж\w*|"
+        r"\bпользовател\w*(?![^.!?\n]{0,16}\bне\b)[^.!?\n]{0,32}\bпотеря\w*\s+данн\w*|"
+        r"\bданн\w*[^.!?\n]{0,24}\bбуд\w*\s+потеря\w*)",
+        folded,
+        re.IGNORECASE,
+    ):
+        return False
+    if re.search(
+        r"\bчтобы\b[^.!?\n]{0,48}\bсистем\w*[^.!?\n]{0,32}\bслома\w*"
+        r"[^.!?\n]{0,32}\bкогда\b[^.!?\n]{0,24}вс[её]\s+хорошо",
+        folded,
+        re.IGNORECASE,
+    ):
+        return False
+    fault = re.search(
+        r"(?:\bкогда\b[^.!?\n]{0,32}\bчто[- ]?то\b[^.!?\n]{0,24}"
+        r"\b(?:пойд\w*\s+не\s+так|слома|сбо|откаж)\w*|"
+        r"\bесли\b[^.!?\n]{0,48}(?:"
+        r"\b(?:слома|сбо|откаж|перестанет)\w*|"
+        r"\bвыйд\w*\s+из\s+строя|"
+        r"\bвышл\w*\s+из\s+строя|"
+        r"\bупад\w*)|"
+        r"\bпри\s+(?:сбо|отказ|поломк)\w*|"
+        r"\bиз[- ]?за\b[^.!?\n]{0,48}\b(?:ошибк|сбо|отказ|поломк)\w*)",
+        folded,
+        re.IGNORECASE,
+    )
+    continue_or_safe = re.search(
+        r"(?:\bпродолж\w*\s+работ\w*|"
+        r"\bне\s+слома\w*|"
+        r"\bкорректн\w*\s+(?:заверш|восстанов)\w*|"
+        r"\bбезопасн\w*\s+(?:заверш|останов|термин)\w*)",
+        folded,
+        re.IGNORECASE,
+    )
+    survival = re.search(r"\bсистем\w*\s+не\s+(?:умр|погибн)\w*", folded)
+    if survival is not None:
+        # The new wording is an affirmative purpose, not a quotation/hedge,
+        # and cannot hide a positive data-loss clause behind a negated death.
+        if re.search(_A09_AFFIRMATIVE_CLAIM_BLOCKER, folded, re.IGNORECASE):
+            survival = None
+        if any(
+            re.search(r"\bне\s+\Z", folded[max(0, loss.start() - 4) : loss.start()]) is None
+            for loss in re.finditer(r"\bпотеря\w*\s+данн\w*", folded)
+        ):
+            return False
+    return fault is not None and (continue_or_safe is not None or survival is not None)
 
 
 def _a09_06_relation_is_exact(message: str) -> bool:
@@ -5453,6 +5876,8 @@ def _a09_06_relation_is_exact(message: str) -> bool:
     if re.search(_A09_06_RESILIENCE_RELATION, folded, re.IGNORECASE):
         return True
     if _a09_06_relation_graph(message):
+        return True
+    if _a09_06_task_faithful_purpose(message):
         return True
     if "(" in message or ")" in message:
         return False
@@ -5511,44 +5936,364 @@ def _a09_12_relation_is_exact(message: str) -> bool:
     )
 
 
-def _a09_14_relation_is_exact(message: str) -> bool:
+def _a09_14_without_leftover_counterfactual(text: str) -> str:
+    """Drop leftover-confound counterfactuals; they are explanation, not hedge."""
+
+    parts = re.split(r"(?<=[.!?])\s+", text.strip())
+    kept: list[str] = []
+    for part in parts:
+        folded = part.casefold()
+        if (
+            re.search(r"\bесли\b", folded)
+            and re.search(r"\b(?:остан\w*|остат\w*)", folded)
+            and re.search(r"\b(?:следующ\w*|друг(?:ой|ие|их|ое)?)\b", folded)
+            and re.search(r"\bможет\b", folded)
+        ):
+            continue
+        kept.append(part)
+    return " ".join(kept)
+
+
+def _a09_14_leftover_still_influences(folded: str) -> bool:
+    """Affirmative leftover/past-state distortion, not a negated-influence claim."""
+
+    influence = (
+        r"(?:влия(?!ни)\w*|искажа\w*|перенос\w*|"
+        r"сохраня\w*|накаплива\w*|просачива\w*)"
+    )
+    actor = r"(?:остат|след|состояни|данн)\w*"
+    exclude_prior = _A09_14_PREVENT_RESIDUE_INFLUENCE
+    modal_risk = re.compile(
+        rf"\b(?:может|могут)\w*[^.!?\n]{{0,24}}{influence}|"
+        rf"{influence}[^.!?\n]{{0,24}}\b(?:может|могут)",
+        re.IGNORECASE,
+    )
+    # Use the same whole-proposition proof as the caller; merely mentioning
+    # "if/would" must not suppress a factual tail elsewhere in the sentence.
+    factual = _a09_14_without_conditional_contamination_explanation(folded)
+    for sentence in _a09_split_sentences(factual):
+        for clause in re.split(r";|,\s*(?=(?:и|а|но|однако|зато)\b)", sentence):
+            for match in re.finditer(
+                rf"\b{actor}(?P<bridge>[^.!?;\n]{{0,48}}?)\b{influence}",
+                clause,
+                re.IGNORECASE,
+            ):
+                # Negation belongs to this predicate, not every later one.
+                if re.search(r"\bне\s+[«„\"']?\Z", match.group("bridge"), re.IGNORECASE):
+                    continue
+                # Modal leftover-risk after exclude-prior is the asked
+                # purpose, not a factual claim about the current run.
+                if re.search(exclude_prior, clause, re.IGNORECASE) and modal_risk.search(clause):
+                    continue
+                return True
+    return False
+
+
+def _a09_14_task_faithful_fresh_db(message: str) -> bool:
+    """Each-run / new-or-separate-clean DB plus mutual or prior-not-distort."""
+
     folded = message.casefold()
-    if re.search(_A09_14_AFFIRMATIVE_FRESH_DATABASE, folded, re.IGNORECASE):
-        return True
-    if _a09_14_relation_graph(message):
-        return True
-    if not (
-        re.search(_A09_14_LIVE_FRESH_DATABASE_RELATION, folded, re.IGNORECASE)
-        or re.search(_A09_14_SEPARATE_RUN_DATABASE_RELATION, folded, re.IGNORECASE)
-    ):
-        return False
-    tokens = _p09_words(message)
-    if any(
-        token in {"возможно", "вероятно", "может", "могут", "якобы", "хотя", "несмотря", "однако"}
-        for token in tokens
-    ) or re.search(
-        r"\b(?:не|ни)\s+(?:предотврат|исключ|устран|нов|независ)\w*|"
+    if re.search(
         r"\b(?:не\s+нов|стар|прежн)\w*[^.!?\n]{0,24}\b(?:баз|database|хранилищ)\w*|"
-        r"\b(?:та|одна)\s+же\s+баз\w*|"
-        r"\A\s*(?:фраза|цитата|отч[её]т)\w*\s*:",
+        r"\b(?:та|одна)\s+же\s+баз\w*",
         folded,
         re.IGNORECASE,
     ):
         return False
-    return not bool(
-        re.search(
-            r"\b(?:остат|след|состояни)\w*[^.!?\n]{0,32}"
-            r"\b(?:по-прежнему\s+)?(?:продолжа\w*\s+)?"
-            r"(?:влия|искажа|перенос|сохраня|накаплива|просачива)\w*|"
-            r"\b(?:данн|остат|след|состояни)\w*"
-            r"(?![^.!?\n]{0,48}\bне\s+[«„\"']?"
-            r"(?:влия|искажа|перенос|сохраня|накаплива|просачива)\w*)"
-            r"[^.!?\n]{0,48}\b"
-            r"(?:влия|искажа|перенос|сохраня|накаплива|просачива)\w*",
-            folded,
+    if re.search(r"\bне\s+(?:остава\w*\s+)?независим\w*", folded, re.IGNORECASE):
+        return False
+    each_run = (
+        r"(?:"
+        r"\bкажд\w*[^.!?\n]{0,24}\b(?:проход|тест|прогон|запуск)\w*"
+        r"|"
+        r"\bдля\s+кажд\w*[^.!?\n]{0,16}\b(?:проход|тест|прогон|запуск)\w*"
+        r"|"
+        r"\bна\s+кажд\w*[^.!?\n]{0,16}\b(?:проход|тест|прогон|запуск)\w*"
+        r")"
+    )
+    fresh_db = (
+        r"(?:"
+        r"\bнов\w*(?:\s+(?:отдельн|изолир|пуст|чист)\w*)?\s+"
+        r"\b(?:баз|database|хранилищ)\w*"
+        r"|"
+        r"\b(?:отдельн|изолир|чист|пуст|свеж)\w*"
+        r"(?:\s+(?:отдельн|изолир|пуст|чист|нов)\w*)?\s+"
+        r"\b(?:баз|database|хранилищ)\w*"
+        r")"
+    )
+    purpose = r"\b(?:чтобы|для\s+того\s+чтобы|поэтому|потому\s+что)\b"
+    not_distort = r"\bне\s+(?:искажа\w*|завис\w*|влия(?:л|ет|ют|ли|я|й)\w*)"
+    mutual = (
+        r"(?:результат|итог|ответ|проход|тест|прогон|запуск)\w*"
+        r"[^.!?\n]{0,32}"
+        r"(?:не\s+влия(?:л|ет|ют|ли|я|й)\w*\s+друг\s+на\s+друга|"
+        r"независим\w*\s+друг\s+от\s+друга)"
+    )
+    prior_not_distort = (
+        r"(?:"
+        r"(?:данн|состояни|остат|след|результат)\w*[^.!?\n]{0,48}"
+        r"\b(?:прошл|предыдущ|ранн)\w*[^.!?\n]{0,40}"
+        rf"{not_distort}"
+        r"|"
+        rf"{not_distort}[^.!?\n]{{0,48}}"
+        r"\b(?:прошл|предыдущ|ранн)\w*"
+        r"|"
+        r"(?:результат|итог|ответ)\w*[^.!?\n]{0,24}"
+        r"\bне\s+завис\w*\s+от\s+"
+        r"(?:данн|состояни)\w*[^.!?\n]{0,40}"
+        r"\b(?:прошл|предыдущ|ранн)\w*"
+        r"|"
+        r"\b(?:прошл|предыдущ|ранн)\w*[^.!?\n]{0,24}"
+        r"(?:данн|прогон|запуск|тест|состояни)\w*[^.!?\n]{0,32}"
+        rf"{not_distort}"
+        r")"
+    )
+    wrong_actor = (
+        r"\b(?:сервер|сервис|процесс|агент|систем|клиент)\w*[^.!?\n]{0,32}"
+        r"\b(?:получа|созда|использу|выделя|поднима|открыва|инициализ|"
+        r"разворач|назнача|предотврат|предотвращ|исключ|устраня)\w*"
+    )
+    purpose_wrong_actor = (
+        r"\b(?:чтобы|для\s+того\s+чтобы)\b[^.!?\n]{0,32}"
+        r"\b(?:сервер|сервис|процесс|агент|систем|клиент)\w*"
+    )
+    for sentence in _a09_split_sentences(folded):
+        if not re.search(each_run, sentence, re.IGNORECASE):
+            continue
+        if not re.search(fresh_db, sentence, re.IGNORECASE):
+            continue
+        if not re.search(purpose, sentence, re.IGNORECASE):
+            continue
+        if re.search(wrong_actor, sentence, re.IGNORECASE) or re.search(
+            purpose_wrong_actor, sentence, re.IGNORECASE
+        ):
+            continue
+        if (
+            re.search(mutual, sentence, re.IGNORECASE)
+            or re.search(prior_not_distort, sentence, re.IGNORECASE)
+            or re.search(_A09_14_PREVENT_RESIDUE_INFLUENCE, sentence, re.IGNORECASE)
+            or re.search(_A09_14_PRIOR_TEST_RESULT_RELATION, sentence, re.IGNORECASE)
+        ):
+            return True
+    return False
+
+
+def _a09_14_prior_run_no_carryover_relation(message: str) -> bool:
+    """Fresh per-run database excludes prior state and yields repeatable runs."""
+
+    folded = message.casefold()
+    if re.search(_A09_14_MAIN_VERB_HEDGE, folded, re.IGNORECASE):
+        return False
+    if re.search(
+        r"\b(?:не|ни)\s+(?:исключ|предотвращ|устраня)\w*|"
+        r"\bне\s+(?:независим|воспроизвод)\w*|"
+        r"\b(?:не\s+нов|стар|прежн)\w*[^.!?\n]{0,24}"
+        r"\b(?:баз|database|хранилищ)\w*|"
+        r"\b(?:та|одна)\s+же\s+баз\w*",
+        folded,
+        re.IGNORECASE,
+    ):
+        return False
+    remainder = _a09_14_without_leftover_counterfactual(folded)
+    if _a09_14_leftover_still_influences(remainder):
+        return False
+    sentences = _a09_split_sentences(remainder)
+    ownership = next(
+        (
+            sentence
+            for sentence in sentences
+            if re.search(_A09_14_EACH_RUN_NEW_DATABASE, sentence, re.IGNORECASE)
+        ),
+        None,
+    )
+    if ownership is None:
+        return False
+    prior_exclusion = re.search(
+        r"\b(?:исключ|предотвращ|устраня)\w*[^.!?\n]{0,32}"
+        r"\bвлияни\w*[^.!?\n]{0,32}"
+        r"\b(?:предыдущ|прошл|ранн)\w*[^.!?\n]{0,12}"
+        rf"\b{_A09_14_RUN_SCOPE}",
+        remainder,
+        re.IGNORECASE,
+    )
+    no_carryover = re.search(
+        r"\b(?:данн|кэш|состояни|остат|след|эффект)\w*[^.!?\n]{0,120}"
+        r"\bне\s+(?:перетека|перенос|переход|просачива|сохраня)\w*"
+        r"[^.!?\n]{0,64}\bиз\s+(?:одн|предыдущ)\w*\s+"
+        rf"{_A09_14_RUN_SCOPE}[^.!?\n]{{0,32}}"
+        r"\b(?:в|на)\s+(?:друг|следующ|текущ)\w*",
+        remainder,
+        re.IGNORECASE,
+    )
+    if prior_exclusion is None and no_carryover is None:
+        return False
+    relation = prior_exclusion or no_carryover
+    assert relation is not None
+    relation_sentence = next(sentence for sentence in sentences if relation.group(0) in sentence)
+    if re.search(
+        r"\b(?:архив|отч[её]т|сервер|сервис|пользоват|процесс)\w*",
+        relation_sentence,
+        re.IGNORECASE,
+    ):
+        return False
+    for sentence in sentences:
+        has_subject = re.search(
+            r"\b(?:результат|тест|прогон|запуск|проход)\w*",
+            sentence,
             re.IGNORECASE,
         )
+        independent = re.search(r"\bнезависим\w*", sentence, re.IGNORECASE)
+        reproducible = re.search(r"\bвоспроизвод\w*", sentence, re.IGNORECASE)
+        if has_subject is None or independent is None or reproducible is None:
+            continue
+        if sentence == ownership or re.search(
+            r"\A\s*(?:это|поэтому|благодаря\s+этому|тем\s+самым)\b",
+            sentence,
+            re.IGNORECASE,
+        ):
+            return True
+    return False
+
+
+def _a09_14_without_subjunctive_carryover_example(message: str) -> str:
+    """Remove a complete if/would example, retaining every factual claim."""
+
+    kept = []
+    for sentence in _a09_split_sentences(message):
+        match = re.fullmatch(
+            r"\s*(?:например,\s*)?если\s+бы\s+"
+            r"(?P<condition>[^,;.!?\n]{1,180}),\s*(?:то\s+)?"
+            r"(?P<result>[^,;.!?\n]{1,180})[.!]?\s*",
+            sentence,
+            re.IGNORECASE,
+        )
+        carryover = list(re.finditer(r"\b(?:протека|перетека|просачива)\w*", sentence, re.IGNORECASE))
+        if (
+            match is not None
+            and carryover
+            and not re.search(r"\b(?:и|а|но|однако|зато)\b", match.group("result"), re.IGNORECASE)
+            and re.search(
+                r"\b\w+л[аои]?(?:сь|ся)?\s+бы\b|\bбы\s+\w+л[аои]?(?:сь|ся)?\b",
+                match.group("result"),
+                re.IGNORECASE,
+            )
+            and not re.search(
+                r"\b(?:но|однако|фактически|действительно)\b|\bна\s+деле\b",
+                sentence,
+                re.IGNORECASE,
+            )
+            and all(
+                re.fullmatch(
+                    r"(?:протекал[аои]?|перетекал[аои]?|просачивал[аои]?сь)",
+                    item.group(),
+                    re.IGNORECASE,
+                )
+                for item in carryover
+            )
+        ):
+            continue
+        kept.append(sentence)
+    return " ".join(kept)
+
+
+def _a09_14_without_conditional_contamination_explanation(message: str) -> str:
+    """Drop a complete if/would contamination example; keep factual claims."""
+
+    kept = []
+    for sentence in _a09_split_sentences(message):
+        folded = sentence.casefold()
+        conditional = re.fullmatch(
+            r"\s*(?:например,\s*)?если\s+бы\s+"
+            r"(?P<condition>[^,;.!?\n]{1,180}),\s*(?:то\s+)?"
+            r"(?P<result>[^,;.!?\n]{1,180})[.!]?\s*",
+            folded,
+        )
+        if (
+            conditional is not None
+            and re.search(r"\b(?:данн|остат|след|состояни|запуск)\w*", folded)
+            and re.search(
+                r"\b(?:искажа|влия(?!ни)|перенос|сохраня|накаплива|просачива)\w*",
+                conditional.group("condition"),
+            )
+            and re.search(
+                r"\b\w+л[аои]?(?:сь|ся)?\s+бы\b|\bбы\s+\w+л[аои]?(?:сь|ся)?\b",
+                conditional.group("result"),
+            )
+            and not re.search(
+                r"\b(?:и|а|но|однако|зато)\b",
+                conditional.group("result"),
+            )
+            and not re.search(
+                r"\b(?:но|однако|фактически|действительно)\b|\bна\s+деле\b",
+                folded,
+            )
+        ):
+            continue
+        kept.append(sentence)
+    return " ".join(kept)
+
+
+def _a09_14_relation_is_exact(message: str) -> bool:
+    message = _a09_unquote_emphasis(message)
+    message = _a09_14_without_subjunctive_carryover_example(message)
+    message = _a09_14_without_conditional_contamination_explanation(message)
+    stripped = message.strip()
+    if (stripped.startswith(("«", '"', "“", "„")) and stripped.endswith(("»", '"', "”", "“"))) or re.match(
+        r"\s*(?:фраза|цитата|отч[её]т)\w*\s*:", stripped, re.IGNORECASE
+    ):
+        return False
+    folded = message.casefold()
+    # Carryover metaphors retain their polarity, including a second clause
+    # after an earlier negated one. Emphasis quotes cannot hide a positive leak.
+    for carryover in re.finditer(r"\b(?:протека|перетека|просачива)\w*", folded):
+        prefix = folded[max(0, carryover.start() - 4) : carryover.start()]
+        if not re.search(r"\bне\s+\Z", prefix):
+            return False
+    if re.search(
+        r"\b(?:исключ|предотвращ|устраня)\w*[^.!?\n]{0,40}"
+        r"\bвлияни\w*[^.!?\n]{0,40}"
+        r"\b(?:предыдущ|прошл|ранн)\w*\s+"
+        r"(?:отч[её]т|архив|сервер|сервис|процесс|пользоват)\w*|"
+        r"\b(?:предыдущ|прошл|ранн)\w*\s+"
+        rf"{_A09_14_RUN_SCOPE}[^.!?\n]{{0,24}}"
+        r"\b(?:на|в|для)\s+"
+        r"(?:отч[её]т|архив|сервер|сервис|процесс|пользоват)\w*",
+        folded,
+        re.IGNORECASE,
+    ):
+        return False
+    if _a09_14_leftover_still_influences(folded):
+        return False
+    if re.search(_A09_14_AFFIRMATIVE_FRESH_DATABASE, folded, re.IGNORECASE):
+        return True
+    if _a09_14_relation_graph(message):
+        return True
+    extra = bool(
+        re.search(_A09_14_LIVE_FRESH_DATABASE_RELATION, folded, re.IGNORECASE)
+        or re.search(_A09_14_SEPARATE_RUN_DATABASE_RELATION, folded, re.IGNORECASE)
+        or re.search(_A09_14_LIVE_MUTUAL_NONINFLUENCE_RELATION, folded, re.IGNORECASE)
     )
+    task_faithful = _a09_14_task_faithful_fresh_db(message) or _a09_14_prior_run_no_carryover_relation(
+        message
+    )
+    if not (extra or task_faithful):
+        return False
+    if re.search(_A09_14_MAIN_VERB_HEDGE, folded, re.IGNORECASE):
+        return False
+    remainder = _a09_14_without_leftover_counterfactual(folded)
+    tokens = _p09_words(remainder)
+    if any(
+        token in {"возможно", "вероятно", "якобы", "хотя", "несмотря", "однако"} for token in tokens
+    ) or re.search(
+        r"\b(?:не|ни)\s+(?:предотврат|предотвращ|исключ|устран|нов|независ)\w*|"
+        r"\b(?:не\s+нов|стар|прежн)\w*[^.!?\n]{0,24}\b(?:баз|database|хранилищ)\w*|"
+        r"\b(?:та|одна)\s+же\s+баз\w*|"
+        r"\A\s*(?:фраза|цитата|отч[её]т)\w*\s*:",
+        remainder,
+        re.IGNORECASE,
+    ):
+        return False
+    return not _a09_14_leftover_still_influences(remainder)
 
 
 def _a09_18_relation_is_exact(message: str) -> bool:
@@ -5591,6 +6336,278 @@ def _a09_18_relation_is_exact(message: str) -> bool:
         re.IGNORECASE,
     )
     return trigger_relation is not None and safe_terminal is not None
+
+
+_B09_20_INNER = r"[^.!?\n«»\"“”„:]{0,20}?"
+_B09_20_INDEPENDENCE_FROM_SUT = (
+    r"(?:"
+    rf"\bнезависим\w*{_B09_20_INNER}\bот\b{_B09_20_INNER}"
+    rf"\b(?:тестируем|проверяем|испытуем)\w*{_B09_20_INNER}"
+    r"\b(?:код|реализац|имплемент|систем)\w*"
+    r"|"
+    rf"\bнезависим\w*{_B09_20_INNER}\bот\b{_B09_20_INNER}"
+    rf"\b(?:код|реализац|имплемент)\w*{_B09_20_INNER}"
+    r"(?:под\s+тест|тестируем|проверяем)\w*"
+    r")"
+)
+_B09_20_STRUCTURE_VS_KNOWN_RULES = (
+    r"(?:"
+    r"\bпроверя\w*[^.!?\n«»\"“”„]{0,48}\bструктур\w*[^.!?\n«»\"“”„]{0,48}"
+    r"\b(?:результат|выход|ответ)\w*[^.!?\n«»\"“”„]{0,48}"
+    r"\b(?:заранее\s+)?(?:известн|задан|ожидаем|фиксир)\w*[^.!?\n«»\"“”„]{0,32}\bправил\w*"
+    r"|"
+    r"\bструктур\w*[^.!?\n«»\"“”„]{0,32}\b(?:результат|выход|ответ)\w*[^.!?\n«»\"“”„]{0,48}"
+    r"\bпо\b[^.!?\n«»\"“”„]{0,24}\b(?:заранее\s+)?(?:известн|задан|ожидаем|фиксир)\w*"
+    r"[^.!?\n«»\"“”„]{0,32}\bправил\w*"
+    r")"
+)
+_B09_20_INDEPENDENT_STRUCTURAL_RULE_RELATION = (
+    r"(?:"
+    rf"(?:{_B09_20_INDEPENDENCE_FROM_SUT})[\s\S]{{0,240}}"
+    rf"(?:{_B09_20_STRUCTURE_VS_KNOWN_RULES})"
+    r"|"
+    rf"(?:{_B09_20_STRUCTURE_VS_KNOWN_RULES})[\s\S]{{0,240}}"
+    rf"(?:{_B09_20_INDEPENDENCE_FROM_SUT})"
+    r")"
+)
+_B09_20_LEGACY_PRECISION = (
+    r"(?:\bточн\w*|\bдетермин\w*|\bоднознач\w*|\bсхем\w*|"
+    r"\bформализ\w*|\bмашин\w*|"
+    r"\bпроверяемост\w*|\bпроверяем(?:ый|ая|ое|ые|ых|ым|ой|ую)\b)"
+)
+_B09_20_INDEPENDENCE_UNNECESSARY = (
+    r"(?:\bнезависим\w*[^.!?\n]{0,48}\b(?:не\s+(?:нужн|обязательн|важн|требу)|"
+    r"ненужн|лишн|избыточн)\w*|"
+    r"\b(?:не\s+(?:нужн|обязательн)|ненужн|лишн)\w*[^.!?\n]{0,48}\bнезависим\w*)"
+)
+_B09_20_COPY_AS_RECOMMENDATION = (
+    r"(?:следует|нужно|лучше|стоит|рекоменд|надо)\w*[^.!?\n]{0,64}"
+    r"\b(?:дублир|копир|повтор)\w*[^.!?\n]{0,40}"
+    r"\b(?:логик|реализац|код|имплемент)\w*"
+)
+_B09_20_INDEPENDENCE_HEDGE = (
+    r"(?:главн\w*\s+свойств|независим)\w*[^.!?\n]{0,32}"
+    r"\b(?:может|возможн|вероятн|вряд)\w*"
+)
+_B09_20_INDEPENDENCE_CONTRADICTION = (
+    r"\bнезависим\w*[^.!?\n]{0,80}\b(?:но|однако)\b[^.!?\n]{0,80}"
+    r"\b(?:завис|копир|дублир)\w*"
+)
+_B09_20_DENIED_QUOTE_FRAME = re.compile(
+    r"(?:»|\"|”)\s*(?:неверн\w*|ложн\w*|ошибочн\w*)\s*[:—–-]\s*",
+    re.IGNORECASE,
+)
+_B09_20_LIVE_COPY_OR_DEPEND = re.compile(
+    r"(?:"
+    r"\bполностью\s+копир\w*"
+    r"|"
+    r"\bкопир\w*[^.!?\n«»\"“”]{0,40}\b(?:код|логик|реализац|имплемент)\w*"
+    r"|"
+    r"\bзавис\w*[^.!?\n«»\"“”]{0,24}\bот\b[^.!?\n«»\"“”]{0,24}"
+    r"(?:е[её]\s+)?(?:реализац|код|систем)\w*"
+    r")",
+    re.IGNORECASE,
+)
+_B09_20_ADVISORY = re.compile(
+    r"\b(?:стоит|следует|лучше|важно|рекоменд|надо|нужно)\w*",
+    re.IGNORECASE,
+)
+_B09_20_ORACLE_TOKEN = re.compile(r"\b(?:oracle|оракул)\w*", re.IGNORECASE)
+_B09_20_PROPERTY_LINK = re.compile(
+    r"\s*(?:[—–:-]|является|являются|обладает|отличается|"
+    r"заключается\s+в|состоит\s+в)\s*(?:высок\w*\s+)?",
+    re.IGNORECASE,
+)
+_B09_20_REVERSE_PROPERTY_LINK = re.compile(
+    r"\s*(?:[—–:-]|является)\s*(?:(?:главн|основн|ключев|важн)\w*\s+)?"
+    r"свойств\w*\s+(?:(?:хорош|структурн|правильн)\w*\s+){0,3}",
+    re.IGNORECASE,
+)
+
+
+def _b09_20_quote_spans(message: str) -> tuple[tuple[int, int], ...]:
+    """Interior spans of «», ASCII, and curly quotes; no colon/dash reset."""
+
+    spans: list[tuple[int, int]] = []
+    index = 0
+    length = len(message)
+    closers = {"«": "»", '"': '"', "“": "”", "„": "“"}
+    while index < length:
+        char = message[index]
+        closer = closers.get(char)
+        if closer is None:
+            index += 1
+            continue
+        close = message.find(closer, index + 1)
+        end = close if close >= 0 else length
+        spans.append((index + 1, end))
+        index = end + 1
+    return tuple(spans)
+
+
+def _b09_20_inside_quotes(message: str, start: int, end: int) -> bool:
+    return any(span_start < end and span_end > start for span_start, span_end in _b09_20_quote_spans(message))
+
+
+def _b09_20_clause_start(message: str, position: int) -> int:
+    return max(message.rfind(separator, 0, position) for separator in ".!?;\n") + 1
+
+
+def _b09_20_live_prefix(message: str, start: int) -> str:
+    """Clause prefix with a denied-quote frame removed so 'неверно:' owns the quote."""
+
+    prefix = message[_b09_20_clause_start(message, start) : start]
+    return _B09_20_DENIED_QUOTE_FRAME.sub(" ", prefix)
+
+
+def _b09_20_span_is_live_affirmative(message: str, start: int, end: int) -> bool:
+    """Independence/structure counts only as a live, unquoted, unnegated claim."""
+
+    if _b09_20_inside_quotes(message, start, end):
+        return False
+    suffix_positions = [position for char in ".!?;\n" if (position := message.find(char, end)) >= 0]
+    clause_end = min(suffix_positions) if suffix_positions else len(message)
+    if message[end : end + 1] == "?" or message[clause_end : clause_end + 1] == "?":
+        return False
+    prefix = _b09_20_live_prefix(message, start)
+    if re.search(r"\bне(?:\s+(?:ровно|точно|менее|более))?\s*$", prefix, re.IGNORECASE):
+        return False
+    if _NEGATED_ASSERTION_PREFIX.search(prefix):
+        return False
+    suffix = message[end : min(clause_end, end + 80)]
+    if _NEGATED_ASSERTION_SUFFIX.search(suffix):
+        return False
+    return not _B09_20_ADVISORY.search(prefix)
+
+
+def _b09_20_claimed_new_relation(message: str) -> bool:
+    folded = message.casefold()
+    return bool(
+        re.search(_B09_20_INDEPENDENCE_FROM_SUT, folded, re.IGNORECASE)
+        or re.search(_B09_20_STRUCTURE_VS_KNOWN_RULES, folded, re.IGNORECASE)
+    )
+
+
+def _b09_20_live_pairs(message: str) -> bool:
+    folded = message.casefold()
+    independence = [
+        match
+        for match in re.finditer(_B09_20_INDEPENDENCE_FROM_SUT, folded, re.IGNORECASE)
+        if _b09_20_span_is_live_affirmative(folded, match.start(), match.end())
+    ]
+    structure = [
+        match
+        for match in re.finditer(_B09_20_STRUCTURE_VS_KNOWN_RULES, folded, re.IGNORECASE)
+        if _b09_20_span_is_live_affirmative(folded, match.start(), match.end())
+    ]
+    for left in independence:
+        for right in structure:
+            if 0 <= right.start() - left.end() <= 240:
+                return True
+            if 0 <= left.start() - right.end() <= 240:
+                return True
+    return False
+
+
+def _b09_20_live_copy_or_depend_contradiction(message: str) -> bool:
+    """Reject a live copy/depend claim, including a following sentence; keep «не копир»."""
+
+    folded = message.casefold()
+    for match in _B09_20_LIVE_COPY_OR_DEPEND.finditer(folded):
+        if _b09_20_inside_quotes(folded, match.start(), match.end()):
+            continue
+        prefix = _b09_20_live_prefix(folded, match.start())
+        if re.search(r"\bне\s+$", prefix, re.IGNORECASE):
+            continue
+        return True
+    return False
+
+
+def _b09_20_legacy_precision_is_exact(message: str) -> bool:
+    """Oracle-owned live precision property; not co-occurrence of the two stems."""
+
+    folded = message.casefold()
+    stripped = folded.strip()
+    if stripped.endswith("?") or re.search(r"\bли\b", folded, re.IGNORECASE):
+        return False
+    sentences = _a09_split_sentences(folded) or [folded]
+    search_from = 0
+    for sentence in sentences:
+        abs_start = folded.find(sentence, search_from)
+        if abs_start < 0:
+            abs_start = search_from
+        search_from = abs_start + max(len(sentence), 1)
+        if "?" in sentence:
+            continue
+        live_oracles = [
+            match
+            for match in _B09_20_ORACLE_TOKEN.finditer(sentence)
+            if not _b09_20_inside_quotes(folded, abs_start + match.start(), abs_start + match.end())
+        ]
+        live_precision = []
+        for match in re.finditer(_B09_20_LEGACY_PRECISION, sentence, re.IGNORECASE):
+            start = abs_start + match.start()
+            end = abs_start + match.end()
+            if _b09_20_inside_quotes(folded, start, end):
+                continue
+            if re.search(r"\bне\s+$", sentence[: match.start()], re.IGNORECASE):
+                continue
+            live_precision.append(match)
+        if not live_oracles or not live_precision:
+            continue
+        # A property belongs to this oracle only through the exact linking
+        # proposition. A semicolon, new subject or independent predicate may
+        # not borrow the oracle token from another part of the sentence.
+        owns_precision = any(
+            (
+                oracle.end() <= precision.start()
+                and _B09_20_PROPERTY_LINK.fullmatch(sentence[oracle.end() : precision.start()])
+            )
+            or (
+                precision.end() <= oracle.start()
+                and _B09_20_REVERSE_PROPERTY_LINK.fullmatch(sentence[precision.end() : oracle.start()])
+            )
+            for oracle in live_oracles
+            for precision in live_precision
+        )
+        if not owns_precision:
+            continue
+        if re.search(r"\b(?:погод|прогноз)\w*", sentence, re.IGNORECASE) and not re.search(
+            r"\bструктур\w*", sentence, re.IGNORECASE
+        ):
+            continue
+        return True
+    return False
+
+
+def _b09_20_relation_is_exact(message: str) -> bool:
+    """Bounded independent-structural-rule property; not a live-answer whitelist."""
+
+    folded = message.casefold()
+    if re.search(_B09_20_INDEPENDENCE_UNNECESSARY, folded, re.IGNORECASE):
+        return False
+    if re.search(_B09_20_COPY_AS_RECOMMENDATION, folded, re.IGNORECASE):
+        return False
+    if re.search(_B09_20_INDEPENDENCE_HEDGE, folded, re.IGNORECASE):
+        return False
+    if re.search(_B09_20_INDEPENDENCE_CONTRADICTION, folded, re.IGNORECASE):
+        return False
+    if _b09_20_live_copy_or_depend_contradiction(folded):
+        return False
+    advisory = _B09_20_ADVISORY.search(folded)
+    asserted = re.search(
+        r"(?:главн\w*\s+свойств|\bявля\w*|"
+        r"свойств\w*\s*[—–:-]|\bэто\s+независим\w*)",
+        folded,
+        re.IGNORECASE,
+    )
+    if advisory is not None and asserted is None:
+        return False
+    if _b09_20_claimed_new_relation(folded):
+        # Claimed independence/structure cannot re-enter via legacy stems
+        # such as «проверяемого кода».
+        return _b09_20_live_pairs(folded)
+    return _b09_20_legacy_precision_is_exact(folded)
 
 
 _FALLBACK_SEMANTIC_GROUPS = {
@@ -5753,6 +6770,7 @@ class PassContext:
     manifest_sha256: str
     home: Path
     evidence_path: Path
+    suite_revision: str | None = None
 
 
 @dataclass(frozen=True)
@@ -6109,6 +7127,111 @@ def _expected_document_row_count(case: ExpandedCase) -> int:
     return frozen_counts[case.battery_id][case.question_index - 1]
 
 
+# Independently classified from fixture prompt + production office_request_kind
+# routing (review210 grammar). Not observed pass/FAIL.
+# Route A: _office_structural_request (Lab268 predicate/summary).
+# Route B: _structural_count_requested ∧ _closed_whole_office_arbiter_request
+#          → count_records; arbiter skipped; model HTTP must be zero.
+_PACKAGE_C_STRUCTURAL_ZERO_IDS = frozenset(
+    {
+        "SYN-B03-08",
+        "SYN-B03-09",
+        "SYN-B03-11",
+        "SYN-B03-12",
+        "SYN-B03-16",
+        "SYN-B03-17",
+        "SYN-B03-02",
+        "SYN-B03-05",
+        "SYN-B03-06",
+        "SYN-B03-10",
+        "SYN-B03-18",
+        "SYN-B03-19",
+        "SYN-B03-20",
+        "SYN-A03-03",
+        "SYN-A03-06",
+        "SYN-A03-08",
+        "SYN-A03-15",
+        "SYN-A03-19",
+        "SYN-A03-20",
+    }
+)
+_PACKAGE_C_PREDICATE_ZERO_IDS = frozenset(
+    {
+        "SYN-B03-08",
+        "SYN-B03-09",
+        "SYN-B03-11",
+        "SYN-B03-12",
+        "SYN-B03-16",
+        "SYN-B03-17",
+    }
+)
+_PACKAGE_C_NOMINAL_COUNT_ZERO_IDS = _PACKAGE_C_STRUCTURAL_ZERO_IDS - _PACKAGE_C_PREDICATE_ZERO_IDS
+
+
+def _package_c_structural_case(case: ExpandedCase) -> bool:
+    return case.oracle_profile == "package_c_exact_documents" and case.id in _PACKAGE_C_STRUCTURAL_ZERO_IDS
+
+
+def _document_fixture_rows(case: ExpandedCase) -> list[list[str]]:
+    """Derive facts from the submitted fixture, independently of product parsing."""
+    document = _case_document(case)
+    if document is None:
+        raise BatteryContractError("document_fixture_missing")
+    payload = base64.b64decode(document["content_base64"], validate=True).decode("utf-8")
+    rows = list(csv.reader(io.StringIO(payload), strict=True))
+    if not rows or not rows[0] or any(len(row) != len(rows[0]) for row in rows):
+        raise BatteryContractError("document_fixture_structure_invalid")
+    return rows
+
+
+def _expected_document_structure(case: ExpandedCase) -> dict[str, Any]:
+    rows = _document_fixture_rows(case)
+    return {"tables": 1, "records": len(rows) - 1, "columns": len(rows[0]), "fields": rows[0]}
+
+
+def _expected_document_predicate_count(case: ExpandedCase) -> int:
+    if case.battery_id != "B" or case.question_index not in {8, 9, 12, 17}:
+        return _expected_document_row_count(case)
+    header, *rows = _document_fixture_rows(case)
+    if header != ["ID", "Статус"]:
+        raise BatteryContractError("document_fixture_predicate_schema_invalid")
+    if case.question_index == 8:
+        return sum(bool(row[0].strip()) for row in rows)
+    if case.question_index == 9:
+        return sum(any(cell.strip() for cell in row) for row in rows)
+    if case.question_index == 12:
+        return len({row[0] for row in rows if row[0].strip()})
+    return sum(bool(row[0].strip() and row[1].strip()) for row in rows)
+
+
+def _office_structure_summary_matches(message: str, expected: Mapping[str, Any]) -> bool:
+    """Check the whole code-owned report, including labels and all numeric facts.
+
+    This grammar is local to the instrument; it never invokes the production
+    renderer or accepts a bare count as proof of a requested parse summary.
+    Full matching excludes quoted, negated, approximate and conflicting claims.
+    """
+    match = re.fullmatch(
+        r"Разбор подтвержд[её]н:\s*таблиц\s*[—:-]\s*([0-9]{1,9}),\s*"
+        r"строк данных\s*[—:-]\s*([0-9]{1,9}),\s*столбцов\s*[—:-]\s*([0-9]{1,9})\.\s*"
+        r"Поля:\s*(.+)\.",
+        message.strip(),
+        flags=re.IGNORECASE | re.DOTALL,
+    )
+    if match is None:
+        return False
+    try:
+        fields = json.loads("[" + match[4] + "]")
+    except (ValueError, TypeError):
+        return False
+    return (
+        [int(match[index]) for index in (1, 2, 3)]
+        == [expected["tables"], expected["records"], expected["columns"]]
+        and fields == expected["fields"]
+        and all(isinstance(field, str) for field in fields)
+    )
+
+
 def _clause_start(message: str, position: int) -> int:
     return max(message.rfind(separator, 0, position) for separator in ".!?;:\n—") + 1
 
@@ -6244,7 +7367,11 @@ def _closed_refusal_shape(message: str) -> bool:
     return not _independent_outside_deed_claim(message)
 
 
-def oracle_for_case(case: ExpandedCase) -> dict[str, Any]:
+def oracle_for_case(
+    case: ExpandedCase,
+    *,
+    suite_revision: str | None = None,
+) -> dict[str, Any]:
     """Closed deterministic oracle; no model judges another model's answer."""
 
     content: dict[str, Any] = {
@@ -6256,6 +7383,7 @@ def oracle_for_case(case: ExpandedCase) -> dict[str, Any]:
         "semantic_profile": "",
         "excludes_all": list(_COMMON_FORBIDDEN_OUTPUT),
         "standalone_integer": None,
+        "office_structure_summary": None,
         "exact_tag_inventory": None,
         "exact_tag_distinct_total": None,
         "exact_time_marker": None,
@@ -6346,7 +7474,16 @@ def oracle_for_case(case: ExpandedCase) -> dict[str, Any]:
                 }
             )
     elif profile == "package_c_exact_documents":
-        content["standalone_integer"] = _expected_document_row_count(case)
+        independently_reviewed_meta = (
+            suite_revision == b09_evidence.SUITE_REVISION and case.id == "SYN-B03-15"
+        )
+        if independently_reviewed_meta:
+            content["min_chars"] = 24
+            content["min_words"] = 4
+        elif case.battery_id == "B" and case.question_index in {11, 16}:
+            content["office_structure_summary"] = _expected_document_structure(case)
+        else:
+            content["standalone_integer"] = _expected_document_predicate_count(case)
         state_equals.update(
             {
                 "attachment_submitted": True,
@@ -6354,6 +7491,10 @@ def oracle_for_case(case: ExpandedCase) -> dict[str, Any]:
                 "office_exact_owned": True,
             }
         )
+        if independently_reviewed_meta:
+            state_equals.update({"office_exact_owned": False, "model_spoke": True, "llm_failed": False})
+        elif _package_c_structural_case(case):
+            state_equals.update({"model_spoke": False, "model_router_calls": 0, "model_http_attempts": 0})
     elif profile == "k03_tag_inventory":
         content["contains_all"] = []
         content["exact_tag_inventory"] = {
@@ -6382,6 +7523,7 @@ def oracle_for_case(case: ExpandedCase) -> dict[str, Any]:
             "label": expected_label,
             "url": expected_url,
             "only": (case.battery_id, case.question_index) == ("A", 3),
+            "forbid_bare_url": (case.battery_id, case.question_index) == ("B", 6),
         }
         state_equals.update(
             {
@@ -6488,16 +7630,25 @@ def oracle_for_case(case: ExpandedCase) -> dict[str, Any]:
             content["min_words"] = 4
             fallback_key = (case.battery_id, case.question_index)
             semantic_groups = _FALLBACK_SEMANTIC_GROUPS[fallback_key]
+            independently_reviewed = bool(
+                suite_revision == b09_evidence.SUITE_REVISION and case.id in b09_evidence.OPEN_CASE_IDS
+            )
             # ``contains_any`` is a cheap literal diagnostic while semantic
             # groups are the authoritative regex grammar.  Keep the bounded
             # equivalents in that grammar and expose only literal surfaces
             # here; negative or unrelated occurrences still fail a semantic
             # group and therefore cannot become green.
-            if fallback_key == ("A", 4):
+            if independently_reviewed:
+                # Meaning for these five NEW-suite rows is decided only by the
+                # preregistered independent receipt binder after the closed run.
+                # Length, forbidden output, fallback state, HTTP, privacy and
+                # lifecycle checks below remain unchanged and authoritative.
+                pass
+            elif fallback_key == ("A", 4):
                 content["contains_any"] = ["изолир", "изоляц"]
                 content["semantic_profile"] = "a09_04"
             elif fallback_key == ("A", 6):
-                content["contains_any"] = ["част", "компонент"]
+                content["contains_any"] = ["отказоустойчив", "устойчивост"]
                 content["semantic_profile"] = "a09_06"
             elif fallback_key == ("A", 8):
                 content["contains_any"] = [
@@ -6524,9 +7675,12 @@ def oracle_for_case(case: ExpandedCase) -> dict[str, Any]:
             elif fallback_key == ("A", 18):
                 content["contains_any"] = ["fail-closed", "неопредел", "ошиб", "сбо"]
                 content["semantic_profile"] = "a09_18"
+            elif fallback_key == ("B", 20):
+                content["contains_any"] = ["oracle", "оракул"]
+                content["semantic_profile"] = "b09_20"
             else:
                 content["contains_any"] = list(semantic_groups[0])
-            if not content["semantic_profile"]:
+            if not independently_reviewed and not content["semantic_profile"]:
                 content["semantic_groups"] = [list(group) for group in semantic_groups]
             state_equals.update({"expected_tool": "", "tools_enabled": False, "fallback_clean": True})
     elif profile == "telegram_fake_transport":
@@ -6599,6 +7753,7 @@ def oracle_for_case(case: ExpandedCase) -> dict[str, Any]:
         and profile != "reminder_creation"
         and not _package_a_code_owned_case(case)
         and not _package_a_code_owned_temporal_case(case)
+        and not _package_c_structural_case(case)
     ):
         state_min["model_http_attempts"] = 1
     max_model_calls, max_local_connections = _PROFILE_ATTEMPT_LIMITS[profile]
@@ -6883,15 +8038,60 @@ def _tag_inventory_is_affirmative(message: str) -> bool:
     )
 
 
-def _closed_marker_exact(message: str, expected: str, *, kind: str) -> bool:
+_ATTACHMENT_OUTPUT_EXACT_ONCE = re.compile(
+    r"(?:"
+    r"(?:верн|вывед|напиш|отправ|процитир|воспроизвед|покаж|сообщ|назов)\w*"
+    r".{0,80}(?:ровно|только)\s+(?:один|одну|одно)\s+раз"
+    r"|"
+    r"(?:ровно|только)\s+один\s+раз.{0,48}"
+    r"(?:верн|вывед|напиш|отправ|маркер|токен|canary|идентификатор)"
+    r"|"
+    r"\bexact(?:ly)?[\s-]+once\b"
+    r"|"
+    r"\bonly\s+once\b"
+    r")",
+    re.IGNORECASE | re.DOTALL,
+)
+
+
+def _attachment_output_requires_exact_once(question: str) -> bool:
+    """Prompt-owned output cardinality, not uniqueness of a file-internal id."""
+
+    return bool(_ATTACHMENT_OUTPUT_EXACT_ONCE.search(question or ""))
+
+
+_OPAQUE_ATTACHMENT_TOKEN = re.compile(r"syn-attachment(?:-[0-9a-f]+(?:[-_][0-9a-z]+)*|[0-9a-f]+)")
+
+
+def _opaque_attachment_has_competitor(folded: str, expected_folded: str) -> bool:
+    """Inspect every marker-like token, including malformed separators/suffixes."""
+
+    expected_folded = expected_folded.casefold()
+    for match in _OPAQUE_ATTACHMENT_TOKEN.finditer(folded):
+        if match.group(0) != expected_folded:
+            return True
+        before = folded[match.start() - 1] if match.start() else ""
+        after = folded[match.end()] if match.end() < len(folded) else ""
+        if before.isalnum() or before in {"_", "-"} or after.isalnum() or after in {"_", "-"}:
+            return True
+    return False
+
+
+def _closed_marker_exact(message: str, expected: str, *, kind: str, exact_once: bool | None = None) -> bool:
     folded = message.casefold()
     expected_folded = expected.casefold()
+    if exact_once is None:
+        exact_once = True
     suffix_pattern = r"[0-9a-f]{20}" if kind.upper() in _OPAQUE_MARKER_SALTS else r"[ab]\d{2}-\d{2}"
     observed = re.findall(
         rf"\bsyn-{re.escape(kind.casefold())}-{suffix_pattern}\b",
         folded,
     )
-    if observed != [expected_folded]:
+    if not observed or any(value != expected_folded for value in observed):
+        return False
+    if exact_once and observed != [expected_folded]:
+        return False
+    if kind.upper() == "ATTACHMENT" and _opaque_attachment_has_competitor(folded, expected_folded):
         return False
     if kind.upper() == "TELEGRAM":
         # A Telegram marker is a byte-preservation/formatting token, not a
@@ -6900,9 +8100,9 @@ def _closed_marker_exact(message: str, expected: str, *, kind: str) -> bool:
         # as "without errors" look like a denial of the marker itself.
         return True
     marker = re.escape(expected_folded)
-    exact_match = re.search(marker, folded)
-    if exact_match is None or not _assertion_span_is_affirmative(
-        folded, exact_match.start(), exact_match.end()
+    matches = list(re.finditer(marker, folded))
+    if not matches or any(
+        not _assertion_span_is_affirmative(folded, match.start(), match.end()) for match in matches
     ):
         return False
     pre_negation = re.search(
@@ -7321,6 +8521,19 @@ def _terminal_sentence_boundary_count(message: str) -> int:
     return len(_TERMINAL_SENTENCE_BOUNDARY.findall(without_abbreviations))
 
 
+def _p10_numbered_list_matches(lines: list[str], *, battery_id: str, marker: str) -> bool:
+    # A explicitly asks for two items. B names the first item but does not
+    # set the list's cardinality; one or more sequential items are valid.
+    if not lines or (battery_id == "A" and len(lines) != 2):
+        return False
+    matches = [re.fullmatch(r"\s*(\d{1,2})[.)]\s+(\S.*)", line) for line in lines]
+    if any(match is None for match in matches):
+        return False
+    if [int(match.group(1)) for match in matches] != list(range(1, len(lines) + 1)):
+        return False
+    return battery_id == "A" or matches[0].group(2).strip() == marker
+
+
 def _telegram_shape_matches(case: ExpandedCase, message: str) -> bool:
     """Closed source-shape oracle for the formatting requested by P10."""
 
@@ -7364,16 +8577,9 @@ def _telegram_shape_matches(case: ExpandedCase, message: str) -> bool:
             return message.strip() in {f"**{marker}**", f"__{marker}__"}
         return has_bold and (case.battery_id == "A" or marker in bold_spans[0])
     if index == 3:
-        minimum = 2
-        if numbered_count < minimum or not marker_numbered_lines:
-            return False
-        numbers = [int(re.match(r"^\s*(\d{1,2})", line).group(1)) for line in numbered_lines]
-        if numbers != list(range(1, len(numbers) + 1)) or len(lines) != numbered_count:
-            return False
-        if case.battery_id == "A":
-            return numbered_count == 2
-        first_value = re.sub(r"^\s*\d{1,2}[.)]\s+", "", numbered_lines[0]).strip()
-        return first_value == marker
+        return bool(marker_numbered_lines) and _p10_numbered_list_matches(
+            lines, battery_id=case.battery_id, marker=marker
+        )
     if index == 4:
         if case.battery_id == "A":
             return len(lines) == 1 and len(italic_spans) == 1 and italic_spans[0].casefold() == "синтетика"
@@ -7408,7 +8614,7 @@ def _telegram_shape_matches(case: ExpandedCase, message: str) -> bool:
     if index == 7:
         return bool(
             len(lines) == 1
-            and has_angle_literal
+            and (("<" in message and ">" in message) if case.battery_id == "A" else has_angle_literal)
             and (case.battery_id == "A" or "&" in message)
             and (case.battery_id != "A" or _terminal_sentence_boundary_count(message) <= 1)
         )
@@ -7497,17 +8703,10 @@ def _telegram_shape_matches(case: ExpandedCase, message: str) -> bool:
         quote_value = re.sub(r"^\s*>\s*", "", lines[0]).strip()
         return (case.battery_id == "A" and marker in message) or quote_value == marker
     if index == 19:
-        remainder = re.sub(
-            r"\bSYN-(?:TELEGRAM-)?[AB]\d{2}-\d{2}\b",
-            " ",
-            message,
-            flags=re.I,
-        )
         return bool(
             (case.battery_id == "B" or 1 <= len(lines) <= 2)
             and (case.battery_id == "B" or len(substantive_words) >= 1)
             and not re.search(r"https?://|\[[^\]\n]+\]\(|<\s*/?\s*a\b", message, re.I)
-            and (case.battery_id == "A" or bool(re.search(r"[A-Za-zА-Яа-яЁё]{3,}|[`*_~]", remainder)))
         )
     if index == 20 and case.battery_id == "A":
         return list_count == 2 and len(lines) == 2 and bool(marker_list_lines)
@@ -7527,20 +8726,117 @@ def _tag_distinct_totals(message: str) -> list[int]:
     return [int(value) for pattern in patterns for value in re.findall(pattern, folded)]
 
 
-def _markdown_source_exact(message: str, *, label: str, url: str, only: bool = False) -> bool:
+_NEGATED_LINK_ACTION_PREFIX = re.compile(
+    r"\bне\s+(?:используй(?:те)?|открывай(?:те)?|переходи(?:те)?|считай(?:те)?|"
+    r"показывай(?:те)?|выводи(?:те)?|вставляй(?:те)?)\s*"
+    r"(?:(?:эту|данную|такую)\s+)?(?:(?:гипер)?ссылк\w*|anchor)?\s*(?:[:—-]\s*)?$",
+    re.IGNORECASE,
+)
+_NEGATED_LINK_IDENTITY_SUFFIX = re.compile(
+    r"^\s*(?:[-—,:]\s*)?(?:это\s+)?(?:"
+    r"не\s+(?:(?:гипер)?ссылк\w*|anchor\b|кликабельн\w*|верн\w*|правильн\w*|рабоч\w*)|"
+    r"(?:неверн|ложн|ошибочн|неправильн|некликабельн)\w*)\b",
+    re.IGNORECASE,
+)
+
+
+def _markdown_anchor_is_affirmative(message: str, match: re.Match[str]) -> bool:
+    """Reject only negation bound to the candidate anchor itself."""
+
+    if not _assertion_span_is_affirmative(message, match.start(), match.end()):
+        return False
+    clause_start = max(message.rfind(char, 0, match.start()) for char in ".!?;\n") + 1
+    endings = [position for char in ".!?;\n" if (position := message.find(char, match.end())) >= 0]
+    clause_end = min(endings) if endings else len(message)
+    prefix = message[max(clause_start, match.start() - 96) : match.start()]
+    suffix = message[match.end() : min(clause_end, match.end() + 96)]
+    return not (_NEGATED_LINK_ACTION_PREFIX.search(prefix) or _NEGATED_LINK_IDENTITY_SUFFIX.search(suffix))
+
+
+def _markdown_balanced_inline_code_spans(message: str) -> list[tuple[int, int]]:
+    """Return inner ranges of balanced inline code; delimiter runs are excluded."""
+
+    spans: list[tuple[int, int]] = []
+    index = 0
+    length = len(message)
+    while index < length:
+        if message[index] != "`":
+            index += 1
+            continue
+        closer = index
+        while closer < length and message[closer] == "`":
+            closer += 1
+        delimiter = closer - index
+        cursor = closer
+        found = False
+        while cursor < length:
+            if message[cursor] != "`":
+                cursor += 1
+                continue
+            end = cursor
+            while end < length and message[end] == "`":
+                end += 1
+            if end - cursor == delimiter:
+                spans.append((closer, cursor))
+                index = end
+                found = True
+                break
+            cursor = end
+        if not found:
+            index = closer
+    return spans
+
+
+def _markdown_source_urls(message: str) -> list[str]:
+    """Extract http(s) URLs from prose and from inner code-span text separately.
+
+    Closing backticks are delimiters, not URL characters. Unbalanced leftover
+    backticks stay in prose and remain part of the captured token. Existing
+    trailing-punctuation stripping is unchanged; backticks are not stripped.
+    """
+
+    spans = _markdown_balanced_inline_code_spans(message)
+    regions: list[str] = []
+    last = 0
+    for start, end in spans:
+        if last < start:
+            regions.append(message[last:start])
+        regions.append(message[start:end])
+        last = end
+    if last < len(message):
+        regions.append(message[last:])
+    urls: list[str] = []
+    for region in regions or [message]:
+        urls.extend(value.rstrip(".,;:!?)]}") for value in re.findall(r"https?://[^\s<>\"']+", region))
+    return urls
+
+
+def _markdown_source_exact(
+    message: str, *, label: str, url: str, only: bool = False, forbid_bare_url: bool = False
+) -> bool:
     if re.search(r"<\s*/?\s*[A-Za-z][^>\n]*>", message, re.IGNORECASE):
         return False
-    link_matches = list(re.finditer(r"\[([^\]\n]+)\]\((https?://[^)\s]+)\)", message))
+    code_spans = _markdown_balanced_inline_code_spans(message)
+    link_matches = [
+        match
+        for match in re.finditer(r"\[([^\]\n]+)\]\((https?://[^)\s]+)\)", message)
+        if not any(start <= match.start() < end for start, end in code_spans)
+    ]
     links = [match.groups() for match in link_matches]
-    urls = [value.rstrip(".,;:!?)]}") for value in re.findall(r"https?://[^\s<>\"']+", message)]
+    urls = _markdown_source_urls(message)
     labels = re.findall(r"\bSYN-LINK-[AB]\d{2}-\d{2}\b", message, re.IGNORECASE)
     exact_source = f"[{label}]({url})"
     return bool(
         links == [(label, url)]
-        and urls == [url]
-        and labels == [label]
+        # One exact anchor is required. Mentioning the same label or URL in
+        # surrounding prose is allowed unless the prompt forbids that shape.
+        and bool(urls)
+        and all(value == url for value in urls)
+        and bool(labels)
+        and all(value == label for value in labels)
+        and (not forbid_bare_url or urls == [url])
         and len(link_matches) == 1
-        and _assertion_span_is_affirmative(message, link_matches[0].start(), link_matches[0].end())
+        and _markdown_anchor_is_affirmative(message, link_matches[0])
         and (not only or message.strip() == exact_source)
     )
 
@@ -7742,8 +9038,33 @@ def _independent_p10_html(source: str) -> str | None:
     return rendered
 
 
-def _p10_prompt_tags_exact(battery_id: str, index: int, spans: Sequence[tuple[str, int, int]]) -> bool:
+def _p10_prompt_tags_exact(
+    battery_id: str,
+    index: int,
+    spans: Sequence[tuple[str, int, int]],
+    *,
+    visible_text: str = "",
+) -> bool:
     tags = [tag for tag, _start, _end in spans]
+    if index == 7 and battery_id == "A":
+        # The request asks for safe angle symbols, not an angle-wrapped marker.
+        # Inline code may protect those literal glyphs without adding a style
+        # requirement to the sentence or changing any visible content.
+        return all(tag == "code" and visible_text[start:end] in {"<", ">"} for tag, start, end in spans)
+    if index == 11:
+        # Ampersand prompt: raw "&" or code only around that glyph.  Whole-line
+        # code wrap is still over-broad and fails.
+        if not tags:
+            return True
+        return all(tag == "code" and visible_text[start:end] == "&" for tag, start, end in spans)
+    if index == 17:
+        # Angle-literal prompt: raw "<>" or code only around the glyphs / the
+        # angle-wrapped telegram marker.  Whole-line code wrap still fails.
+        if not tags:
+            return True
+        marker = f"SYN-TELEGRAM-{battery_id}10-17"
+        allowed = {"<", ">", "<>", f"<{marker}>"}
+        return all(tag == "code" and visible_text[start:end] in allowed for tag, start, end in spans)
     if index == 6 and battery_id == "A":
         return tags in ([], ["b"])
     if index in {2, 6, 10}:
@@ -7773,7 +9094,12 @@ def _p10_source_tags_exact(message: str, *, battery_id: str, index: int) -> bool
     if expected_html is None:
         return False
     expected = _parse_p10_html_semantics(expected_html)
-    return bool(expected is not None and _p10_prompt_tags_exact(battery_id, index, sorted(expected.spans)))
+    return bool(
+        expected is not None
+        and _p10_prompt_tags_exact(
+            battery_id, index, sorted(expected.spans), visible_text=expected.visible_text
+        )
+    )
 
 
 def _telegram_p10_content_equivalent(message: str, rendered: str, *, battery_id: str, index: int) -> bool:
@@ -7789,12 +9115,18 @@ def _telegram_p10_content_equivalent(message: str, rendered: str, *, battery_id:
     return bool(
         expected.visible_text == observed.visible_text
         and expected_spans == observed_spans
-        and _p10_prompt_tags_exact(battery_id, index, expected_spans)
+        and _p10_prompt_tags_exact(battery_id, index, expected_spans, visible_text=expected.visible_text)
     )
 
 
-def evaluate_case(case: ExpandedCase, record: Mapping[str, Any], *, latency_ms: int) -> dict[str, Any]:
-    oracle = oracle_for_case(case)
+def evaluate_case(
+    case: ExpandedCase,
+    record: Mapping[str, Any],
+    *,
+    latency_ms: int,
+    suite_revision: str | None = None,
+) -> dict[str, Any]:
+    oracle = oracle_for_case(case, suite_revision=suite_revision)
     failures: list[str] = []
     status_code = record.get("status_code")
     response = record.get("response")
@@ -7831,6 +9163,7 @@ def evaluate_case(case: ExpandedCase, record: Mapping[str, Any], *, latency_ms: 
         "a09_12": _a09_12_relation_is_exact,
         "a09_14": _a09_14_relation_is_exact,
         "a09_18": _a09_18_relation_is_exact,
+        "b09_20": _b09_20_relation_is_exact,
     }.get(semantic_profile)
     semantic_missing = (
         not semantic_profile_exact(message)
@@ -7843,6 +9176,14 @@ def evaluate_case(case: ExpandedCase, record: Mapping[str, Any], *, latency_ms: 
             for group in semantic_groups
         )
     )
+    if (
+        semantic_profile == "b09_20"
+        and _b09_20_claimed_new_relation(folded)
+        and not _b09_20_live_pairs(folded)
+    ):
+        # Caller-level polarity: leftover precision stems cannot accept a
+        # negated, quoted, or unpaired independence/structure claim.
+        semantic_missing = True
     if semantic_missing:
         failures.append("content_semantic_group_missing")
     if any(str(fragment).casefold() in folded for fragment in content["excludes_all"]):
@@ -7856,6 +9197,11 @@ def evaluate_case(case: ExpandedCase, record: Mapping[str, Any], *, latency_ms: 
             failures.append("content_exact_integer_missing")
         if _answer_conflicting_integer_values(message, int(standalone_integer)):
             failures.append("content_exact_integer_conflict")
+    expected_structure = content.get("office_structure_summary")
+    if isinstance(expected_structure, Mapping) and not _office_structure_summary_matches(
+        message, expected_structure
+    ):
+        failures.append("content_office_structure_mismatch")
     expected_tag_inventory = content.get("exact_tag_inventory")
     if isinstance(expected_tag_inventory, Mapping):
         observed_inventory, pair_count, mention_count, closed_grammar = _parse_exact_tag_inventory(message)
@@ -7883,7 +9229,10 @@ def evaluate_case(case: ExpandedCase, record: Mapping[str, Any], *, latency_ms: 
         failures.append("content_time_marker_not_exact")
     expected_attachment_marker = content.get("exact_attachment_marker")
     if isinstance(expected_attachment_marker, str) and not _closed_marker_exact(
-        message, expected_attachment_marker, kind="ATTACHMENT"
+        message,
+        expected_attachment_marker,
+        kind="ATTACHMENT",
+        exact_once=_attachment_output_requires_exact_once(case.question),
     ):
         failures.append("content_attachment_marker_not_exact")
     expected_reminder_marker = content.get("exact_reminder_marker")
@@ -7904,6 +9253,7 @@ def evaluate_case(case: ExpandedCase, record: Mapping[str, Any], *, latency_ms: 
         label=str(exact_markdown_link.get("label") or ""),
         url=str(exact_markdown_link.get("url") or ""),
         only=exact_markdown_link.get("only") is True,
+        forbid_bare_url=exact_markdown_link.get("forbid_bare_url") is True,
     ):
         failures.append("content_markdown_link_not_exact")
     if case.oracle_profile == "package_a_honesty":
@@ -7975,17 +9325,25 @@ def _secure_new_descriptor(path: Path) -> int:
     flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
     if hasattr(os, "O_NOFOLLOW"):
         flags |= os.O_NOFOLLOW
+    # An exclusive-open failure gives us no ownership of the destination.
+    descriptor = os.open(path, flags, 0o600)
+    created = None
     try:
-        descriptor = os.open(path, flags, 0o600)
+        created = os.fstat(descriptor)
         os.fchmod(descriptor, 0o600)
         metadata = os.fstat(descriptor)
         if not stat.S_ISREG(metadata.st_mode) or stat.S_IMODE(metadata.st_mode) != 0o600:
             raise BatteryContractError("private_file_mode_unsupported")
     except BaseException:
-        with contextlib.suppress(OSError, UnboundLocalError):
-            os.close(descriptor)
-        with contextlib.suppress(OSError):
-            path.unlink()
+        try:
+            if created is not None:
+                with contextlib.suppress(OSError):
+                    current = path.lstat()
+                    if (current.st_dev, current.st_ino) == (created.st_dev, created.st_ino):
+                        path.unlink()
+        finally:
+            with contextlib.suppress(OSError):
+                os.close(descriptor)
         raise
     return descriptor
 
@@ -8047,6 +9405,7 @@ def execute_pass_cases(
     evidence_path: Path,
     runtime_hash: str,
     require_reconciliation: bool = False,
+    suite_revision: str | None = None,
 ) -> dict[str, Any]:
     """Execute exactly one sealed pass and keep raw records only in 0600 evidence."""
 
@@ -8070,7 +9429,12 @@ def execute_pass_cases(
                 }
                 executor_error = type(exc).__name__
             latency_ms = max(0, round((time.perf_counter() - started) * 1000))
-            outcome = evaluate_case(case, record, latency_ms=latency_ms)
+            outcome = evaluate_case(
+                case,
+                record,
+                latency_ms=latency_ms,
+                suite_revision=suite_revision,
+            )
             if executor_error:
                 outcome["passed"] = False
                 outcome["failure_codes"] = sorted(set([*outcome["failure_codes"], "executor_error"]))
@@ -8325,6 +9689,7 @@ def _validate_pass_result(result: Any, cases: Sequence[ExpandedCase]) -> bool:
         "content_forbidden_fragment_present",
         "content_exact_integer_missing",
         "content_exact_integer_conflict",
+        "content_office_structure_mismatch",
         "content_attachment_marker_not_exact",
         "content_markdown_link_not_exact",
         "content_outside_deed_claim",
@@ -8409,6 +9774,9 @@ def run_battery(
     run_directory: Path,
     pass_executor: PassExecutor,
     concurrency: int = DEFAULT_CONCURRENCY,
+    review_plan: Mapping[str, Any] | None = None,
+    root_review_key: bytes | None = None,
+    candidate_sha: str | None = None,
 ) -> dict[str, Any]:
     """Preseal all ten passes, then execute them independently with stable ordering."""
 
@@ -8426,14 +9794,43 @@ def run_battery(
         raise BatteryContractError("manifest_hash_invalid")
     if type(concurrency) is not int or not (1 <= concurrency <= MAX_CONCURRENCY):
         raise BatteryContractError("concurrency_out_of_range")
+    all_cases = expand_manifest_cases(manifest)
+    validated_review_plan: dict[str, Any] | None = None
+    if review_plan is not None or root_review_key is not None or candidate_sha is not None:
+        if (
+            battery_id != "B"
+            or review_plan is None
+            or root_review_key is None
+            or candidate_sha is None
+            or not _is_sha256(candidate_sha)
+        ):
+            raise BatteryContractError("b09_review_inputs_invalid")
+        questions = {case.id: case.question for case in all_cases if case.id in b09_evidence.OPEN_CASE_IDS}
+        try:
+            validated_review_plan = b09_evidence.validate_plan(
+                review_plan,
+                key=root_review_key,
+                expected_candidate_sha=candidate_sha,
+                manifest_sha256=FROZEN_MANIFEST_SHA256,
+                questions=questions,
+                source_facts=b09_evidence.expected_source_facts(sys.modules[__name__]),
+            )
+        except b09_evidence.B09EvidenceError:
+            raise BatteryContractError("b09_review_plan_invalid") from None
+    if (
+        validated_review_plan is not None
+        and run_directory.resolve() != Path(validated_review_plan["pair_directory"]) / "battery-b"
+    ):
+        raise BatteryContractError("b09_review_run_directory_mismatch")
     _assert_ignored_or_external(run_directory)
     if run_directory.exists():
         raise BatteryContractError("run_directory_already_exists")
     run_directory.mkdir(parents=True, mode=0o700)
     run_directory.chmod(0o700)
     _preflight_private_filesystem(run_directory)
+    if validated_review_plan is not None:
+        _secure_write_json(run_directory / "b09-review-plan.json", validated_review_plan)
 
-    all_cases = expand_manifest_cases(manifest)
     pass_specs = list(manifest["passes"])
     sealed: list[tuple[Mapping[str, Any], list[ExpandedCase], PassContext]] = []
     for pass_index, pass_spec in enumerate(pass_specs, start=1):
@@ -8458,6 +9855,7 @@ def run_battery(
             manifest_sha256=manifest_sha256,
             home=home.resolve(),
             evidence_path=(evidence_dir / "raw-responses.jsonl").resolve(),
+            suite_revision=(b09_evidence.SUITE_REVISION if validated_review_plan is not None else None),
         )
         sealed.append((pass_spec, cases, context))
 
@@ -8506,6 +9904,11 @@ def run_battery(
         "runtime_hashes": [str(item["runtime_hash"]) for item in ordered],
         "evidence_hashes": [str(item["evidence_sha256"]) for item in ordered],
     }
+    if battery_id == "B":
+        report["aggregates"]["content_acceptance_complete"] = False
+    if validated_review_plan is not None:
+        report["suite_revision"] = b09_evidence.SUITE_REVISION
+        report["content_review"] = b09_evidence.plan_binding(validated_review_plan)
     _secure_write_json(run_directory / "aggregate.json", report)
     return report
 
@@ -8604,6 +10007,42 @@ def _configured_model_endpoint_urls(environment: Mapping[str, str]) -> dict[str,
     return endpoints
 
 
+def _validated_relay_endpoints(
+    endpoint_urls: Mapping[str, str],
+    *,
+    include_secondary: bool = False,
+) -> tuple[dict[str, str], dict[str, str]]:
+    """Return one closed relay endpoint/socket set after local-only validation."""
+
+    if type(include_secondary) is not bool:
+        raise BatteryContractError("worker_relay_endpoint_invalid")
+    socket_names = dict(_RELAY_SOCKET_NAMES)
+    if include_secondary:
+        socket_names["secondary"] = "secondary.sock"
+    try:
+        endpoint_kinds = set(endpoint_urls)
+    except (TypeError, ValueError):
+        raise BatteryContractError("worker_relay_endpoint_invalid") from None
+    if endpoint_kinds != set(socket_names):
+        raise BatteryContractError("worker_relay_endpoint_invalid")
+
+    endpoints: dict[str, str] = {}
+    for kind in socket_names:
+        value = endpoint_urls[kind]
+        if not isinstance(value, str) or not value or value != value.strip():
+            raise BatteryContractError("worker_relay_endpoint_invalid")
+        try:
+            parsed = urlsplit(value)
+            parsed_port = parsed.port
+            port = int(parsed_port if parsed_port is not None else (443 if parsed.scheme == "https" else 80))
+        except (TypeError, ValueError):
+            raise BatteryContractError("worker_relay_endpoint_invalid") from None
+        if not _endpoint_is_numeric_local(value) or not (1 <= port <= 65_535):
+            raise BatteryContractError("worker_relay_endpoint_invalid")
+        endpoints[kind] = value
+    return endpoints, socket_names
+
+
 def _resolved_endpoint_targets(value: str) -> tuple[tuple[int, tuple[Any, ...]], ...]:
     if not _endpoint_is_numeric_local(value):
         raise BatteryContractError("worker_relay_endpoint_invalid")
@@ -8699,7 +10138,15 @@ class _RelayLifecycle:
         thread = threading.Thread(target=target, args=args, daemon=True)
         with self._lock:
             self._threads.append(thread)
-        thread.start()
+        try:
+            thread.start()
+        except RuntimeError:
+            # A failed native thread allocation has no joinable thread. Keep
+            # every successfully started thread owned even if start then raises.
+            if thread.ident is None:
+                with self._lock:
+                    self._threads.remove(thread)
+            raise
 
     def _stop_connections(self) -> None:
         self._stop.set()
@@ -8791,12 +10238,18 @@ class _UnixToTcpEndpointRelay(_RelayLifecycle):
 
 
 class _HostEndpointRelays:
-    """Three private fixed-target UDS relays mounted read-only into one worker."""
+    """Private fixed-target UDS relays mounted read-only into one worker."""
 
-    def __init__(self, endpoint_urls: Mapping[str, str]) -> None:
-        if set(endpoint_urls) != set(_RELAY_SOCKET_NAMES):
-            raise BatteryContractError("worker_relay_endpoint_invalid")
-        self._endpoint_urls = dict(endpoint_urls)
+    def __init__(
+        self,
+        endpoint_urls: Mapping[str, str],
+        *,
+        include_secondary: bool = False,
+    ) -> None:
+        self._endpoint_urls, self._socket_names = _validated_relay_endpoints(
+            endpoint_urls,
+            include_secondary=include_secondary,
+        )
         self._temporary: tempfile.TemporaryDirectory[str] | None = None
         self.directory: Path | None = None
         self._relays: list[_UnixToTcpEndpointRelay] = []
@@ -8806,13 +10259,18 @@ class _HostEndpointRelays:
         self.directory = Path(self._temporary.name).resolve()
         self.directory.chmod(0o700)
         try:
-            for kind, socket_name in _RELAY_SOCKET_NAMES.items():
-                relay = _UnixToTcpEndpointRelay(
+            relays = [
+                _UnixToTcpEndpointRelay(
                     self.directory / socket_name,
                     self._endpoint_urls[kind],
                 )
-                relay.start()
+                for kind, socket_name in self._socket_names.items()
+            ]
+            for relay in relays:
                 self._relays.append(relay)
+                # Own the partially initialized listener before start can
+                # raise. It must participate in the same cleanup as prior ones.
+                relay.start()
         except BaseException:
             self.__exit__(None, None, None)
             raise
@@ -8832,10 +10290,18 @@ class _HostEndpointRelays:
 class _UnixRelayLoopbackBridge(_RelayLifecycle):
     """Worker-side UDS clients exposed only as private loopback TCP adapters."""
 
-    def __init__(self, endpoint_urls: Mapping[str, str], relay_root: Path) -> None:
+    def __init__(
+        self,
+        endpoint_urls: Mapping[str, str],
+        relay_root: Path,
+        *,
+        include_secondary: bool = False,
+    ) -> None:
         super().__init__()
-        if set(endpoint_urls) != set(_RELAY_SOCKET_NAMES):
-            raise BatteryContractError("worker_relay_endpoint_invalid")
+        endpoints, socket_names = _validated_relay_endpoints(
+            endpoint_urls,
+            include_secondary=include_secondary,
+        )
         self._original_connect = socket.socket.connect
         self._listeners: list[socket.socket] = []
         self.routes: dict[tuple[int, str, int], tuple[Any, ...]] = {}
@@ -8843,15 +10309,18 @@ class _UnixRelayLoopbackBridge(_RelayLifecycle):
         if not relay_root.is_dir() or relay_root.is_symlink():
             raise BatteryContractError("worker_relay_mount_invalid")
         try:
-            for kind, endpoint_url in endpoint_urls.items():
-                relay_path = relay_root / _RELAY_SOCKET_NAMES[kind]
+            relay_bindings: list[tuple[Path, tuple[tuple[int, tuple[Any, ...]], ...]]] = []
+            for kind, socket_name in socket_names.items():
+                relay_path = relay_root / socket_name
                 try:
                     relay_metadata = relay_path.lstat()
                 except OSError:
                     raise BatteryContractError("worker_relay_socket_invalid") from None
                 if not stat.S_ISSOCK(relay_metadata.st_mode) or stat.S_IMODE(relay_metadata.st_mode) != 0o600:
                     raise BatteryContractError("worker_relay_socket_invalid")
-                for family, target_sockaddr in _resolved_endpoint_targets(endpoint_url):
+                relay_bindings.append((relay_path, _resolved_endpoint_targets(endpoints[kind])))
+            for relay_path, targets in relay_bindings:
+                for family, target_sockaddr in targets:
                     canonical = _canonical_endpoint_target(family, target_sockaddr)
                     if canonical in self.routes:
                         continue
@@ -8880,14 +10349,20 @@ class _UnixRelayLoopbackBridge(_RelayLifecycle):
         cls,
         settings: Any,
         relay_root: Path = WORKER_RELAY_ROOT,
+        *,
+        include_secondary: bool = False,
     ) -> _UnixRelayLoopbackBridge:
+        endpoints = {
+            "model": str(settings.llm_base_url),
+            "embedding": str(settings.embeddings_base_url),
+            "reranker": str(settings.rerank_base_url),
+        }
+        if include_secondary:
+            endpoints["secondary"] = str(settings.secondary_llm_base_url)
         return cls(
-            {
-                "model": str(settings.llm_base_url),
-                "embedding": str(settings.embeddings_base_url),
-                "reranker": str(settings.rerank_base_url),
-            },
+            endpoints,
             relay_root,
+            include_secondary=include_secondary,
         )
 
     def _accept_loop(self, accept_connection: Any, relay_path: Path) -> None:
@@ -9349,6 +10824,17 @@ def _http_probe_reconciliation_exact(
         return all(int(delta[key]) == 0 for delta in deltas for key in attempt_keys)
     if any(temporal_routes):
         return False
+    if profile == "package_c_exact_documents":
+        # Mixed per-case census: structural-zero ids (predicate grammar plus
+        # independently proved nominal whole-table count_records) require
+        # model_http==0; every remaining model-owned request requires >=1.
+        # This is not a pass-wide exemption.
+        return all(
+            int(delta["model_http"]) == 0
+            if _package_c_structural_case(case)
+            else int(delta["model_http"]) >= 1
+            for case, delta in zip(cases, deltas, strict=True)
+        )
     if profile != "package_a_honesty":
         return all(int(delta["model_http"]) >= 1 for delta in deltas)
 
@@ -9406,9 +10892,17 @@ class LocalEndpointHttpProbe:
 
     _KINDS = ("model", "embedding", "reranker", "other")
 
-    def __init__(self, settings: Any, foreign_canaries: Sequence[str] = ()) -> None:
+    def __init__(
+        self,
+        settings: Any,
+        foreign_canaries: Sequence[str] = (),
+        *,
+        include_secondary: bool = False,
+    ) -> None:
         import httpx
 
+        if type(include_secondary) is not bool:
+            raise BatteryContractError("http_probe_secondary_opt_in_invalid")
         self._httpx = httpx
         self._original_send = httpx.AsyncClient.send
         self._targets = {
@@ -9416,10 +10910,26 @@ class LocalEndpointHttpProbe:
             self._target(str(settings.embeddings_base_url), "/embeddings"): "embedding",
             self._target(str(settings.rerank_base_url), "/rerank"): "reranker",
         }
-        self.counts = {kind: 0 for kind in self._KINDS}
+        kinds = self._KINDS
+        if include_secondary:
+            secondary_target = self._target(str(settings.secondary_llm_base_url), "/chat/completions")
+            secondary_health_target = self._target(str(settings.secondary_llm_base_url), "/models")
+            secondary_profile_target = self._target(str(settings.secondary_llm_base_url), "/friday-profile")
+            if (
+                secondary_target in self._targets
+                or secondary_health_target in self._targets
+                or secondary_profile_target in self._targets
+                or len({secondary_target, secondary_health_target, secondary_profile_target}) != 3
+            ):
+                raise BatteryContractError("http_probe_endpoint_collision")
+            self._targets[secondary_target] = "secondary"
+            self._targets[secondary_health_target] = "secondary_health"
+            self._targets[secondary_profile_target] = "secondary_health"
+            kinds += ("secondary", "secondary_health")
+        self.counts = {kind: 0 for kind in kinds}
         # These retain counters only.  Request URL/header/body values are scanned
         # at the send boundary and are never copied into evidence or probe state.
-        self.foreign_canary_sends = {kind: 0 for kind in self._KINDS}
+        self.foreign_canary_sends = {kind: 0 for kind in kinds}
         self.foreign_canary_surfaces = {surface: 0 for surface in ("url", "headers", "body")}
         self.scan_failures = 0
         self._foreign_canaries = tuple(str(value) for value in foreign_canaries if str(value))
@@ -9450,6 +10960,9 @@ class LocalEndpointHttpProbe:
                     parsed.path,
                 )
                 kind = probe._targets.get(target, "other")
+                expected_method = "GET" if kind == "secondary_health" else "POST"
+                if request.method != expected_method:
+                    kind = "other"
             except (AttributeError, TypeError, ValueError):
                 kind = "other"
             probe.counts[kind] += 1
@@ -10001,10 +11514,14 @@ def _candidate_source_paths(
         and os.fsdecode(value).startswith(tuple(f"{package}/" for package in shipped_roots))
         and os.fsdecode(value) not in _FORBIDDEN_PROVENANCE_PATHS
     ]
+    binder_path = instrument_path.with_name("synthetic_live_b09_evidence.py")
     explicit = [
         str(instrument_path.relative_to(root)),
         *(str(path.resolve().relative_to(root)) for path in manifest_paths),
     ]
+    for review_path in (binder_path, instrument_path.with_name("synthetic_live_b09_lab.py")):
+        if review_path.is_file():
+            explicit.append(str(review_path.resolve().relative_to(root)))
     return tuple(sorted(set([*tracked, *untracked, *explicit])))
 
 
@@ -10543,6 +12060,10 @@ def _worker_environment(base: Mapping[str, str], context: PassContext) -> dict[s
             "FRIDAY_LIVE_BATTERY_WORKSPACE": str(WORKER_WORKSPACE_ROOT),
             "FRIDAY_LIVE_BATTERY_RELAY_ROOT": str(WORKER_RELAY_ROOT),
             "FRIDAY_TIMEZONE": context.timezone,
+            # Bind numerical-library pools before product imports. These are
+            # private worker limits; native thread census remains strict.
+            "OMP_NUM_THREADS": "1",
+            "OPENBLAS_NUM_THREADS": "1",
             "PYTHONHASHSEED": str(context.seed),
             "TZ": context.timezone,
         }
@@ -10905,6 +12426,8 @@ class SubprocessPassExecutor:
                 for case in cases
             ],
         }
+        if context.suite_revision is not None:
+            request["suite_revision"] = context.suite_revision
         self._assert_candidate_unchanged()
         request_bytes = _canonical_json_bytes(request)
         environment = _worker_environment(self.base_environment, context)
@@ -12257,13 +13780,7 @@ def _telegram_delivery_shape_exact(message: str, attempts: Any, delivered: Any, 
             return marker_inside("b", "strong")
         return len(re.findall(r"<(?:b|strong)>", delivered_text, re.I)) == 1
     if index == 3:
-        numbered = [line for line in lines if re.match(r"^\s*\d{1,2}[.)]\s+", line)]
-        expected = 2
-        return bool(
-            len(lines) == expected
-            and len(numbered) == expected
-            and (battery_id == "A" or marker in numbered[0])
-        )
+        return _p10_numbered_list_matches(lines, battery_id=battery_id, marker=marker)
     if index == 4:
         if battery_id == "B":
             return marker_inside("i", "em")
@@ -12286,17 +13803,17 @@ def _telegram_delivery_shape_exact(message: str, attempts: Any, delivered: Any, 
                 )
             )
         )
+    if index == 7 and battery_id == "A":
+        visible = _parse_p10_html_semantics(delivered_text)
+        return bool(
+            visible is not None
+            and "<" in visible.visible_text
+            and ">" in visible.visible_text
+            and _terminal_sentence_boundary_count(visible.visible_text) <= 1
+        )
     if index in {7, 17}:
         angle_safe = bool(re.search(r"&lt;[^&<>\n]+&gt;", delivered_text))
-        return bool(
-            angle_safe
-            and (battery_id == "A" or index == 17 or "&amp;" in delivered_text)
-            and (
-                battery_id != "A"
-                or index != 7
-                or _terminal_sentence_boundary_count(html.unescape(delivered_text)) <= 1
-            )
-        )
+        return angle_safe and (index == 17 or "&amp;" in delivered_text)
     if index in {8, 18}:
         return bool(
             marker_inside("blockquote")
@@ -12821,7 +14338,12 @@ class _LiveCaseExecutor:
             state["markdown_anchor_exact"] = bool(
                 not anchors.invalid
                 and anchors.anchors == [(url, label)]
-                and _markdown_source_exact(message, label=label, url=url)
+                and _markdown_source_exact(
+                    message,
+                    label=label,
+                    url=url,
+                    forbid_bare_url=(case.battery_id, case.question_index) == ("B", 6),
+                )
             )
             state["markdown_link_preserved"] = (url, label) in anchors.anchors
             state["rendered_html_safe"] = _telegram_html_is_safe(rendered)
@@ -13026,6 +14548,22 @@ class _LiveCaseExecutor:
             connection.row_factory = sqlite3.Row
             try:
                 connection.execute("PRAGMA query_only=ON")
+                # Current FTS content views call the same deterministic SQL
+                # functions as live Storage and backup verification. A bare
+                # connection cannot read those views, even when no rows changed.
+                from friday.conversation_passages.schema import (
+                    register_conversation_passage_connection_functions,
+                )
+                from friday.document_catalog.passage_schema import (
+                    register_document_passage_connection_functions,
+                )
+                from friday.document_catalog.schema import (
+                    register_document_catalog_connection_functions,
+                )
+
+                register_document_catalog_connection_functions(connection)
+                register_document_passage_connection_functions(connection)
+                register_conversation_passage_connection_functions(connection)
                 database_exact = _logical_database_digest(connection) == self._tail_database_sha256
             finally:
                 connection.close()
@@ -13519,6 +15057,9 @@ def _execute_live_worker(request: Mapping[str, Any]) -> dict[str, Any]:
                     candidate_source_sha256=candidate_source_sha256,
                 ),
                 require_reconciliation=True,
+                suite_revision=(
+                    str(request["suite_revision"]) if request.get("suite_revision") is not None else None
+                ),
             )
         if executor is not None:
             try:
@@ -13551,9 +15092,18 @@ def _valid_worker_request(value: Any) -> bool:
         "pass",
         "cases",
     }
-    if set(value) != expected_fields or value.get("protocol") != WORKER_PROTOCOL:
+    actual_fields = frozenset(value)
+    if (
+        actual_fields not in {frozenset(expected_fields), frozenset({*expected_fields, "suite_revision"})}
+        or value.get("protocol") != WORKER_PROTOCOL
+    ):
         return False
     battery_id = value.get("battery_id")
+    suite_revision = value.get("suite_revision")
+    if suite_revision is not None and not (
+        battery_id == "B" and suite_revision == b09_evidence.SUITE_REVISION
+    ):
+        return False
     candidate_files = value.get("candidate_files")
     pass_spec = value.get("pass")
     cases = value.get("cases")
@@ -13699,10 +15249,20 @@ def _parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Run A then B on one unchanged candidate; B starts only after a clean A",
     )
+    parser.add_argument(
+        "--b09-review-plan",
+        type=Path,
+        help="Private signed B09 plan preregistered before an official --both run",
+    )
+    parser.add_argument(
+        "--root-review-key",
+        type=Path,
+        help="Private root-held HMAC key; never copied into a worker or report",
+    )
     return parser
 
 
-def _report_is_green(report: Mapping[str, Any]) -> bool:
+def _closed_report_is_green(report: Mapping[str, Any]) -> bool:
     aggregates = report.get("aggregates")
     passes = report.get("passes")
     runtime_hashes = report.get("runtime_hashes")
@@ -13751,7 +15311,29 @@ def _report_is_green(report: Mapping[str, Any]) -> bool:
     )
 
 
-def _pair_reports_green(reports: Sequence[Mapping[str, Any]]) -> bool:
+def _report_is_green(
+    report: Mapping[str, Any],
+    *,
+    content_acceptance: Mapping[str, Any] | None = None,
+    root_review_key: bytes | None = None,
+) -> bool:
+    if not _closed_report_is_green(report):
+        return False
+    if report.get("battery_id") == "A":
+        return True
+    return b09_evidence.acceptance_matches_report(
+        report,
+        content_acceptance,
+        key=root_review_key,
+    )
+
+
+def _pair_reports_green(
+    reports: Sequence[Mapping[str, Any]],
+    *,
+    content_acceptance: Mapping[str, Any] | None = None,
+    root_review_key: bytes | None = None,
+) -> bool:
     runtime_hashes = [
         str(runtime_hash)
         for report in reports
@@ -13762,7 +15344,12 @@ def _pair_reports_green(reports: Sequence[Mapping[str, Any]]) -> bool:
     return bool(
         len(reports) == 2
         and [report.get("battery_id") for report in reports] == ["A", "B"]
-        and all(_report_is_green(report) for report in reports)
+        and _report_is_green(reports[0])
+        and _report_is_green(
+            reports[1],
+            content_acceptance=content_acceptance,
+            root_review_key=root_review_key,
+        )
         and len(runtime_hashes) == 2 * PASSES_PER_BATTERY
         and len(set(runtime_hashes)) == 1
     )
@@ -13779,13 +15366,24 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 2
     if bool(args.battery) == bool(args.both):
         raise SystemExit("choose exactly one of --battery or --both")
+    if args.both and args.b09_review_plan is None:
+        raise SystemExit("--both requires a preregistered --b09-review-plan and --root-review-key")
+    if bool(args.b09_review_plan) != bool(args.root_review_key):
+        raise SystemExit("--b09-review-plan and --root-review-key must be supplied together")
+    if args.b09_review_plan is not None and not args.both:
+        raise SystemExit("the B09 review plan is valid only for the official --both run")
     if not (1 <= int(args.concurrency) <= MAX_CONCURRENCY):
         raise SystemExit(f"--concurrency must be between 1 and {MAX_CONCURRENCY}")
     if args.env_file is not None:
         _select_live_env_file(args.env_file)
-    executor = SubprocessPassExecutor(_inherit_model_environment())
 
-    def execute_one(battery_id: str, run_directory: Path) -> dict[str, Any]:
+    def execute_one(
+        battery_id: str,
+        run_directory: Path,
+        *,
+        review_plan: Mapping[str, Any] | None = None,
+        root_review_key: bytes | None = None,
+    ) -> dict[str, Any]:
         path = MANIFEST_PATHS[battery_id]
         return run_battery(
             load_manifest(path),
@@ -13793,9 +15391,13 @@ def main(argv: Sequence[str] | None = None) -> int:
             run_directory=run_directory,
             pass_executor=executor,
             concurrency=int(args.concurrency),
+            review_plan=review_plan,
+            root_review_key=root_review_key,
+            candidate_sha=(executor._candidate_source_sha256 if review_plan is not None else None),
         )
 
     if args.battery:
+        executor = SubprocessPassExecutor(_inherit_model_environment())
         battery_id = str(args.battery)
         manifest_hash = file_sha256(MANIFEST_PATHS[battery_id])
         run_directory = (
@@ -13816,12 +15418,41 @@ def main(argv: Sequence[str] | None = None) -> int:
     _assert_ignored_or_external(pair_root)
     if pair_root.exists():
         raise BatteryContractError("run_directory_already_exists")
+    review_plan: dict[str, Any] | None = None
+    root_review_key: bytes | None = None
+    if args.b09_review_plan is not None and args.root_review_key is not None:
+        root_review_key = b09_evidence.read_root_key(
+            args.root_review_key,
+            forbidden_roots=(ROOT, pair_root),
+        )
+        raw_plan = b09_evidence.load_private_json(args.b09_review_plan.resolve())
+        b_cases = expand_manifest_cases(load_manifest(MANIFEST_PATHS["B"]))
+        b_questions = {case.id: case.question for case in b_cases if case.id in b09_evidence.OPEN_CASE_IDS}
+        review_plan = b09_evidence.validate_plan(
+            raw_plan,
+            key=root_review_key,
+            expected_candidate_sha=_candidate_source_digest(),
+            manifest_sha256=FROZEN_MANIFEST_SHA256,
+            questions=b_questions,
+            source_facts=b09_evidence.expected_source_facts(sys.modules[__name__]),
+        )
+        if str(pair_root) != review_plan["pair_directory"]:
+            raise BatteryContractError("b09_review_run_directory_mismatch")
     pair_root.mkdir(parents=True, mode=0o700)
     pair_root.chmod(0o700)
     _preflight_private_filesystem(pair_root)
+    _secure_write_json(pair_root / "b09-review-plan.json", review_plan)
+    executor = SubprocessPassExecutor(_inherit_model_environment())
     reports: list[dict[str, Any]] = [execute_one("A", pair_root / "battery-a")]
     if _report_is_green(reports[0]):
-        reports.append(execute_one("B", pair_root / "battery-b"))
+        reports.append(
+            execute_one(
+                "B",
+                pair_root / "battery-b",
+                review_plan=review_plan,
+                root_review_key=root_review_key,
+            )
+        )
     runtime_hashes = [value for report in reports for value in report["runtime_hashes"]]
     pair_report = {
         "schema": PAIR_REPORT_SCHEMA,
@@ -13835,6 +15466,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 report["aggregates"]["privacy_canaries_clear"] is True for report in reports
             ),
             "runtime_identity_consistent": bool(runtime_hashes) and len(set(runtime_hashes)) == 1,
+            "content_acceptance_complete": False,
             "pair_clean": _pair_reports_green(reports),
         },
     }

@@ -15,9 +15,21 @@ from typing import Any
 
 import pytest
 
-from friday.agent_runtime import AgentContext, AgentRuntime, _temporal_payload_is_coherent
+from friday.agent_runtime import (
+    AgentContext,
+    AgentRuntime,
+    _has_temporal_subject_filter,
+    _temporal_payload_is_coherent,
+)
 from friday.execution_kernel import ToolResult
-from friday.time_routing import TimeIntent, TimeWindow, build_time_window, fast_time_intent
+from friday.time_routing import (
+    TimeIntent,
+    TimeWindow,
+    build_time_window,
+    fast_time_intent,
+    is_temporal_read_request,
+    temporal_routing_text,
+)
 
 FIXED_TODAY = date(2026, 8, 8)
 FIXED_NOW = datetime(2026, 8, 8, 10, 0, 0)
@@ -25,6 +37,10 @@ _LIVE_A = json.loads(
     (Path(__file__).parent / "fixtures" / "synthetic_live_battery_a.json").read_text(encoding="utf-8")
 )
 _LIVE_A_P02 = next(item for item in _LIVE_A["passes"] if item["pass_id"] == "A-P02")["questions"]
+_LIVE_B = json.loads(
+    (Path(__file__).parent / "fixtures" / "synthetic_live_battery_b.json").read_text(encoding="utf-8")
+)
+_LIVE_B_P02 = next(item for item in _LIVE_B["passes"] if item["pass_id"] == "B-P02")["questions"]
 
 
 def _tool(name: str) -> dict[str, Any]:
@@ -110,6 +126,196 @@ def test_every_frozen_a_p02_event_question_has_one_code_owned_past_day(
         f"2024-05-{day:02d}",
         f"2024-05-{day:02d}",
     )
+
+
+@pytest.mark.parametrize("question,day", [(q, i) for i, q in enumerate(_LIVE_B_P02, start=1)])
+@pytest.mark.parametrize("outward_kind", ["архив", "знание"])
+@pytest.mark.asyncio
+async def test_b_event_index_requests_execute_the_named_window(question, day, outward_kind) -> None:
+    # B08 names midnight: preserve its hour instead of widening it to the day
+    # just because the other nineteen prompts ask for whole calendar days.
+    midnight = day == 8
+    intent = fast_time_intent(question, today=FIXED_TODAY)
+    assert intent == TimeIntent("past", "single_hour" if midnight else "single_day")
+    expected_day = f"2024-06-{day:02d}"
+    assert build_time_window(question, intent, today=FIXED_TODAY) == TimeWindow(
+        expected_day + ("T00:00:00" if midnight else ""),
+        expected_day + ("T00:59:59" if midnight else ""),
+    )
+    kernel = _TimezoneKernel()
+    runtime = _runtime(kernel)
+    await runtime._prefetch_the_timeline_if_asked(  # noqa: SLF001
+        question,
+        None,
+        [_tool("what_happened"), _tool("upcoming"), _tool("memory_search")],
+        [],
+        [],
+        [],
+        AgentContext(
+            conversation_id="synthetic-b",
+            user_id="synthetic",
+            outward_verdict=(outward_kind, None),
+        ),
+    )
+    assert kernel.calls == [
+        (
+            "what_happened",
+            {
+                "since": expected_day + "T00:00:00",
+                "until": expected_day + ("T00:59:59" if midnight else "T23:59:59"),
+                "limit": 40,
+            },
+        )
+    ]
+
+
+@pytest.mark.parametrize(
+    "question",
+    [
+        "Не ищи событие за 8 июня 2024 года.",
+        "Не ищи по тексту: не показывай событие за 8 июня 2024 года.",
+        "Не ищи по тексту: покажи событие за 8 июня 2024 года, но не показывай его.",
+        "Не ищи по тексту: покажи событие за 8 июня 2024 года; не ищите его.",
+        "Не ищи по тексту: покажи событие за 8 июня 2024 года, но не надо показывать.",
+        "Не ищи по тексту: покажи событие за 8 июня 2024 года; не нужно называть.",
+        "Не ищи по тексту: покажи событие за 8 июня 2024 года, я не хочу перечислять.",
+        "Не ищи по тексту: перескажи документ за 8 июня 2024 года.",
+        "Не ищи по тексту: прочитай событие в документе от 8 июня 2024 года.",
+        "Не ищи по тексту: прочитай событие Олега за 8 июня 2024 года.",
+        "Отдели дату документа от valid-time: что произошло у Олега 8 июня 2024 года?",
+        "Переведи: «Не ищи по тексту: прочитай событие за 8 июня 2024 года».",
+        "Восстанови удалённое событие на 8 июня 2024 года.",
+        "Верни событие в календарь на 8 июня 2024 года.",
+        "В суточном окне 8 июня 2024 года должен быть один эпизод.",
+        "Проверь синтаксис temporal index в документе за 8 июня 2024 года.",
+        "Сверь дату документа 8 июня 2024 года: что произошло?",
+    ],
+)
+@pytest.mark.asyncio
+async def test_event_index_method_prefix_does_not_grant_unrelated_authority(question) -> None:
+    kernel = _TimezoneKernel()
+    runtime = _runtime(kernel)
+    await runtime._prefetch_the_timeline_if_asked(  # noqa: SLF001
+        question,
+        None,
+        [_tool("what_happened"), _tool("upcoming"), _tool("memory_search")],
+        [],
+        [],
+        [],
+        AgentContext(
+            conversation_id="synthetic-negative",
+            user_id="synthetic",
+            outward_verdict=("архив", None),
+        ),
+    )
+    assert kernel.calls == []
+
+
+@pytest.mark.parametrize(
+    "ending",
+    [
+        ", но не показывай его.",
+        "; не ищите его.",
+        ", но не надо показывать.",
+        "; не нужно называть.",
+        ", я не хочу перечислять.",
+    ],
+)
+def test_method_prefix_keeps_later_countermand_visible(ending):
+    question = "Не ищи по тексту: покажи событие за 8 июня 2024 года" + ending
+    assert temporal_routing_text(question) == question
+    assert fast_time_intent(question, today=FIXED_TODAY) is None
+
+
+@pytest.mark.parametrize("verb", ["случится", "случатся", "произойдёт", "произойдут"])
+@pytest.mark.parametrize("subject", ["", "в календарной истории "])
+@pytest.mark.asyncio
+async def test_future_morphology_cannot_be_taken_for_past(verb, subject):
+    question = f"Что {verb} {subject}10 сентября 2031 года?"
+    intent = fast_time_intent(question, today=FIXED_TODAY)
+    assert intent == TimeIntent("future", "single_day")
+    assert build_time_window(question, intent, today=FIXED_TODAY) == TimeWindow("2031-09-10", "2031-09-10")
+    kernel = _TimezoneKernel()
+    runtime = _runtime(kernel)
+    await runtime._prefetch_the_timeline_if_asked(  # noqa: SLF001
+        question,
+        None,
+        [_tool("what_happened"), _tool("upcoming"), _tool("memory_search")],
+        [],
+        [],
+        [],
+        AgentContext(conversation_id="future-probe", user_id="synthetic", outward_verdict=("архив", None)),
+    )
+    assert kernel.calls == [
+        (
+            "upcoming",
+            {
+                "since": "2031-09-10",
+                "until": "2031-09-10",
+            },
+        )
+    ]
+
+
+@pytest.mark.parametrize(
+    "question",
+    [
+        "Что случится с сервером 10 сентября 2031 года?",
+        "Что произойдёт с рейсом 10 сентября 2031 года?",
+        "Что случится с Олегом 10 сентября 2031 года?",
+        "Что случится с сервером в календарной истории 10 сентября 2031 года?",
+    ],
+)
+@pytest.mark.asyncio
+async def test_future_morphology_does_not_expand_personal_calendar_authority(question):
+    assert is_temporal_read_request(question) is False
+    assert fast_time_intent(question, today=FIXED_TODAY) is None
+    kernel = _TimezoneKernel()
+    runtime = _runtime(kernel)
+
+    async def forbidden_arbiter(*args, **kwargs):
+        del args, kwargs
+        raise AssertionError("non-calendar subject reached the temporal arbiter")
+
+    runtime._time_intent_by_arbiter = forbidden_arbiter  # type: ignore[method-assign]  # noqa: SLF001
+    await runtime._prefetch_the_timeline_if_asked(  # noqa: SLF001
+        question,
+        None,
+        [_tool("what_happened"), _tool("upcoming"), _tool("memory_search")],
+        [],
+        [],
+        [],
+        AgentContext(
+            conversation_id="future-negative",
+            user_id="synthetic",
+            outward_verdict=("архив", None),
+        ),
+    )
+    assert kernel.calls == []
+
+
+@pytest.mark.parametrize("verb", ["случился", "случилась", "случилось", "случились"])
+def test_past_morphology_still_selects_the_named_past_day(verb):
+    question = f"Что {verb} 8 июня 2024 года?"
+    intent = fast_time_intent(question, today=FIXED_TODAY)
+    assert intent == TimeIntent("past", "single_day")
+    assert build_time_window(question, intent, today=FIXED_TODAY) == TimeWindow("2024-06-08", "2024-06-08")
+
+
+@pytest.mark.parametrize(
+    "question,filtered",
+    [
+        ("Изолируйте интервал 2 мая 2024 года и назовите попавшее в него событие.", False),
+        ("В суточном окне 2 мая 2024 года есть один факт; назовите его.", False),
+        ("Назови его событие за 2 мая 2024 года.", True),
+        ("Прочитай событие Олега за 2 мая 2024 года.", True),
+        ("Прочитай событие Олега Иванова за 2 мая 2024 года.", True),
+        ("Изолируй суточный интервал 2 мая 2024 года и назови попавшее в него событие Олега.", True),
+        ("В суточном окне 2 мая 2024 года есть один факт; назови его и расскажи про его планы.", True),
+    ],
+)
+def test_dated_event_anaphora_does_not_erase_a_person_filter(question, filtered):
+    assert _has_temporal_subject_filter(question) is filtered
 
 
 @pytest.mark.asyncio
@@ -480,7 +686,14 @@ async def test_a_right_endpoint_year_reaches_the_real_prefetch_arguments() -> No
             },
         )
     ]
-    assert context.structural_answer == ""
+    # Verified calendar results now publish from code on ordinary turns too.
+    # With no remainder model, the existing fail-closed notice is retained;
+    # the original temporal request must never be sent to free synthesis.
+    assert context.structural_answer.startswith(
+        "В проверенной личной ленте за указанный интервал событий нет."
+    )
+    assert context.remainder_known is True
+    assert context.open_remainder == ""
 
 
 @pytest.mark.asyncio
@@ -600,7 +813,14 @@ async def test_a_legitimate_indirect_speech_act_still_reads_the_exact_timeline(q
             },
         )
     ]
-    assert context.structural_answer == ""
+    # Verified calendar results now publish from code on ordinary turns too.
+    # With no remainder model, the existing fail-closed notice is retained;
+    # the original temporal request must never be sent to free synthesis.
+    assert context.structural_answer.startswith(
+        "В проверенной личной ленте за указанный интервал событий нет."
+    )
+    assert context.remainder_known is True
+    assert context.open_remainder == ""
 
 
 @pytest.mark.parametrize(

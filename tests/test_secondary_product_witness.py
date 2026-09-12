@@ -47,6 +47,14 @@ def _product_tables(storage: Any) -> dict[str, int]:
     }
 
 
+def _query_rows(
+    storage: Any,
+    query: str,
+    parameters: tuple[Any, ...] = (),
+) -> list[dict[str, Any]]:
+    return [dict(row) for row in storage.execute(query, parameters).fetchall()]
+
+
 class _NoPrimaryAdvice:
     enabled = True
     model = "primary-must-not-run"
@@ -888,7 +896,8 @@ def test_runner_recovers_lost_ingest_and_cleanup_responses_through_real_api(
         lambda _settings: "8" * 64,
     )
 
-    app = create_app(replace(settings, llm_enabled=True, workers_enabled=False))
+    configured = replace(settings, llm_enabled=True, workers_enabled=False)
+    app = create_app(configured)
     owner = {"Authorization": f"Bearer {settings.api_token}"}
     with TestClient(app) as client:
         scheduler = _attach_private_shadow_secondary(app)
@@ -1043,44 +1052,92 @@ def test_runner_recovers_lost_ingest_and_cleanup_responses_through_real_api(
             sealed_runner_sha256="6" * 64,
             server_rollout_attestation_sha256=product_witness.secondary_product_sha256(attestation),
         )
+
+        def rollout_row() -> dict[str, Any]:
+            rows = _query_rows(
+                app.state.storage,
+                """SELECT * FROM request_idempotency
+                     WHERE user_id=? AND request_key LIKE
+                           'secondary-product-witness-purge:private-shadow:%'
+                     ORDER BY request_key""",
+                (LEGACY_OWNER_USER_ID,),
+            )
+            assert len(rows) == 1
+            return rows[0]
+
+        def audit_rows() -> list[dict[str, Any]]:
+            return _query_rows(app.state.storage, "SELECT * FROM audit_log ORDER BY rowid")
+
+        unused_tombstone = rollout_row()
+        assert unused_tombstone["state"] == "complete"
+        assert unused_tombstone["lease_token"] == ""
+        unused_state = json.loads(unused_tombstone["response_json"])
+        assert set(unused_state) == {
+            "schema",
+            "cleanup_core",
+            "server_rollout_attestation",
+            "rollout_consume_state",
+            "rollout_consumed_at",
+            "rollout_consume_request_sha256",
+            "rollout_consume_binding_sha256",
+            "rollout_state_version",
+        }
+        assert unused_state["schema"] == "friday.secondary-product-purge-tombstone.v2"
+        assert unused_state["server_rollout_attestation"] == attestation
+        assert unused_state["rollout_consume_state"] == "unused"
+        assert unused_state["rollout_consumed_at"] == ""
+        assert unused_state["rollout_consume_request_sha256"] == ""
+        assert unused_state["rollout_consume_binding_sha256"] == ""
+        assert unused_state["rollout_state_version"] == 1
+        assert attestation["lookup_token_sha256"] == product_witness.secondary_product_sha256(
+            evidence["server_rollout_lookup_token"]
+        )
+        assert evidence["server_rollout_lookup_token"] not in unused_tombstone["response_json"]
+        audit_before_consume = audit_rows()
+
+        def assert_unconsumed_rejection(response: Any) -> None:
+            assert response.status_code == 400
+            assert response.json() == {"detail": ("Некорректное подтверждение перехода второго контура")}
+            assert rollout_row() == unused_tombstone
+            assert audit_rows() == audit_before_consume
+
         wrong = client.post(
             "/api/admin/secondary-product-witness/consume-rollout-attestation",
             headers=owner,
             json={**consume_request, "predecessor_commit": "4" * 40},
         )
-        assert wrong.status_code == 400
+        assert_unconsumed_rejection(wrong)
         forged = client.post(
             "/api/admin/secondary-product-witness/consume-rollout-attestation",
             headers=owner,
             json={**consume_request, "attestation_lookup_token": "f" * 64},
         )
-        assert forged.status_code == 400
-        unused_tombstone = app.state.storage.execute(
-            """SELECT response_json FROM request_idempotency
-                WHERE user_id=? AND request_key LIKE
-                      'secondary-product-witness-purge:private-shadow:%'""",
-            (LEGACY_OWNER_USER_ID,),
-        ).fetchone()
-        assert unused_tombstone is not None
-        unused_state = json.loads(unused_tombstone["response_json"])
-        assert unused_state["rollout_consume_state"] == "unused"
-        assert unused_state["rollout_state_version"] == 1
+        assert_unconsumed_rejection(forged)
+        current_server_identity = product_witness.secondary_product_current_server_identity(
+            configured,
+            scheduler,
+        )
+        with monkeypatch.context() as rebound_server:
+            rebound_server.setattr(
+                inbox_api,
+                "secondary_product_current_server_identity",
+                lambda *_args, **_kwargs: {
+                    **current_server_identity,
+                    "primary_process_epoch_sha256": "0" * 64,
+                },
+            )
+            rebound = client.post(
+                "/api/admin/secondary-product-witness/consume-rollout-attestation",
+                headers=owner,
+                json=consume_request,
+            )
+        assert_unconsumed_rejection(rebound)
         mismatched_local_attestation = client.post(
             "/api/admin/secondary-product-witness/consume-rollout-attestation",
             headers=owner,
             json={**consume_request, "server_rollout_attestation_sha256": "f" * 64},
         )
-        assert mismatched_local_attestation.status_code == 400
-        still_unused_tombstone = app.state.storage.execute(
-            """SELECT response_json FROM request_idempotency
-                WHERE user_id=? AND request_key LIKE
-                      'secondary-product-witness-purge:private-shadow:%'""",
-            (LEGACY_OWNER_USER_ID,),
-        ).fetchone()
-        assert still_unused_tombstone is not None
-        still_unused_state = json.loads(still_unused_tombstone["response_json"])
-        assert still_unused_state["rollout_consume_state"] == "unused"
-        assert still_unused_state["rollout_state_version"] == 1
+        assert_unconsumed_rejection(mismatched_local_attestation)
         with monkeypatch.context() as stale_clock:
             stale_clock.setattr(
                 time,
@@ -1092,17 +1149,90 @@ def test_runner_recovers_lost_ingest_and_cleanup_responses_through_real_api(
                 headers=owner,
                 json=consume_request,
             )
-        assert stale.status_code == 400
+        assert_unconsumed_rejection(stale)
+        consume_started = int(time.time())
         consumed = client.post(
             "/api/admin/secondary-product-witness/consume-rollout-attestation",
             headers=owner,
             json=consume_request,
         )
+        consume_finished = int(time.time())
         assert consumed.status_code == 200, consumed.text
-        assert consumed.content == product_witness.secondary_product_canonical(consumed.json())
+        consumed_body = consumed.json()
+        assert consumed.content == product_witness.secondary_product_canonical(consumed_body)
+        assert set(consumed_body) == product_witness.SECONDARY_PRODUCT_CONSUME_RESPONSE_KEYS
+        assert consumed_body["schema"] == "friday.secondary-product-rollout-consume-response.v1"
+        assert consumed_body["status"] == "consumed"
+        for field in (
+            "stage",
+            "transition",
+            "predecessor_commit",
+            "predecessor_tree_sha256",
+            "candidate_commit",
+            "candidate_tree_sha256",
+            "next_env_sha256",
+            "product_receipt_sha256",
+            "sealed_runner_sha256",
+            "server_rollout_attestation_sha256",
+        ):
+            assert consumed_body[field] == consume_request[field]
+        assert consumed_body["lookup_token_sha256"] == attestation["lookup_token_sha256"]
+        assert consumed_body["request_sha256"] == product_witness.secondary_product_sha256(consume_request)
+        assert consume_started <= consumed_body["consumed_at"] <= consume_finished
+        assert consumed_body["state_version"] == 2
+        assert len(consumed_body["consume_binding_sha256"]) == 64
+        assert set(consumed_body["consume_binding_sha256"]) <= set("0123456789abcdef")
         release_operator._validate_secondary_rollout_consume_response(  # noqa: SLF001
-            consumed.json(), request=consume_request, attestation=attestation
+            consumed_body, request=consume_request, attestation=attestation
         )
+        consumed_tombstone = rollout_row()
+        assert {key: value for key, value in consumed_tombstone.items() if key != "response_json"} == {
+            key: value for key, value in unused_tombstone.items() if key != "response_json"
+        }
+        consumed_state = json.loads(consumed_tombstone["response_json"])
+        assert set(consumed_state) == set(unused_state)
+        assert consumed_state["schema"] == unused_state["schema"]
+        assert consumed_state["cleanup_core"] == unused_state["cleanup_core"]
+        assert consumed_state["server_rollout_attestation"] == attestation
+        assert consumed_state["rollout_consume_state"] == "consumed"
+        assert consumed_state["rollout_consumed_at"] == consumed_body["consumed_at"]
+        assert consumed_state["rollout_consume_request_sha256"] == consumed_body["request_sha256"]
+        assert consumed_state["rollout_consume_binding_sha256"] == consumed_body["consume_binding_sha256"]
+        assert consumed_state["rollout_state_version"] == 2
+        assert evidence["server_rollout_lookup_token"] not in consumed_tombstone["response_json"]
+        audit_after_consume = audit_rows()
+        assert audit_after_consume[:-1] == audit_before_consume
+        assert len(audit_after_consume) == len(audit_before_consume) + 1
+        consume_audit = audit_after_consume[-1]
+        assert set(consume_audit) == {
+            "id",
+            "user_id",
+            "action",
+            "target_type",
+            "target_id",
+            "before_json",
+            "after_json",
+            "ip_address",
+            "request_id",
+            "created_at",
+        }
+        assert consume_audit["user_id"] == LEGACY_OWNER_USER_ID
+        assert consume_audit["action"] == "admin.inbox.consume_secondary_product_rollout_attestation"
+        assert consume_audit["target_type"] == "inbox"
+        assert consume_audit["target_id"] is None
+        assert consume_audit["before_json"] is None
+        assert json.loads(consume_audit["after_json"]) == {
+            "private_chars": 104,
+            "private_fields_count": 3,
+            "status_chars": 8,
+        }
+        consume_audit_text = json.dumps(consume_audit, ensure_ascii=False, sort_keys=True)
+        for forbidden in (
+            evidence["server_rollout_lookup_token"],
+            consume_request["product_receipt_sha256"],
+            attestation["attestation_id"],
+        ):
+            assert forbidden not in consume_audit_text
         # A lost response is deliberately unrecoverable: the CAS already burned it.
         replay = client.post(
             "/api/admin/secondary-product-witness/consume-rollout-attestation",
@@ -1110,13 +1240,12 @@ def test_runner_recovers_lost_ingest_and_cleanup_responses_through_real_api(
             json=consume_request,
         )
         assert replay.status_code == 409
-        tombstone = app.state.storage.execute(
-            """SELECT response_json FROM request_idempotency
-                WHERE user_id=? AND request_key LIKE 'secondary-product-witness-purge:private-shadow:%'""",
-            (LEGACY_OWNER_USER_ID,),
-        ).fetchone()
-        assert tombstone is not None
-        retained = str(tombstone["response_json"])
+        assert replay.json() == {
+            "detail": ("Подтверждение перехода второго контура уже использовано или изменилось")
+        }
+        assert rollout_row() == consumed_tombstone
+        assert audit_rows() == audit_after_consume
+        retained = consumed_tombstone["response_json"]
         for forbidden in (
             evidence["server_rollout_lookup_token"],
             "SECONDARY_MODEL_BODY_SENTINEL",
@@ -1262,6 +1391,7 @@ def test_runner_source_bound_purge_cleans_when_both_ingest_receipts_are_lost(
 def test_reserved_witness_routes_reject_scoped_token_without_storage_rows(
     settings: Any,
     shared_archive: bool,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from friday.secondary_product_witness import (
         secondary_product_witness_content,
@@ -1286,6 +1416,26 @@ def test_reserved_witness_routes_reject_scoped_token_without_storage_rows(
         baseline = _product_tables(storage)
         baseline_idempotency = int(
             storage.execute("SELECT COUNT(*) AS count FROM request_idempotency").fetchone()["count"]
+        )
+        exact_before = {
+            table: _query_rows(storage, f"SELECT * FROM {table} ORDER BY rowid")
+            for table in ("raw_objects", "inbox", "request_idempotency", "audit_log")
+        }
+        entered: list[str] = []
+
+        def storage_must_not_run(name: str) -> None:
+            entered.append(name)
+            raise AssertionError(f"delegated request entered {name}")
+
+        monkeypatch.setattr(
+            storage,
+            "purge_secondary_product_witness",
+            lambda *_args, **_kwargs: storage_must_not_run("purge"),
+        )
+        monkeypatch.setattr(
+            storage,
+            "consume_secondary_product_rollout_attestation",
+            lambda *_args, **_kwargs: storage_must_not_run("consume"),
         )
         nonce = "9" * 32
         source_ref = secondary_product_witness_source_ref("assist", nonce)
@@ -1330,14 +1480,18 @@ def test_reserved_witness_routes_reject_scoped_token_without_storage_rows(
             },
         )
 
-        assert ingest.status_code == 403
-        assert purge.status_code == 403
-        assert consume.status_code == 403
+        for response in (ingest, purge, consume):
+            assert response.status_code == 403
+            assert response.json() == {"detail": "Secondary product witness доступен только владельцу"}
+        assert entered == []
         assert _product_tables(storage) == baseline
         assert (
             int(storage.execute("SELECT COUNT(*) AS count FROM request_idempotency").fetchone()["count"])
             == baseline_idempotency
         )
+        assert {
+            table: _query_rows(storage, f"SELECT * FROM {table} ORDER BY rowid") for table in exact_before
+        } == exact_before
 
 
 @pytest.mark.parametrize("feedback_state", [False, True])
@@ -1395,6 +1549,30 @@ def test_witness_purge_refuses_raw_or_inbox_feedback_dependencies(
             )
         storage.commit()
 
+        raw_id = ingested.json()["raw_object_id"]
+        inbox_id = ingested.json()["inbox_id"]
+        exact_before = {
+            "raw": _query_rows(
+                storage,
+                "SELECT * FROM raw_objects WHERE id=? AND user_id=?",
+                (raw_id, LEGACY_OWNER_USER_ID),
+            ),
+            "inbox": _query_rows(
+                storage,
+                "SELECT * FROM inbox WHERE id=? AND user_id=?",
+                (inbox_id, LEGACY_OWNER_USER_ID),
+            ),
+            "feedback": _query_rows(storage, "SELECT * FROM feedback WHERE id=?", (feedback_id,)),
+            "feedback_state": _query_rows(
+                storage,
+                "SELECT * FROM feedback_state WHERE feedback_id=?",
+                (feedback_id,),
+            ),
+            "idempotency": _query_rows(storage, "SELECT * FROM request_idempotency ORDER BY rowid"),
+            "audit": _query_rows(storage, "SELECT * FROM audit_log ORDER BY rowid"),
+        }
+        product_before = _product_tables(storage)
+
         purge = client.post(
             "/api/admin/secondary-product-witness/purge",
             headers=owner,
@@ -1406,8 +1584,30 @@ def test_witness_purge_refuses_raw_or_inbox_feedback_dependencies(
             },
         )
         assert purge.status_code == 400
-        assert storage.get_raw_object(ingested.json()["raw_object_id"], LEGACY_OWNER_USER_ID)
-        assert storage.get_inbox_item(ingested.json()["inbox_id"], LEGACY_OWNER_USER_ID)
+        assert purge.json() == {"detail": ("Некорректные данные очистки проверки второго контура")}
+        assert storage.get_raw_object(raw_id, LEGACY_OWNER_USER_ID)
+        assert storage.get_inbox_item(inbox_id, LEGACY_OWNER_USER_ID)
+        assert _product_tables(storage) == product_before
+        assert {
+            "raw": _query_rows(
+                storage,
+                "SELECT * FROM raw_objects WHERE id=? AND user_id=?",
+                (raw_id, LEGACY_OWNER_USER_ID),
+            ),
+            "inbox": _query_rows(
+                storage,
+                "SELECT * FROM inbox WHERE id=? AND user_id=?",
+                (inbox_id, LEGACY_OWNER_USER_ID),
+            ),
+            "feedback": _query_rows(storage, "SELECT * FROM feedback WHERE id=?", (feedback_id,)),
+            "feedback_state": _query_rows(
+                storage,
+                "SELECT * FROM feedback_state WHERE feedback_id=?",
+                (feedback_id,),
+            ),
+            "idempotency": _query_rows(storage, "SELECT * FROM request_idempotency ORDER BY rowid"),
+            "audit": _query_rows(storage, "SELECT * FROM audit_log ORDER BY rowid"),
+        } == exact_before
 
 
 def test_reserved_witness_advice_rejects_delegated_admin(settings: Any) -> None:
@@ -1479,6 +1679,7 @@ def test_force_review_admin_advice_and_purge_leave_no_product_material(
         secondary_product_witness_source_ref,
     )
     from friday.server import create_app
+    from friday.storage.models import InboxItem, RawObject, new_id
 
     class LocalAdvice:
         enabled = True
@@ -1711,7 +1912,7 @@ def test_force_review_admin_advice_and_purge_leave_no_product_material(
                 },
             )
             assert denied_feedback.status_code == 404, denied_feedback.text
-        from friday.storage.models import FeedbackItem, new_id
+        from friday.storage.models import FeedbackItem
 
         with pytest.raises(ValueError, match="private knowledge"):
             storage.store_feedback(
@@ -1738,6 +1939,107 @@ def test_force_review_admin_advice_and_purge_leave_no_product_material(
             storage.create_backup(label="active-secondary-witness")
         assert set(configured.backups_dir.glob("*")) == before_backup
 
+        foreign_user = "foreign-secondary-witness"
+        storage.ensure_user(foreign_user)
+        same_owner_raw = RawObject(
+            id=new_id("raw"),
+            user_id=LEGACY_OWNER_USER_ID,
+            source="manual",
+            source_ref=source_ref,
+            raw_content=content,
+            content_type="text",
+            metadata_json={},
+            content_hash=_sha256_text(content),
+        )
+        foreign_raw = RawObject(
+            id=new_id("raw"),
+            user_id=foreign_user,
+            source="api",
+            source_ref=source_ref,
+            raw_content=content,
+            content_type="text",
+            metadata_json={},
+            content_hash=_sha256_text(content),
+        )
+        same_owner_inbox = InboxItem(
+            id=new_id("inbox"),
+            user_id=LEGACY_OWNER_USER_ID,
+            raw_object_id=same_owner_raw.id,
+        )
+        foreign_inbox = InboxItem(
+            id=new_id("inbox"),
+            user_id=foreign_user,
+            raw_object_id=foreign_raw.id,
+        )
+        for decoy_raw, decoy_inbox in (
+            (same_owner_raw, same_owner_inbox),
+            (foreign_raw, foreign_inbox),
+        ):
+            storage.store_raw_object(decoy_raw)
+            storage.store_inbox_item(decoy_inbox)
+        preserved_ids = (
+            same_owner_raw.id,
+            foreign_raw.id,
+            same_owner_inbox.id,
+            foreign_inbox.id,
+        )
+
+        def preserved_rows() -> dict[str, list[dict[str, Any]]]:
+            return {
+                "raw_objects": _query_rows(
+                    storage,
+                    "SELECT * FROM raw_objects WHERE id IN (?, ?) ORDER BY id",
+                    (same_owner_raw.id, foreign_raw.id),
+                ),
+                "inbox": _query_rows(
+                    storage,
+                    "SELECT * FROM inbox WHERE id IN (?, ?) ORDER BY id",
+                    (same_owner_inbox.id, foreign_inbox.id),
+                ),
+            }
+
+        preserved_before = preserved_rows()
+        assert len(preserved_before["raw_objects"]) == 2
+        assert len(preserved_before["inbox"]) == 2
+        for decoy in preserved_before["raw_objects"]:
+            assert decoy["source_ref"] == source_ref
+            assert decoy["raw_content"] == content
+            assert json.loads(decoy["metadata_json"]).get("secondary_product_witness") is not True
+            assert product_witness.is_secondary_product_witness_raw(decoy) is False
+        preserved_product_counts = {
+            **baseline,
+            "raw_objects": baseline["raw_objects"] + 2,
+            "inbox": baseline["inbox"] + 2,
+        }
+        purge_audits_before = _query_rows(
+            storage,
+            """SELECT * FROM audit_log
+                 WHERE action='admin.inbox.purge_secondary_witness' ORDER BY rowid""",
+        )
+
+        def assert_safe_purge_audit(row: dict[str, Any]) -> None:
+            assert set(row) == {
+                "id",
+                "user_id",
+                "action",
+                "target_type",
+                "target_id",
+                "before_json",
+                "after_json",
+                "ip_address",
+                "request_id",
+                "created_at",
+            }
+            assert row["user_id"] == LEGACY_OWNER_USER_ID
+            assert row["action"] == "admin.inbox.purge_secondary_witness"
+            assert row["target_type"] == "inbox"
+            assert row["target_id"] is None
+            assert row["before_json"] is None
+            assert json.loads(row["after_json"]) == {"private_fields_count": 2}
+            safe_text = json.dumps(row, ensure_ascii=False, sort_keys=True)
+            for forbidden in (content, source_ref, raw_id, inbox_id, *preserved_ids):
+                assert forbidden not in safe_text
+
         cleaned = client.post(
             "/api/admin/secondary-product-witness/purge",
             headers=owner,
@@ -1750,10 +2052,58 @@ def test_force_review_admin_advice_and_purge_leave_no_product_material(
         )
         assert cleaned.status_code == 200, cleaned.text
         cleanup = cleaned.json()
+        assert set(cleanup) == {
+            "schema",
+            "cleanup_core",
+            "cleanup_core_sha256",
+            "server_rollout_attestation",
+            "server_rollout_lookup_token",
+        }
         assert cleanup["schema"] == "friday.secondary-product-purge-response.v2"
-        assert cleanup["cleanup_core"]["storage_binding_sha256"] == expected_binding
-        assert cleanup["cleanup_core"]["raw_object_id_sha256"] == _sha256_text(raw_id)
-        assert cleanup["cleanup_core"]["inbox_id_sha256"] == _sha256_text(inbox_id)
+        cleanup_core = cleanup["cleanup_core"]
+        assert set(cleanup_core) == product_witness.SECONDARY_PRODUCT_CLEANUP_CORE_KEYS
+        assert cleanup_core["schema"] == "friday.secondary-product-cleanup-core.v1"
+        assert cleanup_core["purged"] is True
+        assert cleanup_core["raw_deleted"] == 1
+        assert cleanup_core["inbox_deleted"] == 1
+        assert cleanup_core["storage_binding_sha256"] == expected_binding
+        assert cleanup_core["raw_object_id_sha256"] == _sha256_text(raw_id)
+        assert cleanup_core["inbox_id_sha256"] == _sha256_text(inbox_id)
+        residue_keys = (
+            "raw_residue",
+            "inbox_residue",
+            "knowledge_residue",
+            "alias_residue",
+            "ko_state_residue",
+            "feedback_residue",
+            "feedback_state_residue",
+            "review_residue",
+        )
+        assert {key: cleanup_core[key] for key in residue_keys} == dict.fromkeys(residue_keys, 0)
+        zero_projection = {
+            "schema": "friday.secondary-product-cleanup-zero-residue.v1",
+            "raw_object_id_sha256": _sha256_text(raw_id),
+            "inbox_id_sha256": _sha256_text(inbox_id),
+            **dict.fromkeys(residue_keys, 0),
+        }
+        assert cleanup_core["cleanup_zero_residue_binding_sha256"] == _sha256_text(
+            json.dumps(
+                zero_projection,
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+            )
+            + "\n"
+        )
+        assert cleanup["cleanup_core_sha256"] == _sha256_text(
+            json.dumps(
+                cleanup_core,
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+            )
+            + "\n"
+        )
         assert cleanup["server_rollout_attestation"] is None
         assert cleanup["server_rollout_lookup_token"] == ""
         replayed_cleanup = client.post(
@@ -1768,23 +2118,100 @@ def test_force_review_admin_advice_and_purge_leave_no_product_material(
         )
         assert replayed_cleanup.status_code == 200, replayed_cleanup.text
         assert replayed_cleanup.json() == cleanup
+        assert preserved_rows() == preserved_before
+        purge_audits_after_first = _query_rows(
+            storage,
+            """SELECT * FROM audit_log
+                 WHERE action='admin.inbox.purge_secondary_witness' ORDER BY rowid""",
+        )
+        assert purge_audits_after_first[: len(purge_audits_before)] == purge_audits_before
+        assert len(purge_audits_after_first) == len(purge_audits_before) + 2
+        for audit_row in purge_audits_after_first[len(purge_audits_before) :]:
+            assert_safe_purge_audit(audit_row)
         assert storage.get_raw_object(raw_id, LEGACY_OWNER_USER_ID) is None
         assert storage.get_inbox_item(inbox_id, LEGACY_OWNER_USER_ID) is None
-        assert storage.search_raw_objects(LEGACY_OWNER_USER_ID, "PostgreSQL 16") == []
+        assert {item["id"] for item in storage.search_raw_objects(LEGACY_OWNER_USER_ID, "PostgreSQL 16")} == {
+            same_owner_raw.id
+        }
         clean_backup = storage.create_backup(label="after-secondary-witness")
-        backup_conn = __import__("sqlite3").connect(clean_backup["path"])
+        backup_conn = sqlite3.connect(clean_backup["path"])
         try:
             assert (
                 backup_conn.execute(
-                    "SELECT COUNT(*) FROM raw_objects WHERE source_ref LIKE 'secondary-product-witness:%'"
+                    """SELECT (SELECT COUNT(*) FROM raw_objects WHERE id=?)
+                              + (SELECT COUNT(*) FROM inbox WHERE id=?)""",
+                    (raw_id, inbox_id),
                 ).fetchone()[0]
                 == 0
             )
+            assert {
+                str(row[0])
+                for row in backup_conn.execute(
+                    "SELECT id FROM raw_objects WHERE id IN (?, ?)",
+                    (same_owner_raw.id, foreign_raw.id),
+                ).fetchall()
+            } == {same_owner_raw.id, foreign_raw.id}
+            assert {
+                str(row[0])
+                for row in backup_conn.execute(
+                    "SELECT id FROM inbox WHERE id IN (?, ?)",
+                    (same_owner_inbox.id, foreign_inbox.id),
+                ).fetchall()
+            } == {same_owner_inbox.id, foreign_inbox.id}
         finally:
             backup_conn.close()
         backup_bytes = Path(clean_backup["path"]).read_bytes()
-        assert content.encode("utf-8") not in backup_bytes
-        assert b"postgresql" not in backup_bytes.lower()
+
+        def assert_backup_scope(path: Path) -> None:
+            from friday.conversation_passages.schema import (
+                register_conversation_passage_connection_functions,
+            )
+            from friday.document_catalog.passage_schema import (
+                register_document_passage_connection_functions,
+            )
+            from friday.document_catalog.schema import register_document_catalog_connection_functions
+
+            # Completed backup: read without creating WAL/SHM beside the artifact.
+            connection = sqlite3.connect(path.resolve().as_uri() + "?mode=ro&immutable=1", uri=True)
+            connection.row_factory = sqlite3.Row
+            try:
+                # Use the same real read functions as the ordinary backup reader.
+                register_document_catalog_connection_functions(connection)
+                register_document_passage_connection_functions(connection)
+                register_conversation_passage_connection_functions(connection)
+                for table in ("raw_objects", "inbox", "audit_log", "request_idempotency"):
+                    assert [
+                        dict(row) for row in connection.execute(f"SELECT * FROM {table} ORDER BY rowid")
+                    ] == _query_rows(storage, f"SELECT * FROM {table} ORDER BY rowid")
+                allowed_audit_ids: set[str] = set()
+                tables = connection.execute(
+                    "SELECT name FROM sqlite_master WHERE type='table' ORDER BY name"
+                ).fetchall()
+                for table_row in tables:
+                    table = str(table_row["name"])
+                    quoted = '"' + table.replace('"', '""') + '"'
+                    for row in connection.execute(f"SELECT * FROM {quoted}"):
+                        for column, value in dict(row).items():
+                            encoded = value if isinstance(value, bytes) else str(value).encode("utf-8")
+                            if table in ("audit_log", "request_idempotency"):
+                                for forbidden in (source_ref.encode("utf-8"), b"postgresql"):
+                                    assert forbidden.lower() not in encoded.lower(), (table, column)
+                            if table == "audit_log" and column == "target_id" and value == inbox_id:
+                                assert row["action"] == "admin.inbox.model_advice"
+                                assert row["target_type"] == "inbox"
+                                assert row["user_id"] == LEGACY_OWNER_USER_ID
+                                allowed_audit_ids.add(str(row["id"]))
+                                continue
+                            for removed_id in (raw_id, inbox_id):
+                                assert removed_id.encode("utf-8") not in encoded, (table, column)
+                assert len(allowed_audit_ids) == 1
+            finally:
+                connection.close()
+
+        assert_backup_scope(Path(clean_backup["path"]))
+        assert raw_id.encode("utf-8") not in backup_bytes
+        for preserved_id in preserved_ids:
+            assert preserved_id.encode("utf-8") in backup_bytes
         assert b"MODEL_RESPONSE_BODY_SENTINEL" not in backup_bytes
         operator_inbox = configured.state_dir / "telegram-inbox.sqlite3"
         if not operator_inbox.exists():
@@ -1818,11 +2245,17 @@ def test_force_review_admin_advice_and_purge_leave_no_product_material(
         )
         operator_payload = operator_backup.opaque
         assert isinstance(operator_payload, release_operator._ExactBackupPayload)  # noqa: SLF001
+        assert_backup_scope(operator_payload.directory / "database.sqlite3")
+        operator_copies: list[bytes] = []
         for name, _digest, _size in operator_payload.files:
             copied = (operator_payload.directory / name).read_bytes().lower()
-            assert b"postgresql" not in copied
+            operator_copies.append(copied)
             assert b"model_response_body_sentinel" not in copied
-            assert content.encode("utf-8").lower() not in copied
+            assert raw_id.encode("utf-8") not in copied
+            if name != "database.sqlite3":
+                assert inbox_id.encode("utf-8") not in copied
+        for preserved_id in preserved_ids:
+            assert any(preserved_id.encode("utf-8") in copied for copied in operator_copies)
         listed = client.get(
             "/api/admin/inbox",
             headers=owner,
@@ -1830,7 +2263,7 @@ def test_force_review_admin_advice_and_purge_leave_no_product_material(
         )
         assert listed.status_code == 200
         assert all(item["id"] != inbox_id for item in listed.json()["items"])
-        for table, expected in baseline.items():
+        for table, expected in preserved_product_counts.items():
             assert count(table) == expected
         tombstone = storage.execute(
             """SELECT request_key, request_hash, response_json, state
@@ -1843,8 +2276,48 @@ def test_force_review_admin_advice_and_purge_leave_no_product_material(
         assert tombstone is not None
         assert tombstone["state"] == "complete"
         assert count("request_idempotency") == baseline_idempotency + 1
-        tombstone_text = str(tombstone["response_json"])
-        for forbidden in (content, source_ref, raw_id, inbox_id, "MODEL_RESPONSE_BODY_SENTINEL"):
+        purge_request_value = {
+            "cleanup_token": nonce,
+            "content_sha256": _sha256_text(content),
+            "stage": "assist",
+            "source_ref_sha256": _sha256_text(source_ref),
+            "uploader": LEGACY_OWNER_USER_ID,
+            "advice_proof_sha256": "",
+            "operation_binding_sha256": "",
+        }
+        assert tombstone["request_hash"] == _sha256_text(
+            json.dumps(purge_request_value, sort_keys=True, separators=(",", ":")) + "\n"
+        )
+        tombstone_state = json.loads(tombstone["response_json"])
+        assert set(tombstone_state) == {
+            "schema",
+            "cleanup_core",
+            "server_rollout_attestation",
+            "rollout_consume_state",
+            "rollout_consumed_at",
+            "rollout_consume_request_sha256",
+            "rollout_consume_binding_sha256",
+            "rollout_state_version",
+        }
+        assert tombstone_state == {
+            "schema": "friday.secondary-product-purge-tombstone.v2",
+            "cleanup_core": cleanup_core,
+            "server_rollout_attestation": None,
+            "rollout_consume_state": "unavailable",
+            "rollout_consumed_at": "",
+            "rollout_consume_request_sha256": "",
+            "rollout_consume_binding_sha256": "",
+            "rollout_state_version": 0,
+        }
+        tombstone_text = tombstone["response_json"]
+        for forbidden in (
+            content,
+            source_ref,
+            raw_id,
+            inbox_id,
+            "MODEL_RESPONSE_BODY_SENTINEL",
+            *preserved_ids,
+        ):
             assert forbidden not in tombstone_text
 
         next_nonce = "e" * 32
@@ -1873,13 +2346,65 @@ def test_force_review_admin_advice_and_purge_leave_no_product_material(
             json=next_cleanup_payload,
         )
         assert next_cleanup.status_code == 200, next_cleanup.text
+        next_cleanup_body = next_cleanup.json()
+        assert set(next_cleanup_body) == set(cleanup)
+        assert next_cleanup_body["schema"] == cleanup["schema"]
+        assert next_cleanup_body["server_rollout_attestation"] is None
+        assert next_cleanup_body["server_rollout_lookup_token"] == ""
+        next_core = next_cleanup_body["cleanup_core"]
+        assert set(next_core) == product_witness.SECONDARY_PRODUCT_CLEANUP_CORE_KEYS
+        assert next_core["schema"] == "friday.secondary-product-cleanup-core.v1"
+        assert next_core["purged"] is True
+        assert next_core["raw_deleted"] == 1
+        assert next_core["inbox_deleted"] == 1
+        assert (
+            next_core["storage_binding_sha256"]
+            == next_ingest.json()["secondary_product_storage_binding_sha256"]
+        )
+        assert next_core["raw_object_id_sha256"] == _sha256_text(next_ingest.json()["raw_object_id"])
+        assert next_core["inbox_id_sha256"] == _sha256_text(next_ingest.json()["inbox_id"])
+        assert {key: next_core[key] for key in residue_keys} == dict.fromkeys(residue_keys, 0)
+        next_zero_projection = {
+            "schema": "friday.secondary-product-cleanup-zero-residue.v1",
+            "raw_object_id_sha256": next_core["raw_object_id_sha256"],
+            "inbox_id_sha256": next_core["inbox_id_sha256"],
+            **dict.fromkeys(residue_keys, 0),
+        }
+        assert next_core["cleanup_zero_residue_binding_sha256"] == _sha256_text(
+            json.dumps(
+                next_zero_projection,
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+            )
+            + "\n"
+        )
+        assert next_cleanup_body["cleanup_core_sha256"] == _sha256_text(
+            json.dumps(
+                next_core,
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+            )
+            + "\n"
+        )
         next_cleanup_replay = client.post(
             "/api/admin/secondary-product-witness/purge",
             headers=owner,
             json=next_cleanup_payload,
         )
         assert next_cleanup_replay.status_code == 200, next_cleanup_replay.text
-        assert next_cleanup_replay.json() == next_cleanup.json()
+        assert next_cleanup_replay.json() == next_cleanup_body
+        assert preserved_rows() == preserved_before
+        purge_audits_after_second = _query_rows(
+            storage,
+            """SELECT * FROM audit_log
+                 WHERE action='admin.inbox.purge_secondary_witness' ORDER BY rowid""",
+        )
+        assert purge_audits_after_second[: len(purge_audits_after_first)] == purge_audits_after_first
+        assert len(purge_audits_after_second) == len(purge_audits_before) + 4
+        for audit_row in purge_audits_after_second[len(purge_audits_after_first) :]:
+            assert_safe_purge_audit(audit_row)
         stage_tombstones = storage.execute(
             """SELECT request_key, response_json FROM request_idempotency
                  WHERE user_id=? AND request_key LIKE ?""",
@@ -1888,7 +2413,7 @@ def test_force_review_admin_advice_and_purge_leave_no_product_material(
         assert len(stage_tombstones) == 1
         assert stage_tombstones[0]["request_key"] == (f"secondary-product-witness-purge:assist:{next_nonce}")
         assert nonce not in str(stage_tombstones[0]["response_json"])
-        assert _product_tables(storage) == baseline
+        assert _product_tables(storage) == preserved_product_counts
         assert count("request_idempotency") == baseline_idempotency + 1
         storage.execute(
             """UPDATE request_idempotency SET created_at='2000-01-01T00:00:00+00:00',

@@ -18,7 +18,7 @@ import asyncio
 import pytest
 from fastapi.testclient import TestClient
 
-from friday.api.events import BRIDGE_EVENT_TYPES, MAX_PAYLOAD_KEYS, MAX_VALUE_CHARS
+from friday.api.events import BRIDGE_EVENT_TYPES
 from friday.server import create_app
 
 
@@ -54,15 +54,67 @@ def _signed(settings, body, *, user: str = "5001"):
 
 
 def test_a_bridge_event_lands_in_the_journal(settings, storage):
+    import json
+
     with TestClient(create_app(settings)) as client:
+        prior_id = storage.record_event("worker.fixture", {"component": "prior-journal"})
+
+        def journal():
+            return [
+                dict(row) for row in storage.execute("SELECT * FROM runtime_events ORDER BY rowid").fetchall()
+            ]
+
+        before = journal()
+        assert any(row["id"] == prior_id for row in before)
         payload, headers = _signed(
-            settings, {"event_type": "bridge.poll_failed", "payload": {"loop": "poll"}}
+            settings,
+            {
+                "event_type": "bridge.poll_failed",
+                "payload": {"loop": "poll", "attempt": 3, "offline": True, "retry_after": None},
+            },
         )
         response = client.post("/api/events", content=payload, headers=headers)
+        assert response.status_code == 200, response.text
+        body = response.json()
+        assert set(body) == {"id", "event_type"}
+        assert body["event_type"] == "bridge.poll_failed"
+        assert body["id"].startswith("evt_") and body["id"] != prior_id
+        after = journal()
+        assert after[: len(before)] == before, "bridge_event_http_prefix"
+        assert len(after) == len(before) + 1
+        event = after[-1]
+        assert (event["id"], event["event_type"], json.loads(event["payload"])) == (
+            body["id"],
+            "bridge.poll_failed",
+            {"loop": "poll", "attempt": 3, "offline": True, "retry_after": None},
+        ), "bridge_event_http_row"
+        assert event["created_at"]
+        payload, headers = _signed(settings, {"event_type": "bridge.unknown-private-canary"})
+        unknown = client.post("/api/events", content=payload, headers=headers)
+        assert unknown.status_code == 400
+        assert unknown.json() == {"detail": "Неизвестный тип события моста"}
+        assert journal() == after, "bridge_event_http_unknown_preserves_journal"
+        bearer = client.post(
+            "/api/events",
+            json={"event_type": "bridge.poll_failed"},
+            headers={"Authorization": f"Bearer {settings.api_token}"},
+        )
+        assert bearer.status_code == 403
+        assert bearer.json() == {"detail": "Требуется аутентификация моста"}
+        assert journal() == after, "bridge_event_http_bearer_preserves_journal"
+        anonymous = client.post("/api/events", json={"event_type": "bridge.poll_failed"})
+        assert anonymous.status_code == 401
+        assert journal() == after, "bridge_event_http_anonymous_preserves_journal"
+        for text in (response.text, unknown.text, bearer.text, anonymous.text, json.dumps(after)):
+            assert settings.api_token not in text
+            assert settings.telegram_bridge_secret not in text
+        for refusal in (unknown, bearer, anonymous):
+            assert prior_id not in refusal.text and body["id"] not in refusal.text
+            assert "prior-journal" not in refusal.text and "bridge.unknown-private-canary" not in refusal.text
 
-    assert response.status_code == 200, response.text
     events = storage.list_events(event_type="bridge.poll_failed")
-    assert len(events) == 1 and events[0]["payload"]["loop"] == "poll"
+    assert len(events) == 1 and events[0]["id"] == body["id"]
+    assert events[0]["payload"] == {"loop": "poll", "attempt": 3, "offline": True, "retry_after": None}
 
 
 def test_an_unknown_event_type_is_refused(settings, storage):
@@ -85,27 +137,62 @@ def test_the_endpoint_requires_bridge_authentication(settings, storage):
 
 def test_the_payload_is_bounded_on_both_axes(settings, storage):
     """The bridge handles untrusted input from Telegram; what it forwards is untrusted too."""
+    import json
+
     with TestClient(create_app(settings)) as client:
+        before = [
+            dict(row) for row in storage.execute("SELECT * FROM runtime_events ORDER BY rowid").fetchall()
+        ]
+        long_key = "boundary-key-" + "z" * 80
+        submitted = {long_key: "x" * 5000, **{f"k{index}": "x" * 5000 for index in range(1, 50)}}
         payload, headers = _signed(
             settings,
             {
                 "event_type": "bridge.dead_letter",
-                "payload": {f"k{index}": "x" * 5000 for index in range(50)},
+                "payload": submitted,
             },
         )
         response = client.post("/api/events", content=payload, headers=headers)
-
-    assert response.status_code == 200
-    stored = storage.list_events()[0]["payload"]
-    assert len(stored) <= MAX_PAYLOAD_KEYS
-    assert all(len(str(value)) <= MAX_VALUE_CHARS for value in stored.values())
+        assert response.status_code == 200
+        event_id = response.json()["id"]
+        assert response.json() == {"id": event_id, "event_type": "bridge.dead_letter"}
+        after = [
+            dict(row) for row in storage.execute("SELECT * FROM runtime_events ORDER BY rowid").fetchall()
+        ]
+        assert after[: len(before)] == before and len(after) == len(before) + 1
+        assert after[-1]["id"] == event_id and after[-1]["event_type"] == "bridge.dead_letter"
+        expected = {long_key[:64]: "x" * 200, **{f"k{index}": "x" * 200 for index in range(1, 12)}}
+        assert json.loads(after[-1]["payload"]) == expected, "bridge_event_http_bounded_payload"
+        stored = storage.list_events(event_type="bridge.dead_letter")
+        assert len(stored) == 1 and stored[0]["id"] == event_id
+        assert stored[0]["payload"] == expected
+        for secret in (settings.api_token, settings.telegram_bridge_secret):
+            assert secret not in response.text and secret not in json.dumps(after)
 
 
 @pytest.mark.parametrize("event_type", sorted(BRIDGE_EVENT_TYPES))
 def test_every_allowed_type_is_accepted(settings, storage, event_type):
+    import json
+
     with TestClient(create_app(settings)) as client:
+        before = [
+            dict(row) for row in storage.execute("SELECT * FROM runtime_events ORDER BY rowid").fetchall()
+        ]
         payload, headers = _signed(settings, {"event_type": event_type})
-        assert client.post("/api/events", content=payload, headers=headers).status_code == 200
+        response = client.post("/api/events", content=payload, headers=headers)
+        assert response.status_code == 200
+        event_id = response.json()["id"]
+        assert event_id.startswith("evt_")
+        assert response.json() == {"id": event_id, "event_type": event_type}
+        after = [
+            dict(row) for row in storage.execute("SELECT * FROM runtime_events ORDER BY rowid").fetchall()
+        ]
+        assert after[: len(before)] == before and len(after) == len(before) + 1
+        assert (after[-1]["id"], after[-1]["event_type"], json.loads(after[-1]["payload"])) == (
+            event_id,
+            event_type,
+            {},
+        ), "bridge_event_http_allowlisted_type"
 
 
 # --- the bridge side: transitions, not ticks ------------------------------

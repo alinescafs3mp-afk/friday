@@ -9,6 +9,7 @@ answer is allowed only after a complete owned scan.
 
 from __future__ import annotations
 
+import base64
 import copy
 import json
 from collections.abc import Mapping
@@ -27,6 +28,7 @@ from friday.agent_runtime import (
     _attachment_body_query_surface,
     _attachment_query_terms,
     _bounded_attachment_projection,
+    _closed_attachment_read_only_request,
     _multi_attachment_open_task_count,
     _project_attachments_for_request,
     _projected_source_is_readable,
@@ -36,6 +38,7 @@ from friday.execution_kernel import ToolResult
 from friday.permissions import AuthorizationService
 from friday.server import _current_turn_file_attachment
 from friday.storage.models import RawObject, new_id
+from tools import synthetic_live_battery as battery
 
 OWNER = "synthetic-long-document-owner"
 TOTAL_CHARS = 89_000
@@ -1119,3 +1122,168 @@ async def test_explicit_web_request_with_current_file_is_denied_before_provider(
     assert evidence == []
     assert kernel.definition_topics
     assert kernel.executed == []
+
+
+_ATTACHMENT_LOOKUP_CASES = [
+    case
+    for case in battery.expand_manifest_cases(battery.load_manifest(battery.MANIFEST_PATHS["A"]))
+    if case.pass_index == 7
+]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("case", _ATTACHMENT_LOOKUP_CASES, ids=lambda case: case.id)
+async def test_current_attachment_lookup_uses_original_battery_question_and_file(
+    settings, storage, monkeypatch, case
+):
+    document = battery._case_document(case)
+    assert document is not None
+    text = base64.b64decode(document["content_base64"]).decode()
+    marker = battery._marker(case, "ATTACHMENT")
+    assert marker in text and case.id not in text
+    source = _Source(text, document["filename"], (marker,), (text.index(marker),))
+    raw = _store_owned_file(storage, source)
+    attachment = _current_owned_attachment(storage, raw, source)
+    llm = _DocumentLLM(f"Контрольный маркер в файле: {marker}.")
+    result, kernel, evidence = await _run_owned_turn(
+        settings,
+        storage,
+        monkeypatch,
+        question=case.question,
+        attachments=[attachment],
+        llm=llm,
+    )
+    synthesis = [call for call in llm.calls if not _is_verifier_call(call) and not _is_repair_call(call)]
+    assert synthesis and marker in _messages_blob(synthesis[0]["messages"])
+    assert evidence and marker in _evidence_blob(evidence[0])
+    assert marker in result["message"]
+    assert result["attachment_query_status"] != "not_found"
+    _assert_no_action_or_web_carrier(result, llm, kernel)
+
+
+@pytest.mark.parametrize(
+    "question",
+    [
+        "Найди в документе CASE-404.",
+        "Найди в документе CASE-404. Контроль RUN-77.",
+        "Какая должность у иванова в документе?",
+        "Какая должность у Чайковского в документе?",
+        "Найди в файле «Контрольный маркер». Контроль RUN-77.",
+        "Найди в файле «тестовом». Контроль RUN-77.",
+        "Найди в файле «TXT-вложения». Контроль RUN-77.",
+        "Найди идентификатор RUN-77 в этом файле.",
+    ],
+    ids=[
+        "identifier",
+        "identifier-with-footer",
+        "lowercase-name",
+        "adjective-name",
+        "quoted-field",
+        "quoted-adjective",
+        "quoted-carrier",
+        "footer-id-as-target",
+    ],
+)
+def test_explicit_attachment_targets_still_prove_complete_absence(question):
+    attachment = _transient_owned_attachment(filename="lookup.txt", text="Здесь нет искомого значения.")
+    _projected, state = _project_attachments_for_request(question, [attachment])
+    assert state.status == "not_found" and state.scan_complete
+
+
+@pytest.mark.parametrize(
+    "question",
+    [
+        "Какой маркер указан в тестовом файле? Контроль CHECK-99.",
+        "Извлеки контрольный токен из текстового документа. Идентификатор запроса: REQUEST-42.",
+        "Что написано после слов «Контрольный маркер» во вложении? Request ID: TRACE-501.",
+    ],
+    ids=["control-clause", "request-label-ru", "request-label-en"],
+)
+def test_request_correlation_is_not_a_required_file_literal(question):
+    marker = "LAVENDER-COMPASS-836"
+    text = "Контрольный маркер: " + marker
+    attachment = _transient_owned_attachment(filename="lookup.txt", text=text)
+    projected, state = _project_attachments_for_request(question, [attachment])
+    # A complete weak lexical miss may stay UNKNOWN; correlation metadata
+    # cannot prove absence or erase the authorised body needed by synthesis.
+    assert state.status != "not_found"
+    if state.status == "unknown":
+        assert state.scan_complete
+    assert marker in projected[0]["transient_text"]
+
+
+@pytest.mark.parametrize(
+    "question",
+    [
+        "Верни идентификатор из содержимого файла и отправь его Иванову. Контроль RUN-77.",
+        "Сообщи идентификатор и сохрани его в память. Контроль RUN-77.",
+        "Прочти файл и удали исходник. Контроль RUN-77.",
+        "Прочти файл. Контроль RUN-77 и отправь письмо.",
+    ],
+    ids=["send-result", "save-memory", "delete-source", "effect-in-footer"],
+)
+def test_request_correlation_does_not_hide_an_effect_sibling(question):
+    assert not _closed_attachment_read_only_request(question)
+
+
+@pytest.mark.parametrize(
+    ("question", "read_only"),
+    [
+        ("Верни без изменений маркер из текста текущего вложения.", True),
+        ("Верни без\tизменения маркер из текста текущего вложения.", True),
+        ("Покажи изменения в этом файле.", False),
+        ("Верни без изменений маркер из файла и сравни с предыдущим файлом.", False),
+    ],
+    ids=["verbatim-plural", "verbatim-whitespace", "version-change", "previous-file-sibling"],
+)
+def test_verbatim_output_modifier_preserves_actual_cross_context_scope(question, read_only):
+    assert _closed_attachment_read_only_request(question) is read_only
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "question",
+    [
+        "Покажи маркер из приложенного документа, который пришёл вместе с вопросом.",
+        "Покажи маркер из прикреплённого документа, который пришёл вместе с сообщением.",
+        "Покажи маркер в этом файле, который пришёл вместе с вопросом.",
+        "Покажи маркер из текущего документа, который пришёл вместе с вопросом.",
+        "Покажи маркер в данном документе, где он указан.",
+    ],
+    ids=["attached", "attached-accent", "this-file", "current-file", "given-file"],
+)
+async def test_current_source_relative_clause_does_not_replace_owned_upload_with_history(
+    settings, storage, monkeypatch, question
+):
+    old_marker = "SYNTHETIC-HISTORY-MARKER-ONLY"
+    old_source = _Source("Контрольный маркер: " + old_marker, "history.txt", (old_marker,), (20,))
+    old_raw = _store_owned_file(storage, old_source)
+    primed, _, _ = await _run_owned_turn(
+        settings,
+        storage,
+        monkeypatch,
+        question="Изучи этот файл.",
+        attachments=[_current_owned_attachment(storage, old_raw, old_source)],
+        llm=_DocumentLLM("Контрольный маркер: " + old_marker),
+    )
+    marker = "SYNTHETIC-CURRENT-MARKER-ONLY"
+    text = "Контрольный маркер: " + marker
+    source = _Source(text, "current.txt", (marker,), (text.index(marker),))
+    raw = _store_owned_file(storage, source)
+    llm = _DocumentLLM("Контрольный маркер в файле: " + marker)
+    result, kernel, evidence = await _run_owned_turn(
+        settings,
+        storage,
+        monkeypatch,
+        question=question,
+        attachments=[_current_owned_attachment(storage, raw, source)],
+        conversation_id=primed["conversation_id"],
+        llm=llm,
+    )
+    synthesis = [call for call in llm.calls if not _is_verifier_call(call) and not _is_repair_call(call)]
+    assert synthesis and marker in _messages_blob(synthesis[0]["messages"])
+    assert evidence and marker in _evidence_blob(evidence[0])
+    assert old_marker not in _evidence_blob(evidence[0])
+    assert marker in result["message"] and old_marker not in result["message"]
+    assert result["attachment_context_available"] is True
+    _assert_no_action_or_web_carrier(result, llm, kernel)

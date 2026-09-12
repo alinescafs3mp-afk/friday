@@ -226,20 +226,27 @@ async def test_operator_full_autonomy_auto_starts_proposed_missions(settings, st
 def test_mission_http_endpoints_create_list_and_stop(settings):
     from fastapi.testclient import TestClient
 
+    from friday.permissions import LEGACY_OWNER_USER_ID
     from friday.server import create_app
 
+    goal = "Навести порядок в базе"
     app = create_app(settings)
     owner_headers = {"Authorization": f"Bearer {settings.api_token}"}
     with TestClient(app) as client:
-        created = client.post("/api/missions", headers=owner_headers, json={"goal": "Навести порядок в базе"})
+        storage = app.state.storage
+        created = client.post("/api/missions", headers=owner_headers, json={"goal": goal})
         assert created.status_code == 200
         mission = created.json()["mission"]
         mission_id = mission["id"]
         assert mission["status"] == "ready"
+        assert mission["goal"] == goal
+        assert mission["created_by"] == LEGACY_OWNER_USER_ID
 
         listing = client.get("/api/missions", headers=owner_headers)
         assert listing.status_code == 200
-        assert any(item["id"] == mission_id for item in listing.json()["items"])
+        listed = listing.json()
+        assert listed["count"] == 1
+        assert [item["id"] for item in listed["items"]] == [mission_id]
 
         detail = client.get(f"/api/missions/{mission_id}", headers=owner_headers)
         assert detail.status_code == 200
@@ -248,14 +255,38 @@ def test_mission_http_endpoints_create_list_and_stop(settings):
         stopped = client.post(f"/api/missions/{mission_id}/stop", headers=owner_headers)
         assert stopped.status_code == 200
         assert stopped.json()["mission"]["status"] == "cancelled"
+        persisted = client.get(f"/api/missions/{mission_id}", headers=owner_headers)
+        assert persisted.status_code == 200
+        assert persisted.json()["mission"]["status"] == "cancelled"
 
         empty = client.post("/api/missions", headers=owner_headers, json={"goal": "   "})
         assert empty.status_code == 400
+        after_empty = client.get("/api/missions", headers=owner_headers).json()
+        assert after_empty["count"] == listed["count"]
 
-        # Admin inspection router lists the same mission cross-tenant.
+        before = storage.list_audit_log(LEGACY_OWNER_USER_ID, limit=200)
         admin_list = client.get("/api/admin/missions", headers=owner_headers)
         assert admin_list.status_code == 200
         assert any(item["id"] == mission_id for item in admin_list.json()["items"])
+        before_ids = {row["id"] for row in before}
+        delta = [
+            row
+            for row in storage.list_audit_log(LEGACY_OWNER_USER_ID, limit=200)
+            if row["id"] not in before_ids
+        ]
+
+        def _after(row: dict) -> dict:
+            raw = row.get("after_json")
+            if isinstance(raw, str) and raw:
+                return json.loads(raw)
+            return raw or {}
+
+        assert any(
+            row["action"] == "admin.missions.read"
+            and row["target_id"] == "*"
+            and _after(row).get("scope") == "all_tenants"
+            for row in delta
+        ), delta
 
 
 @pytest.mark.asyncio

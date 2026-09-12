@@ -120,7 +120,9 @@ async def test_long_turn_uses_one_revision_stream_without_fake_phase_percent_or_
     assert final_messages == ["Готово"]
     assert len([item for item in statuses if item["create"]]) == checkpoint_count
     assert {item["operation_id"] for item in statuses} == {f"chat:{update_id}"}
-    assert [item["revision"] for item in statuses] == list(range(1, len(statuses) + 1))
+    revisions = [item["revision"] for item in statuses]
+    # Coalesced snapshots spend revisions without issuing HTTP requests.
+    assert revisions[0] == 1 and revisions == sorted(set(revisions))
     assert statuses[-1]["terminal"] is True
     assert statuses[-1]["text"].startswith("✅")
     assert all("ETA" not in item["text"] for item in statuses)
@@ -132,14 +134,14 @@ async def test_long_turn_uses_one_revision_stream_without_fake_phase_percent_or_
 
 
 @pytest.mark.asyncio
-async def test_progress_is_cancelled_before_fast_final_answer_and_does_not_create_status(
+async def test_fast_turn_starts_status_and_cancels_recurring_updates_before_final_answer(
     tmp_path,
     monkeypatch,
 ) -> None:
     bridge = _bridge(tmp_path)
     progress_waiting = asyncio.Event()
     progress_cancelled = asyncio.Event()
-    statuses: list[str] = []
+    statuses: list[dict[str, Any]] = []
     sent: list[str] = []
 
     async def blocked_progress_delay(_delay: float) -> None:
@@ -153,8 +155,8 @@ async def test_progress_is_cancelled_before_fast_final_answer_and_does_not_creat
         await progress_waiting.wait()
         return {"message": "Итог", "message_format": "plain"}
 
-    async def publish(*_args: Any, **_kwargs: Any) -> str:
-        statuses.append("unexpected")
+    async def publish(*_args: Any, **kwargs: Any) -> str:
+        statuses.append(kwargs)
         return "sent"
 
     async def send(_client: object, _chat_id: int, text: str, **_kwargs: Any) -> None:
@@ -178,7 +180,8 @@ async def test_progress_is_cancelled_before_fast_final_answer_and_does_not_creat
         bridge._inbox.close()  # noqa: SLF001
 
     assert sent == ["Итог"]
-    assert statuses == []
+    assert len([item for item in statuses if item["create"]]) == 1
+    assert statuses[-1]["terminal"] is True
 
 
 @pytest.mark.asyncio
@@ -615,7 +618,8 @@ async def test_web_sources_edit_existing_status_after_backend_without_searching_
     assert joined.index("ядро обрабатывает запрос") < joined.index("Исследую вопрос")
     assert statuses[-1]["terminal"] is True
     assert {item["operation_id"] for item in statuses} == {"chat:8820"}
-    assert [item["revision"] for item in statuses] == list(range(1, len(statuses) + 1))
+    revisions = [item["revision"] for item in statuses]
+    assert revisions[0] == 1 and revisions == sorted(set(revisions))
     assert len([item for item in statuses if item["create"]]) == 1
     assert "Источники:" in final_messages[0]
     assert all("ETA" not in item["text"] for item in statuses)
@@ -707,6 +711,14 @@ async def test_observed_web_sources_use_one_send_then_only_edits(
     created = asyncio.Event()
     final_messages: list[str] = []
     message_id = 771
+    published_revisions = []
+    original_publish = bridge._status_messages.publish
+
+    async def record_publish(client, chat_id, operation_id, revision, text, **kwargs):
+        published_revisions.append(revision)
+        return await original_publish(client, chat_id, operation_id, revision, text, **kwargs)
+
+    monkeypatch.setattr(bridge._status_messages, "publish", record_publish)
 
     async def immediate_progress_delay(_delay: float) -> None:
         return None
@@ -759,7 +771,9 @@ async def test_observed_web_sources_use_one_send_then_only_edits(
     assert status_calls.count("sendMessage") == 1
     assert status_calls[1:]
     assert all(method == "editMessageText" for method in status_calls[1:])
-    assert snapshot == {"message_id": message_id, "revision": len(status_calls), "terminal": True}
+    assert len(published_revisions) == len(status_calls)
+    assert published_revisions == sorted(set(published_revisions))
+    assert snapshot == {"message_id": message_id, "revision": published_revisions[-1], "terminal": True}
     assert len(final_messages) == 1
     assert "Источники:" in final_messages[0]
 

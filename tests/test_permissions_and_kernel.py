@@ -9,8 +9,54 @@ from friday.execution_kernel import ExecutionKernel
 from friday.ingestion import IngestionPipeline
 from friday.knowledge_graph import KnowledgeGraph
 from friday.permissions import AuthorizationService
+from friday.storage._base import DeletedAccountError, deleted_identity_tombstone_key
 from friday.web_surfer import WebSurfer
 from tests.conftest import run_with_approval
+
+
+@pytest.mark.parametrize("origin", ["admin", "telegram", ""])
+def test_account_touches_and_permission_effects_preserve_origin(storage, origin):
+    user_id = "origin-user"
+    initial = storage.ensure_user(user_id, source=origin, external_id="origin-identity", metadata={"kept": 1})
+    auth = AuthorizationService(storage)
+    operations = (
+        lambda: storage.ensure_user(user_id, metadata={"added": 2}),
+        lambda: storage.ensure_user(user_id, source=None),
+        lambda: auth.set_user_preset(user_id, "guest"),
+        lambda: auth.grant_permission(user_id, "knowledge.create"),
+        lambda: auth.deny_permission(user_id, "knowledge.create"),
+        lambda: auth.revoke_permission(user_id, "knowledge.create"),
+    )
+    for operation in operations:
+        operation()
+        row = storage.get_user(user_id)
+        assert (row["source"], row["external_id"], row["created_at"]) == (
+            initial["source"],
+            initial["external_id"],
+            initial["created_at"],
+        )
+    assert storage.get_user(user_id)["preset_key"] == "guest"
+    assert storage.get_permission_overrides(user_id) == {}
+    assert storage.get_user(user_id)["metadata_json"] == '{"added": 2, "kept": 1}'
+
+
+def test_account_default_creation_and_explicit_source_update_remain_distinct(storage):
+    assert storage.ensure_user("new-local")["source"] == "local"
+    assert storage.ensure_user("explicit-none", source=None)["source"] == "local"
+    storage.ensure_user("changed-origin", source="admin", external_id="original")
+    row = storage.ensure_user("changed-origin", source="local")
+    assert (row["source"], row["external_id"]) == ("local", "original")
+
+
+def test_omitted_source_cannot_bypass_an_existing_origin_identity_tombstone(storage):
+    storage.ensure_user("existing-origin", source="telegram", external_id="original")
+    key = deleted_identity_tombstone_key("telegram", "deleted-identity")
+    with storage.transaction() as conn:
+        conn.execute("INSERT INTO runtime_kv(key, value, updated_at) VALUES(?, '{}', 'test')", (key,))
+    before = storage.get_user("existing-origin")
+    with pytest.raises(DeletedAccountError):
+        storage.ensure_user("existing-origin", external_id="deleted-identity")
+    assert storage.get_user("existing-origin") == before
 
 
 def test_default_deny_presets_and_persistent_overrides(storage):

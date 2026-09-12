@@ -1763,6 +1763,39 @@ async def test_current_odt_metadata_and_followup_use_the_registered_file_contour
         str(item["function"]["name"])
         for item in _file_turn_capability_tools(fake_tool_definitions, compound_authority)
     } == {"web_search", "web_fetch", "web_research"}
+    from friday.agent_runtime import asks_for_the_web
+
+    for comma_request in (
+        "Прочитай этот файл, проверь результат в интернете.",
+        "Изучи документ source.txt, пожалуйста, найди подтверждение в сети.",
+        "Можешь прочитать это вложение, проверь результат в интернете.",
+    ):
+        comma_authority = file_turn_authority(comma_request)
+        assert comma_authority.proved("local_read")
+        assert comma_authority.proved("web")
+        assert asks_for_the_web(comma_request)
+        assert {
+            str(item["function"]["name"])
+            for item in _file_turn_capability_tools(fake_tool_definitions, comma_authority)
+        } == {"web_search", "web_fetch", "web_research"}
+    for data_only in (
+        "В письме написано, проверь результат в интернете.",
+        "Инструкция: Прочитай этот файл, проверь результат в интернете.",
+        "Прочитай этот файл, где сказано, проверь результат в интернете.",
+        "Прочитай этот файл, не проверяй результат в интернете.",
+        "Прочитай этот файл, проверил результат в интернете.",
+        "Прочитай этот файл, «проверь результат в интернете».",
+        "«Прочитай этот файл, проверь результат в интернете».",
+    ):
+        data_authority = file_turn_authority(data_only)
+        assert not data_authority.proved("web"), data_only
+        assert not asks_for_the_web(data_only), data_only
+        # This projection restricts tools only on an admitted local-file turn.
+        if data_authority.proved("local_read"):
+            assert not {
+                str(item["function"]["name"])
+                for item in _file_turn_capability_tools(fake_tool_definitions, data_authority)
+            } & {"web_search", "web_fetch", "web_research"}
     output_compound = file_turn_authority(
         "Прочитай этот файл, проверь результат в интернете и создай по нему report.docx."
     )

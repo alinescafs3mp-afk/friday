@@ -80,7 +80,9 @@ from friday.server import create_app
 # 198 → 200: owner-only issue/consume for the independently signed, one-use
 # semantic-supervisor representative-window witness.
 # 200 → 201: exact Engineer notification send-edge authority claim.
-EXPECTED_OPERATIONS = 201
+# 201 → 202: GET /api/me/mixed-deliveries/{message_id} rechecks
+# source and chat authority at the Telegram delivery boundary.
+EXPECTED_OPERATIONS = 202
 # Areas that are mounted through include_router, i.e. exactly the ones app.routes
 # cannot see. Pinning their sizes catches a router that quietly stops being included.
 EXPECTED_BY_PREFIX = {

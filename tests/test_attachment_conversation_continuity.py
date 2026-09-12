@@ -23,10 +23,13 @@ from friday.agent_runtime import (
     _attachment_evidence_chunks,
     _attachment_filename_mentions,
     _attachment_selector_message,
+    _file_effect_projection,
     _historical_direct_read_attachment,
     _is_document_metadata_request,
     _requested_output_filename_stem,
+    _requests_all_attachment_set,
     _supported_direct_attachment_file_only_request,
+    file_turn_authority,
 )
 from friday.execution_kernel import ToolResult
 from friday.permissions import ActorContext
@@ -1333,6 +1336,10 @@ async def test_legacy_scan_replay_with_failed_visual_reinspection_stays_unreadab
         ("Сравни файлы «alpha-plan.txt» и «beta-budget.txt»", [0, 1]),
         ("Сравни первый и третий загруженные файлы", [0, 2]),
         ("Обобщи все загруженные файлы", [0, 1, 2]),
+        ("Обобщи все мои документы", [0, 1, 2]),
+        ("Обобщи все три документа", [0, 1, 2]),
+        ("Обобщи все три моих документа", [0, 1, 2]),
+        ("Summarize all my documents", [0, 1, 2]),
     ],
 )
 def test_conversation_catalog_resolves_names_ordinals_and_sets(
@@ -1661,7 +1668,8 @@ async def test_all_files_beyond_the_message_catalog_cap_is_never_certified_as_on
         )
 
 
-def test_document_catalog_excludes_voice_and_wrong_uploader(settings, storage):
+@pytest.mark.parametrize("query", ["Обобщи все загруженные файлы", "Обобщи все мои документы"])
+def test_document_catalog_excludes_voice_and_wrong_uploader(settings, storage, query):
     document = _pending_file(storage, "shared", "alice", "OWN-DOCUMENT", filename="report.pdf")
     ignored = _pending_file(storage, "shared", "alice", "IGNORED-DOCUMENT", filename="ignored.pdf")
     storage.execute(
@@ -1682,7 +1690,7 @@ def test_document_catalog_excludes_voice_and_wrong_uploader(settings, storage):
     history = storage.get_conversation_messages(conversation["id"], user_id="alice", limit=1_000)
 
     restored, expected = runtime._restore_conversation_attachments(  # noqa: SLF001
-        "Обобщи все загруженные файлы",
+        query,
         history,
         tenant_id="shared",
         person_id="alice",
@@ -3489,6 +3497,165 @@ def test_mixed_input_output_roles_keep_one_supported_output_name(
     assert _requested_output_filename_stem(message, kind="docx") == (expected_stem, True)
 
 
+@pytest.mark.parametrize(
+    ("message", "inputs", "output"),
+    [
+        (
+            "Создай Word-файл brief.docx по приложенному brief.txt. "
+            "Перенеси все три строки исходника без изменения значений.",
+            ("brief.txt",),
+            ("brief", True),
+        ),
+        (
+            "Возьми данные из файла «материалы кухни.txt» и подготовь документ «итог кухни.docx» в формате DOCX. "
+            "Сохрани в документе каждую из трёх строк и все её значения.",
+            ("материалы кухни.txt",),
+            ("итог кухни", True),
+        ),
+        (
+            "Из приложенного заметки-v2.txt сделай отчёт-v2.docx. Нужен скачиваемый Word-документ, "
+            "содержащий все три исходные строки с точными значениями.",
+            ("заметки-v2.txt",),
+            ("отчёт-v2", True),
+        ),
+        ("Из приложенного source.txt сделай first.docx и second.docx.", ("source.txt",), ("", False)),
+        ("Из приложенного source.txt сделай result.pdf.", ("source.txt",), ("", False)),
+        ("Создай приложенный итог.docx.", (), ("итог", True)),
+    ],
+    ids=["first-gen", "cyrillic", "version", "multiple-outputs", "wrong-format", "output-adjective"],
+)
+def test_attached_input_roles_preserve_destination_format_and_multiplicity(message, inputs, output):
+    assert _attachment_filename_mentions(_attachment_selector_message(message)) == inputs
+    assert _requested_output_filename_stem(message, kind="docx") == output
+
+
+@pytest.mark.parametrize(
+    ("source_name", "output_name", "message"),
+    [
+        (
+            "brief.txt",
+            "brief.docx",
+            "Создай Word-файл brief.docx по приложенному brief.txt. "
+            "Перенеси все три строки исходника без изменения значений.",
+        ),
+        (
+            "материалы кухни.txt",
+            "итог кухни.docx",
+            "Возьми данные из файла «материалы кухни.txt» и подготовь документ «итог кухни.docx» в формате DOCX. "
+            "Сохрани в документе каждую из трёх строк и все её значения.",
+        ),
+        (
+            "заметки-v2.txt",
+            "отчёт-v2.docx",
+            "Из приложенного заметки-v2.txt сделай отчёт-v2.docx. Нужен скачиваемый Word-документ, "
+            "содержащий все три исходные строки с точными значениями.",
+        ),
+        (
+            "source.txt",
+            "result.docx",
+            "Возьми файл source.txt и создай документ result.docx в формате DOCX. "
+            "Сохрани все три строки и их значения.",
+        ),
+        (
+            "source-v2.txt",
+            "result-v2.docx",
+            "Прочитай файл source-v2.txt и подготовь Word-файл result-v2.docx. "
+            "Сохрани все три строки и их значения.",
+        ),
+    ],
+)
+@pytest.mark.asyncio
+async def test_named_word_request_delivers_the_actual_file_from_one_source(
+    settings,
+    storage,
+    monkeypatch,
+    source_name,
+    output_name,
+    message,
+) -> None:
+    import base64
+
+    body = "Проект: КУХНЯ\nОтветственный: Соколова\nКоличество участников: 17"
+    storage.ensure_user("alice", source="test", preset_key="owner")
+    source = _pending_file(
+        storage,
+        "alice",
+        "alice",
+        body,
+        filename=source_name,
+        extra_metadata={"stored_path": "alice/" + source_name, "mime_type": "text/plain"},
+    )
+
+    from test_long_document_query_contract import _DocumentLLM
+
+    llm = _DocumentLLM("Сведения об исходнике\n\n" + "\n\n".join(body.splitlines()))
+    runtime = AgentRuntime(replace(settings, verify_answers=False), storage, llm=llm)
+    runtime.kernel.bind_services(storage, None, None, None)
+
+    async def prepare(user_id, _message, conversation_id, **_kwargs):
+        return AgentContext(conversation_id=conversation_id, user_id=user_id, person_id=user_id)
+
+    monkeypatch.setattr(runtime, "_prepare_context", prepare)
+    result = await runtime.chat(
+        "alice",
+        message,
+        actor=ActorContext(user_id="alice", preset_key="owner", source="telegram-bridge"),
+        attachments=[_current_attachment(storage, source)],
+        enable_tools=True,
+    )
+    assert len(result["files"]) == 1, result["message"]
+    generated = result["files"][0]
+    assert generated["filename"] == output_name
+    assert generated["mime_type"] == "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+    with zipfile.ZipFile(io.BytesIO(base64.b64decode(generated["content_base64"]))) as archive:
+        xml = archive.read("word/document.xml").decode()
+    assert all(line in xml for line in body.splitlines())
+
+
+@pytest.mark.parametrize(
+    ("message", "expected"),
+    [
+        ("Обобщи все 2 документа", True),
+        ("Обобщи все три документа", True),
+        ("Обобщи все мои документы", True),
+        ("Обобщи все три моих документа", True),
+        ("Перечисли значения всех пяти приложенных файлов", True),
+        ("Создай документ со всеми моими заметками: перечисли все строки", False),
+        ("Обобщи все приложенные документы", True),
+        ("В документе перечисли все строки", False),
+        ("Создай документ, содержащий все три строки исходника", False),
+    ],
+)
+def test_all_source_quantifier_does_not_select_intra_file_rows(message, expected):
+    assert _requests_all_attachment_set(message) is expected
+
+
+@pytest.mark.parametrize(
+    ("message", "expected"),
+    [
+        ("Из приложенного source.txt сделай result.docx.", True),
+        ("Из файла source.txt создайте result.docx.", True),
+        ("Из приложенного source.txt создал result.docx.", False),
+        ("Из приложенного source.txt сделала result.docx.", False),
+        ("Из приложенного source.txt создаст result.docx.", False),
+        ("Он сказал: из приложенного source.txt создай result.docx.", False),
+        ("Процитируй «Из приложенного source.txt создай result.docx».", False),
+        ("Из рассказа source.txt создай result.docx.", False),
+    ],
+)
+def test_named_source_lead_requires_a_command_owned_by_the_user(message, expected):
+    assert file_turn_authority(message).proved("file_create") is expected
+
+
+def test_quoted_output_filename_survives_only_as_data_in_the_effect_projection():
+    message = "Создай Word-файл «создай итог.docx» по приложенному source.txt."
+    authority = file_turn_authority(message)
+    assert authority.proved("file_create")
+    projected, _ = _file_effect_projection(message, authority, "file_create")
+    assert _requested_output_filename_stem(projected, kind="docx") == ("создай итог", True)
+    assert not file_turn_authority("Процитируй «Создай документ итог.docx».").proved("file_create")
+
+
 @pytest.mark.asyncio
 async def test_output_destination_filename_never_restores_an_older_same_named_file(
     settings,
@@ -3758,3 +3925,112 @@ async def test_short_attachment_answer_is_verified_without_persisting_file_text(
     assistant_metadata = json.loads(messages[-1]["metadata_json"])
     assert assistant_metadata["verification"]["issues"] == ["attachment_verification_note"]
     assert private_text not in json.dumps(result, ensure_ascii=False)
+
+
+@pytest.mark.parametrize(
+    "message,expected",
+    [
+        ("Возьми файл source.txt и создай Word-файл result.docx.", True),
+        ("Возьми source.txt и создай Word-файл result.docx.", True),
+        ("Прочитай файл source.txt и подготовь Word-файл result.docx.", True),
+        ("Используй source.txt, затем создай Word-файл result.docx.", True),
+        ("Возьми файл source.txt и создал Word-файл result.docx.", False),
+        ("Возьми файл source.txt и создаст Word-файл result.docx.", False),
+        ("Он сказал: возьми source.txt и создай Word-файл result.docx.", False),
+        ("Процитируй «Возьми source.txt и создай Word-файл result.docx».", False),
+        ("Возьми рассказ о source.txt и создай Word-файл result.docx.", False),
+        ("Создал Word-файл result.docx.", False),
+        ("Сделала Word-файл result.docx.", False),
+        ("Создаст Word-файл result.docx.", False),
+        ("Сделает Word-файл result.docx.", False),
+        ("Подготовил Word-файл result.docx.", False),
+        ("Сохраню Word-файл result.docx.", False),
+        ("Создай Word-файл result.docx.", True),
+        ("Пришли Word-файл result.docx.", True),
+        ("Отправь Word-файл result.docx.", True),
+        ("Сгенерируй Word-файл result.docx.", True),
+        ("Верни файл в формате Word.", True),
+    ],
+)
+def test_read_create_clause_admits_commands_without_admitting_reports(message, expected):
+    assert file_turn_authority(message).proved("file_create") is expected
+
+
+@pytest.mark.parametrize(
+    "message",
+    [
+        "Создал Word-файл result.docx.",
+        "Сделает Word-файл result.docx.",
+        "Подготовил Word-файл result.docx.",
+        "Возьми файл source.txt и создал Word-файл result.docx.",
+    ],
+)
+@pytest.mark.asyncio
+async def test_reported_file_action_causes_no_kernel_effect(settings, storage, monkeypatch, message):
+    from test_long_document_query_contract import _DocumentLLM
+
+    storage.ensure_user("alice", source="test", preset_key="owner")
+    runtime = AgentRuntime(
+        replace(settings, verify_answers=False), storage, llm=_DocumentLLM("Принято к сведению.")
+    )
+    runtime.kernel.bind_services(storage, None, None, None)
+    calls = []
+    execute = runtime.kernel.execute
+
+    async def observe(name, arguments, **kwargs):
+        calls.append(name)
+        return await execute(name, arguments, **kwargs)
+
+    async def prepare(user_id, _message, conversation_id, **_kwargs):
+        return AgentContext(conversation_id=conversation_id, user_id=user_id, person_id=user_id)
+
+    monkeypatch.setattr(runtime.kernel, "execute", observe)
+    monkeypatch.setattr(runtime, "_prepare_context", prepare)
+    result = await runtime.chat(
+        "alice",
+        message,
+        actor=ActorContext(user_id="alice", preset_key="owner", source="telegram-bridge"),
+        enable_tools=True,
+    )
+    assert not file_turn_authority(message).proved("file_create")
+    assert calls == []
+    assert result["files"] == []
+
+
+@pytest.mark.asyncio
+async def test_explicit_record_selection_before_file_creation_still_requires_known_structure(
+    settings,
+    storage,
+    monkeypatch,
+):
+    from test_long_document_query_contract import _DocumentLLM
+
+    storage.ensure_user("alice", source="test", preset_key="owner")
+    source = _pending_file(
+        storage,
+        "alice",
+        "alice",
+        "Имя: Лена\nПроект: КУХНЯ",
+        filename="source.txt",
+        extra_metadata={"stored_path": "alice/source.txt", "mime_type": "text/plain"},
+    )
+    runtime = AgentRuntime(
+        replace(settings, verify_answers=False),
+        storage,
+        llm=_DocumentLLM("Не должен выдумывать третью строку."),
+    )
+    runtime.kernel.bind_services(storage, None, None, None)
+
+    async def prepare(user_id, _message, conversation_id, **_kwargs):
+        return AgentContext(conversation_id=conversation_id, user_id=user_id, person_id=user_id)
+
+    monkeypatch.setattr(runtime, "_prepare_context", prepare)
+    result = await runtime.chat(
+        "alice",
+        "Прочитай три строки из файла source.txt и создай Word-файл result.docx. Сохрани все три строки.",
+        actor=ActorContext(user_id="alice", preset_key="owner", source="telegram-bridge"),
+        attachments=[_current_attachment(storage, source)],
+        enable_tools=True,
+    )
+    assert result["files"] == []
+    assert "структура выбранного файла неоднозначна" in result["message"]

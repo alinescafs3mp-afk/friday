@@ -44,14 +44,36 @@ class RuntimeMixin(StorageShared):
         kind: str = "",
         dedup_key: str = "",
     ) -> bool:
-        """Queue a push message. Returns False when a same dedup_key already exists."""
+        """Queue a push, preserving shared-chat and personal reminder dedup.
+
+        The chat/key unique index still protects all notification kinds. A
+        reminder also reserves its person's key across delivery-chat changes;
+        the guard belongs to the same atomic INSERT, including for tombstones.
+        """
         notification_id = new_id("notif")
         with self.transaction() as conn:
             cursor = conn.execute(
                 """INSERT OR IGNORE INTO outbound_notifications(
                        id, user_id, chat_id, kind, dedup_key, body, status, attempts, created_at)
-                   VALUES(?, ?, ?, ?, ?, ?, 'pending', 0, ?)""",
-                (notification_id, user_id, str(chat_id), kind, dedup_key, body, utc_now()),
+                   SELECT ?, ?, ?, ?, ?, ?, 'pending', 0, ?
+                    WHERE ?<>'reminder' OR ?='' OR NOT EXISTS (
+                        SELECT 1 FROM outbound_notifications existing
+                         WHERE existing.user_id=? AND existing.kind='reminder'
+                           AND existing.dedup_key=?
+                    )""",
+                (
+                    notification_id,
+                    user_id,
+                    str(chat_id),
+                    kind,
+                    dedup_key,
+                    body,
+                    utc_now(),
+                    kind,
+                    dedup_key,
+                    user_id,
+                    dedup_key,
+                ),
             )
             queued = cursor.rowcount > 0
             if queued:
@@ -243,19 +265,12 @@ class RuntimeMixin(StorageShared):
             return dict(authorized) if authorized is not None else None
 
     def silence_reminder(self, user_id: str, dedup_key: str, *, chat_id: str = "") -> bool:
-        """«Не напоминай мне об этом» — независимо от того, отправлено уже или нет.
+        """Cancel this person's reminder regardless of its delivery outcome.
 
-        `dismiss_notification` умеет гасить только строку в состоянии `pending`, а
-        мост дренирует очередь раз в пятнадцать секунд. То есть кнопка «Снять»
-        работала в пятнадцатисекундном окне после скана и промахивалась всё
-        остальное время: строка уже `sent`, гасить нечего, а следующий скан
-        поставит напоминание снова, пока живёт событие.
-
-        Здесь снимается САМО напоминание, а не строка очереди: если гасить нечего,
-        заводится запись с тем же `dedup_key` сразу в состоянии `dismissed`.
-        Частичный уникальный индекс по `(user_id, dedup_key)` после этого не даст
-        `scan_reminders` поставить его заново — ровно тем же механизмом, каким
-        держится обычный дедуп.
+        Keep the key after pending/sent/uncertain/failed transitions. Before a
+        scan has queued anything, insert a dismissed tombstone instead. The
+        existing chat/key index remains intact; the person/key INSERT guard
+        also preserves cancellation after a delivery-chat change.
         """
         user_id = validate_user_id(user_id)
         dedup_key = str(dedup_key or "").strip()
@@ -266,7 +281,7 @@ class RuntimeMixin(StorageShared):
                 f"""UPDATE outbound_notifications AS n
                    SET status='dismissed'
                    WHERE user_id=? AND dedup_key=? AND kind='reminder'
-                     AND status IN ('pending', 'sent')
+                     AND status IN ('pending', 'sent', 'uncertain', 'failed')
                      AND {_not_private_notification_dependency("n")}""",  # nosec B608
                 (user_id, dedup_key),
             )
@@ -276,7 +291,12 @@ class RuntimeMixin(StorageShared):
             inserted = conn.execute(
                 """INSERT OR IGNORE INTO outbound_notifications(
                        id, user_id, chat_id, kind, dedup_key, body, status, attempts, created_at)
-                   VALUES(?, ?, ?, 'reminder', ?, ?, 'dismissed', 0, ?)""",
+                   SELECT ?, ?, ?, 'reminder', ?, ?, 'dismissed', 0, ?
+                    WHERE NOT EXISTS (
+                        SELECT 1 FROM outbound_notifications existing
+                         WHERE existing.user_id=? AND existing.kind='reminder'
+                           AND existing.dedup_key=?
+                    )""",
                 (
                     notification_id,
                     user_id,
@@ -284,6 +304,8 @@ class RuntimeMixin(StorageShared):
                     dedup_key,
                     "снято до отправки",
                     utc_now(),
+                    user_id,
+                    dedup_key,
                 ),
             )
             if inserted.rowcount > 0:
@@ -317,18 +339,12 @@ class RuntimeMixin(StorageShared):
         return {str(row["dedup_key"]): str(row["status"]) for row in rows}
 
     def dismiss_notification(self, user_id: str, notification_id: str) -> bool:
-        """Mark a pending reminder dismissed without releasing its dedup key.
+        """Cancel one of this person's reminder queue IDs, retaining its key.
 
-        Opposite of ``discard_notifications`` / terminal failure: those clear
-        ``dedup_key`` so the organ can re-raise the matter. Dismiss means the
-        person saw the reminder and cancelled it — the partial unique index on
-        ``(user_id, dedup_key)`` must keep blocking the next ``scan_reminders``
-        enqueue of the same key. Only ``kind='reminder'`` and
-        ``status='pending'`` rows of this tenant transition — same scope as
-        ``list_pending_reminders``. Other kinds (chronicle/sentinel/…), foreign
-        or already-terminal ids return False (→ 404). Keeping non-reminder
-        rows out matters: dismiss intentionally leaves ``dedup_key`` in place,
-        which would permanently block re-raise for a non-reminder organ.
+        Pending, sent, uncertain and failed describe delivery outcomes, all of
+        which remain cancellable. Other kinds, foreign IDs and already-dismissed
+        rows do not transition. Retaining the key prevents the next scan from
+        reviving the reminder, including after a delivery-chat change.
         """
         user_id = validate_user_id(user_id)
         notification_id = str(notification_id or "").strip()
@@ -338,7 +354,8 @@ class RuntimeMixin(StorageShared):
             cursor = conn.execute(
                 f"""UPDATE outbound_notifications AS n
                    SET status='dismissed'
-                   WHERE id=? AND user_id=? AND kind='reminder' AND status='pending'
+                   WHERE id=? AND user_id=? AND kind='reminder'
+                     AND status IN ('pending', 'sent', 'uncertain', 'failed')
                      AND {_not_private_notification_dependency("n")}""",  # nosec B608
                 (notification_id, user_id),
             )

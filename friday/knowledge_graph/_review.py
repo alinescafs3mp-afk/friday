@@ -291,7 +291,7 @@ async def review_relation_candidates(
                 # безупречная очередь. Проход обязан называть это числом.
                 result["model_errors"] += 1
                 if on_verdict is not None:
-                    on_verdict(candidate, {"verdict": UNSURE, "reason": f"{type(error).__name__}: {error}"})
+                    on_verdict(candidate, {"verdict": UNSURE, "reason": type(error).__name__})
                 failed = True
                 break
             rounds.append(judged)

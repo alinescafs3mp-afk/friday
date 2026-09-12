@@ -12,6 +12,7 @@ import json
 import re
 import time
 from collections.abc import Awaitable
+from dataclasses import dataclass
 from datetime import date, timedelta
 
 from friday.retrieval._keyboard import switched
@@ -85,10 +86,23 @@ _NONREPLAYABLE_COMMANDS = frozenset(
 # request time, not a Ghidra phase event, so it must never invent completion
 # percentages or claim that a particular worker stage has been entered.
 _PROGRESS_CANDIDATES_SEC = (12.0, 30.0, 60.0, 120.0, 300.0, 600.0)
+# Admission must acknowledge fast turns too, without putting a Telegram outage
+# on the backend's critical path for the client's full network timeout.
+_INITIAL_PROGRESS_TIMEOUT_SEC = 1.0
+# Final progress is advisory too; it cannot retain an already-delivered turn.
+_FINAL_PROGRESS_TIMEOUT_SEC = 1.0
 # A module seam keeps progress timing deterministic in focused async tests while
 # production still uses the normal event-loop clock.
 _progress_sleep = asyncio.sleep
 _progress_clock = time.monotonic
+
+
+@dataclass(frozen=True, slots=True)
+class _ChatProgressUpdate:
+    revision: int
+    text: str
+    create: bool
+    terminal: bool
 
 
 class _ChatProgressState:
@@ -98,6 +112,8 @@ class _ChatProgressState:
         "next_notice",
         "operation_id",
         "pending",
+        "queued_update",
+        "closing",
         "received_bytes",
         "received_items",
         "revision",
@@ -113,6 +129,8 @@ class _ChatProgressState:
         "generated_file_total",
         "generated_archive_total",
         "mixed_projection",
+        "authenticated_turn_id",
+        "is_media_group",
     )
 
     def __init__(
@@ -122,6 +140,7 @@ class _ChatProgressState:
         operation_id: str = "chat:test",
         snapshot: dict[str, Any] | None = None,
         item_total: int = 0,
+        is_media_group: bool = False,
         ceiling_sec: float = 780.0,
     ) -> None:
         del speech  # Timing is transport-owned; user/model words never choose status prose.
@@ -133,12 +152,18 @@ class _ChatProgressState:
         self.schedule = tuple(sorted(set(candidates)))
         self.next_notice = 0
         self.operation_id = operation_id
-        self.stage = TelegramStatusStage.RECEIVING_MEDIA
+        self.authenticated_turn_id = operation_id
+        self.is_media_group = is_media_group
+        self.stage = (
+            TelegramStatusStage.RECEIVING_MEDIA if item_total > 0 else TelegramStatusStage.BACKEND_WAIT
+        )
         self.started_at = _progress_clock()
         self.revision = int(snapshot.get("revision") or 0) if snapshot is not None else 0
         self.started = snapshot is not None
         self.terminal = bool(snapshot.get("terminal")) if snapshot is not None else False
         self.pending: set[asyncio.Task[None]] = set()
+        self.queued_update: _ChatProgressUpdate | None = None
+        self.closing = self.terminal
         self.item_total = max(0, int(item_total))
         self.received_items = 0
         self.received_bytes = 0
@@ -174,13 +199,17 @@ def _observe_chat_result(state: _ChatProgressState, response: dict[str, Any]) ->
                 archive_total += 1
     state.generated_file_total = file_total
     state.generated_archive_total = archive_total
+    internal = response.get("_mixed_journey_source_facts")
+    turn_id = internal.get("authenticated_turn_id") if isinstance(internal, dict) else state.operation_id
     projection = observe_mixed_journey(
         state.operation_id,
-        state.operation_id,
+        turn_id if type(turn_id) is str else state.operation_id,
         response=response,
         revision=max(1, int(state.revision) or 1),
     )
     state.mixed_projection = projection if mixed_status_admitted(projection) else None
+    if state.mixed_projection is not None:
+        state.authenticated_turn_id = projection.authenticated_turn_id
 
 
 def _queue_chat_progress(
@@ -193,7 +222,7 @@ def _queue_chat_progress(
     create: bool,
     terminal: bool = False,
 ) -> asyncio.Task[None] | None:
-    if state.terminal:
+    if state.terminal or state.closing:
         return None
     state.revision += 1
     revision = state.revision
@@ -211,41 +240,84 @@ def _queue_chat_progress(
         generated_file_total=state.generated_file_total,
         generated_archive_total=state.generated_archive_total,
         operation_id=state.operation_id,
-        authenticated_turn_id=state.operation_id,
+        authenticated_turn_id=state.authenticated_turn_id,
         revision=revision,
         mixed_projection=state.mixed_projection,
+        is_media_group=state.is_media_group,
     )
     if create:
         # Mark before the network await. A stage transition that happens while
         # sendMessage is in flight must queue a later edit, not strand old text.
         state.started = True
+    previous = state.queued_update
+    state.queued_update = _ChatProgressUpdate(
+        revision,
+        status_text,
+        create or previous is not None and previous.create,
+        terminal,
+    )
+    state.closing = terminal
+    # A queued refresh is replaceable until its HTTP request begins. Preserve
+    # a not-yet-started creation attempt when a newer snapshot replaces it.
+    for pending in tuple(state.pending):
+        if not pending.done():
+            return pending
+        state.pending.discard(pending)
 
     async def deliver() -> None:
         try:
-            outcome = await bridge._status_messages.publish(
-                telegram,
-                chat_id,
-                state.operation_id,
-                revision,
-                status_text,
-                terminal=terminal,
-                reply_to_message_id=reply_to_message_id,
-                create=create,
-            )
-            if outcome in {"terminal"} or terminal and outcome in {"edited", "replaced", "sent"}:
-                state.terminal = True
-        except asyncio.CancelledError:
-            raise
-        except Exception as exc:
-            # Progress is advisory, including its terminal transition. Holding
-            # the durable inbound update here can replay backend/model or
-            # non-fenced answer side effects when terminal delivery fails.
-            LOGGER.debug("Telegram progress status failed (%s)", type(exc).__name__)
+            while state.queued_update is not None:
+                update = state.queued_update
+                state.queued_update = None
+                try:
+                    outcome = await bridge._status_messages.publish(
+                        telegram,
+                        chat_id,
+                        state.operation_id,
+                        update.revision,
+                        update.text,
+                        terminal=update.terminal,
+                        reply_to_message_id=reply_to_message_id,
+                        create=update.create,
+                    )
+                    if outcome == "terminal" or update.terminal and outcome in {"edited", "replaced", "sent"}:
+                        state.terminal = True
+                        return
+                except asyncio.CancelledError:
+                    raise
+                except Exception as exc:
+                    # A failed advisory snapshot does not discard a newer
+                    # queued one or retain the inbound operation for replay.
+                    LOGGER.debug("Telegram progress status failed (%s)", type(exc).__name__)
+        finally:
+            state.queued_update = None
 
     task = asyncio.create_task(deliver())
     state.pending.add(task)
     task.add_done_callback(state.pending.discard)
     return task
+
+
+async def _start_chat_progress(
+    bridge: BridgeShared,
+    telegram: httpx.AsyncClient,
+    chat_id: int,
+    reply_to_message_id: int | None,
+    state: _ChatProgressState,
+) -> None:
+    """Enter the existing fenced status transport once, before doing work."""
+
+    if state.started or state.terminal:
+        return
+    task = _queue_chat_progress(bridge, telegram, chat_id, reply_to_message_id, state, create=True)
+    if task is not None:
+        try:
+            async with asyncio.timeout(_INITIAL_PROGRESS_TIMEOUT_SEC):
+                await task
+        except TimeoutError:
+            # Cancellation drains the owned send and preserves its durable
+            # ambiguity fence. Neither this turn nor a restart blindly resends.
+            pass
 
 
 def _set_chat_progress_stage(
@@ -256,7 +328,7 @@ def _set_chat_progress_stage(
     state: _ChatProgressState,
     stage: TelegramStatusStage,
 ) -> None:
-    if state.stage is stage or state.terminal:
+    if state.stage is stage or state.terminal or state.closing:
         return
     state.stage = stage
     if state.started:
@@ -277,7 +349,7 @@ def _refresh_chat_progress(
     reply_to_message_id: int | None,
     state: _ChatProgressState,
 ) -> None:
-    if state.started and not state.terminal:
+    if state.started and not state.terminal and not state.closing:
         _queue_chat_progress(
             bridge,
             telegram,
@@ -296,14 +368,9 @@ async def _finish_chat_progress(
     state: _ChatProgressState,
     stage: TelegramStatusStage,
 ) -> None:
-    if state.terminal:
+    if state.terminal or state.closing or not state.started:
         return
     state.stage = stage
-    pending = tuple(state.pending)
-    if pending:
-        await asyncio.gather(*pending, return_exceptions=True)
-    if not state.started or state.terminal:
-        return
     task = _queue_chat_progress(
         bridge,
         telegram,
@@ -314,7 +381,13 @@ async def _finish_chat_progress(
         terminal=True,
     )
     if task is not None:
-        await asyncio.gather(task, return_exceptions=True)
+        try:
+            async with asyncio.timeout(_FINAL_PROGRESS_TIMEOUT_SEC):
+                await asyncio.gather(task, return_exceptions=True)
+        except TimeoutError:
+            # Cancellation drains the in-flight edit/replacement. The manager
+            # retains any unknown-send fence; no terminal success is invented.
+            pass
 
 
 async def _emit_chat_progress(
@@ -636,6 +709,38 @@ class CommandsMixin(BridgeShared):
         update: dict[str, Any],
         *,
         cached_response: dict[str, Any] | None,
+    ) -> None:
+        progress_states: list[_ChatProgressState] = []
+        try:
+            await self._process_update_body(
+                telegram,
+                backend,
+                update,
+                cached_response=cached_response,
+                progress_states=progress_states,
+            )
+        finally:
+            # Stage-triggered edits need not be awaited by the recurring
+            # notifier. Drain every status child before this update exits,
+            # including cancellation during source work or final delivery.
+            pending: list[asyncio.Task[None]] = []
+            for state in progress_states:
+                state.closing = True
+                state.queued_update = None
+                pending.extend(state.pending)
+            for task in pending:
+                task.cancel()
+            if pending:
+                await asyncio.gather(*pending, return_exceptions=True)
+
+    async def _process_update_body(
+        self,
+        telegram: httpx.AsyncClient,
+        backend: httpx.AsyncClient,
+        update: dict[str, Any],
+        *,
+        cached_response: dict[str, Any] | None,
+        progress_states: list[_ChatProgressState],
     ) -> None:
         callback = update.get("callback_query")
         if isinstance(callback, dict):
@@ -1196,6 +1301,20 @@ class CommandsMixin(BridgeShared):
                 self._inbox.cache_backend_response(update_id, response)
             else:
                 response = cached_response
+            from friday.telegram_bridge._mixed_delivery import require_mixed_delivery_authority
+
+            await require_mixed_delivery_authority(
+                self,
+                backend,
+                response,
+                external_user_id=external_user_id,
+                chat_id=chat_id,
+                from_cache=cached_response is not None,
+                # /retry carries none of the original source cues. A cache
+                # without identity cannot prove it is a legacy notice.
+                require_durable_identity=cached_response is not None,
+                request_message=text,
+            )
             retry_text = self._format_response_message(response)
             await self._send_message(
                 telegram,
@@ -2082,6 +2201,7 @@ class CommandsMixin(BridgeShared):
             text,
             operation_id=status_operation_id,
             snapshot=status_snapshot,
+            is_media_group=bool(album_messages),
             item_total=sum(
                 1
                 for media_message in album_messages or [message]
@@ -2100,8 +2220,11 @@ class CommandsMixin(BridgeShared):
             ),
             ceiling_sec=self.config.backend_timeout_sec,
         )
+        progress_states.append(progress_state)
 
         if cached_response is not None:
+            from friday.telegram_bridge._mixed_delivery import require_mixed_delivery_authority
+
             response_to_send = cached_response
             if album_messages:
                 expected_album_ids = [int(item.get("message_id") or 0) for item in album_messages]
@@ -2111,6 +2234,15 @@ class CommandsMixin(BridgeShared):
                     )
                 response_to_send = dict(cached_response)
                 response_to_send.pop(_ALBUM_CACHE_MESSAGE_IDS, None)
+            await require_mixed_delivery_authority(
+                self,
+                backend,
+                response_to_send,
+                external_user_id=external_user_id,
+                chat_id=chat_id,
+                from_cache=True,
+                request_message=text,
+            )
             _observe_chat_result(progress_state, response_to_send)
             _set_chat_progress_stage(
                 self,
@@ -2120,6 +2252,7 @@ class CommandsMixin(BridgeShared):
                 progress_state,
                 TelegramStatusStage.DELIVERING_RESULT,
             )
+            await _start_chat_progress(self, telegram, chat_id, message.get("message_id"), progress_state)
             response_text = self._format_response_message(response_to_send)
             await self._send_message(
                 telegram,
@@ -2156,6 +2289,8 @@ class CommandsMixin(BridgeShared):
                 TelegramStatusStage.COMPLETE,
             )
             return
+
+        await _start_chat_progress(self, telegram, chat_id, message.get("message_id"), progress_state)
 
         # Forwarded-message provenance travels with the ingested content.
         forward = self._extract_forward(message)
@@ -2622,15 +2757,6 @@ class CommandsMixin(BridgeShared):
                     int(item.get("message_id") or 0) for item in album_messages
                 ]
             self._inbox.cache_backend_response(int(update["update_id"]), response_to_cache)
-            _observe_chat_result(progress_state, response)
-            _set_chat_progress_stage(
-                self,
-                telegram,
-                chat_id,
-                message.get("message_id"),
-                progress_state,
-                TelegramStatusStage.DELIVERING_RESULT,
-            )
         except PermanentUpdateError as exc:
             if album_messages and exc.status_code == 409:
                 # A 409 after a persistent backend seam is not proof that every
@@ -2651,6 +2777,20 @@ class CommandsMixin(BridgeShared):
             progress_task.cancel()
             typing_task.cancel()
             await asyncio.gather(progress_task, typing_task, return_exceptions=True)
+        from friday.telegram_bridge._mixed_delivery import require_mixed_delivery_authority
+
+        await require_mixed_delivery_authority(
+            self, backend, response, external_user_id=external_user_id, chat_id=chat_id
+        )
+        _observe_chat_result(progress_state, response)
+        _set_chat_progress_stage(
+            self,
+            telegram,
+            chat_id,
+            message.get("message_id"),
+            progress_state,
+            TelegramStatusStage.DELIVERING_RESULT,
+        )
         response_text = self._format_response_message(response)
         await self._send_message(
             telegram,

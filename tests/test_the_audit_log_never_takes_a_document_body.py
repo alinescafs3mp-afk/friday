@@ -186,7 +186,11 @@ def test_the_own_edit_and_delete_routes_cannot_copy_a_note_into_audit(settings):
     with TestClient(create_app(settings)) as client:
         token = settings.api_token
         headers = {"Authorization": f"Bearer {token}"}
-        knowledge_id, _ = _ingest(client, token)
+        knowledge_id, user_id = _ingest(client, token)
+        storage = client.app.state.storage
+        audit_before = [
+            dict(row) for row in storage.execute("SELECT * FROM audit_log ORDER BY rowid").fetchall()
+        ]
 
         edited = client.patch(
             f"/api/knowledge/{knowledge_id}",
@@ -198,8 +202,32 @@ def test_the_own_edit_and_delete_routes_cannot_copy_a_note_into_audit(settings):
             headers=headers,
         )
         assert edited.status_code == 200, edited.text
+        expected = {
+            "id": knowledge_id,
+            "user_id": user_id,
+            "title": title_secret,
+            "summary": f"summary-{edited_secret}",
+            "content": f"body-{edited_secret}",
+        }
+        assert {key: edited.json()["item"][key] for key in expected} == expected, "knowledge_http_projection"
+        current = storage.get_knowledge_object(knowledge_id, user_id)
+        assert {key: current[key] for key in expected} == expected, "knowledge_http_persistence"
+        assert not current["deleted_at"]
         deleted = client.delete(f"/api/knowledge/{knowledge_id}", headers=headers)
         assert deleted.status_code == 200, deleted.text
+        assert deleted.json() == {"status": "soft_deleted"}
+        current = storage.get_knowledge_object(knowledge_id, user_id)
+        assert current["deleted_at"], "knowledge_http_delete"
+        assert {key: current[key] for key in expected} == expected, "knowledge_http_delete_preserves_content"
+        audit_after = [
+            dict(row) for row in storage.execute("SELECT * FROM audit_log ORDER BY rowid").fetchall()
+        ]
+        assert audit_after[: len(audit_before)] == audit_before, "knowledge_http_audit_prefix"
+        actions = audit_after[len(audit_before) :]
+        assert [(row["action"], row["user_id"], row["target_type"], row["target_id"]) for row in actions] == [
+            ("knowledge." + action, user_id, "knowledge_object", knowledge_id)
+            for action in ("update", "delete")
+        ], "knowledge_http_audit_sequence"
 
         recorded = _audit_text(client, token)
         for private in (SECRET, edited_secret, title_secret):

@@ -65,6 +65,8 @@ _ARCHIVE_MIME_TYPES = frozenset(
 )
 _TABLE_KINDS = frozenset({"table", "sheet"})
 _BLOCKED = object()
+MIXED_SOURCE_FACTS = "_mixed_journey_source_facts"
+MIXED_SOURCE_FACTS_SCHEMA = "friday.mixed-journey-source-facts.v1"
 
 
 def _opaque_id(value: object) -> str | None:
@@ -279,6 +281,10 @@ def _extract_response(response: Mapping[str, Any] | None) -> dict[str, Any]:
     context_map = context if isinstance(context, Mapping) else {}
     files: list[object] = []
     archives: list[object] = []
+    internal = response.get(MIXED_SOURCE_FACTS)
+    if isinstance(internal, Mapping):
+        files.extend(internal["files"])
+        archives.extend(internal["archives"])
     raw_files = response.get("files")
     if isinstance(raw_files, list):
         for item in raw_files:
@@ -355,6 +361,20 @@ def observe_mixed_journey(
 ) -> MixedJourneyStoreProjectionV1:
     """Compose one store-backed mixed projection from durable identities."""
 
+    internal = response.get(MIXED_SOURCE_FACTS) if response is not None else None
+    if internal is not None and (
+        not isinstance(internal, Mapping)
+        or set(internal) != {"schema", "authenticated_turn_id", "files", "archives"}
+        or internal.get("schema") != MIXED_SOURCE_FACTS_SCHEMA
+        or internal.get("authenticated_turn_id") != authenticated_turn_id
+        or not isinstance(internal.get("files"), list)
+        or len(internal["files"]) != 1
+        or not isinstance(internal.get("archives"), list)
+        or len(internal["archives"]) != 1
+    ):
+        return build_mixed_journey_store_projection(
+            projection_id, authenticated_turn_id, file={"file_id": "/blocked"}
+        )
     extracted = _extract_response(response)
     if conversation_id is None:
         conversation_id = extracted.get("conversation_id")

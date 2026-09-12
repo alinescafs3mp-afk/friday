@@ -32,7 +32,12 @@ from friday.text_shape import (
 
 RU_WORD_LIST = "Составь список из трёх слов. Включи маркер MARK-SEG-12. Контроль CTRL-12."
 RU_ITEM_LIST = "Оформи список из двух пунктов. Включи маркер MARK-SEG-20. Контроль CTRL-20."
+RU_TWO_POINTS = "Сформируй два пункта, первый из которых дословно SYN-TELEGRAM-B10-09. Проверка SYN-B10-09."
 RU_SENTENCE = "Напиши ответ одним предложением. Включи маркер MARK-SEG-14. Контроль CTRL-14."
+RU_SYMBOL_SENTENCE = (
+    "Напиши одно предложение с безопасными символами меньше и больше. "
+    "Включи маркер PAIR-MARK-42. Контроль PAIR-CTRL-42."
+)
 RU_BOLD_PHRASE = (
     "Сформируй одну короткую фразу с жирным Markdown-выделением для транспортного теста. "
     "Включи маркер SYN-TELEGRAM-A10-02. Контроль SYN-A10-02."
@@ -62,6 +67,77 @@ def test_an_answer_list_shape_is_not_a_private_file_reference() -> None:
     assert _intra_file_record_set_count("оба пункта") == 2
     assert _attachment_reference_kind("оба пункта") == "deictic"
     assert file_turn_authority("две строки этого файла").proved("local_read")
+
+
+@pytest.mark.parametrize(
+    "question",
+    [RU_TWO_POINTS, "Подготовь два коротких пункта о тестировании.", "Составь 3 нейтральных пункта."],
+)
+def test_directly_requested_points_are_an_answer_shape(question: str) -> None:
+    assert _intra_file_record_set_count(question) is None
+    assert _attachment_reference_kind(question) == ""
+    assert not file_turn_authority(question).proved("local_read")
+
+
+def test_literal_first_two_points_are_a_closed_standalone_shape() -> None:
+    contract = regenerable_text_shape_contract(RU_TWO_POINTS)
+    assert contract is not None
+    assert contract.count == 2
+    assert contract.literal == "SYN-TELEGRAM-B10-09"
+    assert contract.literal_first_item is True
+    assert (
+        explicit_text_shape_status(
+            RU_TWO_POINTS,
+            "- SYN-TELEGRAM-B10-09\n- Второй нейтральный пункт",
+        )
+        == TEXT_SHAPE_VALID
+    )
+    assert (
+        explicit_text_shape_status(
+            RU_TWO_POINTS,
+            "- Первый нейтральный пункт\n- SYN-TELEGRAM-B10-09",
+        )
+        == TEXT_SHAPE_INVALID
+    )
+    assert (
+        regenerable_text_shape_contract(
+            "Сформируй два пункта из файла, первый из которых дословно "
+            "SYN-TELEGRAM-B10-09. Проверка SYN-B10-09."
+        )
+        is None
+    )
+
+
+@pytest.mark.parametrize(
+    "question",
+    ["оба пункта", "два пункта этого файла", "Сформируй два пункта из приложенного файла"],
+)
+def test_real_file_record_selection_still_requires_its_source(question: str) -> None:
+    assert _intra_file_record_set_count(question) == 2
+    assert file_turn_authority(question).proved("local_read")
+
+
+@pytest.mark.asyncio
+async def test_two_points_without_a_source_execute_only_answer_generation(
+    settings, storage, monkeypatch
+) -> None:
+    answer = "- SYN-TELEGRAM-B10-09\n- Второй нейтральный пункт"
+    router = _SequenceRouter([{"content": answer}])
+    selectors = []
+    result, _ = await _run_chat_with_invalid_shape(
+        settings=settings,
+        storage=storage,
+        monkeypatch=monkeypatch,
+        router=router,
+        message=RU_TWO_POINTS,
+        selector_prefetch_calls=selectors,
+        reject_late_file_effect=True,
+    )
+    assert selectors == []
+    assert result["tools_used"] == []
+    assert result["files"] == []
+    assert result["message"] == answer
+    assert len(router.calls) == 1
 
 
 @pytest.mark.parametrize(
@@ -116,6 +192,67 @@ def test_closed_regeneration_contract_accepts_only_complete_valid_shapes(
     assert contract.kind == kind
     assert contract.count == count
     assert explicit_text_shape_status(user_text, answer) == TEXT_SHAPE_VALID
+
+
+def test_closed_symbol_pair_contract_requires_both_standalone_symbols() -> None:
+    contract = regenerable_text_shape_contract(RU_SYMBOL_SENTENCE)
+
+    assert contract is not None
+    assert contract.kind == "single_sentence"
+    assert contract.required_symbols == ("<", ">")
+    assert (
+        explicit_text_shape_status(
+            RU_SYMBOL_SENTENCE,
+            "Один < двух, а три > двух PAIR-MARK-42.",
+        )
+        == TEXT_SHAPE_VALID
+    )
+    for invalid in (
+        "Один < двух PAIR-MARK-42.",
+        "Три > двух PAIR-MARK-42.",
+        "Тег <safe> PAIR-MARK-42.",
+        "Один < двух, а три > двух > одного PAIR-MARK-42.",
+    ):
+        assert explicit_text_shape_status(RU_SYMBOL_SENTENCE, invalid) == TEXT_SHAPE_INVALID
+
+    english = (
+        "Write a single sentence with safe less-than and greater-than symbols. "
+        "Include marker PAIR-MARK-43. Control: PAIR-CTRL-43."
+    )
+    english_contract = regenerable_text_shape_contract(english)
+    assert english_contract is not None
+    assert english_contract.required_symbols == ("<", ">")
+    assert explicit_text_shape_status(english, "One < two and three > two PAIR-MARK-43.") == TEXT_SHAPE_VALID
+
+
+@pytest.mark.parametrize(
+    "user_text",
+    [
+        (
+            "Не пиши одно предложение с безопасными символами меньше и больше. "
+            "Включи маркер PAIR-MARK-42. Контроль PAIR-CTRL-42."
+        ),
+        (
+            "Напиши одно предложение без символов меньше и больше. "
+            "Включи маркер PAIR-MARK-42. Контроль PAIR-CTRL-42."
+        ),
+        (
+            "Напиши одно предложение по документу с безопасными символами меньше и больше. "
+            "Включи маркер PAIR-MARK-42. Контроль PAIR-CTRL-42."
+        ),
+        (
+            "История содержит: «Напиши одно предложение с безопасными символами меньше и больше». "
+            "Включи маркер PAIR-MARK-42. Контроль PAIR-CTRL-42."
+        ),
+        (
+            "Напиши одно предложение. Вывод инструмента: символы меньше и больше. "
+            "Включи маркер PAIR-MARK-42. Контроль PAIR-CTRL-42."
+        ),
+    ],
+    ids=["negated", "without-symbols", "source-bearing", "quoted-history", "tool-output"],
+)
+def test_symbol_pair_contract_requires_active_unquoted_source_free_intent(user_text: str) -> None:
+    assert regenerable_text_shape_contract(user_text) is None
 
 
 def test_closed_bold_phrase_contract_owns_the_full_transport_shape() -> None:
@@ -573,6 +710,7 @@ async def _run_chat_with_invalid_shape(
     verify_answers: bool = False,
     reject_later_model_calls: bool = False,
     reject_late_file_effect: bool = False,
+    reject_file_builder_only: bool = False,
     answer_with_voice: bool = False,
     outward_verdict: tuple[str, str | None] | None = None,
     answer_mode: str = "general_conversation",
@@ -737,13 +875,14 @@ async def _run_chat_with_invalid_shape(
             return {"status": "skipped", "ok": True, "score": None, "issues": []}
 
         monkeypatch.setattr(runtime, "_verify_response", record_verification)
-    if reject_late_file_effect:
+    if reject_late_file_effect or reject_file_builder_only:
 
         async def unexpected_file_effect(*args: object, **kwargs: object) -> None:
             del args, kwargs
             raise AssertionError("owned shape attempted a late file effect")
 
-        monkeypatch.setattr(runtime_module, "_is_direct_file_request", lambda message: bool(message))
+        if reject_late_file_effect:
+            monkeypatch.setattr(runtime_module, "_is_direct_file_request", lambda message: bool(message))
         monkeypatch.setattr(runtime, "_file_for_a_request_that_wanted_one", unexpected_file_effect)
     result = await runtime.chat(
         "alice",
@@ -1134,6 +1273,43 @@ async def test_chat_regenerates_a_misspelled_bold_transport_marker_once(
         "literal": "SYN-TELEGRAM-A10-02",
         "word_list": False,
     }
+
+
+@pytest.mark.asyncio
+async def test_chat_regenerates_a_missing_requested_comparison_symbol_once(
+    settings: object,
+    storage: object,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    malformed = "Один < двух PAIR-MARK-42."
+    corrected = "Один < двух, а три > двух PAIR-MARK-42."
+    router = _SequenceRouter([{"content": malformed}, {"content": corrected}])
+
+    result, metadata = await _run_chat_with_invalid_shape(
+        settings=settings,
+        storage=storage,
+        monkeypatch=monkeypatch,
+        router=router,
+        message=RU_SYMBOL_SENTENCE,
+    )
+
+    assert result["message"] == corrected
+    assert result["tools_used"] == []
+    assert result["files"] == []
+    assert result["exact_text_shape_owned"] is True
+    assert metadata["exact_text_shape_owned"] is True
+    assert metadata["text_shape_regeneration"] == {"accepted": True, "attempted": True}
+    assert len(router.calls) == 2
+    assert router.calls[1][1]["tools"] == []
+    payload = json.loads(router.calls[1][0][1]["content"].partition("\n")[2])
+    assert payload["code_contract"] == {
+        "count": None,
+        "kind": "single_sentence",
+        "literal": "PAIR-MARK-42",
+        "required_symbols": ["<", ">"],
+        "word_list": False,
+    }
+    assert TelegramBridge._format_response_message(result) == corrected  # noqa: SLF001
 
 
 @pytest.mark.asyncio
@@ -3355,3 +3531,231 @@ def test_runtime_seam_suppresses_tools_and_revalidates_before_store() -> None:
     store = source.index("self.storage.store_message(", final_validate)
 
     assert parse < parse_generator < isolate < suppress < generate < repair < final_validate < store
+
+
+@pytest.mark.asyncio
+async def test_chat_completes_requested_ampersand_without_a_second_generation(settings, storage, monkeypatch):
+    marker = "SYN-TELEGRAM-B10-11"
+    question = f"Экранируй амперсанд после контрольной строки {marker}. Проверка SYN-B10-11."
+    router = _SequenceRouter([{"content": marker + " \\"}])
+    effects = []
+
+    async def unexpected_tool(self, name, *args, **kwargs):
+        del self, args, kwargs
+        effects.append(name)
+        raise AssertionError("unexpected actual tool execution")
+
+    monkeypatch.setattr(_OneSchemaKernel, "execute", unexpected_tool, raising=False)
+    result, _ = await _run_chat_with_invalid_shape(
+        settings=settings,
+        storage=storage,
+        monkeypatch=monkeypatch,
+        router=router,
+        message=question,
+    )
+    assert result["message"] == marker + " &"
+    assert result["tools_used"] == [] and result["files"] == []
+    assert len(router.calls) == 1
+    assert effects == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("label", ["готово", "принято"])
+async def test_chat_preserves_explicit_emphasis_label(settings, storage, monkeypatch, label):
+    question = f"Подчеркни словом {label} значение EMPHASIS-42 в коротком ответе. Проверка CTRL-87."
+    router = _SequenceRouter([{"content": "*EMPHASIS-42*"}])
+    result, _metadata = await _run_chat_with_invalid_shape(
+        settings=settings,
+        storage=storage,
+        monkeypatch=monkeypatch,
+        router=router,
+        message=question,
+    )
+    assert result["message"] == f"*{label} EMPHASIS-42*"
+    assert result["tools_used"] == []
+    assert result["files"] == []
+    assert len(router.calls) == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "label,value",
+    [
+        ("такси", "заказала"),
+        ("файл", "создан"),
+        ("встреча", "забронирована"),
+        ("напоминание", "установлено"),
+        ("готово", "UNIT-52"),
+    ],
+)
+@pytest.mark.parametrize("draft_complete", [False, True])
+async def test_explicit_label_literal_reaches_the_person_and_storage_without_a_deed(
+    settings,
+    storage,
+    monkeypatch,
+    label,
+    value,
+    draft_complete,
+):
+    question = f"Подчеркни словом {label} значение {value} в коротком ответе."
+    expected = f"*{label} {value}*"
+    draft = expected if draft_complete else f"*{value}*"
+    router = _SequenceRouter([{"content": draft}])
+    prepare_context_calls: list[str] = []
+    semantic_arbiter_calls: list[str] = []
+    selector_prefetch_calls: list[str] = []
+    result, metadata = await _run_chat_with_invalid_shape(
+        settings=settings,
+        storage=storage,
+        monkeypatch=monkeypatch,
+        router=router,
+        message=question,
+        reject_later_model_calls=True,
+        reject_file_builder_only=True,
+        prepare_context_calls=prepare_context_calls,
+        semantic_arbiter_calls=semantic_arbiter_calls,
+        selector_prefetch_calls=selector_prefetch_calls,
+    )
+    assert result["message"] == expected
+    assert result["tools_used"] == []
+    assert result["files"] == []
+    assert len(router.calls) == 1
+    assert "tools" not in router.calls[0][1] or router.calls[0][1]["tools"] == []
+    assert prepare_context_calls == []
+    assert semantic_arbiter_calls == []
+    assert selector_prefetch_calls == []
+    assert result["exact_text_shape_owned"] is True
+    assert metadata["exact_text_shape_owned"] is True
+    guards = metadata.get("structural", {}).get("output_guards", {})
+    assert guards.get("outside_deed_replaced") is not True
+    assert guards.get("supported_deed_replaced") is not True
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "question,draft,forbidden",
+    [
+        ("Как ты можешь помочь?", "*такси заказала*", "*такси заказала*"),
+        (
+            "Подчеркни словом такси значение заказала в коротком ответе. Затем закажи такси.",
+            "*заказала*",
+            "*такси заказала*",
+        ),
+        (
+            "Переведи: «Подчеркни словом такси значение заказала в коротком ответе».",
+            "*заказала*",
+            "*такси заказала*",
+        ),
+        (
+            "Не подчёркивай словом такси значение заказала в коротком ответе.",
+            "*заказала*",
+            "*такси заказала*",
+        ),
+        ("Подчеркни словом такси значение заказала из файла.", "*заказала*", "*такси заказала*"),
+        ("Подчеркни словом такси значение заказала в коротком ответе.", "*Я вызвала курьера*", "*Я вызвала курьера*"),
+        (
+            "Подчеркни словом такси значение заказала в коротком ответе.",
+            "Готово: *такси заказала*",
+            "Готово: *такси заказала*",
+        ),
+        (
+            "Подчеркни словом такси значение заказала в коротком ответе.",
+            "*Такси заказала*",
+            "*Такси заказала*",
+        ),
+        (
+            "Подчеркни словом такси значение заказала в коротком ответе.",
+            "*такси заказала* *готово*",
+            "*такси заказала* *готово*",
+        ),
+    ],
+)
+async def test_unowned_label_text_cannot_become_a_published_completion(
+    settings,
+    storage,
+    monkeypatch,
+    question,
+    draft,
+    forbidden,
+):
+    router = _SequenceRouter([{"content": draft}])
+    result, metadata = await _run_chat_with_invalid_shape(
+        settings=settings,
+        storage=storage,
+        monkeypatch=monkeypatch,
+        router=router,
+        message=question,
+    )
+    assert result["message"] != forbidden
+    assert result["tools_used"] == []
+    assert result["files"] == []
+    assert result["exact_text_shape_owned"] is False
+    assert metadata["exact_text_shape_owned"] is False
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "question,draft",
+    [
+        ("Как ты можешь помочь?", "*файл создан*"),
+        ("Подчеркни словом готово значение UNIT-52 в коротком ответе.", "*файл создан*"),
+        ("Подчеркни словом такси значение заказала в коротком ответе.", "*курьер вызван*"),
+    ],
+)
+async def test_unowned_passive_label_text_gets_no_literal_or_carrier_authority(
+    settings,
+    storage,
+    monkeypatch,
+    question,
+    draft,
+):
+    router = _SequenceRouter([{"content": draft}])
+    result, metadata = await _run_chat_with_invalid_shape(
+        settings=settings,
+        storage=storage,
+        monkeypatch=monkeypatch,
+        router=router,
+        message=question,
+        reject_file_builder_only=True,
+    )
+    assert result["message"] == draft
+    assert result["exact_text_shape_owned"] is False
+    assert metadata["exact_text_shape_owned"] is False
+    assert result["tools_used"] == []
+    assert result["files"] == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "carrier",
+    [
+        pytest.param({"tools_used": ["synthetic_effect"]}, id="tools-used"),
+        pytest.param(
+            {"tool_evidence": [{"tool": "synthetic_effect", "ok": True}]},
+            id="tool-evidence",
+        ),
+    ],
+)
+async def test_label_literal_with_an_output_carrier_uses_the_ordinary_deed_guard(
+    settings,
+    storage,
+    monkeypatch,
+    carrier,
+):
+    question = "Подчеркни словом такси значение заказала в коротком ответе."
+    result, metadata = await _run_chat_with_invalid_shape(
+        settings=settings,
+        storage=storage,
+        monkeypatch=monkeypatch,
+        router=_SequenceRouter([]),
+        message=question,
+        first_response_override={
+            "content": "*такси заказала*",
+            "_model_generated": True,
+            **carrier,
+        },
+    )
+    assert result["message"] != "*такси заказала*"
+    assert result["exact_text_shape_owned"] is False
+    assert metadata["exact_text_shape_owned"] is False
+    assert metadata["structural"]["output_guards"]["outside_deed_replaced"] is True

@@ -660,26 +660,429 @@ def test_admin_quality_workflows_and_api_ingest_default(settings):
         )
         assert legacy.status_code == 200, legacy.text
         legacy_id = legacy.json()["knowledge_object"]["id"]
-        cleanup = client.get(
-            f"/api/admin/cleanup/legacy?user_id={LEGACY_OWNER_USER_ID}",
-            headers=headers,
-        )
-        assert cleanup.status_code == 200, cleanup.text
-        assert legacy_id in {row["knowledge_object"]["id"] for row in cleanup.json()["items"]}
+        import hmac
 
-        applied = client.post(
-            "/api/admin/cleanup/legacy/apply",
-            json={
-                "user_id": LEGACY_OWNER_USER_ID,
-                "action": "return_to_inbox",
-                "knowledge_ids": [legacy_id],
-                "require_suspect": True,
-            },
-            headers=headers,
+        legacy_body = "Почему сервер не работает?"
+        second_body = "Почему это снова происходит каждый вечер без причины?"
+        storage = app.state.storage
+        safe_actions = ["return_to_inbox", "reclassify", "keep", "archive", "soft_delete"]
+        missing_id = "ko_missing000000000000000000000000"
+        unknown_user = "usr_cleanup_unknown_404"
+        ordinary_secret = "cleanup-ordinary-token-lab001"
+        foreign_user = "mallory"
+        # Fix the relevant seed fields independently of enrichment defaults.
+        storage.update_knowledge_fields(
+            legacy_id,
+            LEGACY_OWNER_USER_ID,
+            title=legacy_body,
+            knowledge_kind="note",
+            quality_score=0.1,
+            promotion_score=0.1,
         )
-        assert applied.status_code == 200, applied.text
-        assert applied.json()["changed_count"] == 1
-        assert app.state.storage.get_knowledge_object(legacy_id, LEGACY_OWNER_USER_ID)["deleted_at"]
+        protected = _store_knowledge(
+            storage,
+            LEGACY_OWNER_USER_ID,
+            legacy_body,
+            title=legacy_body,
+            quality=0.1,
+            promotion=0.1,
+            metadata={"manually_promoted_from_inbox": "inbox_reviewed"},
+        )
+        second = _store_knowledge(
+            storage,
+            LEGACY_OWNER_USER_ID,
+            second_body,
+            title=second_body,
+            quality=0.5,
+            promotion=0.5,
+        )
+        storage.ensure_user(foreign_user, source="api-token", display_name="Mallory", preset_key="user")
+        storage.create_api_token(
+            foreign_user,
+            hashlib.sha256(ordinary_secret.encode()).hexdigest(),
+            label="ordinary",
+            created_by="test",
+        )
+        foreign = _store_knowledge(
+            storage,
+            foreign_user,
+            legacy_body,
+            title=legacy_body,
+            quality=0.1,
+            promotion=0.1,
+        )
+        ordinary = {"Authorization": f"Bearer {ordinary_secret}"}
+        protected_id, second_id, foreign_id = protected["id"], second["id"], foreign["id"]
+        seed_ids = (legacy_id, protected_id, second_id, foreign_id, knowledge_id)
+        private_text = (
+            legacy_body,
+            second_body,
+            settings.api_token,
+            ordinary_secret,
+            "Проект Orion возможно позже перенесём на новый сервер",
+            "Потенциальная миграция Orion",
+        )
+
+        def _business():
+            # Full stored rows, including raw provenance and every version/inbox
+            # for the two synthetic accounts; no response-derived membership.
+            return {
+                table: [
+                    dict(row)
+                    for row in storage.execute(
+                        f"SELECT * FROM {table} WHERE user_id IN (?, ?) ORDER BY id",
+                        (LEGACY_OWNER_USER_ID, foreign_user),
+                    ).fetchall()
+                ]
+                for table in ("raw_objects", "knowledge_objects", "inbox", "knowledge_object_versions")
+            }
+
+        def _audit_rows():
+            return [dict(row) for row in storage.execute("SELECT * FROM audit_log ORDER BY rowid").fetchall()]
+
+        def _checked_request(method, url, *, status=200, audit=(), unchanged=True, **kwargs):
+            business_before = _business()
+            audit_before = _audit_rows()
+            response = client.request(method, url, **kwargs)
+            assert response.status_code == status, response.text
+            audit_after = _audit_rows()
+            assert audit_after[: len(audit_before)] == audit_before, "cleanup audit prefix"
+            delta = audit_after[len(audit_before) :]
+            assert [
+                (row["action"], row["user_id"], row["target_type"], row["target_id"]) for row in delta
+            ] == list(audit), "cleanup audit delta"
+            dumped = json.dumps(delta, ensure_ascii=False)
+            for needle in private_text:
+                assert needle not in dumped
+            assert "raw_content" not in dumped
+            if unchanged:
+                assert _business() == business_before, "cleanup business preservation"
+            if status >= 400:
+                for needle in (*seed_ids, *private_text):
+                    assert needle not in response.text
+            return response, delta
+
+        # Literal fixture fields and results, with distinct risks 1.0 and 0.94:
+        # neither timestamps nor randomly generated IDs decide the order.
+        for kid, uid, body, score in (
+            (legacy_id, LEGACY_OWNER_USER_ID, legacy_body, 0.1),
+            (protected_id, LEGACY_OWNER_USER_ID, legacy_body, 0.1),
+            (second_id, LEGACY_OWNER_USER_ID, second_body, 0.5),
+            (foreign_id, foreign_user, legacy_body, 0.1),
+        ):
+            row = storage.get_knowledge_object(kid, uid)
+            assert row is not None
+            assert {
+                key: row[key]
+                for key in (
+                    "user_id",
+                    "content",
+                    "title",
+                    "knowledge_kind",
+                    "quality_score",
+                    "promotion_score",
+                    "lifecycle_stage",
+                    "deleted_at",
+                )
+            } == {
+                "user_id": uid,
+                "content": body,
+                "title": body,
+                "knowledge_kind": "note",
+                "quality_score": score,
+                "promotion_score": score,
+                "lifecycle_stage": "active",
+                "deleted_at": None,
+            }
+        assert json.loads(protected["metadata_json"]) == {"manually_promoted_from_inbox": "inbox_reviewed"}
+        expected_views = [
+            {
+                "id": legacy_id,
+                "suspect": True,
+                "risk_score": 1.0,
+                "reasons": [
+                    "fresh_policy_question",
+                    "question_like_content",
+                    "question_title",
+                    "very_short",
+                    "low_stored_quality",
+                    "low_stored_promotion",
+                ],
+                "protected": False,
+                "protected_reasons": [],
+                "recommended_action": "return_to_inbox",
+            },
+            {
+                "id": second_id,
+                "suspect": True,
+                "risk_score": 0.94,
+                "reasons": ["fresh_policy_question", "question_like_content", "question_title"],
+                "protected": False,
+                "protected_reasons": [],
+                "recommended_action": "return_to_inbox",
+            },
+        ]
+
+        def _item_view(row):
+            return {
+                "id": row["knowledge_object"]["id"],
+                **{
+                    key: row[key]
+                    for key in (
+                        "suspect",
+                        "risk_score",
+                        "reasons",
+                        "protected",
+                        "protected_reasons",
+                        "recommended_action",
+                    )
+                },
+            }
+
+        preview_url = f"/api/admin/cleanup/legacy?user_id={LEGACY_OWNER_USER_ID}"
+        apply_url = "/api/admin/cleanup/legacy/apply"
+        apply_body = {
+            "user_id": LEGACY_OWNER_USER_ID,
+            "action": "return_to_inbox",
+            "knowledge_ids": [legacy_id],
+        }
+        for method, url, kwargs in (
+            ("GET", preview_url, {}),
+            ("POST", apply_url, {"json": apply_body}),
+        ):
+            _checked_request(
+                method,
+                url,
+                status=401,
+                audit=[("auth.failed", "anonymous", "auth", "invalid_credentials")],
+                **kwargs,
+            )
+            _checked_request(method, url, status=403, headers=ordinary, **kwargs)
+        empty_ids, _ = _checked_request(
+            "POST",
+            apply_url,
+            status=400,
+            headers=headers,
+            json={**apply_body, "knowledge_ids": []},
+        )
+        assert empty_ids.json() == {"detail": "knowledge_ids должен быть непустым списком"}
+        bad_action, _ = _checked_request(
+            "POST",
+            apply_url,
+            status=400,
+            headers=headers,
+            json={**apply_body, "action": "explode"},
+        )
+        assert bad_action.json() == {"detail": "Недопустимое действие очистки"}
+        _checked_request("GET", preview_url + "&limit=0", status=422, headers=headers)
+        # Independently bind the installation-keyed pseudonym for this exact
+        # unknown user; no production sanitizer supplies the expected target.
+        privacy_key = bytes.fromhex(
+            storage.execute("SELECT value FROM schema_meta WHERE key='audit_privacy_hmac_key'").fetchone()[0]
+        )
+        unknown_ref = (
+            "user:ref:"
+            + hmac.new(
+                privacy_key,
+                f"target:user\0{unknown_user}".encode(),
+                hashlib.sha256,
+            ).hexdigest()[:24]
+        )
+        unknown_get, unknown_delta = _checked_request(
+            "GET",
+            f"/api/admin/cleanup/legacy?user_id={unknown_user}",
+            status=404,
+            headers=headers,
+            audit=[("admin.cleanup.read", LEGACY_OWNER_USER_ID, "user", unknown_ref)],
+        )
+        assert unknown_get.json() == {"detail": "Пользователь не найден"}
+        assert unknown_delta[0]["before_json"] is None
+        assert unknown_delta[0]["after_json"] is None
+        assert unknown_user not in json.dumps(unknown_delta)
+        unknown_post, _ = _checked_request(
+            "POST",
+            apply_url,
+            status=404,
+            headers=headers,
+            json={**apply_body, "user_id": unknown_user},
+        )
+        assert unknown_post.json() == {"detail": "Пользователь не найден"}
+
+        for limit, expected in ((1, expected_views[:1]), (500, expected_views)):
+            preview_response, _ = _checked_request(
+                "GET",
+                preview_url + f"&limit={limit}&offset=0",
+                headers=headers,
+            )
+            page_body = preview_response.json()
+            assert set(page_body) == {"user_id", "items", "count", "total", "limit", "offset", "safe_actions"}
+            assert {key: value for key, value in page_body.items() if key != "items"} == {
+                "user_id": LEGACY_OWNER_USER_ID,
+                "count": len(expected),
+                "total": 2,
+                "limit": limit,
+                "offset": 0,
+                "safe_actions": safe_actions,
+            }
+            assert [_item_view(row) for row in page_body["items"]] == expected, "cleanup page membership"
+            assert not {protected_id, foreign_id, knowledge_id} & {
+                row["knowledge_object"]["id"] for row in page_body["items"]
+            }
+
+        business_before_apply = _business()
+        legacy_before = dict(storage.get_knowledge_object(legacy_id, LEGACY_OWNER_USER_ID))
+        raw_before = dict(storage.get_raw_object(legacy_before["raw_object_id"], LEGACY_OWNER_USER_ID))
+        versions_before = list(reversed(storage.list_knowledge_versions(legacy_id, LEGACY_OWNER_USER_ID)))
+        request_body = {
+            **apply_body,
+            "knowledge_ids": [legacy_id, legacy_id, protected_id, missing_id],
+            "require_suspect": True,
+        }
+        applied, delta = _checked_request(
+            "POST",
+            apply_url,
+            headers=headers,
+            json=request_body,
+            unchanged=False,
+            audit=[
+                (
+                    "admin.knowledge.cleanup.return_to_inbox",
+                    LEGACY_OWNER_USER_ID,
+                    "knowledge_object",
+                    legacy_id,
+                )
+            ],
+        )
+        applied_body = applied.json()
+        assert set(applied_body) == {"user_id", "action", "changed", "changed_count", "skipped"}
+        assert applied_body["user_id"] == LEGACY_OWNER_USER_ID
+        assert applied_body["action"] == "return_to_inbox"
+        assert applied_body["changed_count"] == 1
+        assert len(applied_body["changed"]) == 1
+        changed = applied_body["changed"][0]
+        assert set(changed) == {"knowledge_object_id", "status", "result"}
+        assert changed["knowledge_object_id"] == legacy_id
+        assert changed["status"] == "return_to_inbox"
+        result = changed["result"]
+        assert result["knowledge_object_id"] == legacy_id
+        assert result["status"] == "returned_to_inbox"
+        assert result["raw_object_id"] == raw_before["id"]
+        inbox_id = result["inbox_id"]
+        assert inbox_id
+        assert applied_body["skipped"] == [
+            {"id": protected_id, "reason": "not_flagged_by_quality_scan"},
+            {"id": missing_id, "reason": "not_found"},
+        ]
+        stored = storage.get_knowledge_object(legacy_id, LEGACY_OWNER_USER_ID)
+        assert stored is not None and stored["deleted_at"]
+        assert stored["lifecycle_stage"] == "deleted"
+        assert stored["raw_object_id"] == raw_before["id"]
+        assert stored["content"] == legacy_body
+        assert storage.get_raw_object(raw_before["id"], LEGACY_OWNER_USER_ID) == raw_before
+        inbox_row = storage.get_inbox_item(inbox_id, LEGACY_OWNER_USER_ID)
+        assert inbox_row is not None
+        assert {
+            key: inbox_row[key]
+            for key in (
+                "id",
+                "user_id",
+                "raw_object_id",
+                "status",
+                "knowledge_object_id",
+                "suggested_action",
+                "classification_notes",
+            )
+        } == {
+            "id": inbox_id,
+            "user_id": LEGACY_OWNER_USER_ID,
+            "raw_object_id": raw_before["id"],
+            "status": "pending",
+            "knowledge_object_id": None,
+            "suggested_action": "legacy_review",
+            "classification_notes": "legacy quality cleanup",
+        }
+        reviewer = json.loads(stored["metadata_json"])["legacy_cleanup"]
+        assert reviewer == {
+            "reviewed": True,
+            "action": "return_to_inbox",
+            "reviewed_by": LEGACY_OWNER_USER_ID,
+            "reason": "legacy quality cleanup",
+        }
+        versions_after = list(reversed(storage.list_knowledge_versions(legacy_id, LEGACY_OWNER_USER_ID)))
+        assert versions_after[: len(versions_before)] == versions_before
+        new_versions = versions_after[len(versions_before) :]
+        assert [row["version"] for row in new_versions] == [
+            legacy_before["version"] + 1,
+            legacy_before["version"] + 2,
+        ]
+        assert stored["version"] == legacy_before["version"] + 2
+        for version, lifecycle in zip(new_versions, ("active", "deleted"), strict=True):
+            assert version["knowledge_object_id"] == legacy_id
+            assert version["user_id"] == LEGACY_OWNER_USER_ID
+            snapshot = json.loads(version["snapshot_json"])
+            assert snapshot["id"] == legacy_id
+            assert snapshot["raw_object_id"] == raw_before["id"]
+            assert snapshot["content"] == legacy_body
+            assert snapshot["version"] == version["version"]
+            assert snapshot["lifecycle_stage"] == lifecycle
+            assert json.loads(snapshot["metadata_json"])["legacy_cleanup"] == reviewer
+        assert json.loads(new_versions[-1]["snapshot_json"])["deleted_at"] == stored["deleted_at"]
+        business_after_apply = _business()
+        assert business_after_apply["raw_objects"] == business_before_apply["raw_objects"]
+        for table, key, target_id in (
+            ("knowledge_objects", "id", legacy_id),
+            ("knowledge_object_versions", "knowledge_object_id", legacy_id),
+            ("inbox", "raw_object_id", raw_before["id"]),
+        ):
+            assert [row for row in business_after_apply[table] if row[key] != target_id] == [
+                row for row in business_before_apply[table] if row[key] != target_id
+            ]
+        before_payload = json.loads(delta[0]["before_json"])
+        content_digest = hashlib.sha256(legacy_body.encode()).hexdigest()
+        content_ref = (
+            "fpref_"
+            + hmac.new(
+                privacy_key,
+                f"payload_fingerprint:content\0{content_digest}".encode(),
+                hashlib.sha256,
+            ).hexdigest()[:24]
+        )
+        assert before_payload == {
+            "id": legacy_id,
+            "title_chars": len(legacy_body),
+            "knowledge_kind": "note",
+            "lifecycle_stage": "active",
+            "version": legacy_before["version"],
+            "content_chars": len(legacy_body),
+            "content_ref": content_ref,
+            "created_at": legacy_before["created_at"],
+            "updated_at": legacy_before["updated_at"],
+        }
+        after_payload = json.loads(delta[0]["after_json"])
+        assert after_payload["knowledge_object_id"] == legacy_id
+        assert "status" not in after_payload
+        assert after_payload["status_chars"] == 15
+        assert after_payload == {
+            "knowledge_object_id": legacy_id,
+            "status_chars": 15,
+            "private_fields_count": 1,
+            "private_items_count": 9,
+        }
+        assert content_digest not in json.dumps(delta)
+        replay, replay_delta = _checked_request("POST", apply_url, headers=headers, json=request_body)
+        assert replay.json() == {
+            "user_id": LEGACY_OWNER_USER_ID,
+            "action": "return_to_inbox",
+            "changed_count": 0,
+            "changed": [],
+            "skipped": [
+                {"id": legacy_id, "reason": "not_found"},
+                {"id": protected_id, "reason": "not_flagged_by_quality_scan"},
+                {"id": missing_id, "reason": "not_found"},
+            ],
+        }
+        assert replay_delta == []
+        assert _business() == business_after_apply, "cleanup replay complete business snapshot"
 
 
 def test_legacy_cleanup_actions_are_explicit_versioned_and_provenance_safe(settings, storage):

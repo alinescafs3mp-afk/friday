@@ -165,10 +165,11 @@ def _seed_graph(
     label: str,
     *,
     owner: str = _OWNER,
+    owner_source: str = "schema44-test",
     now: str = "2026-08-26T10:00:00+00:00",
     expires_at: str = "2026-08-26T22:00:00+00:00",
 ) -> CompareCurrentFileWebWorkGraph:
-    storage.ensure_user(owner, source="schema44-test")
+    storage.ensure_user(owner, source=owner_source)
     conversation = storage.create_conversation(owner, f"schema44 {label}")
     boundary = storage.store_message(
         conversation["id"],
@@ -444,7 +445,7 @@ def test_user_export_validates_and_projects_the_body_free_graph(storage) -> None
 
 def test_account_deletion_inventory_classifies_graph_and_steps(storage) -> None:
     owner = "local:schema44-graph-delete-owner"
-    _seed_graph(storage, "deletion-inventory", owner=owner)
+    _seed_graph(storage, "deletion-inventory", owner=owner, owner_source="local")
     assert _mark_account_deletion_history_clean(storage, owner)
     storage.update_user(owner, status="disabled")
 

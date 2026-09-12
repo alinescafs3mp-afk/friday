@@ -423,6 +423,13 @@ def test_code_owned_membership_requires_all_sixteen_candidates_and_exact_ids():
         ("Какие сотрудники в таблице?", "list_people"),
         ("Назови состав команды из документа", "list_people"),
         ("Каково количество людей в файле?", "count_people"),
+        ("Каково точное количество людей во всём файле?", "count_people"),
+        ("Покажи полный список записей в приложенной таблице.", "list_records"),
+        ("Каково точное количество записей во всём CSV-файле?", "count_records"),
+        ("Покажи все позиции во всём файле.", "list_records"),
+        ("Сколько строк в таблице?", "count_records"),
+        ("Перечисли все строки в документе.", "list_records"),
+        ("Сколько строк в этом файле?", "count_records"),
         ("Перечисли все позиции в документе и посчитай их", "list_records"),
         ("Выдай перечень сотрудников из таблицы", "list_people"),
         ("Имена в файле?", "list_people"),
@@ -482,6 +489,11 @@ def test_natural_targeted_exact_phrasings_are_closed_intents(question, kind):
         "Сколько в таблице стоит товар?",
         "Сколько в таблице и создай отчёт.",
         "В таблице написано: «сколько в таблице?»",
+        "Покажи полный список записей в приложенной таблице и отправь его Ивану.",
+        "Каково точное количество записей во всём CSV-файле и создай отчёт?",
+        "Покажи все позиции во всём файле с ценой выше 100.",
+        "Покажи все позиции во всём файле на странице 3.",
+        "Объясни фразу «Покажи все позиции во всём файле».",
     ],
 )
 def test_target_only_table_count_does_not_swallow_semantic_residue(question: str) -> None:
@@ -1428,3 +1440,570 @@ def test_no_save_office_literals_and_index_never_enter_api_or_idempotency_cache(
         assert "_office_source_text" not in encoded
         assert all(person not in encoded for person in people)
         assert OFFICE_STRUCTURE_KEY not in response.json().get("file_ingestion", {})
+
+
+_CSV_EXACT_COUNT_REQUESTS = (
+    ("Сосчитай все позиции этой синтетической CSV-ведомости целиком.", 16, "SYN-A03-07"),
+    ("Дай точный счёт позиций из всего прикреплённого CSV-документа.", 14, "SYN-A03-15"),
+    ("Дайте точный счет всех записей из всего прикрепленного CSV-документа.", 3, "CHECK-COUNT"),
+    (
+        "Ответ должен быть точным числом объектов из CSV, а не оценкой по предпросмотру.",
+        21,
+        "CHECK-NOMINAL-COUNT",
+    ),
+    ("Нужен исчерпывающий счёт элементов CSV без включения названий столбцов.", 13, "CHECK-TOTAL"),
+    (
+        "Какова мощность полного табличного набора согласно детерминированному разбору файла?",
+        18,
+        "CHECK-CARDINALITY",
+    ),
+    ("Какой row_count имеет целый CSV после удаления единственного заголовка?", 7, "CHECK-ROWS"),
+    ("Найди фактический размер набора строк во вложении без семплирования.", 24, "CHECK-SIZE"),
+    ("Каков детерминированный total_rows_minus_header для переданного файла?", 9, "CHECK-HEADER"),
+    ("Закрой табличный проход точным счётчиком всех записей из приложенного CSV.", 27, "CHECK-END"),
+    ("Укажите cardinality записей в приложенном CSV.", 11, "CHECK-CARDINALITY-ALT"),
+    ("Вычислите мощность табличного набора из файла.", 8, "CHECK-POWER-ALT"),
+    ("Верните точный размер множества строк из вложения.", 17, "CHECK-SIZE-ALT"),
+)
+
+_CSV_COMPOSITIONAL_COUNT_REQUESTS = (
+    "Сколько всего записей находится во всей приложенной синтетической CSV-таблице?",
+    "Посчитай точное число строк данных в прикреплённом тестовом CSV.",
+    "Каково полное количество позиций в этой синтетической таблице, без заголовка?",
+    "Назови точное число записей во всём приложенном документе CSV.",
+    "Сколько элементов перечислено в тестовой таблице после строки заголовков?",
+    "Дай точный итог по количеству строк данных в приложенном файле.",
+    "Какое точное количество записей содержит прикреплённая таблица?",
+    "Проверь структуру CSV и сообщи число строк с данными во всём файле.",
+    "Сколько полных записей видно в приложенной синтетической таблице?",
+    "Посчитай позиции в CSV, не принимая заголовок за отдельную запись.",
+    "Каков точный размер списка строк в этом тестовом табличном файле?",
+    "Назови число записей, реально содержащихся в приложенном CSV целиком.",
+    "Сколько строк-объектов следует после шапки синтетической таблицы?",
+    "Определи полное число элементов таблицы на основании структуры файла.",
+    "Сколько записей нужно учитывать в этом приложенном тестовом реестре?",
+    "Посчитай строки данных CSV полностью и верни только точный итог.",
+    "Какое количество позиций присутствует во всей синтетической ведомости?",
+    "Сообщи точное число записей приложенной таблицы, исключив её заголовок.",
+    "Прочитай структурную аттестацию вложения и выведи cardinality строк, не считая header.",
+    "Сколько тел записей подтверждено парсером во всём прикреплённом наборе?",
+    "Проверь границы таблицы и сообщи количество data rows после первой строки.",
+    "Не проси следующий вопрос: сразу сосчитай записи в документе этого сообщения.",
+    "Опираясь на структуру вложения, вычисли количество элементов массива строк.",
+    "Просканируй документ до EOF и дай полный счёт записей под шапкой.",
+)
+
+
+def _csv_count_attachment(count: int) -> dict[str, Any]:
+    payload = (
+        "ID,Статус\n" + "\n".join(f"SYNTHETIC-ITEM-{i:02d},синтетика" for i in range(1, count + 1))
+    ).encode("utf-8")
+    extracted = DocumentExtractor(secret_values=()).extract(payload, "synthetic-register.csv")
+    assert extracted.success
+    assert validate_runtime_office_index(extracted.office_structure_index, extracted.text)
+    return trusted_office_attachment(
+        {
+            "filename": "synthetic-register.csv",
+            "transient_text": extracted.text,
+            "extraction_success": True,
+            "verification_eligible": True,
+            OFFICE_STRUCTURE_KEY: extracted.office_structure_index,
+        }
+    )
+
+
+@pytest.mark.parametrize("question,count,control", _CSV_EXACT_COUNT_REQUESTS)
+@pytest.mark.parametrize("correlation_label", ["", "Контроль", "Проверка"])
+@pytest.mark.asyncio
+async def test_csv_exact_count_synonyms_reach_real_owned_runtime(
+    question,
+    count,
+    control,
+    correlation_label,
+    settings,
+    storage,
+    monkeypatch,
+):
+    if correlation_label:
+        question += f" {correlation_label} {control}."
+    attachment = _csv_count_attachment(count)
+    projected = _bounded_attachment_projection([attachment])
+    assert office_exact_request_detected(question)
+    assert office_arbiter_applies(question, projected)
+    exact = code_owned_office_answer(question, projected, kind_override="count_records")
+    assert exact is not None and exact["status"] == "passed"
+    assert exact["content"] == f"В документе {count} позиций."
+
+    class CountArbiter:
+        enabled = True
+        model = "synthetic-csv-intent"
+        total_budget_sec = 30.0
+
+        def __init__(self):
+            self.questions = []
+
+        async def chat(self, messages, **kwargs):
+            del kwargs
+            system = next(m["content"] for m in messages if m["role"] == "system")
+            assert "арбитр" in system.casefold(), "unexpected answer-generation model call"
+            self.questions.append(next(m["content"] for m in messages if m["role"] == "user"))
+            return {"content": '{"kind": "count_records"}'}
+
+    storage.ensure_user("alice", preset_key="owner")
+    llm = CountArbiter()
+    runtime = AgentRuntime(
+        replace(settings, verify_answers=True, verify_min_answer_chars=1),
+        storage,
+        llm=llm,
+    )
+    monkeypatch.setattr(runtime, "_prepare_context", _simple_context)
+    result = await runtime.chat(
+        "alice",
+        question,
+        actor=AuthorizationService(storage).actor_for_user("alice", source="test"),
+        attachments=[attachment],
+        enable_tools=True,
+    )
+    assert len(llm.questions) == 1
+    assert result["message"] == f"В документе {count} позиций."
+    rows = storage.get_conversation_messages(result["conversation_id"], user_id="alice")
+    metadata = json.loads(rows[-1]["metadata_json"])
+    assert metadata["structural"]["verdict_kind"] == "office_exact"
+    assert metadata["attachment_context_used"] is True
+    assert result["verification_status"] == "passed"
+    assert result["attachment_coverage_complete"] is True
+    assert result.get("tools_used") == []
+
+
+@pytest.mark.parametrize("question", _CSV_COMPOSITIONAL_COUNT_REQUESTS)
+def test_compositional_whole_count_grammar_is_source_bound_and_code_owned(question):
+    projected = _bounded_attachment_projection([_csv_count_attachment(6)])
+    tagged = f"{question} Проверка GENERAL-WHOLE-COUNT."
+    for surface in (question, tagged):
+        assert office_exact_request_detected(surface)
+        answer = code_owned_office_answer(surface, projected, kind_override="count_records")
+        assert answer is not None and answer["status"] == "passed"
+        assert answer["content"] == "В документе 6 позиций."
+    assert office_arbiter_applies(tagged, projected)
+
+
+@pytest.mark.parametrize("question", _CSV_COMPOSITIONAL_COUNT_REQUESTS)
+@pytest.mark.parametrize("damage", ["index_complete", "prompt_complete", "sibling"])
+def test_compositional_whole_count_grammar_cannot_bypass_complete_source(question, damage):
+    projected = _bounded_attachment_projection([_csv_count_attachment(6)])
+    if damage in {"index_complete", "prompt_complete"}:
+        projected[0]["_office_exact_view"][damage] = False
+    else:
+        projected.append({"filename": "second.txt", "transient_text": "SYNTHETIC sibling"})
+    tagged = f"{question} Проверка GENERAL-WHOLE-COUNT."
+    assert not office_arbiter_applies(tagged, projected)
+    answer = code_owned_office_answer(tagged, projected, kind_override="count_records")
+    assert answer is not None and answer["status"] == "unknown"
+
+
+@pytest.mark.parametrize("question,count,control", _CSV_EXACT_COUNT_REQUESTS)
+@pytest.mark.parametrize("damage", ["index_complete", "prompt_complete", "untrusted", "sibling"])
+def test_csv_count_synonyms_cannot_bypass_source_completeness(question, count, control, damage):
+    del control
+    attachment = _csv_count_attachment(count)
+    if damage == "untrusted":
+        # A plain dictionary does not carry the trusted descriptor subclass.
+        attachment = {k: v for k, v in attachment.items() if isinstance(k, str)}
+    projected = _bounded_attachment_projection([attachment])
+    if damage in {"index_complete", "prompt_complete"}:
+        projected[0]["_office_exact_view"][damage] = False
+    elif damage == "sibling":
+        projected.append({"filename": "second.txt", "transient_text": "SYNTHETIC sibling"})
+    assert not office_arbiter_applies(question, projected)
+    answer = code_owned_office_answer(question, projected, kind_override="count_records")
+    if damage == "untrusted":
+        assert "_office_exact_view" not in projected[0]
+        assert answer is None
+    else:
+        assert answer is not None
+        assert answer["status"] == "unknown"
+        assert answer["kind"] == "unavailable"
+        assert answer["content"] != f"В документе {count} позиций."
+
+
+@pytest.mark.parametrize(
+    "question",
+    [
+        "Перескажи кратко содержимое этой CSV-ведомости.",
+        "Покажи банковский счёт из этого CSV-документа.",
+        "Дай точный счёт на оплату позиций из CSV-документа.",
+        "В CSV-документе приведён точный счёт позиций.",
+        "Процитируй: «Сосчитай все позиции этой CSV-ведомости целиком».",
+        "Объясни фразу «Дай точный счёт позиций из всего CSV-документа».",
+        "Что означает row_count в этом CSV?",
+        "Объясни total_rows_minus_header для приложенного файла.",
+        "В CSV указан row_count.",
+        "Не вычисляй мощность полного табличного набора из файла.",
+        "Процитируй: «Какой row_count имеет целый CSV?».",
+        "Объясни фразу «Нужен исчерпывающий счёт элементов CSV».",
+        "Какова мощность двигателя в приложенном документе?",
+        "Проверяется exact-document path: какое число объектов он обязан вернуть?",
+    ],
+)
+def test_csv_count_synonyms_preserve_summary_account_and_quoted_scope(question):
+    projected = _bounded_attachment_projection([_csv_count_attachment(16)])
+    assert not office_exact_request_detected(question)
+    assert not office_arbiter_applies(question, projected)
+    assert code_owned_office_answer(question, projected) is None
+
+
+@pytest.mark.parametrize(
+    "question",
+    [
+        "Сосчитай все позиции на первой странице этой CSV-ведомости.",
+        "Дай точный счёт позиций из отдела продаж в CSV-документе.",
+        "Сосчитай все строки кода в этом документе.",
+        "Какой row_count в CSV для записей со статусом закрыто?",
+        "Нужен точный размер набора строк на первой странице файла.",
+        "Укажи row_count в CSV и создай новый документ.",
+        "Дай row_count для уникальных записей CSV.",
+        "Укажи row_count в CSV. Затем отправь документ.",
+        "Укажи row_count в CSV; сохрани результат в новом файле.",
+        "Укажи row_count в CSV и сделай новый Word-файл.",
+        "Укажи row_count разных записей CSV.",
+        "Укажи row_count записей CSV без повторов.",
+        "Укажи row_count записей CSV для строк с высоким приоритетом.",
+        "Прочитай структурную аттестацию вложения и выведи cardinality строк, затем удали файл.",
+        (
+            "Опираясь на структуру вложения, вычисли количество элементов массива строк "
+            "только для отдела продаж."
+        ),
+        (
+            "Проверь границы таблицы и сообщи количество data rows после первой строки, "
+            "затем отправь документ."
+        ),
+        ("Сколько тел записей подтверждено парсером во всём прикреплённом наборе для высокого приоритета?"),
+        ("Не проси следующий вопрос: сразу сосчитай записи в документе этого сообщения и создай файл."),
+        ("Просканируй документ до EOF и дай полный счёт записей под шапкой и отправь документ."),
+    ],
+)
+def test_csv_count_synonyms_do_not_turn_scoped_counts_into_whole_file_answers(question):
+    projected = _bounded_attachment_projection([_csv_count_attachment(16)])
+    assert office_request_kind(question) == ""
+    assert code_owned_office_answer(question, projected) is None
+    assert not office_arbiter_applies(question, projected)
+    for kind in OFFICE_INTENT_KINDS:
+        assert code_owned_office_answer(question, projected, kind_override=kind) is None
+
+
+@pytest.mark.parametrize(
+    "question",
+    [
+        "Какой row_count в CSV для записей со статусом закрыто?",
+        "Нужен точный размер набора строк на первой странице файла.",
+        "Сосчитай все строки кода в этом документе.",
+        "Укажи row_count в CSV и создай новый документ.",
+        "Дай row_count для уникальных записей CSV.",
+        "Укажи row_count в CSV и сделай новый Word-файл.",
+        "Укажи row_count разных записей CSV.",
+        "Укажи row_count записей CSV без повторов.",
+        "Укажи row_count записей CSV для строк с высоким приоритетом.",
+    ],
+)
+@pytest.mark.asyncio
+async def test_real_runtime_cannot_ask_arbiter_to_replace_scoped_count_with_total(
+    question, settings, storage, monkeypatch
+):
+    storage.ensure_user("alice", preset_key="owner")
+    runtime = AgentRuntime(
+        replace(settings, verify_answers=False),
+        storage,
+        llm=_CaptureLLM("Для выбранного условия отдельный подсчёт не выполнен."),
+    )
+    monkeypatch.setattr(runtime, "_prepare_context", _simple_context)
+    arbiter_calls = []
+
+    async def malicious_arbiter(*args, **kwargs):
+        arbiter_calls.append((args, kwargs))
+        return "count_records"
+
+    monkeypatch.setattr(runtime, "_office_intent_arbiter", malicious_arbiter)
+    result = await runtime.chat(
+        "alice",
+        question,
+        actor=AuthorizationService(storage).actor_for_user("alice", source="test"),
+        attachments=[_csv_count_attachment(16)],
+        enable_tools=True,
+    )
+    assert arbiter_calls == []
+    assert "В документе 16 позиций." not in result["message"]
+    rows = storage.get_conversation_messages(result["conversation_id"], user_id="alice")
+    metadata = json.loads(rows[-1]["metadata_json"])
+    assert metadata.get("structural", {}).get("verdict_kind") != "office_exact"
+
+
+def test_quoted_other_scope_cannot_revoke_an_actual_whole_table_request():
+    projected = _bounded_attachment_projection([_csv_count_attachment(16)])
+    question = "Укажите cardinality записей в приложенном CSV. «Создай файл для отдела продаж»."
+    assert office_arbiter_applies(question, projected)
+    answer = code_owned_office_answer(question, projected, kind_override="count_records")
+    assert answer is not None and answer["content"] == "В документе 16 позиций."
+
+
+_PARSE_SUMMARY_QUESTIONS = [
+    "Покажи только подтверждённый итог разбора приложенной таблицы, без приблизительных слов. Проверка SYN-B03-11.",
+    "Не используй число из текста вопроса; извлеки итог из CSV-структуры. Проверка SYN-B03-16.",
+    "Покажи структуру CSV.",
+    "Выведи результат разбора загруженной таблицы.",
+]
+_NONEMPTY_FIELDS_QUESTION = (
+    "Сообщи количество записей, для которых в таблице есть значения ID и Статус. Проверка SYN-B03-17."
+)
+
+
+def _structural_csv_attachment(text):
+    extracted = DocumentExtractor(secret_values=()).extract(text.encode("utf-8"), "structure.csv")
+    assert extracted.success
+    assert validate_runtime_office_index(extracted.office_structure_index, extracted.text)
+    return trusted_office_attachment(
+        {
+            "filename": "structure.csv",
+            "transient_text": extracted.text,
+            "extraction_success": True,
+            "verification_eligible": True,
+            OFFICE_STRUCTURE_KEY: extracted.office_structure_index,
+        }
+    )
+
+
+@pytest.mark.parametrize("question", _PARSE_SUMMARY_QUESTIONS)
+@pytest.mark.parametrize("count", [3, 25, 40])
+def test_parse_summary_reports_actual_schema_and_count(question, count):
+    projected = _bounded_attachment_projection([_csv_count_attachment(count)])
+    assert office_request_kind(question) == "structure_summary"
+    assert office_exact_request_detected(question)
+    assert not office_arbiter_applies(question, projected)
+    for override in ["", *OFFICE_INTENT_KINDS]:
+        answer = code_owned_office_answer(question, projected, kind_override=override)
+        assert answer is not None and answer["status"] == "passed"
+        assert answer["kind"] == "structure_summary"
+        assert f"строк данных — {count}" in answer["content"]
+        assert 'столбцов — 2. Поля: "ID", "Статус".' in answer["content"]
+
+
+@pytest.mark.parametrize(
+    "data,expected",
+    [
+        ("A,готово\nB,\n,готово\nC, \nD,открыто\n", 2),
+        ("A,\nB, \n", 0),
+        ("A,0\nB,false\n", 2),
+    ],
+)
+def test_nonempty_field_count_reads_each_requested_cell(data, expected):
+    projected = _bounded_attachment_projection([_structural_csv_attachment("ID,Статус\n" + data)])
+    assert office_request_kind(_NONEMPTY_FIELDS_QUESTION) == "count_nonempty_fields"
+    assert not office_arbiter_applies(_NONEMPTY_FIELDS_QUESTION, projected)
+    for override in ["", *OFFICE_INTENT_KINDS]:
+        answer = code_owned_office_answer(_NONEMPTY_FIELDS_QUESTION, projected, kind_override=override)
+        assert answer is not None and answer["status"] == "passed"
+        assert answer["content"].startswith(f"В документе {expected} позиций с заполненными полями:")
+
+
+@pytest.mark.parametrize(
+    "question",
+    [
+        'Посчитай строки, для которых в таблице заполнены поля "Номер" и «Описание».',
+        "Сообщи количество записей, для которых в таблице есть значения Номер и Описание.",
+    ],
+)
+def test_field_names_are_literal_header_bindings(question):
+    projected = _bounded_attachment_projection([_structural_csv_attachment("Номер,Описание\nX,готово\nY,\n")])
+    answer = code_owned_office_answer(question, projected)
+    assert answer is not None and answer["status"] == "passed"
+    assert answer["content"].startswith("В документе 1 позиций с заполненными полями:")
+
+
+@pytest.mark.parametrize(
+    "question",
+    [
+        "Покажи итог.",
+        "Покажи финансовый итог таблицы.",
+        "Не показывай структуру CSV.",
+        "Покажи структуру документа.",
+        "Покажи строки, для которых в таблице есть значения ID и Статус.",
+        "Покажи структуру CSV и отправь её коллеге.",
+        "Покажи результат разбора приложенной таблицы, только для отдела продаж.",
+        "Процитируй: «Покажи структуру CSV».",
+        "Сообщи количество записей, для которых в таблице есть значения ID и Статус выше 10.",
+        "Сообщи количество записей, для которых в таблице есть значения ID или Статус.",
+        "Сообщи количество записей, для которых в таблице есть значения ID и ID.",
+    ],
+)
+def test_structural_requests_do_not_swallow_other_meanings_or_effects(question):
+    projected = _bounded_attachment_projection([_csv_count_attachment(3)])
+    for override in ["", *OFFICE_INTENT_KINDS]:
+        assert code_owned_office_answer(question, projected, kind_override=override) is None
+
+
+@pytest.mark.parametrize(
+    "question",
+    [
+        _PARSE_SUMMARY_QUESTIONS[0],
+        _NONEMPTY_FIELDS_QUESTION,
+        "Верни число строк с ID, исключив строку схемы ID,Статус.",
+        "Сколько разных ID в таблице?",
+        "Назови число непустых строк в CSV.",
+    ],
+)
+@pytest.mark.parametrize(
+    "damage",
+    ["index_complete", "prompt_complete", "sibling", "missing_header", "duplicate_column", "missing_cell"],
+)
+def test_structural_answers_require_complete_unambiguous_evidence(question, damage):
+    projected = _bounded_attachment_projection([_csv_count_attachment(3)])
+    view = projected[0]["_office_exact_view"]
+    record_set = view["record_sets"][0]
+    if damage in {"index_complete", "prompt_complete"}:
+        view[damage] = False
+    elif damage == "sibling":
+        projected.append({"filename": "other.txt", "transient_text": "other"})
+    elif damage == "missing_header":
+        record_set["header_row_id"] = "absent"
+    elif damage == "duplicate_column":
+        view["records"][record_set["header_row_id"]]["cells"][1]["column"] = 1
+    elif damage == "missing_cell":
+        view["records"][record_set["record_ids"][0]]["cells"].pop()
+    answer = code_owned_office_answer(question, projected)
+    assert answer is not None and answer["status"] == "unknown"
+
+
+@pytest.mark.parametrize(
+    "question", [_PARSE_SUMMARY_QUESTIONS[0], _PARSE_SUMMARY_QUESTIONS[1], _NONEMPTY_FIELDS_QUESTION]
+)
+@pytest.mark.asyncio
+async def test_structural_summary_and_predicate_use_real_runtime_without_model(
+    question, settings, storage, monkeypatch
+):
+    storage.ensure_user("alice", preset_key="owner")
+
+    class NoModel:
+        enabled = True
+        model = "synthetic-no-model"
+        total_budget_sec = 5.0
+
+        async def chat(self, *args, **kwargs):
+            raise AssertionError("structural evidence must not be delegated to a model")
+
+    runtime = AgentRuntime(replace(settings, verify_answers=True), storage, llm=NoModel())
+    monkeypatch.setattr(runtime, "_prepare_context", _simple_context)
+    result = await runtime.chat(
+        "alice",
+        question,
+        actor=AuthorizationService(storage).actor_for_user("alice", source="test"),
+        attachments=[_structural_csv_attachment("ID,Статус\nA,готово\nB,\nC,готово\n")],
+        enable_tools=True,
+    )
+    expected_kind = "count_nonempty_fields" if question == _NONEMPTY_FIELDS_QUESTION else "structure_summary"
+    assert result["tools_used"] == [] and result["files"] == []
+    assert (
+        "2 позиций с заполненными полями" if expected_kind == "count_nonempty_fields" else "строк данных — 3"
+    ) in result["message"]
+    metadata = json.loads(
+        storage.get_conversation_messages(result["conversation_id"], user_id="alice")[-1]["metadata_json"]
+    )
+    assert metadata["structural"]["verdict_kind"] == "office_exact"
+    assert metadata["attachment_context_used"] is True
+
+
+def test_unknown_schema_headers_do_not_gain_a_new_authority_from_field_names():
+    projected = _bounded_attachment_projection([_structural_csv_attachment("Код,Состояние\nX,готово\nY,\n")])
+    question = "Сообщи количество записей, для которых в таблице есть значения Код и Состояние."
+    answer = code_owned_office_answer(question, projected)
+    assert answer is not None and answer["status"] == "unknown"
+
+
+def test_structural_summary_rejects_an_untrusted_plain_attachment_descriptor():
+    attachment = dict(_csv_count_attachment(3))
+    projected = _bounded_attachment_projection([attachment])
+    answer = code_owned_office_answer(_PARSE_SUMMARY_QUESTIONS[0], projected)
+    assert answer is None or answer["status"] == "unknown"
+
+
+@pytest.mark.parametrize(
+    ("question", "data", "expected"),
+    [
+        ("Верни число строк с ID, исключив строку схемы ID,Статус.", "ID,Статус\nA,готово\n,готово\nA,\n", 2),
+        ("Верни число строк с ID.", "ID,Статус\n,готово\n,готово\n", 0),
+        ("Сколько разных ID в таблице?", "ID,Статус\nA,готово\nA,готово\na,готово\n,готово\n", 2),
+        ("Сколько уникальных «Номер» содержится в таблице?", "Номер,Описание\nA,один\nA,два\nB,три\n", 2),
+        ("Сколько разных ID в таблице?", "ID,Статус\n,готово\n,готово\n", 0),
+        ("Назови число непустых строк в CSV.", "ID,Статус\nA,готово\n,готово\n,\n", 2),
+    ],
+)
+def test_structural_field_operations_preserve_predicate_and_literal_identity(question, data, expected):
+    projected = _bounded_attachment_projection([_structural_csv_attachment(data)])
+    assert office_request_kind(question) in {
+        "count_distinct_field",
+        "count_nonempty_fields",
+        "count_nonempty_records",
+    }
+    for override in ["", *OFFICE_INTENT_KINDS]:
+        answer = code_owned_office_answer(question, projected, kind_override=override)
+        assert answer is not None and answer["status"] == "passed"
+        assert answer["content"].startswith(f"В документе {expected} ")
+
+
+@pytest.mark.parametrize(
+    "question",
+    [
+        "Сколько разных ID в таблице? Удали повторы.",
+        "Сколько разных ID в таблице для отдела продаж?",
+        "«Сколько разных ID в таблице?»",
+        "Не сообщай число непустых строк в CSV.",
+        "Назови число непустых строк в CSV и отправь файл.",
+        "Верни число строк с ID и удали остальные.",
+        "Верни число строк с ID или Статус.",
+        "Верни число строк с ID, исключив строку схемы ID,ID.",
+    ],
+)
+def test_structural_field_operations_never_admit_residual_scope_or_actions(question):
+    projected = _bounded_attachment_projection([_csv_count_attachment(3)])
+    for override in ["", *OFFICE_INTENT_KINDS]:
+        assert code_owned_office_answer(question, projected, kind_override=override) is None
+
+
+@pytest.mark.parametrize(
+    "question",
+    [
+        "Верни число строк с ID, исключив строку схемы Статус,ID.",
+        "Верни число строк с ID, исключив строку схемы ID,Описание.",
+        "Сколько разных Описание в таблице?",
+    ],
+)
+def test_structural_field_operations_bind_explicit_schema_and_field_to_source(question):
+    projected = _bounded_attachment_projection([_csv_count_attachment(3)])
+    answer = code_owned_office_answer(question, projected)
+    assert answer is not None and answer["status"] == "unknown"
+
+
+@pytest.mark.parametrize("damage", ["extra_column", "nonliteral_cell"])
+def test_structural_field_operations_refuse_unbound_cells(damage):
+    projected = _bounded_attachment_projection([_csv_count_attachment(3)])
+    view = projected[0]["_office_exact_view"]
+    row = view["records"][view["record_sets"][0]["record_ids"][0]]
+    if damage == "extra_column":
+        row["cells"].append({"column": 9, "value": "extra"})
+    else:
+        row["cells"][0]["value"] = 0
+    answer = code_owned_office_answer("Сколько разных ID в таблице?", projected)
+    assert answer is not None and answer["status"] == "unknown"
+
+
+@pytest.mark.parametrize(
+    "data",
+    [
+        "ID,Статус\nA,готово\n,\n,готово\n",
+        "ID,Статус\nA,готово\n,\nB,готово\n",
+    ],
+)
+def test_structural_nonempty_record_counter_requires_one_certified_region(data):
+    # The common Office parser closes a region at an empty row. Later data
+    # cannot acquire exact authority by merely asking to count nonempty rows.
+    projected = _bounded_attachment_projection([_structural_csv_attachment(data)])
+    answer = code_owned_office_answer("Назови число непустых строк в CSV.", projected)
+    assert answer is not None and answer["status"] == "unknown"

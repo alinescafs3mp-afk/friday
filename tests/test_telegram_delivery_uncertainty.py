@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import sqlite3
 import time
 from pathlib import Path
@@ -22,6 +23,13 @@ TIMEOUT_CANARY = "RAW-TELEGRAM-READ-TIMEOUT-CANARY"
 LONG_ANSWER = "\n".join(f"Уникальный абзац {index}: " + chr(1072 + index % 20) * 300 for index in range(40))
 
 
+def _progress_payload(payload: dict[str, Any]) -> bool:
+    """These fault scripts target answer chunks, after the immediate status."""
+
+    text = str(payload.get("text") or "")
+    return text.startswith("⏳ ") and "\n\nПрошло:" in text
+
+
 class _Telegram:
     def __init__(
         self,
@@ -32,6 +40,7 @@ class _Telegram:
         self.accept_then_timeout_at = accept_then_timeout_at
         self.connect_before_accept_at = connect_before_accept_at
         self.accepted_payloads: list[dict[str, Any]] = []
+        self.status_payloads: list[dict[str, Any]] = []
         self.send_attempts = 0
         self._timeout_fired = False
         self._connect_fired = False
@@ -41,6 +50,9 @@ class _Telegram:
         if not url.endswith("/sendMessage"):
             return httpx.Response(200, json={"ok": True, "result": {}}, request=request)
         payload = dict(kwargs.get("json") or {})
+        if _progress_payload(payload):
+            self.status_payloads.append(payload)
+            return httpx.Response(200, json={"ok": True, "result": {"message_id": 6900}}, request=request)
         attempt = self.send_attempts
         self.send_attempts += 1
         if self.connect_before_accept_at == attempt and not self._connect_fired:
@@ -72,6 +84,8 @@ class _HardCrashTelegram(_Telegram):
         if not url.endswith("/sendMessage"):
             return httpx.Response(200, json={"ok": True, "result": {}}, request=request)
         payload = dict(kwargs.get("json") or {})
+        if _progress_payload(payload):
+            return await super().post(url, **kwargs)
         self.send_attempts += 1
         if self.after_accept:
             self.accepted_payloads.append(payload)
@@ -83,6 +97,8 @@ class _ConcreteRejectTelegram(_Telegram):
         request = httpx.Request("POST", url)
         if not url.endswith("/sendMessage"):
             return httpx.Response(200, json={"ok": True, "result": {}}, request=request)
+        if _progress_payload(dict(kwargs.get("json") or {})):
+            return await super().post(url, **kwargs)
         self.send_attempts += 1
         return httpx.Response(400, json={"ok": False}, request=request)
 
@@ -97,6 +113,8 @@ class _AcceptedNoticeTransportFailure(_Telegram):
         if not url.endswith("/sendMessage"):
             return httpx.Response(200, json={"ok": True, "result": {}}, request=request)
         payload = dict(kwargs.get("json") or {})
+        if _progress_payload(payload):
+            return await super().post(url, **kwargs)
         self.send_attempts += 1
         self.accepted_payloads.append(payload)
         raise self.error_type("ambiguous post-write transport failure", request=request)
@@ -113,7 +131,25 @@ class _Backend:
             self.chat_calls += 1
             return httpx.Response(
                 200,
-                json={"message": self.answer, "message_id": "msg_delivery_1", "citations": []},
+                json={
+                    "message": self.answer,
+                    "message_id": "msg_delivery_1",
+                    "conversation_id": "conv_delivery_1",
+                    "citations": [],
+                },
+                request=request,
+            )
+        if request.url.path == "/api/me/mixed-deliveries/msg_delivery_1":
+            authorized = (
+                request.url.params.get("answer_sha256") == hashlib.sha256(self.answer.encode()).hexdigest()
+            )
+            return httpx.Response(
+                200,
+                json={
+                    "authorized": authorized,
+                    "mixed_required": False,
+                    "conversation_id": "conv_delivery_1",
+                },
                 request=request,
             )
         return httpx.Response(200, json={}, request=request)

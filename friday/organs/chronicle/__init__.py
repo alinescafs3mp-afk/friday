@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Sequence
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from fastapi import APIRouter, Query, Request
@@ -78,7 +78,9 @@ def build_window(
     вечером в Москве сегодняшний день из окна выпадал.
     """
     now = local_now(settings) if settings is not None else datetime.now().astimezone()
-    since = (now - timedelta(days=max(1, days))).isoformat()
+    # Stored creation timestamps are UTC; subtract calendar days locally before
+    # expressing the cutoff in the same zone (including across DST changes).
+    since = (now - timedelta(days=max(1, days))).astimezone(UTC).isoformat()
     recent = storage.list_recent_knowledge(user_id, since_iso=since, limit=50)
     events = _bounded_visible_timeline_event_rows(
         storage,

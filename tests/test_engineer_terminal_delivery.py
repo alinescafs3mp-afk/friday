@@ -3,7 +3,10 @@ from __future__ import annotations
 import base64
 import hashlib
 import io
+import json
 import threading
+import time
+import uuid
 import zipfile
 from dataclasses import replace
 from pathlib import Path
@@ -11,6 +14,7 @@ from types import SimpleNamespace
 from typing import Any
 
 import pytest
+from fastapi.testclient import TestClient
 from starlette.requests import Request
 
 from friday.api.notifications import _claim_strict_notification, notifications_pending
@@ -47,7 +51,7 @@ from friday.organs.engineer.command.progress import (
 )
 from friday.organs.engineer.command.store import CommandJobStore
 from friday.organs.engineer.command.store_lifecycle import command_store_backup_is_quiescent
-from friday.organs.engineer.command_tools import EngineerCommandService
+from friday.organs.engineer.command_tools import EngineerCommandService, provision_engineer_command_store
 from friday.organs.engineer.publication import ExactGeneratedFileBatch, exact_generated_file_batch
 from friday.organs.engineer.terminal_delivery import (
     TERMINAL_NOTIFICATION_KIND,
@@ -67,6 +71,45 @@ from friday.organs.engineer.terminal_delivery import (
     unknown_notification_projection,
 )
 from friday.permissions import LEGACY_OWNER_USER_ID, AuthorizationService
+from friday.security import sign_bridge_request
+from friday.server import create_app
+
+
+def _engineer_http_settings(settings: Any):
+    key = Path(settings.engineer_command_key_file)
+    key.parent.mkdir(parents=True, exist_ok=True)
+    key.write_bytes(b"K" * 32)
+    key.chmod(0o600)
+    Path(settings.engineer_command_store_dir).mkdir(parents=True, exist_ok=True)
+    enabled = replace(settings, engineer_mode_enabled=True, engineer_command_enabled=True)
+    provision_engineer_command_store(enabled)
+    return enabled
+
+
+def _bridge(client: TestClient, settings: Any, method: str, path: str, body: bytes = b""):
+    timestamp = int(time.time())
+    nonce = uuid.uuid4().hex
+    signer = "5001"
+    headers = {
+        "X-Friday-Timestamp": str(timestamp),
+        "X-Friday-User": signer,
+        "X-Friday-Chat": signer,
+        "X-Friday-Nonce": nonce,
+        "X-Friday-Signature": sign_bridge_request(
+            settings.telegram_bridge_secret,
+            timestamp=timestamp,
+            method=method,
+            path=path,
+            external_user_id=signer,
+            chat_id=signer,
+            nonce=nonce,
+            body=body,
+        ),
+    }
+    if method == "GET":
+        return client.get(path, headers=headers)
+    headers["Content-Type"] = "application/json"
+    return client.post(path, content=body, headers=headers)
 
 
 def _main_scope(storage, *, chat_id: str = "5001") -> tuple[str, str]:
@@ -461,76 +504,137 @@ def _worker_service(
     return service
 
 
-@pytest.mark.asyncio
-async def test_terminal_text_pending_does_not_require_file_read(settings, storage) -> None:
-    conversation_id, source_message_id = _main_scope(storage)
-    receipt = _receipt(b"", generated=False, stdout=b"scan complete\n")
-    staged = stage_terminal_text(
-        storage,
-        actor_id=LEGACY_OWNER_USER_ID,
-        tenant_id=LEGACY_OWNER_USER_ID,
-        conversation_id=conversation_id,
-        source_message_id=source_message_id,
-        delivery_chat_id="5001",
-        receipt=receipt,
+def test_terminal_text_pending_does_not_require_file_read(settings) -> None:
+    enabled = _engineer_http_settings(settings)
+    job_id = "3" * 32
+    expected_body = (
+        f"Engineer-задача `{job_id}` завершена за 1 с. exit code: 0.\n\n"
+        "stdout:\n\n"
+        "```text\nscan complete\n```"
     )
-    assert (
-        terminal_notification_status(
+    with TestClient(create_app(enabled)) as client:
+        storage = client.app.state.storage
+        conversation_id, source_message_id = _main_scope(storage)
+        receipt = _receipt(b"", generated=False, stdout=b"scan complete\n")
+        staged = stage_terminal_text(
             storage,
-            staged.notification_id,
-            staged.dedup_key,
-            staged.envelope_sha256,
+            actor_id=LEGACY_OWNER_USER_ID,
+            tenant_id=LEGACY_OWNER_USER_ID,
+            conversation_id=conversation_id,
+            source_message_id=source_message_id,
+            delivery_chat_id="5001",
+            receipt=receipt,
         )
-        == "pending"
-    )
-    authorization = AuthorizationService(storage)
-    for capability in EngineerOrgan().capabilities():
-        authorization.register_capability(capability)
-    authorization.deny_permission(LEGACY_OWNER_USER_ID, "files.read")
-    app = SimpleNamespace(
-        state=SimpleNamespace(
-            storage=storage,
-            settings=replace(settings, engineer_mode_enabled=True, engineer_command_enabled=True),
-            auth_service=authorization,
+        assert (
+            terminal_notification_status(
+                storage,
+                staged.notification_id,
+                staged.dedup_key,
+                staged.envelope_sha256,
+            )
+            == "pending"
         )
-    )
-    request = Request({"type": "http", "method": "GET", "path": "/", "app": app})
-    request.state.actor = SimpleNamespace(source="telegram-bridge")
-
-    legacy = await notifications_pending(request, limit=20)
-    assert "status_update" not in legacy["items"][0]
-    pending = await notifications_pending(request, limit=20, status_messages=True)
-
-    assert pending["items"] == [
-        {
+        client.app.state.auth_service.deny_permission(LEGACY_OWNER_USER_ID, "files.read")
+        seeded_dedup = f"engineer-terminal:text:{job_id}:{'7' * 64}"
+        pointer = {
             "id": staged.notification_id,
             "chat_id": "5001",
             "kind": TERMINAL_TEXT_NOTIFICATION_KIND,
-            "dedup_key": staged.dedup_key,
+            "dedup_key": seeded_dedup,
         }
-    ]
-    claimed = _claim_strict_notification(
-        app.state,
-        staged.notification_id,
-        pending["items"][0],
-        status_messages=True,
-    )
-    assert (
-        claimed["body"]
-        == terminal_text_notification_projection(
-            storage,
-            storage.list_pending_notifications()[0],
-            tenant_id=LEGACY_OWNER_USER_ID,
-            actor_id=LEGACY_OWNER_USER_ID,
-        )["body"]
-    )
-    assert claimed["status_update"] == {
-        "schema": "friday.telegram-status.v1",
-        "operation_id": f"engineer:{'3' * 32}",
-        "revision": (1 << 63) - 1,
-        "terminal": True,
-        "stage": "completed",
-    }
+        assert staged.dedup_key == seeded_dedup
+        assert pointer["id"] == staged.notification_id
+
+        legacy = _bridge(client, enabled, "GET", "/api/notifications/pending?limit=20")
+        assert legacy.status_code == 200, legacy.text
+        legacy_body = legacy.json()
+        assert legacy_body["count"] == 1
+        assert legacy_body["items"] == [pointer]
+        assert "status_update" not in legacy_body["items"][0]
+        pending = _bridge(
+            client,
+            enabled,
+            "GET",
+            "/api/notifications/pending?limit=20&status_messages=true",
+        )
+        assert pending.status_code == 200, pending.text
+        pending_body = pending.json()
+        assert pending_body["count"] == 1
+        assert pending_body["items"] == [pointer]
+
+        def _claim_bytes(body: dict) -> bytes:
+            return json.dumps(body).encode()
+
+        wrong = _bridge(
+            client,
+            enabled,
+            "POST",
+            f"/api/notifications/{staged.notification_id}/claim",
+            _claim_bytes({**pointer, "dedup_key": "wrong-dedup", "status_messages": True}),
+        )
+        assert wrong.status_code == 404
+        assert wrong.json()["detail"] == "Уведомление не найдено"
+        malformed = _bridge(
+            client,
+            enabled,
+            "POST",
+            f"/api/notifications/{staged.notification_id}/claim",
+            _claim_bytes({**pointer}),
+        )
+        assert malformed.status_code == 404
+        assert malformed.json()["detail"] == "Уведомление не найдено"
+        still = storage.execute(
+            "SELECT status FROM outbound_notifications WHERE id=?",
+            (staged.notification_id,),
+        ).fetchone()
+        assert still is not None and still["status"] == "pending"
+
+        claimed = _bridge(
+            client,
+            enabled,
+            "POST",
+            f"/api/notifications/{staged.notification_id}/claim",
+            _claim_bytes({**pointer, "status_messages": True}),
+        )
+        assert claimed.status_code == 200, claimed.text
+        envelope = claimed.json()
+        assert set(envelope) == {"item"}
+        item = envelope["item"]
+        assert set(item) == {
+            "id",
+            "chat_id",
+            "kind",
+            "dedup_key",
+            "body",
+            "status_update",
+        }
+        assert {key: item[key] for key in ("id", "chat_id", "kind", "dedup_key")} == pointer
+        assert item["body"] == expected_body
+        assert item["status_update"] == {
+            "schema": "friday.telegram-status.v1",
+            "operation_id": f"engineer:{job_id}",
+            "revision": (1 << 63) - 1,
+            "terminal": True,
+            "stage": "completed",
+        }
+        after_claim = storage.execute(
+            "SELECT status FROM outbound_notifications WHERE id=?",
+            (staged.notification_id,),
+        ).fetchone()
+        assert after_claim is not None and after_claim["status"] == "pending"
+
+        ack_payload = json.dumps({"sent": [staged.notification_id]}).encode()
+        ack = _bridge(client, enabled, "POST", "/api/notifications/ack", ack_payload)
+        assert ack.status_code == 200, ack.text
+        assert ack.json()["state_ids"]["sent"] == [staged.notification_id]
+        sent_row = storage.execute(
+            "SELECT status FROM outbound_notifications WHERE id=?",
+            (staged.notification_id,),
+        ).fetchone()
+        assert sent_row is not None and sent_row["status"] == "sent"
+        after = _bridge(client, enabled, "GET", "/api/notifications/pending?limit=20")
+        assert after.status_code == 200, after.text
+        assert staged.notification_id not in {entry["id"] for entry in after.json()["items"]}
 
 
 @pytest.mark.asyncio

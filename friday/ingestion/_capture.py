@@ -146,7 +146,7 @@ class CaptureMixin(PipelineShared):
 
         content_hash = hashlib.sha256(content.encode("utf-8")).hexdigest()
         if authenticated_context is None:
-            self.storage.ensure_user(user_id, source=source)
+            self.storage.ensure_user(user_id)
         existing_raw = (
             self.storage.find_raw_by_source_ref(user_id, source, source_ref) if source_ref else None
         )

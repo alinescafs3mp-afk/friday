@@ -25,6 +25,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import json
 
 import pytest
@@ -51,6 +52,71 @@ def _candidate(storage, user_id: str) -> str:
             evidence_json={"reason": "похожие имена"},
         )
     ).id
+
+
+def _approval_sql(storage, approval_id: str) -> dict:
+    row = storage.execute("SELECT * FROM action_approvals WHERE id=?", (approval_id,)).fetchone()
+    assert row is not None
+    return dict(row)
+
+
+def _issue_token(storage, user_id: str, *, preset_key: str = "user") -> tuple[str, dict[str, str]]:
+    import hashlib
+    import secrets
+
+    storage.ensure_user(user_id, preset_key=preset_key)
+    raw = secrets.token_urlsafe(32)
+    storage.create_api_token(
+        user_id, hashlib.sha256(raw.encode()).hexdigest(), label="lab-approval", ttl_seconds=3600
+    )
+    return raw, {"Authorization": f"Bearer {raw}"}
+
+
+def _listed_item(item: dict) -> dict:
+    return {
+        "id": item["id"],
+        "status": item["status"],
+        "tool": item["tool"],
+        "summary": item["summary"],
+        "error": item.get("error") or "",
+        "requested_by": item.get("requested_by") or "",
+        "decided_by": item.get("decided_by") or "",
+    }
+
+
+def _audit_ordered(storage) -> list[dict]:
+    rows = storage.execute(
+        "SELECT id, user_id, action, target_type, target_id, before_json, after_json, "
+        "ip_address, request_id, created_at FROM audit_log ORDER BY rowid ASC"
+    ).fetchall()
+    return [dict(row) for row in rows]
+
+
+def _audit_known(row: dict) -> dict:
+    return {
+        "action": row["action"],
+        "user_id": row["user_id"],
+        "target_type": row["target_type"],
+        "target_id": row["target_id"],
+    }
+
+
+def _assert_audit_delta(before: list[dict], after: list[dict], expected: list[dict]) -> list[dict]:
+    assert after[: len(before)] == before
+    delta = after[len(before) :]
+    observed = [_audit_known(row) for row in delta]
+    assert observed == expected, observed
+    return delta
+
+
+def _assert_hidden(response, *canaries: str) -> None:
+    blob = response.text
+    with contextlib.suppress(Exception):
+        blob = blob + json.dumps(response.json(), ensure_ascii=False)
+    for canary in canaries:
+        if not canary:
+            continue
+        assert canary not in blob, f"refusal leaked {canary!r} in {blob[:500]}"
 
 
 def _post_state(storage, user_id: str, approval_id: str) -> dict:
@@ -190,17 +256,93 @@ def test_a_stranger_sees_nothing_on_any_surface(api) -> None:
     """Чужая заявка не видна ни маршрутом, ни списком — на всех путях одинаково."""
     app, client, headers, user_id = api
     storage = app.state.storage
-    storage.ensure_user("stranger")
-    approval = storage.create_action_approval(
+    stranger_raw, _stranger_headers = _issue_token(storage, "stranger")
+    owner_token = headers["Authorization"].split(" ", 1)[1]
+    own_candidate = _candidate(storage, user_id)
+    foreign_candidate = _candidate(storage, user_id)
+    own = storage.create_action_approval(
         user_id,
         tool="entity_merge_decide",
-        payload={"candidate_id": _candidate(storage, user_id), "decision": "accept"},
-        summary="Слить пару",
+        payload={"candidate_id": own_candidate, "decision": "accept"},
+        summary="OWN-MERGE-CANARY",
+        requested_by=user_id,
+    )
+    foreign = storage.create_action_approval(
+        user_id,
+        tool="entity_merge_decide",
+        payload={"candidate_id": foreign_candidate, "decision": "accept"},
+        summary="FOREIGN-MERGE-CANARY",
         requested_by="stranger",
     )
+    selected = {
+        "own": _approval_sql(storage, own["id"]),
+        "foreign": _approval_sql(storage, foreign["id"]),
+    }
+    audits_before_reads = _audit_ordered(storage)
 
-    listed = client.get("/api/me/approvals", headers=headers).json()
-    ids = [item["id"] for item in listed.get("items") or []]
+    listed = client.get("/api/me/approvals", headers=headers)
+    assert listed.status_code == 200, listed.text
+    listed_body = listed.json()
+    assert listed_body["count"] == 1
+    assert listed_body["total"] == 1
+    assert listed_body["status"] == "pending"
+    assert [_listed_item(item) for item in listed_body["items"]] == [
+        {
+            "id": own["id"],
+            "status": "pending",
+            "tool": "entity_merge_decide",
+            "summary": "OWN-MERGE-CANARY",
+            "error": "",
+            "requested_by": user_id,
+            "decided_by": "",
+        }
+    ]
+    dump = json.dumps(listed_body, ensure_ascii=False)
+    assert foreign["id"] not in dump, "чужая заявка попала в личный список"
+    assert dump.count("FOREIGN-MERGE-CANARY") == 0
+    assert dump.count("Слить пару") == 0
+    assert foreign_candidate not in dump
+    assert stranger_raw not in dump
+    assert owner_token not in dump
 
-    assert approval["id"] not in ids, "чужая заявка попала в личный список"
-    assert json.dumps(listed, ensure_ascii=False).count("Слить пару") == 0
+    assert _approval_sql(storage, own["id"]) == selected["own"]
+    assert _approval_sql(storage, foreign["id"]) == selected["foreign"]
+
+    canaries = (
+        "OWN-MERGE-CANARY",
+        "FOREIGN-MERGE-CANARY",
+        own["id"],
+        foreign["id"],
+        own_candidate,
+        foreign_candidate,
+        stranger_raw,
+        owner_token,
+    )
+    assert _audit_ordered(storage) == audits_before_reads
+    anon = client.get("/api/me/approvals")
+    assert anon.status_code == 401
+    _assert_hidden(anon, *canaries)
+    after_anon = _audit_ordered(storage)
+    _assert_audit_delta(
+        audits_before_reads,
+        after_anon,
+        [
+            {
+                "action": "auth.failed",
+                "user_id": "anonymous",
+                "target_type": "auth",
+                "target_id": "invalid_credentials",
+            }
+        ],
+    )
+    assert _approval_sql(storage, own["id"]) == selected["own"]
+    assert _approval_sql(storage, foreign["id"]) == selected["foreign"]
+
+    storage.set_permission_override(user_id, "chat.use", "deny")
+    denied = client.get("/api/me/approvals", headers=headers)
+    assert denied.status_code == 403
+    _assert_hidden(denied, *canaries)
+    assert _approval_sql(storage, own["id"]) == selected["own"]
+    assert _approval_sql(storage, foreign["id"]) == selected["foreign"]
+    assert _audit_ordered(storage) == after_anon
+    storage.set_permission_override(user_id, "chat.use", None)

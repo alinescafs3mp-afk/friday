@@ -1317,7 +1317,7 @@ def test_comparison_epoch_never_replaces_the_normal_candidate_wheel(
         False,
     )
     assert quality_gate._tier_result_identity("exact-release", True) == (
-        "friday.quality-gate-measurement.v1",
+        "friday.quality-gate-measurement.v2",
         "measured",
         False,
     )

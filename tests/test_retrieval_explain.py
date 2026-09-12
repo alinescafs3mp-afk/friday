@@ -118,6 +118,7 @@ def test_retrieval_explain_endpoint(settings):
     app = create_app(settings)
     with TestClient(app) as client:
         owner = {"Authorization": f"Bearer {settings.api_token}"}
+        seeded = []
         for content in (
             "Сервер Atlas работает в дата-центре Москвы.",
             "Рецепт борща со свёклой и капустой.",
@@ -126,6 +127,9 @@ def test_retrieval_explain_endpoint(settings):
                 "/api/ingest", json={"content": content, "force_knowledge": True}, headers=owner
             )
             assert resp.status_code == 200, resp.text
+            key = resp.json()["knowledge_object"]["id"]
+            assert app.state.storage.get_knowledge_object(key, LEGACY_OWNER_USER_ID)["content"] == content
+            seeded.append(key)
 
         response = client.get(
             "/api/admin/retrieval/explain",
@@ -134,8 +138,20 @@ def test_retrieval_explain_endpoint(settings):
         )
         assert response.status_code == 200, response.text
         body = response.json()
-        assert body["query"] and body["returned"] >= 1
+        assert (body["query"], body["user_id"], body["limit"], body["returned"]) == (
+            "Сервер Москва",
+            LEGACY_OWNER_USER_ID,
+            1,
+            1,
+        ), "explain_http_request_contract"
         assert body["candidates"] >= body["returned"]
         trace = body["trace"]
-        assert any(row["status"] == "returned" for row in trace)
+        assert [row["id"] for row in trace if row["status"] == "returned"] == [seeded[0]], (
+            "explain_http_target"
+        )
+        discarded = [row for row in trace if row["status"] == "discarded"]
+        assert any(
+            row["id"] == seeded[1] and row["reason"] == "insufficient_evidence" for row in discarded
+        ), "explain_http_discarded"
+        assert body["candidates"] == len(trace) and body["discarded"] == len(discarded)
         assert trace[0]["components"]  # signal breakdown available to the admin

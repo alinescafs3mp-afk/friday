@@ -335,11 +335,16 @@ async def reject_resolution(candidate_id: str, request: Request) -> dict[str, An
     body = await _request_json(request)
     user_id = str(body.get("user_id") or "")
     _protect_owner_target(request, user_id)
-    ok = _services(request).kg.resolver.reject_resolution(
-        candidate_id,
-        user_id,
-        resolved_by=request.state.actor.own_id,
-    )
+    try:
+        ok = _services(request).kg.resolver.reject_resolution(
+            candidate_id,
+            user_id,
+            resolved_by=request.state.actor.own_id,
+        )
+    except ValueError as exc:
+        if exc.args != ("Resolution candidate not found",):
+            raise
+        ok = False
     if not ok:
         raise HTTPException(status_code=404, detail="Кандидат на объединение не найден")
     _audit(request, "admin.entity.merge_rejected", "resolution", candidate_id)

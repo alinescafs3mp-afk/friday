@@ -17,6 +17,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import time
 from typing import Any
 
@@ -37,15 +38,22 @@ class _Telegram:
     def __init__(self, *, break_at: int | None = None) -> None:
         self.break_at = break_at
         self.chunks: list[str] = []
+        self.status_chunks: list[str] = []
 
     async def post(self, url: str, **kwargs: Any) -> httpx.Response:
         request = httpx.Request("POST", url)
         if not url.endswith("/sendMessage"):
             return httpx.Response(200, json={"ok": True, "result": {"message_id": 1}}, request=request)
+        text = str((kwargs.get("json") or {}).get("text", ""))
+        # The fault belongs to answer delivery, after the separate status message.
+        if text.startswith("⏳ ") and "\n\nПрошло:" in text:
+            self.status_chunks.append(text)
+            return httpx.Response(200, json={"ok": True, "result": {"message_id": 9000}}, request=request)
         if self.break_at is not None and len(self.chunks) == self.break_at:
             raise httpx.ConnectError("network is gone", request=request)
-        self.chunks.append(str((kwargs.get("json") or {}).get("text", "")))
-        return httpx.Response(200, json={"ok": True, "result": {"message_id": 1}}, request=request)
+        self.chunks.append(text)
+        message_id = (1000 if self.break_at is not None else 2000) + len(self.chunks)
+        return httpx.Response(200, json={"ok": True, "result": {"message_id": message_id}}, request=request)
 
 
 class _Backend:
@@ -53,6 +61,7 @@ class _Backend:
 
     def __init__(self) -> None:
         self.chat_calls = 0
+        self.authority_checks = 0
 
     async def request(self, method: str, url: str, **kwargs: Any) -> httpx.Response:
         request = httpx.Request(method, url)
@@ -60,7 +69,24 @@ class _Backend:
             self.chat_calls += 1
             return httpx.Response(
                 200,
-                json={"message": LONG_ANSWER, "message_id": "msg_1", "citations": []},
+                json={
+                    "message": LONG_ANSWER,
+                    "message_id": "msg_1",
+                    "conversation_id": "conv_resume",
+                    "citations": [],
+                },
+                request=request,
+            )
+        if method == "GET" and request.url.path == "/api/me/mixed-deliveries/msg_1":
+            self.authority_checks += 1
+            return httpx.Response(
+                200,
+                json={
+                    "authorized": request.url.params.get("answer_sha256")
+                    == hashlib.sha256(LONG_ANSWER.encode()).hexdigest(),
+                    "mixed_required": False,
+                    "conversation_id": "conv_resume",
+                },
                 request=request,
             )
         return httpx.Response(200, json={}, request=request)
@@ -135,6 +161,8 @@ async def test_a_broken_connection_resumes_where_it_stopped(tmp_path):
     repeated = [chunk for chunk in delivered_second if chunk in delivered_first]
     assert not repeated, f"человек получил заново то, что уже читал: {len(repeated)} кусков"
     assert backend.chat_calls == 1, "повтор сходил в ядро второй раз вместо кеша"
+    assert backend.authority_checks == 1, "повтор не проверил актуальное право доставки"
+    assert broken.status_chunks, "перед ответом не было отдельного статуса"
 
 
 @pytest.mark.asyncio
@@ -157,6 +185,9 @@ async def test_the_whole_answer_still_arrives(tmp_path):
         "склеенные попытки не дают ровно один полный ответ"
     )
     assert not left, "доставленное обновление осталось в очереди"
+    assert backend.chat_calls == 1
+    assert backend.authority_checks == 1
+    assert broken.status_chunks
 
 
 def _rendered(chunks: list[str]) -> list[str]:
@@ -187,6 +218,8 @@ async def test_the_progress_survives_a_restart_of_the_bridge(tmp_path):
     assert not [chunk for chunk in healed.chunks if chunk in broken.chunks], (
         "после перезапуска моста человек получил начало ответа заново"
     )
+    assert backend.chat_calls == 1
+    assert backend.authority_checks == 1
 
 
 @pytest.mark.asyncio

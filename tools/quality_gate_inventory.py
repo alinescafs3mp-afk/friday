@@ -2,6 +2,7 @@
 # fmt: off
 import argparse, hashlib, json, os, re, subprocess, tempfile, unicodedata
 from dataclasses import dataclass
+from collections.abc import Callable
 from pathlib import Path, PurePosixPath
 TIERS = ("change", "exact-release", "nightly")
 KINDS = ("unit", "browser", "schema-restore", "host-tool", "candidate-artifact", "external-observation")
@@ -39,8 +40,8 @@ class GateInventory:
         for name, exact in groups.items(): _require(len(exact) == rules[name].node_count and nodeids_sha256(tuple(exact)) == rules[name].nodeids_sha256, f"parameter set differs from inventory: {name}")
         first = {name: min(exact) for name, exact in groups.items()}
         return tuple(ClassifiedNode(nodeid, rules[function_id(nodeid)].module_path, rules[function_id(nodeid)].invariant_id, rules[function_id(nodeid)].tier, rules[function_id(nodeid)].execution_kind, rules[function_id(nodeid)].max_runtime_s, rules[function_id(nodeid)].scratch_mb if nodeid == first[function_id(nodeid)] else 0) for nodeid in nodeids)
-    def validate_candidate_modules(self, root: str | os.PathLike[str], sha: str) -> tuple[str, ...]:
-        tracked = candidate_test_modules(root, sha); _require(self.modules == tracked, "inventory differs from candidate test modules")
+    def validate_candidate_modules(self, root: str | os.PathLike[str], sha: str, *, git_output: Callable[..., bytes] | None = None) -> tuple[str, ...]:
+        tracked = candidate_test_modules(root, sha, git_output=git_output); _require(self.modules == tracked, "inventory differs from candidate test modules")
         return tracked
 def _module(value: str) -> str:
     _require(_MODULE(value) is not None and str(PurePosixPath(value)) == value, f"invalid test module: {value!r}"); return value
@@ -51,6 +52,7 @@ def function_id(nodeid: str) -> str:
         raise InventoryError("nodeid is not UTF-8 text") from exc
     match = _FUNCTION(nodeid)
     _require(match is not None and len(encoded) <= MAX_NODEID_BYTES and not any(unicodedata.category(character) == "Cc" for character in nodeid), f"invalid collected nodeid: {nodeid!r}")
+    assert match is not None
     return match.group(1)
 def nodeids_sha256(nodeids: tuple[str, ...]) -> str:
     _require(type(nodeids) is tuple and nodeids and len(nodeids) == len(set(nodeids)), "parameter set must be a nonempty unique tuple")
@@ -60,6 +62,7 @@ def nodeids_sha256(nodeids: tuple[str, ...]) -> str:
     return digest.hexdigest()
 def validate_inventory(value: object) -> GateInventory:
     _require(isinstance(value, GateInventory) and type(value.rules) is tuple and value.rules, "unsupported inventory shape")
+    assert isinstance(value, GateInventory)
     for rule in value.rules:
         _require(isinstance(rule, FunctionRule) and function_id(rule.function_id) == rule.function_id and rule.invariant_id in INVARIANT_CATALOG and rule.tier in TIERS and rule.execution_kind in KINDS and type(rule.max_runtime_s) is int and 1 <= rule.max_runtime_s <= 86_400 and type(rule.scratch_mb) is int and 0 <= rule.scratch_mb <= 65_536 and type(rule.node_count) is int and 1 <= rule.node_count <= 100_000 and _DIGEST(rule.nodeids_sha256) is not None, "invalid function rule")
         _require(not ((rule.execution_kind == "external-observation" and rule.tier != "nightly") or (rule.execution_kind == "candidate-artifact" and rule.tier != "exact-release") or (rule.execution_kind == "host-tool" and rule.tier == "change") or (rule.execution_kind == "browser" and rule.tier == "nightly")), "tier cannot provision execution kind")
@@ -155,11 +158,12 @@ def _git(root: Path, *args: str) -> bytes:
     result = subprocess.run(("/usr/bin/git", "-c", f"safe.directory={root}", "-C", str(root), *args), check=False, capture_output=True, env=env, timeout=30)
     _require(not result.returncode and len(result.stdout) <= 16 << 20, "candidate Git query failed")
     return result.stdout
-def candidate_test_modules(repository: str | os.PathLike[str], sha: str) -> tuple[str, ...]:
+def candidate_test_modules(repository: str | os.PathLike[str], sha: str, *, git_output: Callable[..., bytes] | None = None) -> tuple[str, ...]:
     _require(isinstance(sha, str) and _SHA(sha) is not None, "candidate SHA is not full and lowercase")
     root = Path(repository).resolve(strict=True)
-    _require(_git(root, "cat-file", "-t", sha) == b"commit\n", "candidate is not a commit")
-    raw = _git(root, "ls-tree", "-r", "-z", "--full-tree", sha, "--", "tests")
+    run_git = _git if git_output is None else git_output
+    _require(run_git(root, "cat-file", "-t", sha) == b"commit\n", "candidate is not a commit")
+    raw = run_git(root, "ls-tree", "-r", "-z", "--full-tree", sha, "--", "tests")
     _require(not raw or raw.endswith(b"\0"), "malformed candidate tree")
     paths = []
     for row in raw.removesuffix(b"\0").split(b"\0") if raw else ():

@@ -5,7 +5,7 @@ API, its contract is not a class other code calls or a set of HTTP paths — alm
 everything is private and driven by whatever Telegram sends. So the class surface alone
 is a weak harness, and two dispatch tables carry the real risk:
 
-* **Commands.** ``_process_update`` is a 288-line if-chain over ``command``. A branch
+* **Commands.** ``_process_update_body`` dispatches the commands awaited by the update wrapper. A branch
   that gets lost in a move takes a user-facing command with it, and nothing fails — the
   bot simply stops answering ``/tags``.
 * **Callback buttons.** Every inline button ships a ``callback_data`` of
@@ -57,10 +57,32 @@ def _find_method(name: str) -> ast.FunctionDef | ast.AsyncFunctionDef:
     return found[0]
 
 
+def _dispatched_command_body() -> ast.FunctionDef | ast.AsyncFunctionDef:
+    wrapper = _find_method("_process_update")
+    calls = [
+        node.value
+        for node in ast.walk(wrapper)
+        if isinstance(node, ast.Await)
+        and isinstance(node.value, ast.Call)
+        and isinstance(node.value.func, ast.Attribute)
+        and isinstance(node.value.func.value, ast.Name)
+        and node.value.func.value.id == "self"
+        and node.value.func.attr == "_process_update_body"
+    ]
+    assert len(calls) == 1, "the update wrapper must await its dispatcher exactly once"
+    call = calls[0]
+    assert [ast.unparse(arg) for arg in call.args] == ["telegram", "backend", "update"]
+    assert {kw.arg: ast.unparse(kw.value) for kw in call.keywords} == {
+        "cached_response": "cached_response",
+        "progress_states": "progress_states",
+    }
+    return _find_method("_process_update_body")
+
+
 def _dispatched_commands() -> set[str]:
     """Every ``/command`` the update handler actually branches on."""
     commands: set[str] = set()
-    for node in ast.walk(_find_method("_process_update")):
+    for node in ast.walk(_dispatched_command_body()):
         if isinstance(node, ast.Compare) and isinstance(node.left, ast.Name) and node.left.id == "command":
             for comparator in node.comparators:
                 if isinstance(comparator, ast.Constant) and isinstance(comparator.value, str):
@@ -74,17 +96,55 @@ def _dispatched_commands() -> set[str]:
     return {c for c in commands if c.startswith("/")}
 
 
+def _callback_lexical_scope(node: ast.AST, parents: dict[ast.AST, ast.AST]) -> ast.AST:
+    scopes = (
+        ast.Module,
+        ast.FunctionDef,
+        ast.AsyncFunctionDef,
+        ast.Lambda,
+        ast.ClassDef,
+        ast.ListComp,
+        ast.SetComp,
+        ast.DictComp,
+        ast.GeneratorExp,
+    )
+    while not isinstance(node, scopes):
+        node = parents[node]
+    return node
+
+
 def _callback_namespaces() -> tuple[set[str], set[str]]:
     """(namespaces, actions) shipped in inline-button ``callback_data``."""
     namespaces: set[str] = set()
     actions: set[str] = set()
     for path in sorted(PACKAGE.glob("*.py")):
-        for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        parents = {child: parent for parent in ast.walk(tree) for child in ast.iter_child_nodes(parent)}
+        for node in ast.walk(tree):
             if not isinstance(node, ast.Dict):
                 continue
             for key, value in zip(node.keys, node.values, strict=True):
                 if not (isinstance(key, ast.Constant) and key.value == "callback_data"):
                     continue
+                # A length-checked payload can be named before it is sent.
+                # Follow only its unique local assignment; unused constants,
+                # other methods and reassigned/dynamic values prove nothing.
+                if isinstance(value, ast.Name):
+                    scope = _callback_lexical_scope(node, parents)
+                    stores = [
+                        item
+                        for item in ast.walk(scope)
+                        if isinstance(item, ast.Name)
+                        and item.id == value.id
+                        and isinstance(item.ctx, ast.Store)
+                        and _callback_lexical_scope(item, parents) is scope
+                    ]
+                    if len(stores) != 1:
+                        continue
+                    assignment = parents[stores[0]]
+                    if not isinstance(assignment, ast.Assign) or assignment.lineno >= node.lineno:
+                        continue
+                    value = assignment.value
                 head = value.values[0] if isinstance(value, ast.JoinedStr) else value
                 if not (isinstance(head, ast.Constant) and isinstance(head.value, str)):
                     continue
@@ -323,7 +383,8 @@ EXPECTED_COMMANDS = {
 # раздачу (`_dispatch_ready_updates`), один ход (`_run_update`) и ожидание
 # полёта (`_await_inflight_updates`). Число здесь стоит затем, чтобы поверхность
 # моста нельзя было расширить молча.
-EXPECTED_BRIDGE_COUNT = 86
+# F.6 owns draining progress tasks in the wrapper; dispatch remains in its body.
+EXPECTED_BRIDGE_COUNT = 87
 EXPECTED_BRIDGE: dict[str, str] = {
     "_album_caption": "(self, message: 'dict[str, Any]') -> 'str'",
     "_archive_document_descriptor": "(message: 'dict[str, Any]') -> 'dict[str, Any] | None'",
@@ -374,6 +435,7 @@ EXPECTED_BRIDGE: dict[str, str] = {
     ),
     "_offer_access_to_owner": "(self, telegram: 'httpx.AsyncClient', actor: 'dict[str, Any]', newcomer: 'dict[str, Any]') -> 'None'",
     "_process_update": "(self, telegram: 'httpx.AsyncClient', backend: 'httpx.AsyncClient', update: 'dict[str, Any]', *, cached_response: 'dict[str, Any] | None') -> 'None'",
+    "_process_update_body": "(self, telegram: 'httpx.AsyncClient', backend: 'httpx.AsyncClient', update: 'dict[str, Any]', *, cached_response: 'dict[str, Any] | None', progress_states: 'list[_ChatProgressState]') -> 'None'",
     "_retry_after_sec": "(response: 'httpx.Response') -> 'float'",
     "_reply_quote": "(message: 'dict[str, Any]') -> 'str'",
     "_run_update": "(self, telegram: 'httpx.AsyncClient', backend: 'httpx.AsyncClient', row: 'dict[str, Any]') -> 'None'",
@@ -749,7 +811,7 @@ def test_backend_url_rejects_credentials_smuggling_and_non_origin_forms(tmp_path
 
 
 def _parse_command(text: str) -> tuple[str, str]:
-    """The exact expressions `_process_update` uses to split an incoming message."""
+    """The exact expressions `_process_update_body` uses to split an incoming message."""
     text = text.strip()
     parts = text.split(maxsplit=1)
     command = parts[0].split("@", 1)[0].casefold() if text.startswith("/") else ""
@@ -783,24 +845,9 @@ def test_a_multiline_command_keeps_its_whole_argument() -> None:
     # The helper above is a copy of the production expression, so pin the
     # production side structurally too: a single space-delimited split is exactly
     # the bug, and a copy-based test would never notice it coming back.
-    import ast
-    from pathlib import Path
-
-    import friday.telegram_bridge._commands as commands_module
-
-    # Over the AST, not the text: the explanatory comment in that module quotes the
-    # old expression, and a substring search would match the very explanation.
-    tree = ast.parse(Path(commands_module.__file__).read_text(encoding="utf-8"))
-    # Scoped to the parsing function rather than the whole module: sibling
-    # helpers legitimately split too (`_read_command_layout` reads the command
-    # word to recognise a wrong keyboard layout), and a module-wide count would
-    # turn every future helper into a false alarm while saying nothing about the
-    # defect it exists to catch.
-    parser = next(
-        node
-        for node in ast.walk(tree)
-        if isinstance(node, ast.AsyncFunctionDef) and node.name == "_process_update"
-    )
+    # Follow the actually awaited dispatcher, so a detached copy cannot satisfy
+    # the split contract while the wrapper silently stops handling commands.
+    parser = _dispatched_command_body()
     calls = [
         node.func.attr
         for node in ast.walk(parser)
@@ -987,3 +1034,55 @@ def test_a_group_only_allowlist_says_so_instead_of_going_quiet(tmp_path, caplog)
 
     complaints = [record for record in caplog.records if "cannot sign" in record.message]
     assert len(complaints) == 1, "the warning must fire, and must not repeat every tick"
+
+
+@pytest.mark.parametrize(
+    ("source", "expected"),
+    [
+        pytest.param('button = {"callback_data": "remind:dismiss:one"}', {"remind"}, id="literal"),
+        pytest.param('button = {"callback_data": f"remind:dismiss:{target}"}', {"remind"}, id="inline"),
+        pytest.param(
+            'def send():\n    payload = f"remind:dismiss:{target}"\n    return {"callback_data": payload}',
+            {"remind"},
+            id="local",
+        ),
+        pytest.param(
+            'def send():\n    payload = "remind:dismiss:one"\n    payload = supplied\n    return {"callback_data": payload}',
+            set(),
+            id="reassigned",
+        ),
+        pytest.param(
+            'payload = "remind:dismiss:one"\nbutton = {"callback_data": supplied}', set(), id="unused"
+        ),
+        pytest.param(
+            'def first():\n    payload = "remind:dismiss:one"\n    return {"callback_data": payload}\ndef second():\n    payload = "doc:open:two"\n    return {"callback_data": payload}',
+            {"remind", "doc"},
+            id="separate-scopes",
+        ),
+        pytest.param(
+            'def send():\n    button = {"callback_data": payload}\n    payload = "remind:dismiss:one"',
+            set(),
+            id="assigned-after",
+        ),
+        pytest.param(
+            'def send():\n    def inner():\n        payload = "remind:dismiss:one"\n    return {"callback_data": payload}',
+            set(),
+            id="nested-store-only",
+        ),
+        pytest.param(
+            'def send():\n    payload = "remind:dismiss:one"\n    def inner():\n        payload = "doc:open:two"\n    return {"callback_data": payload}',
+            {"remind"},
+            id="nested-shadow",
+        ),
+    ],
+)
+def test_callback_namespace_scanner_follows_only_unambiguous_sent_values(
+    tmp_path, monkeypatch, source, expected
+):
+    (tmp_path / "fixture.py").write_text(source, encoding="utf-8")
+    monkeypatch.setitem(globals(), "PACKAGE", tmp_path)
+    namespaces, actions = _callback_namespaces()
+    assert namespaces == expected
+    assert actions == (
+        {"dismiss", "open"} if expected == {"remind", "doc"} else {"dismiss"} if expected else set()
+    )

@@ -7,6 +7,34 @@ from friday.knowledge_graph import KnowledgeGraph
 from friday.retrieval import HybridSearcher, best_snippet
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize("route", ["text", "candidate", "file"])
+async def test_ingestion_preserves_account_origin_and_records_content_origin(settings, storage, route):
+    user_id = "origin-ingestion-user"
+    before = storage.ensure_user(user_id, source="api-token", external_id="origin-id", preset_key="owner")
+    pipeline = IngestionPipeline(settings, storage, KnowledgeGraph(storage))
+    text = "Project Origin records a separate source for an account and its submitted content."
+    if route == "text":
+        result = await pipeline.ingest_text(user_id, text, source="telegram", source_ref="origin-text")
+        expected_source = "telegram"
+    elif route == "candidate":
+        result = await pipeline.queue_agent_candidate(
+            user_id, text, source_ref="origin-candidate", candidate_type="memory"
+        )
+        expected_source = "agent_tool"
+    else:
+        result = await pipeline.ingest_file(
+            user_id, None, text.encode(), filename="origin.txt", opaque_exact_bytes_only=True
+        )
+        expected_source = "upload"
+    raw = storage.get_raw_object(result["raw_object_id"], user_id)
+    assert raw["source"] == expected_source
+    after = storage.get_user(user_id)
+    assert {key: after[key] for key in ("source", "external_id", "preset_key", "created_at")} == {
+        key: before[key] for key in ("source", "external_id", "preset_key", "created_at")
+    }
+
+
 def test_entity_extraction_uses_boundaries_and_explicit_markers():
     entities = _extract_entities(
         "Project Alpha is led by Ivan Petrov and Maria Sidorova at company Google. "

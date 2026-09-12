@@ -10,41 +10,105 @@ from __future__ import annotations
 
 import re
 import unicodedata
+from dataclasses import dataclass
 
 from friday.orchestration.current_file_web_query import (
+    PRIVATE_RAW_REFERENCE_RE,
     compare_current_file_web_cues_present,
     extract_independent_public_web_query,
     utterance_names_local_file,
 )
 
-_ARCHIVE_CUES = (
-    "архив",
-    "archive",
-    "предыдущ",
-    "прошл",
-    "earlier",
-    "previous file",
-    "stored revision",
-    "сохранённ",
-    "сохраненн",
+_ARCHIVE_REFERENCE_PATTERN = (
+    r"\b(?:архив(?:ом|а|е|у)?|archive(?:\s+(?:revision|file|document|copy|snapshot|version))?|"
+    r"(?:архивн\w*|предыдущ\w*|прошл\w*|сохран[её]нн\w*)\s+"
+    r"(?:ревизи\w*|верси\w*|файл\w*|документ\w*|договор\w*|копи\w*|слеп\w*|сним\w*)|"
+    r"(?:previous|earlier|stored|saved|archived)\s+(?:revision|file|document|contract|copy|snapshot|version))\b"
+)
+# Privacy recognition must be wider than the admitted selector grammar.
+# Unknown archive wording stays in the closed mixed path, never generic web.
+_ARCHIVE_CUE_RE = re.compile(
+    r"\b(?:архив\w*|archiv(?:e|ed|al))\b|" + _ARCHIVE_REFERENCE_PATTERN,
+    re.IGNORECASE,
+)
+_ARCHIVE_PREFIX_RE = re.compile(
+    _ARCHIVE_REFERENCE_PATTERN + r"(?:\s*:\s*|\s+)",
+    re.IGNORECASE,
 )
 _FILENAME_RE = re.compile(r"(?<![\w@])@?(?P<name>[0-9A-Za-zА-ЯЁа-яё_.-]{1,247}\.[0-9A-Za-z]{1,12})(?![\w.])")
+_EXACT_FILENAME_RE = re.compile(r"[\w ()-][\w .()-]*\.[A-Za-z0-9]{1,12}\Z")
+_RAW_ID_RE = re.compile(r"raw_[0-9a-f]{16}\Z")
+_SELECTOR_END_RE = re.compile(r"(?:\s*(?:$|[,;.!?]|\b(?:и|а|and|with|against|с|со)\b))", re.IGNORECASE)
+_QUOTE_PAIRS = {'"': '"', "'": "'", "`": "`", "«": "»", "“": "”"}
 _PRIVATE_PATH_RE = re.compile(
     r"(?:^|[\s«\"'`])(?:~|/|\.\./|\.\.\\|[A-Za-z]:\\)",
 )
-_ARCHIVE_DEICTIC_NP = re.compile(
-    r"(?:(?:с|со|with|against|to|и)\s+)?"
-    r"(?:эт(?:им|ом|от|ого|ому|ой|у)|данн\w*|архивн\w*|сохран[её]нн\w*|"
-    r"предыдущ\w*|прошл\w*|this|that|the|previous|earlier|stored)\s+"
-    r"(?:архив\w*|файл\w*|документ\w*|ревизи\w*|договор\w*|"
-    r"archive|file|document|revision|contract)\w*",
-    re.IGNORECASE,
-)
-_RAW_ID_RE = re.compile(r"\braw_[0-9a-f]{16}\b")
 
 
-def _folded(message: str) -> str:
-    return unicodedata.normalize("NFKC", message).casefold()
+@dataclass(frozen=True, slots=True)
+class _ArchiveSelector:
+    filename: str
+    raw_id: str
+    remainder: str
+
+
+def _archive_selector(message: object) -> _ArchiveSelector | None:
+    """Parse one complete archive reference; never salvage a filename suffix."""
+
+    if type(message) is not str or not 1 <= len(message) <= 1_200:
+        return None
+    if _PRIVATE_PATH_RE.search(message) is not None:
+        return None
+    prefix = _ARCHIVE_PREFIX_RE.search(message)
+    if prefix is None or prefix.end() == len(message):
+        return None
+    start = prefix.end()
+    quoted = message[start] in _QUOTE_PAIRS
+    filename_marker = False
+    if quoted:
+        end = message.find(_QUOTE_PAIRS[message[start]], start + 1)
+        if end < 0:
+            return None
+        value = message[start + 1 : end]
+        end += 1
+    else:
+        token = re.match(r"[^\s,;]+", message[start:])
+        if token is None:
+            return None
+        value = token[0]
+        end = start + len(value)
+        # One sentence terminator may follow an otherwise complete selector.
+        # Keep it in the remainder to preserve the public clause boundary;
+        # never search inside a malformed token for a valid filename suffix.
+        if value.endswith((".", "!", "?")):
+            value = value[:-1]
+            end -= 1
+        filename_marker = value.startswith("@")
+        if filename_marker:
+            value = value[1:]
+    if _SELECTOR_END_RE.match(message[end:]) is None:
+        return None
+    raw_id = value if not quoted and not filename_marker and _RAW_ID_RE.fullmatch(value) is not None else ""
+    filename = ""
+    if not raw_id:
+        if (
+            not 1 <= len(value) <= 260
+            or value != value.strip()
+            or value.startswith(".")
+            or ".." in value
+            or _EXACT_FILENAME_RE.fullmatch(value) is None
+        ):
+            return None
+        filename = value
+    remainder = message[: prefix.start()] + " " + message[end:]
+    normalized = unicodedata.normalize("NFKC", remainder)
+    if (
+        _ARCHIVE_PREFIX_RE.search(normalized) is not None
+        or _FILENAME_RE.search(normalized) is not None
+        or PRIVATE_RAW_REFERENCE_RE.search(normalized) is not None
+    ):
+        return None
+    return _ArchiveSelector(filename, raw_id, remainder)
 
 
 def mixed_file_archive_web_cues_present(message: object) -> bool:
@@ -52,55 +116,27 @@ def mixed_file_archive_web_cues_present(message: object) -> bool:
 
     if type(message) is not str or not message.strip():
         return False
-    if _PRIVATE_PATH_RE.search(message) is not None:
-        return False
-    folded = _folded(message)
     if not compare_current_file_web_cues_present(message):
         return False
     if not utterance_names_local_file(message):
         return False
-    return any(cue in folded for cue in _ARCHIVE_CUES)
+    # Recognize malformed references too, so the outbound adapter cannot
+    # bypass mixed validation by falling back to generic file/web extraction.
+    return _ARCHIVE_CUE_RE.search(message) is not None
 
 
 def extract_authorized_archive_filename(message: object) -> str:
     """Return one exact archive filename, or ``\"\"`` when absent/ambiguous/private."""
 
-    if type(message) is not str or not message.strip():
-        return ""
-    if _PRIVATE_PATH_RE.search(message) is not None:
-        return ""
-    names = [match.group("name") for match in _FILENAME_RE.finditer(message)]
-    unique = tuple(dict.fromkeys(names))
-    if len(unique) != 1:
-        return ""
-    name = unique[0]
-    if "/" in name or "\\" in name or name.startswith(".") or ".." in name:
-        return ""
-    return name
+    selector = _archive_selector(message)
+    return selector.filename if selector is not None else ""
 
 
 def extract_authorized_archive_raw_id(message: object) -> str:
     """Return one expert-path archive raw id, or ``\"\"``."""
 
-    if type(message) is not str:
-        return ""
-    found = _RAW_ID_RE.findall(message)
-    unique = tuple(dict.fromkeys(found))
-    return unique[0] if len(unique) == 1 else ""
-
-
-_ARCHIVE_WORD_RE = re.compile(
-    r"\b(?:архив\w*|archive\w*|ревизи\w*|revision\w*|stored)\b",
-    re.IGNORECASE,
-)
-
-
-def _strip_archive_carriers(message: str) -> str:
-    text = _ARCHIVE_DEICTIC_NP.sub(" ", message)
-    text = _FILENAME_RE.sub(" ", text)
-    text = _RAW_ID_RE.sub(" ", text)
-    text = _ARCHIVE_WORD_RE.sub(" ", text)
-    return " ".join(text.split())
+    selector = _archive_selector(message)
+    return selector.raw_id if selector is not None else ""
 
 
 def extract_mixed_file_archive_public_web_query(message: object) -> str:
@@ -108,8 +144,8 @@ def extract_mixed_file_archive_public_web_query(message: object) -> str:
 
     if type(message) is not str or not mixed_file_archive_web_cues_present(message):
         return ""
-    stripped = _strip_archive_carriers(unicodedata.normalize("NFKC", message))
-    return extract_independent_public_web_query(stripped)
+    selector = _archive_selector(message)
+    return extract_independent_public_web_query(selector.remainder) if selector is not None else ""
 
 
 def mixed_file_archive_web_turn_is_admitted(

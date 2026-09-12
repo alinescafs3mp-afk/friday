@@ -22,6 +22,7 @@ from friday.engineer_source_binding import (
     canonical_engineer_source_step_id,
     legacy_engineer_source_binding_sha256,
 )
+from friday.private_fs import prepare_private_sqlite
 from friday.user_ids import validate_user_id
 
 from .contracts import CommandError, canonical_json_bytes, sha256_bytes
@@ -1030,6 +1031,13 @@ class CommandJobStore:
         self._source_slot_authority_depth = 0
         self.fail_next_commit = 0
         try:
+            if lifecycle_mode == "provision":
+                # Create the main file privately before SQLite can derive its
+                # journal/WAL modes; runtime opens never create or repair state.
+                try:
+                    prepare_private_sqlite(self.db_path)
+                except (OSError, ValueError) as exc:
+                    raise CommandError("durable_write_failed") from exc
             database_target = str(self.db_path)
             database_uri = False
             if lifecycle_mode == "runtime":

@@ -1,0 +1,8 @@
+{
+  "historical_evidence_sha256": "472c036d021be31d59f07a6d89448f7da282f36ce80a9093e5cc5c5075995eea",
+  "instrument_sha256": "fd489c05b86f680b5cb29b150284add6f025099f59deb048ad1aa0bd8a2c08ec",
+  "observed_source_commit": "407a9fa453a7697d56ce30b9c9edb3e088814f5e",
+  "release_sha256": "e41830cc8f2ead196b67bb564f21a1534c25f4ef6aeeaec64126aea87d1a0321",
+  "schema": "friday.document-dense-recall.current-candidate.v1",
+  "stable_envelope_sha256": "deb533b2e4b208cadb2a5fa68f5a6134449d88182bf1c9219c0250f3a4bc81f6"
+}

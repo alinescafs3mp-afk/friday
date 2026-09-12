@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 from dataclasses import replace
 from typing import Any
+from unittest.mock import AsyncMock, Mock
 
 import pytest
 from test_mixed_file_archive_web_comparison import (
@@ -72,7 +73,8 @@ async def test_injected_evidence_publishes_text_only_with_file_archive_web_citat
     assert reply["web_evidence_status"] == "sourced"
     assert len(reply["web_sources"]) == 3
     organs = set(reply["context"]["mixed_organs"])
-    assert organs == {"file", "archive", "web", "table"}
+    assert organs == {"file", "archive", "web"}
+    assert not reply.get("knowledge_objects")
     assert reply["context"]["mixed_archive_member_count"] == 1
     prepared_file = _current_file()
     prepared_archive = _archive_file()
@@ -97,13 +99,40 @@ async def test_injected_evidence_publishes_text_only_with_file_archive_web_citat
     )
     assert observed.state is MixedJourneyStoreProjectionState.PROJECTED
     assert observed.view is not None
-    assert set(observed.view.organs.present_organs) == {"file", "archive", "web", "table"}
+    assert set(observed.view.organs.present_organs) == {"file", "archive", "web"}
     assert mixed_status_admitted(observed) is True
     assert model.acquire_calls == 1
     consumption = reply["web_research_consumption"]
     assert consumption.selected_provider_id == "brave"
     assert consumption.usability is WebResearchConsumptionState.CONSUMABLE
     assert consumption.reason is WebResearchConsumptionReason.PRIMARY_SOURCES
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("table_reply", [False, True])
+async def test_prepared_comparison_table_uses_same_shape_contract_without_invented_object(
+    table_reply,
+) -> None:
+    answer = (
+        "| Источник | Состояние |\n| --- | --- |\n"
+        "| Файл [F1] | исходное |\n| Архив [A1] | та же основа |\n"
+        "| Веб [W1] [W2] [W3] | контекст, изменение и границы |"
+    )
+    model = _ComparisonModel(answer=answer if table_reply else _DEFAULT_ANSWER)
+    reply = await _handle(
+        model=model,
+        message=_MIXED + " Ответ оформи таблицей.",
+        ledger=MixedJourneyConsumeLedger(),
+    )
+    assert not reply.get("knowledge_objects")
+    if table_reply:
+        assert reply["message"] == answer
+        assert reply["message_format"] == "markdown"
+        assert "table" not in reply["context"]["mixed_organs"]
+        assert len(model.calls) == 2
+    else:
+        assert reply["message"] != _DEFAULT_ANSWER
+        assert len(model.calls) == 1
 
 
 @pytest.mark.asyncio
@@ -151,6 +180,132 @@ async def test_cancel_while_running_does_not_publish() -> None:
     reply = await asyncio.wait_for(task, timeout=2)
     assert "отменено" in reply["message"].casefold()
     assert reply["files"] == []
+
+
+class _CleanupModel(_ComparisonModel):
+    def __init__(self) -> None:
+        super().__init__(hanging_call=1)
+        self.cleanup_started = asyncio.Event()
+        self.cleanup_release = asyncio.Event()
+        self.cleaned = asyncio.Event()
+        self.task: asyncio.Task[Any] | None = None
+
+    async def complete(self, *args: Any, **kwargs: Any) -> dict[str, Any]:
+        self.task = asyncio.current_task()
+        try:
+            return await super().complete(*args, **kwargs)
+        finally:
+            self.cleanup_started.set()
+            await self.cleanup_release.wait()
+            self.cleaned.set()
+
+
+class _TrackedCancelEvent(asyncio.Event):
+    active_waiters = 0
+
+    async def wait(self) -> bool:
+        self.active_waiters += 1
+        try:
+            return await super().wait()
+        finally:
+            self.active_waiters -= 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("mode", "with_event", "repeat_cancel"),
+    [
+        ("caller", False, False),
+        ("caller", True, False),
+        ("event", True, False),
+        ("caller", True, True),
+        ("event", True, True),
+    ],
+)
+async def test_cancel_drains_model_cleanup_and_waiter_before_returning(
+    mode: str,
+    with_event: bool,
+    repeat_cancel: bool,
+) -> None:
+    ledger = MixedJourneyConsumeLedger()
+    model = _CleanupModel()
+    cancel = _TrackedCancelEvent() if with_event else None
+    storage = Mock()
+    sends: list[dict[str, Any]] = []
+    task = asyncio.create_task(
+        _handle(model=model, ledger=ledger, cancel_event=cancel, publisher=sends.append, storage=storage)
+    )
+    try:
+        await asyncio.wait_for(model.dispatched.wait(), timeout=2)
+        if mode == "event":
+            assert cancel is not None
+            cancel.set()
+        else:
+            task.cancel()
+        await asyncio.wait_for(model.cleanup_started.wait(), timeout=2)
+        assert not task.done(), "consume returned before owned model cleanup finished"
+        if repeat_cancel:
+            task.cancel()
+            await asyncio.sleep(0)
+            await asyncio.sleep(0)
+            assert not task.done(), "repeated cancellation interrupted cleanup"
+        model.cleanup_release.set()
+        if mode == "caller" or repeat_cancel:
+            with pytest.raises(asyncio.CancelledError):
+                await asyncio.wait_for(task, timeout=2)
+        else:
+            reply = await asyncio.wait_for(task, timeout=2)
+            assert "отменено" in reply["message"].casefold()
+        assert model.cleaned.is_set()
+        assert model.task is not None and model.task.done()
+        assert cancel is None or cancel.active_waiters == 0
+        assert sends == []
+        assert storage.mock_calls == []
+        retry_model = _ComparisonModel()
+        retry = await _handle(model=retry_model, ledger=ledger, publisher=sends.append)
+        assert "отменено" in retry["message"].casefold()
+        assert retry_model.acquire_calls == 0
+        assert sends == []
+    finally:
+        # Also clean up the deliberately exposed orphan on the unfixed source.
+        model.cleanup_release.set()
+        owned = [child for child in (task, model.task) if child is not None]
+        for child in owned:
+            if not child.done():
+                child.cancel()
+        await asyncio.gather(*owned, return_exceptions=True)
+
+
+@pytest.mark.asyncio
+async def test_success_drains_unused_cancel_waiter() -> None:
+    cancel = _TrackedCancelEvent()
+    reply = await _handle(ledger=MixedJourneyConsumeLedger(), cancel_event=cancel)
+    assert reply["message"] == _DEFAULT_ANSWER
+    assert cancel.active_waiters == 0
+
+
+@pytest.mark.asyncio
+async def test_cancel_during_waiter_cleanup_prevents_persistence_and_publication() -> None:
+    class _CancelDuringCleanup(_TrackedCancelEvent):
+        async def wait(self) -> bool:
+            try:
+                return await super().wait()
+            finally:
+                self.set()
+
+    cancel = _CancelDuringCleanup()
+    storage = Mock()
+    publisher = Mock()
+    reply = await _handle(
+        ledger=MixedJourneyConsumeLedger(),
+        cancel_event=cancel,
+        storage=storage,
+        publisher=publisher,
+    )
+    assert "отменено" in reply["message"].casefold()
+    assert cancel.active_waiters == 0
+    assert storage.mock_calls == []
+    publisher.assert_not_called()
 
 
 @pytest.mark.asyncio
@@ -291,9 +446,19 @@ class _NoToolKernel:
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "message",
+    [
+        _MIXED,
+        "Сравни этот договор с архивом @contract.txt и текущими публичными правилами в интернете.",
+        "Сравни этот договор с архивом contract.txt! Текущие публичные правила в интернете.",
+        "Сравни этот договор с архивом raw_0123456789abcdef. Текущие публичные правила в интернете.",
+    ],
+)
 async def test_agent_runtime_dispatches_admitted_mixed_turn_fail_closed_without_evidence(
     settings,
     storage,
+    message: str,
 ) -> None:
     storage.ensure_user("alice", preset_key="owner")
     runtime = AgentRuntime(
@@ -304,9 +469,32 @@ async def test_agent_runtime_dispatches_admitted_mixed_turn_fail_closed_without_
     )
     reply = await runtime.chat(
         "alice",
-        _MIXED,
+        message,
         actor=_actor(),
         attachments=_ATTACHMENTS,
     )
     assert "доказательства не подготовлены" in reply["message"].casefold()
     assert reply["files"] == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "selector",
+    ["raw_ABCDEF0123456789", "raw_0123456789abcdef0", "private deal.txt", "/etc/private.txt"],
+)
+async def test_runtime_rejects_invalid_mixed_reference_without_generic_web_fallback(
+    settings,
+    storage,
+    selector: str,
+) -> None:
+    storage.ensure_user("alice", preset_key="owner")
+    model = _NeverRouter()
+    model.chat = AsyncMock(side_effect=AssertionError("unexpected model call"))
+    kernel = _NoToolKernel()
+    kernel.execute = AsyncMock(side_effect=AssertionError("unexpected tool call"))
+    runtime = AgentRuntime(replace(settings, verify_answers=False), storage, llm=model, kernel=kernel)
+    message = f"Сравни этот файл с архивом {selector} и текущими публичными правилами в интернете."
+    reply = await runtime.chat("alice", message, actor=_actor(), attachments=_ATTACHMENTS)
+    assert "не принято" in reply["message"].casefold()
+    model.chat.assert_not_called()
+    kernel.execute.assert_not_called()

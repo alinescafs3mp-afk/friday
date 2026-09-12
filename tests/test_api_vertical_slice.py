@@ -542,6 +542,393 @@ def test_maturity_workflows_are_reachable_through_signed_and_admin_apis(settings
         assert reviewed_relation.status_code == 200
         assert reviewed_relation.json()["item"]["status"] == "accepted"
 
+        # Disjoint persisted fixtures give the three admin routes a literal oracle.
+        import re
+        import sqlite3
+        from contextlib import closing
+        from datetime import UTC, datetime
+
+        relation_tenant, relation_foreign = str(uuid.uuid4()), str(uuid.uuid4())
+        assert relation_tenant != relation_foreign
+        relation_storage = app.state.storage
+        for tenant in (relation_tenant, relation_foreign):
+            relation_storage.ensure_user(tenant)
+        fixture_time = "2024-01-02T03:04:05+00:00"
+        private_evidence = "REL-PRIVATE-EVIDENCE-084"
+        private_entity = "REL-PRIVATE-ENTITY-084"
+        invalidation_reason = "REL-PRIVATE-REASON-084"
+        endpoint_ids = [f"ent_{8400 + index:016x}" for index in range(5)]
+        candidate_ids = [f"relc_{8400 + index:016x}" for index in range(3)]
+        entity_rows = [
+            {
+                "id": entity_id,
+                "user_id": relation_tenant if index < 3 else relation_foreign,
+                "name": ("Atlas084", "Engine084", "Store084", "Foreign084", "Other084")[index],
+                "normalized_name": ("atlas084", "engine084", "store084", "foreign084", "other084")[index],
+                "entity_type": "project" if index in (0, 3) else "other",
+                "aliases_json": "[]",
+                "description": private_entity,
+                "metadata_json": "{}",
+                "canonical": 1,
+                "merged_into_id": None,
+                "version": 1,
+                "created_at": fixture_time,
+                "updated_at": fixture_time,
+                "deleted_at": None,
+            }
+            for index, entity_id in enumerate(endpoint_ids)
+        ]
+        evidence_value = {"quote": private_evidence, "note": "fixture"}
+        evidence_text = json.dumps(evidence_value, ensure_ascii=False, sort_keys=True)
+        candidate_rows = [
+            {
+                "id": candidate_ids[index],
+                "user_id": tenant,
+                "source_entity_id": endpoint_ids[left],
+                "target_entity_id": endpoint_ids[right],
+                "relation_type": "uses",
+                "confidence": confidence,
+                "evidence_json": evidence_text,
+                "status": "suggested",
+                "created_at": fixture_time,
+                "reviewed_at": None,
+                "reviewed_by": None,
+            }
+            for index, (tenant, left, right, confidence) in enumerate(
+                ((relation_tenant, 0, 1, 0.8), (relation_tenant, 0, 2, 0.6), (relation_foreign, 3, 4, 0.9))
+            )
+        ]
+        with relation_storage.transaction() as conn:
+            for table, rows in (("entities", entity_rows), ("relation_candidates", candidate_rows)):
+                for row in rows:
+                    columns = ", ".join(row)
+                    placeholders = ", ".join("?" for _ in row)
+                    conn.execute(
+                        f"INSERT INTO {table} ({columns}) VALUES ({placeholders})", tuple(row.values())
+                    )
+
+        def relation_snapshot():
+            with closing(sqlite3.connect(settings.database_path.as_uri() + "?mode=ro", uri=True)) as conn:
+                conn.row_factory = sqlite3.Row
+                conn.execute("PRAGMA query_only=ON")
+                business = {
+                    table: [dict(row) for row in conn.execute(f"SELECT * FROM {table} ORDER BY id")]
+                    for table in ("entities", "relation_candidates", "relations")
+                }
+                business["relation_revisions"] = [
+                    dict(row) for row in conn.execute("SELECT * FROM relation_revisions ORDER BY event_seq")
+                ]
+                audits = [dict(row) for row in conn.execute("SELECT rowid, * FROM audit_log ORDER BY rowid")]
+                return business, audits
+
+        def canonical(value):
+            return json.dumps(
+                value, ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False
+            )
+
+        def bounded_relation_time(value, window, *, audit=False):
+            assert type(value) is str
+            fraction = r"\.000000" if audit else ""
+            assert re.fullmatch(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}" + fraction + r"\+00:00", value)
+            parsed = datetime.fromisoformat(value)
+            assert parsed.isoformat(timespec="microseconds" if audit else "seconds") == value
+            assert window[0].replace(microsecond=0) <= parsed <= window[1]
+            return value
+
+        expected_business, audit_prefix = relation_snapshot()
+        assert [row for row in expected_business["entities"] if row["id"] in endpoint_ids] == entity_rows
+        assert [
+            row for row in expected_business["relation_candidates"] if row["id"] in candidate_ids
+        ] == candidate_rows
+        assert not [
+            row
+            for row in expected_business["relations"]
+            if row["user_id"] in (relation_tenant, relation_foreign)
+        ]
+
+        def append_expected_relation_revision(actual_history, relation, revision, operation, window):
+            prefix = expected_business["relation_revisions"]
+            assert len(actual_history) == len(prefix) + 1
+            assert actual_history[:-1] == prefix
+            row = actual_history[-1]
+            assert type(row["event_seq"]) is int and row["event_seq"] > 0
+            assert not prefix or row["event_seq"] > prefix[-1]["event_seq"]
+            assert type(row["batch_id"]) is str
+            assert re.fullmatch(r"relation_batch_[0-9a-f]{16}", row["batch_id"])
+            assert row["batch_id"] not in {old["batch_id"] for old in prefix}
+            recorded_at = row["recorded_at"]
+            assert type(recorded_at) is str
+            assert re.fullmatch(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{6}Z", recorded_at)
+            parsed = datetime.fromisoformat(recorded_at.replace("Z", "+00:00"))
+            assert parsed.isoformat(timespec="microseconds").replace("+00:00", "Z") == recorded_at
+            # This past-dated synthetic fixture exercises an ordinary wall clock;
+            # future/rollback authority and revision-context integrity are outside scope.
+            assert window[0] <= parsed <= window[1]
+            assert not prefix or parsed > datetime.fromisoformat(
+                prefix[-1]["recorded_at"].replace("Z", "+00:00")
+            )
+            if revision == 1:
+                assert all(old["relation_id"] != relation["id"] for old in prefix)
+            expected_revision = {
+                "event_seq": row["event_seq"],
+                "relation_id": relation["id"],
+                "revision": revision,
+                "present": 1,
+                "operation": operation,
+                "recorded_at": recorded_at,
+                "batch_id": row["batch_id"],
+                "history_quality": "captured",
+                **{key: value for key, value in relation.items() if key != "id"},
+            }
+            assert row == expected_revision
+            expected_business["relation_revisions"] = [*prefix, expected_revision]
+
+        def relation_request(method, path, status, payload=None):
+            began = datetime.now(UTC)
+            response = client.request(method, path, headers=owner_headers, json=payload)
+            ended = datetime.now(UTC)
+            assert response.status_code == status, response.text
+            assert response.headers["content-type"] == "application/json"
+            assert re.fullmatch(r"[0-9a-f]{24}", response.headers["x-request-id"])
+            for secret in (private_evidence, private_entity, invalidation_reason):
+                assert secret not in response.text
+            return response, (began, ended)
+
+        def relation_effects(response, window, action=None, target_type=None, target_id=None, after=None):
+            nonlocal audit_prefix
+            actual_business, actual_audits = relation_snapshot()
+            assert actual_business == expected_business
+            if action is None:
+                assert actual_audits == audit_prefix
+                return
+            assert len(actual_audits) == len(audit_prefix) + 1
+            assert actual_audits[:-1] == audit_prefix
+            row = actual_audits[-1]
+            assert re.fullmatch(r"audit_[0-9a-f]{16}", row["id"])
+            assert row["id"] not in {old["id"] for old in audit_prefix}
+            assert response.headers["x-request-id"] not in {old["request_id"] for old in audit_prefix}
+            timestamp = bounded_relation_time(row["created_at"], window, audit=True)
+            assert row == {
+                "rowid": audit_prefix[-1]["rowid"] + 1 if audit_prefix else 1,
+                "id": row["id"],
+                "user_id": LEGACY_OWNER_USER_ID,
+                "action": action,
+                "target_type": target_type,
+                "target_id": target_id,
+                "before_json": None,
+                "after_json": None
+                if after is None
+                else json.dumps(after, ensure_ascii=False, sort_keys=True),
+                "ip_address": "",
+                "request_id": response.headers["x-request-id"],
+                "created_at": timestamp,
+            }
+            for secret in (private_evidence, private_entity, invalidation_reason):
+                assert secret not in canonical(actual_audits[len(audit_prefix) :])
+            audit_prefix = actual_audits
+
+        def candidate_card(index, *, status="suggested", reviewed_at=""):
+            return {
+                "id": candidate_ids[index],
+                "source_entity_id": endpoint_ids[0],
+                "target_entity_id": endpoint_ids[index + 1],
+                "relation_type": "uses",
+                "status": status,
+                "created_at": fixture_time,
+                "reviewed_at": reviewed_at,
+                "source_name": "Atlas084",
+                "source_type": "project",
+                "target_name": ("Engine084", "Store084")[index],
+                "target_type": "other",
+                "confidence": (0.8, 0.6)[index],
+                "evidence": {"present": True, "bytes": len(evidence_text.encode("utf-8"))},
+            }
+
+        for offset in (0, 1):
+            page, window = relation_request(
+                "GET",
+                f"/api/admin/relation-candidates?user_id={relation_tenant}&status=suggested&limit=1&offset={offset}",
+                200,
+            )
+            assert canonical(page.json()) == canonical(
+                {
+                    "user_id": relation_tenant,
+                    "items": [candidate_card(offset)],
+                    "count": 1,
+                    "total": 2,
+                    "limit": 1,
+                    "offset": offset,
+                    "matched_at_least": 2,
+                    "truncated": offset == 0,
+                }
+            )
+            relation_effects(page, window, "admin.relations.read", "user", relation_tenant)
+
+        review_path = f"/api/admin/relation-candidates/{candidate_ids[0]}/review"
+        accepted, review_window = relation_request(
+            "POST", review_path, 200, {"user_id": relation_tenant, "status": "accepted"}
+        )
+        accepted_state, _ = relation_snapshot()
+        accepted_row = next(
+            row for row in accepted_state["relation_candidates"] if row["id"] == candidate_ids[0]
+        )
+        reviewed_at = bounded_relation_time(accepted_row["reviewed_at"], review_window)
+        expected_candidate = {
+            **candidate_rows[0],
+            "status": "accepted",
+            "reviewed_at": reviewed_at,
+            "reviewed_by": LEGACY_OWNER_USER_ID,
+        }
+        assert accepted_row == expected_candidate
+        expected_business["relation_candidates"] = [
+            expected_candidate if row["id"] == candidate_ids[0] else row
+            for row in expected_business["relation_candidates"]
+        ]
+        generated = [
+            row
+            for row in accepted_state["relations"]
+            if (row["user_id"], row["source_entity_id"], row["target_entity_id"], row["relation_type"])
+            == (relation_tenant, endpoint_ids[0], endpoint_ids[1], "uses")
+        ]
+        assert len(generated) == 1
+        generated_row = generated[0]
+        assert re.fullmatch(r"rel_[0-9a-f]{16}", generated_row["id"])
+        assert generated_row["id"] not in {row["id"] for row in expected_business["relations"]}
+        created_at = bounded_relation_time(generated_row["created_at"], review_window)
+        relation_metadata = {
+            "origin": "review",
+            "source": "reviewed_relation_candidate",
+            "candidate_id": candidate_ids[0],
+            "reviewed_by": LEGACY_OWNER_USER_ID,
+            "confidence": 0.8,
+            "evidence": evidence_value,
+        }
+        expected_relation = {
+            "id": generated_row["id"],
+            "user_id": relation_tenant,
+            "source_entity_id": endpoint_ids[0],
+            "target_entity_id": endpoint_ids[1],
+            "relation_type": "uses",
+            "weight": 0.8,
+            "metadata_json": json.dumps(relation_metadata, ensure_ascii=False, sort_keys=True),
+            "created_at": created_at,
+            "deleted_at": None,
+            "valid_from": "",
+            "valid_to": None,
+            "invalidated_at": None,
+            "superseded_by": None,
+        }
+        assert generated_row == expected_relation
+        relation_id = expected_relation["id"]
+        expected_business["relations"] = sorted(
+            [*expected_business["relations"], expected_relation], key=lambda row: row["id"]
+        )
+        append_expected_relation_revision(
+            accepted_state["relation_revisions"], expected_relation, 1, "insert", review_window
+        )
+        expected_card = candidate_card(0, status="accepted", reviewed_at=reviewed_at)
+        assert canonical(accepted.json()) == canonical({"item": expected_card})
+        review_audit = {
+            "id": candidate_ids[0],
+            "source_entity_id": endpoint_ids[0],
+            "target_entity_id": endpoint_ids[1],
+            "relation_type": "uses",
+            "confidence": 0.8,
+            "status": "accepted",
+            "created_at": fixture_time,
+            "reviewed_at": reviewed_at,
+            "private_fields_count": 1,
+            "private_items_count": 2,
+        }
+        relation_effects(
+            accepted,
+            review_window,
+            "admin.relation_candidate.accepted",
+            "relation_candidate",
+            candidate_ids[0],
+            review_audit,
+        )
+        invalidate_path = f"/api/admin/relations/{relation_id}/invalidate"
+        invalidate_body = {
+            "user_id": relation_tenant,
+            "valid_to": "2030-01-01",
+            "reason": invalidation_reason,
+        }
+        invalidated, window = relation_request("POST", invalidate_path, 200, invalidate_body)
+        invalidated_state, _ = relation_snapshot()
+        invalidated_row = next(row for row in invalidated_state["relations"] if row["id"] == relation_id)
+        invalidated_at = bounded_relation_time(invalidated_row["invalidated_at"], window)
+        expected_relation = {
+            **expected_relation,
+            "valid_to": "2030-01-01",
+            "invalidated_at": invalidated_at,
+            "metadata_json": json.dumps(
+                {
+                    **json.loads(expected_relation["metadata_json"]),
+                    "invalidation_reason": invalidation_reason,
+                },
+                ensure_ascii=False,
+            ),
+        }
+        assert invalidated_row == expected_relation
+        expected_business["relations"] = [
+            expected_relation if row["id"] == relation_id else row for row in expected_business["relations"]
+        ]
+        append_expected_relation_revision(
+            invalidated_state["relation_revisions"], expected_relation, 2, "update", window
+        )
+        public_relation = {
+            "id": relation_id,
+            "source_entity_id": endpoint_ids[0],
+            "target_entity_id": endpoint_ids[1],
+            "relation_type": "uses",
+            "weight": 0.8,
+            "valid_from": "",
+            "valid_to": "2030-01-01",
+            "created_at": created_at,
+            "invalidated_at": invalidated_at,
+            "superseded_by": None,
+            "provenance": {
+                "origin": "review",
+                "reviewed": True,
+                "source": "reviewed_relation_candidate",
+                "candidate_id": candidate_ids[0],
+                "confidence": 0.8,
+            },
+        }
+        assert canonical(invalidated.json()) == canonical({"item": public_relation})
+        invalidate_audit = {
+            "id": relation_id,
+            "source_entity_id": endpoint_ids[0],
+            "target_entity_id": endpoint_ids[1],
+            "relation_type": "uses",
+            "weight": 0.8,
+            "valid_from": "",
+            "valid_to": "2030-01-01",
+            "created_at": created_at,
+        }
+        relation_effects(
+            invalidated, window, "admin.relation.invalidate", "relation", relation_id, invalidate_audit
+        )
+        accepted_replay, window = relation_request(
+            "POST", review_path, 200, {"user_id": relation_tenant, "status": "accepted"}
+        )
+        assert canonical(accepted_replay.json()) == canonical({"item": expected_card})
+        relation_effects(
+            accepted_replay,
+            window,
+            "admin.relation_candidate.accepted",
+            "relation_candidate",
+            candidate_ids[0],
+            review_audit,
+        )
+
+        invalidated_replay, window = relation_request("POST", invalidate_path, 400, invalidate_body)
+        assert canonical(invalidated_replay.json()) == canonical(
+            {"detail": "Связь уже объявлена недействующей"}
+        )
+        relation_effects(invalidated_replay, window)
+
         for suffix, ip in (("old", "10.0.0.5"), ("new", "10.0.0.7")):
             response = _bridge_json(
                 client,

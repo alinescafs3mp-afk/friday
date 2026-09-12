@@ -2207,27 +2207,47 @@ class KnowledgeMixin(StorageShared):
             ).fetchone()
             if visible_ko is None or visible_entity is None:
                 raise ValueError("Knowledge object and entity must belong to the same user")
-            conn.execute(
-                """INSERT INTO knowledge_entity_links(id, user_id, knowledge_object_id, entity_id,
-                   status, confidence, evidence_json, created_at, reviewed_at, reviewed_by)
-                   VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                   ON CONFLICT(user_id, knowledge_object_id, entity_id) DO UPDATE SET
-                     status=excluded.status, confidence=excluded.confidence,
-                     evidence_json=excluded.evidence_json, reviewed_at=excluded.reviewed_at,
-                     reviewed_by=excluded.reviewed_by""",
-                (
-                    link_id,
-                    user_id,
-                    knowledge_object_id,
-                    entity_id,
-                    status,
-                    parsed_confidence,
-                    json.dumps(evidence or {}, ensure_ascii=False, sort_keys=True),
-                    now,
-                    now if reviewed_by else None,
-                    reviewed_by,
-                ),
-            )
+            existing_link = conn.execute(
+                """SELECT id FROM knowledge_entity_links
+                   WHERE user_id=? AND knowledge_object_id=? AND entity_id=?""",
+                (user_id, knowledge_object_id, entity_id),
+            ).fetchone()
+            if existing_link is not None:
+                # INSERT's BEFORE trigger invalidates dependency authority even
+                # on an UPSERT conflict. A metadata-only UPDATE has no matching
+                # identity AFTER trigger to restore it inside an outer transaction.
+                # Keep the unchanged dependency tuple out of the INSERT path.
+                conn.execute(
+                    """UPDATE knowledge_entity_links SET status=?, confidence=?,
+                       evidence_json=?, reviewed_at=?, reviewed_by=? WHERE id=? AND user_id=?""",
+                    (
+                        status,
+                        parsed_confidence,
+                        json.dumps(evidence or {}, ensure_ascii=False, sort_keys=True),
+                        now if reviewed_by else None,
+                        reviewed_by,
+                        existing_link["id"],
+                        user_id,
+                    ),
+                )
+            else:
+                conn.execute(
+                    """INSERT INTO knowledge_entity_links(id, user_id, knowledge_object_id, entity_id,
+                       status, confidence, evidence_json, created_at, reviewed_at, reviewed_by)
+                       VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    (
+                        link_id,
+                        user_id,
+                        knowledge_object_id,
+                        entity_id,
+                        status,
+                        parsed_confidence,
+                        json.dumps(evidence or {}, ensure_ascii=False, sort_keys=True),
+                        now,
+                        now if reviewed_by else None,
+                        reviewed_by,
+                    ),
+                )
             # Keep legacy primary link synchronized for older clients.
             if status == "accepted" and not visible_ko["entity_id"]:
                 conn.execute(

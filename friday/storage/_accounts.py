@@ -48,24 +48,32 @@ class AccountsMixin(StorageShared):
         self,
         user_id: str,
         *,
-        source: str = "local",
+        source: str | None = None,
         external_id: str = "",
         display_name: str = "",
         username: str = "",
         preset_key: str = "user",
         metadata: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
+        """Create a local account, or touch an existing one without changing its origin.
+
+        An explicitly supplied source can update provenance. Omitting it keeps
+        the stored source, resolved within the same transaction as the upsert.
+        """
         user_id = validate_user_id(user_id)
         tombstone_key = deleted_account_tombstone_key(user_id)
         now = utc_now()
         with self.transaction() as conn:
             if conn.execute("SELECT 1 FROM runtime_kv WHERE key=?", (tombstone_key,)).fetchone():
                 raise DeletedAccountError("This account was permanently deleted")
-            if str(source or "").strip() and str(external_id or "").strip():
-                identity_tombstone = deleted_identity_tombstone_key(source, external_id)
+            existing = conn.execute(
+                "SELECT source, metadata_json FROM users WHERE id=?", (user_id,)
+            ).fetchone()
+            effective_source = source if source is not None else existing["source"] if existing else "local"
+            if str(effective_source or "").strip() and str(external_id or "").strip():
+                identity_tombstone = deleted_identity_tombstone_key(effective_source, external_id)
                 if conn.execute("SELECT 1 FROM runtime_kv WHERE key=?", (identity_tombstone,)).fetchone():
                     raise DeletedAccountError("This login identity belonged to a permanently deleted account")
-            existing = conn.execute("SELECT metadata_json FROM users WHERE id=?", (user_id,)).fetchone()
             merged_metadata = _json_load(existing["metadata_json"], {}) if existing else {}
             if not isinstance(merged_metadata, dict):
                 merged_metadata = {}
@@ -85,7 +93,7 @@ class AccountsMixin(StorageShared):
                      last_seen_at=excluded.last_seen_at""",
                 (
                     user_id,
-                    source,
+                    effective_source,
                     external_id,
                     display_name,
                     username,
@@ -96,7 +104,7 @@ class AccountsMixin(StorageShared):
                     now,
                 ),
             )
-            has_external_history = str(source or "").strip().casefold() == "telegram" or bool(
+            has_external_history = str(effective_source or "").strip().casefold() == "telegram" or bool(
                 isinstance(metadata, dict) and str(metadata.get("chat_id") or "").strip()
             )
             if has_external_history:
@@ -493,17 +501,19 @@ class AccountsMixin(StorageShared):
     ) -> dict[str, Any]:
         """Store the SHA-256 of a scoped API token; the plaintext is never persisted.
 
-        ``ttl_seconds`` (a positive number of seconds) makes the token expire that
-        long after creation; ``None`` mints a non-expiring token. created_at and
-        expires_at come from the same instant so the lifetime is exact.
+        ``ttl_seconds`` (a positive integer number of seconds) makes the token
+        expire that long after creation; ``None`` mints a non-expiring token.
+        created_at and expires_at come from the same instant so the lifetime is exact.
         """
+        if ttl_seconds is not None and (not isinstance(ttl_seconds, int) or isinstance(ttl_seconds, bool)):
+            raise ValueError("ttl_seconds must be a positive integer number of seconds")
         token_id = new_id("tok")
         now = datetime.now(UTC)
         created_at = now.isoformat(timespec="seconds")
         expires_at: str | None = None
         if ttl_seconds is not None:
             if ttl_seconds <= 0:
-                raise ValueError("ttl_seconds must be a positive number of seconds")
+                raise ValueError("ttl_seconds must be a positive integer number of seconds")
             if ttl_seconds > MAX_API_TOKEN_TTL_SECONDS:
                 raise ValueError(f"ttl_seconds must not exceed {MAX_API_TOKEN_TTL_SECONDS} (~100 years)")
             expires_at = (now + timedelta(seconds=ttl_seconds)).isoformat(timespec="seconds")

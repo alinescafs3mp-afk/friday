@@ -84,6 +84,20 @@ def test_workspace_reply_selector_masks_only_output_line_requirements() -> None:
     assert _ATTACHMENT_SELECTIVE_REFERENCE.search(same_output_line_input) is not None
     assert _attachment_reference_kind(same_output_line_input) == "explicit"
 
+    from friday.agent_runtime import file_turn_authority
+
+    # Each future carrier stays distinct from an explicitly named input.
+    for prompt, output in (
+        ("Прочитай source.txt и создай по нему report.docx.", "report.docx"),
+        ("Прочитай source.txt и создай в MCP outbox файл result.txt.", "result.txt"),
+    ):
+        roles = {(item.value, item.role) for item in file_turn_authority(prompt).locators}
+        assert ("source.txt", "source_identity") in roles
+        assert (output, "output_literal") in roles
+        assert (output, "source_identity") not in roles
+    ordinary_read = file_turn_authority("Прочитай result.txt в MCP outbox.")
+    assert ("result.txt", "source_identity") in {(item.value, item.role) for item in ordinary_read.locators}
+
     # Without a structural pointer the ordinary selector path is untouched.
     no_pointer_projection = _attachment_selector_message(
         "Используй workspace_create и создай out.txt по второму документу."

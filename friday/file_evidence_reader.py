@@ -40,7 +40,7 @@ from friday.source_identity import (
     authorized_file_snapshot_token_authorizes_scope,
     raw_source_identity_sha256,
 )
-from friday.storage._core import guarded_storage_transaction
+from friday.storage._core import _connection_before_deadline, read_only_storage_snapshot
 from friday.telemetry.logging import redact_friday_api_tokens
 
 _PROCESS_AUTHORITY = object()
@@ -50,7 +50,9 @@ _PROVENANCE_STUB_RE = re.compile(r"\A\s*\[[A-Za-z][A-Za-z0-9_-]{0,40}:\s*", re.A
 _MAX_FILES = 12
 _MAX_PART_CHARS = 48_000
 _MAX_TOTAL_CHARS = 120_000
-_HISTORICAL_SELECTOR_KINDS = frozenset({"exact_filename", "time_window", "latest", "source_search_result"})
+_HISTORICAL_SELECTOR_KINDS = frozenset(
+    {"exact_filename", "exact_raw_id", "time_window", "latest", "source_search_result"}
+)
 _SOURCE_SEARCH_RESULT_RAW_IDS = "source_search_result_raw_ids"
 _SOURCE_SEARCH_RESULT_IDENTITIES = "source_search_result_identities"
 # This is the durable page emitted by agent_runtime._SOURCE_SEARCH_PAGE_SIZE.
@@ -236,9 +238,10 @@ class HistoricalFileSelectionToken:
             or any(_RAW_ID_RE.fullmatch(raw_id) is None for raw_id in self.raw_ids)
         ):
             raise ValueError("historical file selector is invalid")
-        if self.kind == "exact_filename":
+        if self.kind in {"exact_filename", "exact_raw_id"}:
             if (
-                not self.filename
+                (self.kind == "exact_filename" and not self.filename)
+                or (self.kind == "exact_raw_id" and (self.filename or len(self.raw_ids) != 1))
                 or len(self.filename) > 260
                 or self.conversation_id
                 or self.source_message_id
@@ -540,6 +543,17 @@ def _historical_selection_is_current(
         )
         current = tuple(str(row.get("id") or "") for row in rows) if len(rows) == 1 else ()
         return current == token.raw_ids
+    if token.kind == "exact_raw_id":
+        # The selector pins one explicitly named revision. Authorization and
+        # current bytes are rechecked by the reader in the same transaction.
+        rows = storage.get_searchable_file_sources(
+            token.tenant_id,
+            list(token.raw_ids),
+            uploaded_by=token.uploaded_by,
+            limit=1,
+            include_content=False,
+        )
+        return len(rows) == 1 and str(rows[0].get("id") or "") == token.raw_ids[0]
     selected = storage.select_owned_file_corpus(
         token.tenant_id,
         token.uploaded_by,
@@ -924,16 +938,15 @@ def _prepare_registered_file_evidence(
             raise TimeoutError("file evidence preparation deadline expired")
 
     require_budget()
-    transaction_context = (
-        storage.transaction()
-        if absolute_deadline is None
-        else guarded_storage_transaction(
-            storage,
-            before_commit=require_budget,
-            lock_timeout_sec=max(0.0, absolute_deadline - time.monotonic()),
-        )
-    )
-    with transaction_context as conn:
+    if (
+        absolute_deadline is not None
+        and _connection_before_deadline(storage, absolute_deadline).in_transaction
+    ):
+        # Preserve the bounded reader's original committed-snapshot rule.
+        # An uncommitted source/grant cannot mint evidence for a later model
+        # call after its outer transaction has rolled back.
+        raise FileEvidenceUnavailable("file_source_snapshot_uncommitted")
+    with read_only_storage_snapshot(storage, absolute_deadline=absolute_deadline) as conn:
         _require_file_read(
             conn,
             authorization,

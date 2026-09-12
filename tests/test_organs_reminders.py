@@ -87,9 +87,31 @@ def test_notification_endpoints_require_bridge_actor(settings):
     app = create_app(settings)
     with TestClient(app) as client:
         owner = {"Authorization": f"Bearer {settings.api_token}"}
+        synthetic_id = "synthetic-notification-id"
         # Owner (bearer) is not the bridge — the queue is the bridge's alone.
         assert client.get("/api/notifications/pending", headers=owner).status_code == 403
         assert client.post("/api/notifications/ack", json={}, headers=owner).status_code == 403
+        assert (
+            client.post(
+                f"/api/notifications/{synthetic_id}/claim",
+                json={
+                    "id": synthetic_id,
+                    "chat_id": "5001",
+                    "kind": "reminder",
+                    "dedup_key": "synthetic",
+                    "status_messages": True,
+                },
+                headers=owner,
+            ).status_code
+            == 403
+        )
+        assert (
+            client.get(
+                f"/api/notifications/{synthetic_id}/artifact",
+                headers=owner,
+            ).status_code
+            == 403
+        )
 
 
 # --- reminders organ ------------------------------------------------------

@@ -417,7 +417,12 @@ class ExecutiveService:
     # ---- Control ----
 
     async def start_mission(
-        self, mission_id: str, user_id: str, *, created_by: str | None = None
+        self,
+        mission_id: str,
+        user_id: str,
+        *,
+        created_by: str | None = None,
+        audit_user_id: str | None = None,
     ) -> dict[str, Any] | None:
         mission = self.storage.get_mission(mission_id, user_id, created_by=created_by)
         if mission is None:
@@ -436,7 +441,7 @@ class ExecutiveService:
             status=MissionStatus.READY.value,
             error="",
         ):
-            self._audit(user_id, "mission.start", mission_id)
+            self._audit(audit_user_id or user_id, "mission.start", mission_id)
         return self.get_mission_view(mission_id, user_id)
 
     async def cancel_mission(

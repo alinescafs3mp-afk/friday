@@ -251,7 +251,10 @@ def _source_uploaded_raw_ids(row: Mapping[str, Any]) -> tuple[str, ...] | None:
 
 def _read_private_key(path: Path) -> bytes:
     flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0)
-    fd = os.open(path, flags)
+    try:
+        fd = os.open(path, flags)
+    except OSError as exc:
+        raise CommandError("invalid_command_key") from exc
     try:
         info = os.fstat(fd)
         if (

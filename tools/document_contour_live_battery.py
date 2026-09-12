@@ -25,6 +25,7 @@ import io
 import ipaddress
 import json
 import logging
+import math
 import os
 import re
 import secrets
@@ -34,6 +35,7 @@ import stat
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import unicodedata
 import zipfile
@@ -119,6 +121,9 @@ _PROCESS_CLEANUP_FAILURE_CODES = frozenset(
         "worker_process_group_not_clear",
         "worker_process_group_survived",
         "worker_timeout",
+        "worker_stdout_oversized",
+        "worker_stdout_read_failed",
+        "worker_stdout_reader_not_clear",
     }
 )
 
@@ -188,6 +193,19 @@ class CaseIdentity:
         return int(self.token("prompt-variant:" + key, length=8), 16) % count
 
 
+def _worker_cleanup_clear(reaped: bool, group_clear: bool, codes: Sequence[str]) -> bool:
+    # These events may have failed the case but a final reap/group/reader audit
+    # can still establish cleanup. Unknown and uncertain failures stay fenced.
+    resolved_events = {
+        "worker_group_kill_sent",
+        "worker_group_term_sent",
+        "worker_process_group_survived",
+        "worker_timeout",
+        "worker_stdout_oversized",
+    }
+    return bool(reaped and group_clear and not (set(codes) - resolved_events))
+
+
 @dataclass(frozen=True)
 class WorkerProcessOutcome:
     stdout: bytes
@@ -197,6 +215,12 @@ class WorkerProcessOutcome:
     process_group_clear: bool
     timed_out: bool
     cleanup_failure_codes: tuple[str, ...]
+
+    @property
+    def cleanup_clear(self) -> bool:
+        # Reader failures and any unresolved lifecycle failure fence dispatch,
+        # even if the leader and its original process group are gone.
+        return _worker_cleanup_clear(self.worker_reaped, self.process_group_clear, self.cleanup_failure_codes)
 
 
 @dataclass(frozen=True)
@@ -3430,15 +3454,77 @@ def _cleanup_bound_worker(
     )
 
 
+class _BoundedWorkerStdout:
+    """Drain one bound worker pipe without letting output grow controller memory."""
+
+    def __init__(self, process: subprocess.Popen[bytes], limit: int) -> None:
+        self.stream = process.stdout
+        if self.stream is None:
+            raise BatteryFailure("worker_stdout_missing")
+        self.process_group = int(process.pid)
+        self.limit = limit
+        self.output = bytearray()
+        self.oversized = False
+        self.failed = False
+        # Only this reader owns the pipe. Cleanup's communicate() still reaps
+        # the process but must not compete with the bounded reader for bytes.
+        process.stdout = None
+        self.thread = threading.Thread(target=self._drain, daemon=True, name="document-worker-stdout")
+        try:
+            self.thread.start()
+        except BaseException:
+            self.stream.close()
+            raise
+
+    def _drain(self) -> None:
+        try:
+            while chunk := self.stream.read(65536):
+                remaining = max(0, self.limit - len(self.output))
+                self.output.extend(chunk[:remaining])
+                if len(chunk) > remaining:
+                    self.oversized = True
+                    _signal_process_group(self.process_group, signal.SIGKILL)
+        except Exception:
+            self.failed = True
+            with suppress(OSError):
+                _signal_process_group(self.process_group, signal.SIGKILL)
+        finally:
+            self.stream.close()
+
+    def finish(self) -> tuple[bytes, tuple[str, ...]]:
+        self.thread.join(timeout=PROCESS_GROUP_EXIT_GRACE_SEC)
+        codes = []
+        if self.thread.is_alive():
+            codes.append("worker_stdout_reader_not_clear")
+        if self.oversized:
+            codes.append("worker_stdout_oversized")
+        if self.failed:
+            codes.append("worker_stdout_read_failed")
+        return bytes(self.output), tuple(codes)
+
+
 def _run_worker_process(
     command: Sequence[str],
     *,
     environment: Mapping[str, str],
     private_log: Any,
     controller_signal_handlers: ControllerSignalHandlers | None = None,
+    timeout_sec: float | None = None,
+    stdout_limit_bytes: int | None = None,
 ) -> WorkerProcessOutcome:
     """Run one worker under a single fail-closed spawn-to-audit lifecycle."""
 
+    timeout = WORKER_TIMEOUT_SEC if timeout_sec is None else timeout_sec
+    if (
+        type(timeout) not in {int, float}
+        or not math.isfinite(timeout)
+        or not 0 < timeout <= WORKER_TIMEOUT_SEC
+    ):
+        raise BatteryFailure("worker_timeout_invalid")
+    if stdout_limit_bytes is not None and (
+        type(stdout_limit_bytes) is not int or not 1 <= stdout_limit_bytes <= 16 << 20
+    ):
+        raise BatteryFailure("worker_stdout_limit_invalid")
     _require_posix_signal_lifecycle()
     if controller_signal_handlers is not None:
         initial_mask = _block_controller_signals()
@@ -3464,6 +3550,7 @@ def _run_worker_process(
     lifecycle_pending = True
     cleanup_started = False
     cleanup_mask: frozenset[Any] | None = None
+    capture: _BoundedWorkerStdout | None = None
 
     def capture_primary(exc: BaseException) -> None:
         nonlocal primary, primary_traceback
@@ -3491,16 +3578,25 @@ def _run_worker_process(
                         cwd=ROOT,
                         env=dict(environment),
                         stdout=subprocess.PIPE,
-                        stderr=private_log,
+                        # Optional bounded mode owns both OS-level streams;
+                        # redirecting Python stderr alone misses os.write(2).
+                        # Unexpected bootstrap diagnostics invalidate the JSON
+                        # receipt and remain in the retained private output.
+                        stderr=subprocess.STDOUT if stdout_limit_bytes is not None else private_log,
                         start_new_session=True,
                         restore_signals=True,
                     )
                     process_group = int(process.pid)
+                    if stdout_limit_bytes is not None:
+                        capture = _BoundedWorkerStdout(process, stdout_limit_bytes)
                 finally:
                     _restore_signal_mask(spawn_mask)
 
                 try:
-                    stdout, _stderr = process.communicate(timeout=WORKER_TIMEOUT_SEC)
+                    if capture is None:
+                        stdout, _stderr = process.communicate(timeout=timeout)
+                    else:
+                        process.wait(timeout=timeout)
                 except subprocess.TimeoutExpired:
                     timed_out = True
                     cleanup_required = True
@@ -3545,7 +3641,9 @@ def _run_worker_process(
     cleanup_codes_tuple: tuple[str, ...] = ()
 
     def attach_cleanup_projection(exc: ControllerSignal) -> None:
-        exc.worker_cleanup_clear = bool(worker_reaped and process_group_clear)
+        exc.worker_cleanup_clear = _worker_cleanup_clear(
+            worker_reaped, process_group_clear, cleanup_codes_tuple
+        )
         exc.worker_cleanup_failure_codes = cleanup_codes_tuple
 
     try:
@@ -3567,10 +3665,15 @@ def _run_worker_process(
             cleanup_codes.add("worker_leader_not_reaped")
         if not process_group_clear:
             cleanup_codes.add("worker_process_group_not_clear")
+        if capture is not None:
+            stdout, capture_codes = capture.finish()
+            cleanup_codes.update(capture_codes)
 
         cleanup_codes_tuple = tuple(sorted(cleanup_codes))
         if controller_signal_handlers is not None:
-            controller_signal_handlers.worker_cleanup_clear = bool(worker_reaped and process_group_clear)
+            controller_signal_handlers.worker_cleanup_clear = _worker_cleanup_clear(
+                worker_reaped, process_group_clear, cleanup_codes_tuple
+            )
             controller_signal_handlers.worker_cleanup_failure_codes = cleanup_codes_tuple
         if (
             cleanup_mask is not None

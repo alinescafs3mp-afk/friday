@@ -88,6 +88,9 @@ def test_cancelling_an_ordinary_accounts_mission_still_works_and_is_recorded(set
         cancelled = client.post(f"/api/admin/missions/{mission_id}/cancel", headers=admin)
         assert cancelled.status_code == 200, cancelled.text
         assert cancelled.json()["mission"]["status"] == "cancelled"
+        persisted = client.get(f"/api/missions/{mission_id}", headers=bob)
+        assert persisted.status_code == 200, persisted.text
+        assert persisted.json()["mission"]["status"] == "cancelled"
 
         actions = [entry["action"] for entry in storage.list_audit_log("adm3", limit=200)]
         assert "admin.mission.cancel" in actions, f"the cancellation left no audit entry: {actions}"

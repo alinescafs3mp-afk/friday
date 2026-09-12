@@ -169,74 +169,865 @@ def test_accepting_a_link_reconsiders_the_relations(settings):
     Предложения считались один раз, при рождении объекта, по связям, которые
     автомат принял сам. Подтверждённое человеком не участвовало никогда.
     """
+    import re
+    from contextlib import contextmanager
+    from datetime import UTC, datetime
+
     from fastapi.testclient import TestClient
 
+    import friday.storage._knowledge as knowledge_mod
+    from friday.permissions import LEGACY_OWNER_USER_ID
     from friday.server import create_app
+    from friday.storage.models import AuditEntry, new_id
 
+    ACCEPTED_TEXT = "Сервис Атлас использует базу Полярис для хранения смет."
+    EXTRA_TEXT = "Сервис Орион использует базу Вега в отчётах."
+    FOREIGN_TEXT = "Иностранный контур Сириус хранит архив отдельно."
+    T1 = "2026-09-08T21:47:00+00:00"
+    T2 = "2026-09-08T21:47:01+00:00"
+    TENANT_A = "tenanta"
+    TENANT_B = "tenantb"
+    BUSINESS = (
+        "raw_objects",
+        "knowledge_objects",
+        "knowledge_object_versions",
+        "entities",
+        "entity_versions",
+        "knowledge_entity_links",
+        "relation_candidates",
+        "relations",
+        "relation_revision_context",
+        "relation_revisions",
+    )
+    LINK_KEYS = [
+        "id",
+        "knowledge_object_id",
+        "entity_id",
+        "status",
+        "confidence",
+        "created_at",
+        "reviewed_at",
+        "entity_name",
+        "entity_type",
+        "knowledge_title",
+        "knowledge_lifecycle",
+        "evidence",
+    ]
+
+    def issue(storage, user_id: str, preset: str, secret: str) -> None:
+        storage.ensure_user(user_id, source="api-token", display_name=user_id, preset_key=preset)
+        storage.update_user(user_id, preset_key=preset)
+        storage.create_api_token(
+            user_id,
+            hashlib.sha256(secret.encode()).hexdigest(),
+            label="test",
+            created_by="test",
+        )
+
+    def rows(storage, sql: str, params: tuple = ()):
+        return [dict(item) for item in storage.execute(sql, params).fetchall()]
+
+    def snap(storage):
+        out = {table: rows(storage, f"SELECT * FROM {table} ORDER BY rowid") for table in BUSINESS}
+        out["audit_log"] = rows(storage, "SELECT rowid, * FROM audit_log ORDER BY rowid")
+        return out
+
+    def as_json(value):
+        if value is None:
+            return None
+        if isinstance(value, str):
+            return json.loads(value)
+        return value
+
+    def generated_id(value, prefix):
+        assert type(value) is str and re.fullmatch(rf"{prefix}_[0-9a-f]{{16}}", value)
+        return value
+
+    def request_timestamp(value, window, *, audit=False):
+        assert type(value) is str
+        parsed = datetime.fromisoformat(value)
+        precision = "microseconds" if audit else "seconds"
+        assert value == parsed.astimezone(UTC).isoformat(timespec=precision)
+        assert window[0] <= parsed <= window[1]
+        return value
+
+    def one(storage, sql: str, params: tuple):
+        found = storage.execute(sql, params).fetchone()
+        assert found is not None
+        return dict(found)
+
+    def closed_after(
+        link_id: str, knowledge_id: str, entity_id: str, status: str, created_at: str, reviewed_at: str
+    ):
+        return {
+            "id": link_id,
+            "knowledge_object_id": knowledge_id,
+            "entity_id": entity_id,
+            "status": status,
+            "confidence": 0.9,
+            "created_at": created_at,
+            "reviewed_at": reviewed_at,
+            "entity_type": "concept",
+            "private_fields_count": 4,
+            "private_chars": 21,
+            "private_items_count": 2,
+        }
+
+    def closed_link(link_id, knowledge_id, entity_id, status, created_at, reviewed_at):
+        return {
+            "id": link_id,
+            "knowledge_object_id": knowledge_id,
+            "entity_id": entity_id,
+            "status": status,
+            "confidence": 0.9,
+            "created_at": created_at,
+            "reviewed_at": reviewed_at,
+            "entity_name": "Полярис",
+            "entity_type": "concept",
+            "knowledge_title": "Документ",
+            "knowledge_lifecycle": "active",
+            "evidence": {"present": False, "bytes": 2},
+        }
+
+    def closed_evidence(knowledge_id: str) -> dict:
+        return {
+            "excerpt": ACCEPTED_TEXT,
+            "knowledge_object_id": knowledge_id,
+            "method": "explicit_local_relation_phrase",
+            "phrase": "использует",
+            "source_name": "Атлас",
+            "target_name": "Полярис",
+        }
+
+    def expected_candidate(storage, tenant, source_id, target_id, knowledge_id, created_window):
+        sql_row = one(
+            storage,
+            """SELECT c.id, c.user_id, c.source_entity_id, c.target_entity_id,
+                      c.relation_type, c.confidence, c.evidence_json, c.status,
+                      c.created_at, c.reviewed_at, c.reviewed_by,
+                      substr(s.name,1,240) AS source_name,
+                      substr(t.name,1,240) AS target_name
+                 FROM relation_candidates c
+                 JOIN entities s ON s.id=c.source_entity_id AND s.user_id=c.user_id
+                 JOIN entities t ON t.id=c.target_entity_id AND t.user_id=c.user_id
+                WHERE c.user_id=? AND c.source_entity_id=? AND c.target_entity_id=?
+                  AND c.relation_type=?""",
+            (tenant, source_id, target_id, "uses"),
+        )
+        expected = {
+            "id": generated_id(sql_row["id"], "relc"),
+            "user_id": tenant,
+            "source_entity_id": source_id,
+            "target_entity_id": target_id,
+            "relation_type": "uses",
+            "confidence": 0.9,
+            "evidence_json": json.dumps(closed_evidence(knowledge_id), ensure_ascii=False, sort_keys=True),
+            "status": "suggested",
+            "created_at": request_timestamp(sql_row["created_at"], created_window),
+            "reviewed_at": None,
+            "reviewed_by": None,
+            "source_name": "Атлас",
+            "target_name": "Полярис",
+        }
+        assert sql_row == expected
+        return expected
+
+    def assert_review_audit(
+        delta, *, actor, link_id, knowledge_id, entity_id, status, created_at, reviewed_at, request_id, window
+    ):
+        assert len(delta) == 1
+        row = delta[0]
+        generated_id(row["id"], "audit")
+        request_timestamp(row["created_at"], window, audit=True)
+        assert row["user_id"] == actor
+        assert row["action"] == "admin.knowledge.entity_link.review"
+        assert row["target_type"] == "knowledge_entity_link"
+        assert row["target_id"] == link_id
+        assert as_json(row["before_json"]) is None
+        assert row["request_id"] == request_id
+        assert row["ip_address"] == ""
+        assert as_json(row["after_json"]) == closed_after(
+            link_id, knowledge_id, entity_id, status, created_at, reviewed_at
+        )
+
+    def unchanged_except(pre_rows, post_rows, *, key: str, allowed: dict):
+        pre_map = {item[key]: item for item in pre_rows}
+        post_map = {item[key]: item for item in post_rows}
+        assert set(post_map) == set(pre_map)
+        for item_id, before in pre_map.items():
+            after = post_map[item_id]
+            if item_id in allowed:
+                expected = dict(before)
+                expected.update(allowed[item_id])
+                assert after == expected
+            else:
+                assert after == before
+
+    def frozen(snapshot):
+        # snap retains observed_at before/after. Every managed outer transaction
+        # advances this durable graph/history clock; only its equality is
+        # excluded here. These assertions make no logical-clock integrity claim.
+        out = dict(snapshot)
+        out["relation_revision_context"] = [
+            {key: value for key, value in row.items() if key != "observed_at"}
+            for row in snapshot["relation_revision_context"]
+        ]
+        return out
+
+    @contextmanager
+    def pin_review_time(value: str):
+        original = knowledge_mod.utc_now
+        knowledge_mod.utc_now = lambda: value
+        try:
+            yield
+        finally:
+            knowledge_mod.utc_now = original
+
+    owner_id = LEGACY_OWNER_USER_ID
+    owner = {"Authorization": f"Bearer {settings.api_token}"}
     app = create_app(settings)
     with TestClient(app) as client:
         storage = app.state.storage
         kg = app.state.kg
-        owner = {"Authorization": f"Bearer {settings.api_token}"}
-        user_id = client.get("/api/admin/users", headers=owner).json()["items"][0]["id"]
+        storage.ensure_user(owner_id, source="test", display_name="owner", preset_key="owner")
+        storage.update_user(owner_id, preset_key="owner")
+        issue(storage, TENANT_A, "user", "secret-tenant-a")
+        issue(storage, TENANT_B, "user", "secret-tenant-b")
 
-        text = "Сервис Атлас использует базу Полярис для хранения смет."
-        ko_id = _document(storage, user_id, text)
-        _linked_entity(storage, kg, user_id, ko_id, "Атлас", status="accepted")
-        pending = _linked_entity(storage, kg, user_id, ko_id, "Полярис", status="suggested")
-
-        assert kg.suggest_relations_for_knowledge(user_id, ko_id) == []
-        link_id = next(
-            row["id"]
-            for row in storage.list_knowledge_entity_links(
-                user_id, knowledge_object_id=ko_id, status=None, limit=50
+        ko_id = _document(storage, TENANT_A, ACCEPTED_TEXT)
+        atlas_id = _linked_entity(storage, kg, TENANT_A, ko_id, "Атлас", status="accepted")
+        polaris_id = _linked_entity(storage, kg, TENANT_A, ko_id, "Полярис", status="suggested")
+        extra_ko = _document(storage, TENANT_A, EXTRA_TEXT)
+        _linked_entity(storage, kg, TENANT_A, extra_ko, "Орион", status="accepted")
+        _linked_entity(storage, kg, TENANT_A, extra_ko, "Вега", status="accepted")
+        kg.suggest_relations_for_knowledge(TENANT_A, extra_ko)
+        foreign_ko = _document(storage, TENANT_B, FOREIGN_TEXT)
+        _linked_entity(storage, kg, TENANT_B, foreign_ko, "Сириус", status="accepted")
+        storage.log_audit(
+            AuditEntry(
+                id=new_id("audit"),
+                user_id=owner_id,
+                action="admin.users.list",
+                target_type="user",
+                target_id="*",
+                after_json={"scope": "all_tenants"},
             )
-            if row["entity_id"] == pending
         )
 
-        response = client.patch(
-            f"/api/admin/entity-links/{link_id}",
-            json={"user_id": user_id, "status": "accepted"},
-            headers=owner,
+        polaris_link = one(
+            storage,
+            "SELECT * FROM knowledge_entity_links WHERE user_id=? AND entity_id=?",
+            (TENANT_A, polaris_id),
         )
+        link_id = polaris_link["id"]
+        created_at = polaris_link["created_at"]
+        pre = snap(storage)
+        assert polaris_link["status"] == "suggested"
+        assert polaris_link["reviewed_at"] is None
+        assert polaris_link["reviewed_by"] is None
+
+        first_started = datetime.now(UTC).replace(microsecond=0)
+        with pin_review_time(T1):
+            response = client.patch(
+                f"/api/admin/entity-links/{link_id}",
+                json={"user_id": TENANT_A, "status": "accepted"},
+                headers=owner,
+            )
+        first_window = (first_started, datetime.now(UTC))
         assert response.status_code == 200, response.text
-        assert response.json()["relation_candidates"], (
-            "после подтверждения связи человеком предложения не пересчитались"
+        body = response.json()
+        assert list(body) == ["link", "relation_candidates"]
+        assert list(body["link"]) == LINK_KEYS
+        assert body["link"] == closed_link(link_id, ko_id, polaris_id, "accepted", created_at, T1)
+        candidate = expected_candidate(storage, TENANT_A, atlas_id, polaris_id, ko_id, first_window)
+        assert body["relation_candidates"] == [candidate]
+
+        sql_link = one(storage, "SELECT * FROM knowledge_entity_links WHERE id=?", (link_id,))
+        assert sql_link["user_id"] == TENANT_A
+        assert sql_link["reviewed_by"] == owner_id
+        assert sql_link["status"] == "accepted"
+        assert sql_link["reviewed_at"] == T1
+        assert sql_link["created_at"] == created_at
+        assert sql_link["confidence"] == 0.9
+
+        after = snap(storage)
+        unchanged_except(
+            pre["knowledge_entity_links"],
+            after["knowledge_entity_links"],
+            key="id",
+            allowed={link_id: {"status": "accepted", "reviewed_at": T1, "reviewed_by": owner_id}},
         )
-        assert storage.count_relation_candidates(user_id) > 0
+        unchanged_except(
+            pre["knowledge_objects"],
+            after["knowledge_objects"],
+            key="id",
+            allowed={ko_id: {"updated_at": T1}},
+        )
+        ko_row = one(storage, "SELECT * FROM knowledge_objects WHERE id=?", (ko_id,))
+        assert ko_row["entity_id"] == atlas_id
+        assert ko_row["updated_at"] == T1
+        assert after["raw_objects"] == pre["raw_objects"]
+        assert after["knowledge_object_versions"] == pre["knowledge_object_versions"]
+        assert after["entities"] == pre["entities"]
+        assert after["entity_versions"] == pre["entity_versions"]
+        assert after["relations"] == pre["relations"]
+        assert frozen(after)["relation_revision_context"] == frozen(pre)["relation_revision_context"]
+        assert after["relation_revisions"] == pre["relation_revisions"]
+        assert after["relation_candidates"][: len(pre["relation_candidates"])] == pre["relation_candidates"]
+        assert len(after["relation_candidates"]) == len(pre["relation_candidates"]) + 1
+        selected = [
+            row
+            for row in after["relation_candidates"]
+            if row["source_entity_id"] == atlas_id and row["target_entity_id"] == polaris_id
+        ]
+        assert len(selected) == 1
+        assert selected[0]["id"] == candidate["id"]
+        assert selected[0]["created_at"] == candidate["created_at"]
+        assert after["audit_log"][: len(pre["audit_log"])] == pre["audit_log"]
+        assert_review_audit(
+            after["audit_log"][len(pre["audit_log"]) :],
+            actor=owner_id,
+            link_id=link_id,
+            knowledge_id=ko_id,
+            entity_id=polaris_id,
+            status="accepted",
+            created_at=created_at,
+            reviewed_at=T1,
+            request_id=response.headers["x-request-id"],
+            window=first_window,
+        )
+
+        replay_started = datetime.now(UTC).replace(microsecond=0)
+        with pin_review_time(T2):
+            replay = client.patch(
+                f"/api/admin/entity-links/{link_id}",
+                json={"user_id": TENANT_A, "status": "accepted"},
+                headers=owner,
+            )
+        replay_window = (replay_started, datetime.now(UTC))
+        assert replay.status_code == 200, replay.text
+        replay_body = replay.json()
+        assert list(replay_body) == ["link", "relation_candidates"]
+        assert replay_body["link"] == closed_link(link_id, ko_id, polaris_id, "accepted", created_at, T2)
+        replay_candidate = expected_candidate(storage, TENANT_A, atlas_id, polaris_id, ko_id, first_window)
+        assert replay_candidate["id"] == candidate["id"]
+        assert replay_candidate["created_at"] == candidate["created_at"]
+        assert replay_candidate["evidence_json"] == candidate["evidence_json"]
+        assert replay_body["relation_candidates"] == [replay_candidate]
+        replay_state = snap(storage)
+        assert len(replay_state["relation_candidates"]) == len(after["relation_candidates"])
+        unchanged_except(
+            after["knowledge_entity_links"],
+            replay_state["knowledge_entity_links"],
+            key="id",
+            allowed={link_id: {"reviewed_at": T2, "reviewed_by": owner_id, "status": "accepted"}},
+        )
+        ko_replay = one(storage, "SELECT * FROM knowledge_objects WHERE id=?", (ko_id,))
+        assert ko_replay["entity_id"] == atlas_id
+        assert ko_replay["updated_at"] == T2
+        expected_replay = {table: [dict(row) for row in after[table]] for table in BUSINESS}
+        for row in expected_replay["knowledge_entity_links"]:
+            if row["id"] == link_id:
+                row.update(status="accepted", reviewed_at=T2, reviewed_by=owner_id)
+        for row in expected_replay["knowledge_objects"]:
+            if row["id"] == ko_id:
+                row["updated_at"] = T2
+        for row in expected_replay["relation_candidates"]:
+            if row["id"] == candidate["id"]:
+                # Same-input upsert retains the original ID/time/review fields;
+                # its three assignment columns must still have these literals.
+                row.update(
+                    confidence=0.9,
+                    evidence_json=json.dumps(closed_evidence(ko_id), ensure_ascii=False, sort_keys=True),
+                    status="suggested",
+                )
+        actual_business, expected_business = frozen(replay_state), frozen(expected_replay)
+        for table in BUSINESS:
+            assert actual_business[table] == expected_business[table], table
+        assert replay_state["audit_log"][: len(after["audit_log"])] == after["audit_log"]
+        assert_review_audit(
+            replay_state["audit_log"][len(after["audit_log"]) :],
+            actor=owner_id,
+            link_id=link_id,
+            knowledge_id=ko_id,
+            entity_id=polaris_id,
+            status="accepted",
+            created_at=created_at,
+            reviewed_at=T2,
+            request_id=replay.headers["x-request-id"],
+            window=replay_window,
+        )
 
 
 def test_rejecting_a_link_proposes_nothing(settings):
     """Отклонение — не повод искать связи; и оно не должно стоить прохода по тексту."""
+    import re
+    from contextlib import contextmanager
+    from datetime import UTC, datetime
+
     from fastapi.testclient import TestClient
 
+    import friday.storage._knowledge as knowledge_mod
+    from friday.permissions import LEGACY_OWNER_USER_ID
     from friday.server import create_app
+    from friday.storage.models import AuditEntry, new_id
 
+    REJECTED_TEXT = "Сервис Атлас использует базу Полярис."
+    EXTRA_TEXT = "Сервис Орион использует базу Вега в отчётах."
+    FOREIGN_TEXT = "Иностранный контур Сириус хранит архив отдельно."
+    OWNER_TEXT = "Документ владельца для сторожа."
+    T1 = "2026-09-08T21:47:10+00:00"
+    T2 = "2026-09-08T21:47:11+00:00"
+    TENANT_A = "tenanta"
+    TENANT_B = "tenantb"
+    DELEGATED = "delegated"
+    DENIED = "deniedadm"
+    SECRET_A = "secret-tenant-a"
+    SECRET_B = "secret-tenant-b"
+    SECRET_DELEGATED = "secret-delegated-admin"
+    SECRET_DENIED = "secret-denied-admin"
+    SPOOF = "spoof-reviewed-by-canary"
+    BUSINESS = (
+        "raw_objects",
+        "knowledge_objects",
+        "knowledge_object_versions",
+        "entities",
+        "entity_versions",
+        "knowledge_entity_links",
+        "relation_candidates",
+        "relations",
+        "relation_revision_context",
+        "relation_revisions",
+    )
+    LINK_KEYS = [
+        "id",
+        "knowledge_object_id",
+        "entity_id",
+        "status",
+        "confidence",
+        "created_at",
+        "reviewed_at",
+        "entity_name",
+        "entity_type",
+        "knowledge_title",
+        "knowledge_lifecycle",
+        "evidence",
+    ]
+
+    def issue(storage, user_id: str, preset: str, secret: str) -> None:
+        storage.ensure_user(user_id, source="api-token", display_name=user_id, preset_key=preset)
+        storage.update_user(user_id, preset_key=preset)
+        storage.create_api_token(
+            user_id,
+            hashlib.sha256(secret.encode()).hexdigest(),
+            label="test",
+            created_by="test",
+        )
+
+    def rows(storage, sql: str, params: tuple = ()):
+        return [dict(item) for item in storage.execute(sql, params).fetchall()]
+
+    def snap(storage):
+        out = {table: rows(storage, f"SELECT * FROM {table} ORDER BY rowid") for table in BUSINESS}
+        out["audit_log"] = rows(storage, "SELECT rowid, * FROM audit_log ORDER BY rowid")
+        return out
+
+    def as_json(value):
+        if value is None:
+            return None
+        if isinstance(value, str):
+            return json.loads(value)
+        return value
+
+    def one(storage, sql: str, params: tuple):
+        found = storage.execute(sql, params).fetchone()
+        assert found is not None
+        return dict(found)
+
+    def closed_after(
+        link_id: str, knowledge_id: str, entity_id: str, status: str, created_at: str, reviewed_at: str
+    ):
+        return {
+            "id": link_id,
+            "knowledge_object_id": knowledge_id,
+            "entity_id": entity_id,
+            "status": status,
+            "confidence": 0.9,
+            "created_at": created_at,
+            "reviewed_at": reviewed_at,
+            "entity_type": "concept",
+            "private_fields_count": 4,
+            "private_chars": 21,
+            "private_items_count": 2,
+        }
+
+    def closed_link(link_id, knowledge_id, entity_id, status, created_at, reviewed_at):
+        return {
+            "id": link_id,
+            "knowledge_object_id": knowledge_id,
+            "entity_id": entity_id,
+            "status": status,
+            "confidence": 0.9,
+            "created_at": created_at,
+            "reviewed_at": reviewed_at,
+            "entity_name": "Полярис",
+            "entity_type": "concept",
+            "knowledge_title": "Документ",
+            "knowledge_lifecycle": "active",
+            "evidence": {"present": False, "bytes": 2},
+        }
+
+    def request_timestamp(value, window):
+        assert type(value) is str
+        parsed = datetime.fromisoformat(value)
+        assert value == parsed.astimezone(UTC).isoformat(timespec="microseconds")
+        assert window[0] <= parsed <= window[1]
+
+    def audit_identity(row, window):
+        assert type(row["id"]) is str and re.fullmatch(r"audit_[0-9a-f]{16}", row["id"])
+        request_timestamp(row["created_at"], window)
+
+    def assert_review_audit(
+        delta, *, actor, link_id, knowledge_id, entity_id, status, created_at, reviewed_at, request_id, window
+    ):
+        assert len(delta) == 1
+        row = delta[0]
+        audit_identity(row, window)
+        assert row["user_id"] == actor
+        assert row["action"] == "admin.knowledge.entity_link.review"
+        assert row["target_type"] == "knowledge_entity_link"
+        assert row["target_id"] == link_id
+        assert as_json(row["before_json"]) is None
+        assert row["request_id"] == request_id
+        assert row["ip_address"] == ""
+        assert as_json(row["after_json"]) == closed_after(
+            link_id, knowledge_id, entity_id, status, created_at, reviewed_at
+        )
+
+    def unchanged_except(pre_rows, post_rows, *, key: str, allowed: dict):
+        pre_map = {item[key]: item for item in pre_rows}
+        post_map = {item[key]: item for item in post_rows}
+        assert set(post_map) == set(pre_map)
+        for item_id, before in pre_map.items():
+            after = post_map[item_id]
+            if item_id in allowed:
+                expected = dict(before)
+                expected.update(allowed[item_id])
+                assert after == expected
+            else:
+                assert after == before
+
+    def frozen(snapshot):
+        # Full snapshots retain observed_at. Its managed-transaction durable
+        # graph/history clock may advance even without a relation mutation;
+        # excluding only equality here does not certify clock integrity.
+        out = dict(snapshot)
+        out["relation_revision_context"] = [
+            {key: value for key, value in row.items() if key != "observed_at"}
+            for row in snapshot["relation_revision_context"]
+        ]
+        return out
+
+    def business_equal(pre, post):
+        left, right = frozen(pre), frozen(post)
+        for table in BUSINESS:
+            assert right[table] == left[table]
+
+    def leak_blob(parts) -> str:
+        chunks = []
+        for part in parts:
+            chunks.append(part if isinstance(part, str) else str(part))
+        return "".join(chunks)
+
+    @contextmanager
+    def pin_review_time(value: str):
+        original = knowledge_mod.utc_now
+        knowledge_mod.utc_now = lambda: value
+        try:
+            yield
+        finally:
+            knowledge_mod.utc_now = original
+
+    owner_id = LEGACY_OWNER_USER_ID
+    owner = {"Authorization": f"Bearer {settings.api_token}"}
+    delegated_headers = {"Authorization": f"Bearer {SECRET_DELEGATED}"}
+    denied_headers = {"Authorization": f"Bearer {SECRET_DENIED}"}
     app = create_app(settings)
     with TestClient(app) as client:
         storage = app.state.storage
         kg = app.state.kg
-        owner = {"Authorization": f"Bearer {settings.api_token}"}
-        user_id = client.get("/api/admin/users", headers=owner).json()["items"][0]["id"]
+        storage.ensure_user(owner_id, source="test", display_name="owner", preset_key="owner")
+        storage.update_user(owner_id, preset_key="owner")
+        issue(storage, TENANT_A, "user", SECRET_A)
+        issue(storage, TENANT_B, "user", SECRET_B)
+        issue(storage, DELEGATED, "admin", SECRET_DELEGATED)
+        issue(storage, DENIED, "admin", SECRET_DENIED)
+        storage.set_permission_override(DENIED, "admin.all_data.manage", "deny")
 
-        ko_id = _document(storage, user_id, "Сервис Атлас использует базу Полярис.")
-        _linked_entity(storage, kg, user_id, ko_id, "Атлас", status="accepted")
-        pending = _linked_entity(storage, kg, user_id, ko_id, "Полярис", status="suggested")
-        link_id = next(
-            row["id"]
-            for row in storage.list_knowledge_entity_links(
-                user_id, knowledge_object_id=ko_id, status=None, limit=50
+        ko_id = _document(storage, TENANT_A, REJECTED_TEXT)
+        atlas_id = _linked_entity(storage, kg, TENANT_A, ko_id, "Атлас", status="accepted")
+        polaris_id = _linked_entity(storage, kg, TENANT_A, ko_id, "Полярис", status="suggested")
+        extra_ko = _document(storage, TENANT_A, EXTRA_TEXT)
+        _linked_entity(storage, kg, TENANT_A, extra_ko, "Орион", status="accepted")
+        _linked_entity(storage, kg, TENANT_A, extra_ko, "Вега", status="accepted")
+        kg.suggest_relations_for_knowledge(TENANT_A, extra_ko)
+        foreign_ko = _document(storage, TENANT_B, FOREIGN_TEXT)
+        foreign_entity = _linked_entity(storage, kg, TENANT_B, foreign_ko, "Сириус", status="accepted")
+        owner_ko = _document(storage, owner_id, OWNER_TEXT)
+        owner_entity = _linked_entity(storage, kg, owner_id, owner_ko, "Сторож", status="suggested")
+        storage.log_audit(
+            AuditEntry(
+                id=new_id("audit"),
+                user_id=owner_id,
+                action="admin.users.list",
+                target_type="user",
+                target_id="*",
+                after_json={"scope": "all_tenants"},
             )
-            if row["entity_id"] == pending
         )
 
-        response = client.patch(
-            f"/api/admin/entity-links/{link_id}",
-            json={"user_id": user_id, "status": "rejected"},
-            headers=owner,
+        polaris_link = one(
+            storage,
+            "SELECT * FROM knowledge_entity_links WHERE user_id=? AND entity_id=?",
+            (TENANT_A, polaris_id),
         )
-        assert response.status_code == 200
-        assert response.json()["relation_candidates"] == []
+        owner_link = one(
+            storage,
+            "SELECT * FROM knowledge_entity_links WHERE user_id=? AND entity_id=?",
+            (owner_id, owner_entity),
+        )
+        foreign_link = one(
+            storage,
+            "SELECT * FROM knowledge_entity_links WHERE user_id=? AND entity_id=?",
+            (TENANT_B, foreign_entity),
+        )
+        link_id = polaris_link["id"]
+        created_at = polaris_link["created_at"]
+        source_refs = [
+            row["source_ref"]
+            for row in rows(storage, "SELECT source_ref FROM raw_objects")
+            if row["source_ref"]
+        ]
+        forbidden = [
+            settings.api_token,
+            SECRET_A,
+            SECRET_B,
+            SECRET_DELEGATED,
+            SECRET_DENIED,
+            SPOOF,
+            REJECTED_TEXT,
+            EXTRA_TEXT,
+            FOREIGN_TEXT,
+            OWNER_TEXT,
+            foreign_ko,
+            foreign_entity,
+            foreign_link["id"],
+            *source_refs,
+        ]
+        pre = snap(storage)
+
+        first_started = datetime.now(UTC).replace(microsecond=0)
+        with pin_review_time(T1):
+            response = client.patch(
+                f"/api/admin/entity-links/{link_id}",
+                json={"user_id": TENANT_A, "status": "rejected"},
+                headers=owner,
+            )
+        first_window = (first_started, datetime.now(UTC))
+        assert response.status_code == 200, response.text
+        body = response.json()
+        assert list(body) == ["link", "relation_candidates"]
+        assert list(body["link"]) == LINK_KEYS
+        assert body["link"] == closed_link(link_id, ko_id, polaris_id, "rejected", created_at, T1)
+        assert body["relation_candidates"] == []
+
+        sql_link = one(storage, "SELECT * FROM knowledge_entity_links WHERE id=?", (link_id,))
+        assert sql_link["user_id"] == TENANT_A
+        assert sql_link["reviewed_by"] == owner_id
+        assert sql_link["status"] == "rejected"
+        assert sql_link["reviewed_at"] == T1
+        assert sql_link["created_at"] == created_at
+
+        after = snap(storage)
+        unchanged_except(
+            pre["knowledge_entity_links"],
+            after["knowledge_entity_links"],
+            key="id",
+            allowed={link_id: {"status": "rejected", "reviewed_at": T1, "reviewed_by": owner_id}},
+        )
+        assert after["knowledge_objects"] == pre["knowledge_objects"]
+        ko_row = one(storage, "SELECT * FROM knowledge_objects WHERE id=?", (ko_id,))
+        assert ko_row["entity_id"] == atlas_id
+        assert after["raw_objects"] == pre["raw_objects"]
+        assert after["knowledge_object_versions"] == pre["knowledge_object_versions"]
+        assert after["entities"] == pre["entities"]
+        assert after["entity_versions"] == pre["entity_versions"]
+        assert after["relation_candidates"] == pre["relation_candidates"]
+        assert after["relations"] == pre["relations"]
+        assert frozen(after)["relation_revision_context"] == frozen(pre)["relation_revision_context"]
+        assert after["relation_revisions"] == pre["relation_revisions"]
+        assert after["audit_log"][: len(pre["audit_log"])] == pre["audit_log"]
+        assert_review_audit(
+            after["audit_log"][len(pre["audit_log"]) :],
+            actor=owner_id,
+            link_id=link_id,
+            knowledge_id=ko_id,
+            entity_id=polaris_id,
+            status="rejected",
+            created_at=created_at,
+            reviewed_at=T1,
+            request_id=response.headers["x-request-id"],
+            window=first_window,
+        )
+
+        replay_started = datetime.now(UTC).replace(microsecond=0)
+        with pin_review_time(T2):
+            replay = client.patch(
+                f"/api/admin/entity-links/{link_id}",
+                json={"user_id": TENANT_A, "status": "rejected"},
+                headers=owner,
+            )
+        replay_window = (replay_started, datetime.now(UTC))
+        assert replay.status_code == 200, replay.text
+        replay_body = replay.json()
+        assert list(replay_body) == ["link", "relation_candidates"]
+        assert replay_body["link"] == closed_link(link_id, ko_id, polaris_id, "rejected", created_at, T2)
+        assert replay_body["relation_candidates"] == []
+        replay_state = snap(storage)
+        unchanged_except(
+            after["knowledge_entity_links"],
+            replay_state["knowledge_entity_links"],
+            key="id",
+            allowed={link_id: {"status": "rejected", "reviewed_at": T2, "reviewed_by": owner_id}},
+        )
+        expected_replay = {table: [dict(row) for row in after[table]] for table in BUSINESS}
+        for row in expected_replay["knowledge_entity_links"]:
+            if row["id"] == link_id:
+                row.update(status="rejected", reviewed_at=T2, reviewed_by=owner_id)
+        business_equal(expected_replay, replay_state)
+        assert replay_state["audit_log"][: len(after["audit_log"])] == after["audit_log"]
+        assert_review_audit(
+            replay_state["audit_log"][len(after["audit_log"]) :],
+            actor=owner_id,
+            link_id=link_id,
+            knowledge_id=ko_id,
+            entity_id=polaris_id,
+            status="rejected",
+            created_at=created_at,
+            reviewed_at=T2,
+            request_id=replay.headers["x-request-id"],
+            window=replay_window,
+        )
+
+        cases = [
+            (
+                lambda: client.patch(
+                    f"/api/admin/entity-links/{link_id}",
+                    json={"user_id": TENANT_A, "status": "Accepted"},
+                    headers=owner,
+                ),
+                400,
+                "status must be suggested, accepted, or rejected",
+                0,
+            ),
+            (
+                lambda: client.patch(
+                    f"/api/admin/entity-links/{link_id}",
+                    json={"user_id": TENANT_B, "status": "rejected"},
+                    headers=owner,
+                ),
+                404,
+                "Связь знания с сущностью не найдена",
+                0,
+            ),
+            (
+                lambda: client.patch(
+                    f"/api/admin/entity-links/{owner_link['id']}",
+                    json={"user_id": owner_id, "status": "rejected"},
+                    headers=delegated_headers,
+                ),
+                403,
+                "Только владелец может изменять учётную запись владельца",
+                0,
+            ),
+            (
+                lambda: client.patch(
+                    f"/api/admin/entity-links/{link_id}",
+                    json={"user_id": TENANT_A, "status": "rejected"},
+                    headers=denied_headers,
+                ),
+                403,
+                "Access denied for admin.all_data.manage (explicit_deny)",
+                0,
+            ),
+            (
+                lambda: client.patch(
+                    f"/api/admin/entity-links/{link_id}",
+                    content=b"{",
+                    headers={**owner, "Content-Type": "application/json"},
+                ),
+                400,
+                "Тело запроса должно быть корректным JSON",
+                0,
+            ),
+        ]
+        baseline = snap(storage)
+        for call, status, detail, _delta in cases:
+            before = snap(storage)
+            resp = call()
+            blob = leak_blob(
+                [
+                    resp.text,
+                    json.dumps(resp.json(), ensure_ascii=False),
+                ]
+            )
+            for marker in forbidden:
+                assert marker not in blob
+            assert resp.status_code == status, resp.text
+            assert resp.json() == {"detail": detail}
+            now = snap(storage)
+            business_equal(before, now)
+            assert now["audit_log"] == before["audit_log"]
+            assert frozen(now) == frozen(before)
+
+        before_anon = snap(storage)
+        anon_started = datetime.now(UTC).replace(microsecond=0)
+        anon = client.patch(
+            f"/api/admin/entity-links/{link_id}",
+            json={"user_id": TENANT_A, "status": "rejected"},
+        )
+        anon_window = (anon_started, datetime.now(UTC))
+        assert anon.status_code == 401, anon.text
+        assert anon.json() == {"detail": "Missing authentication"}
+        anon_blob = leak_blob([anon.text, json.dumps(anon.json(), ensure_ascii=False)])
+        for marker in forbidden:
+            assert marker not in anon_blob
+        after_anon = snap(storage)
+        business_equal(before_anon, after_anon)
+        assert after_anon["audit_log"][: len(before_anon["audit_log"])] == before_anon["audit_log"]
+        delta = after_anon["audit_log"][len(before_anon["audit_log"]) :]
+        assert len(delta) == 1
+        row = delta[0]
+        audit_identity(row, anon_window)
+        assert row["user_id"] == "anonymous"
+        assert row["action"] == "auth.failed"
+        assert row["target_type"] == "auth"
+        assert row["target_id"] == "invalid_credentials"
+        assert as_json(row["before_json"]) is None
+        assert row["request_id"] == anon.headers["x-request-id"]
+        assert as_json(row["after_json"]) == {
+            "method_chars": 5,
+            "path_chars": 44,
+            "reason": "invalid_credentials",
+            "status_present": True,
+        }
+        audit_blob = json.dumps(delta, ensure_ascii=False, default=str)
+        for marker in forbidden:
+            assert marker not in audit_blob
+        assert baseline["knowledge_entity_links"] == after_anon["knowledge_entity_links"]
+        assert atlas_id
+        assert owner_link["id"].startswith("kel_")
+        assert len(link_id) == 20
 
 
 def test_one_entity_mentioned_twice_is_not_a_relation_with_itself(storage, graph):
