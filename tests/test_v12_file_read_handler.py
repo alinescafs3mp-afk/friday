@@ -2507,7 +2507,10 @@ async def test_prepare_writer_barrier_is_bounded_before_legacy_fallback(
     storage,
     monkeypatch,
 ) -> None:
+    from concurrent.futures import ThreadPoolExecutor
+
     import friday.orchestration.file_read as file_read_module
+    import friday.storage._core as storage_core_module
 
     reference = _register(storage, settings, text="PREPARE-LOCK", filename="locked.txt")
     handler = _handler(storage, settings, _Model("unused [A1]"))
@@ -2519,22 +2522,133 @@ async def test_prepare_writer_barrier_is_bounded_before_legacy_fallback(
         with storage.transaction() as conn:
             conn.execute("SELECT 1")
             started.set()
-            assert release.wait(2)
+            assert release.wait(10)
 
     owner = threading.Thread(target=hold_writer, daemon=True)
     owner.start()
-    assert await asyncio.to_thread(started.wait, 1)
+    assert await asyncio.to_thread(started.wait, 2)
     monkeypatch.setattr(file_read_module, "_PREPARATION_BUDGET_SEC", 0.05)
     connections_before = len(storage._connections)  # noqa: SLF001
-    started_at = time.monotonic()
+    main_database = storage._db_path.resolve(strict=False)  # noqa: SLF001
+    original_connect = sqlite3.connect
+    original_file_read_time = file_read_module.time
+    original_prepare = handler._prepare_sync  # noqa: SLF001
+    original_prepare_context = handler._prepare_context  # noqa: SLF001
+    observed_connections = []
+
+    class ObservedConnection(sqlite3.Connection):
+        close_observed = False
+
+        def close(self):
+            result = super().close()
+            self.close_observed = True
+            return result
+
+    def observe_connect(database, *args, **kwargs):
+        assert "factory" not in kwargs
+        connection = original_connect(database, *args, factory=ObservedConnection, **kwargs)
+        target = str(database)
+        if target == str(main_database) or target.startswith(f"{main_database.as_uri()}?"):
+            observed_connections.append(connection)
+        return connection
+
+    monkeypatch.setattr(storage_core_module.sqlite3, "connect", observe_connect)
+    real_monotonic = time.monotonic
+    preparation_clock = []
+
+    class ObservedTime:
+        @staticmethod
+        def monotonic():
+            value = real_monotonic()
+            preparation_clock.append(value)
+            return value
+
+    monkeypatch.setattr(file_read_module, "time", ObservedTime)
+    observed_deadlines = []
+    worker_delay = threading.Event()
+    worker_pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="prepare-deadline-test")
+    loop = asyncio.get_running_loop()
+
+    def start_after_deadline(request, absolute_deadline):
+        worker_entered = real_monotonic()
+        remaining = max(0.0, absolute_deadline - real_monotonic())
+        assert not worker_delay.wait(remaining + 0.02)
+        observed_deadlines.append((absolute_deadline, worker_entered, real_monotonic()))
+        return original_prepare(request, absolute_deadline)
+
+    async def prepare_after_deadline(request, turn, plan, absolute_deadline):
+        del turn, plan
+        return await loop.run_in_executor(
+            worker_pool,
+            start_after_deadline,
+            request,
+            absolute_deadline,
+        )
+
+    primary_complete = False
     try:
-        assert await handler.prepare(request, turn, plan) is None
-        assert time.monotonic() - started_at < 0.5
+        # A valid worker may begin only after its exact 50 ms deadline. It must
+        # return fallback before sqlite3.connect(), without requiring an opener.
+        monkeypatch.setattr(handler, "_prepare_context", prepare_after_deadline)
+        assert await asyncio.wait_for(handler.prepare(request, turn, plan), timeout=2) is None
+        assert len(observed_deadlines) == 1
+        deadline, worker_entered, worker_resumed = observed_deadlines[0]
+        assert preparation_clock
+        assert deadline == pytest.approx(preparation_clock[0] + 0.05, abs=1e-9)
+        assert deadline - worker_entered <= 0.05
+        assert worker_resumed >= deadline
+        assert time.monotonic() >= deadline
+        assert owner.is_alive() and not release.is_set()
+        assert observed_connections == []
         assert len(storage._connections) == connections_before  # noqa: SLF001
+
+        # Give the same worker a fresh deadline while the real writer is held.
+        # This reaches the post-connect exception path deterministically, and
+        # every rejected connection must be closed before fallback is returned.
+        monkeypatch.setattr(file_read_module, "time", original_file_read_time)
+        monkeypatch.setattr(handler, "_prepare_context", original_prepare_context)
+
+        def contend_with_writer():
+            return original_prepare(request, real_monotonic() + 0.25)
+
+        assert (
+            await asyncio.wait_for(
+                loop.run_in_executor(worker_pool, contend_with_writer),
+                timeout=2,
+            )
+            is None
+        )
+        assert observed_connections
+        assert all(connection.close_observed for connection in observed_connections)
+        for failed_connection in observed_connections:
+            with pytest.raises(sqlite3.ProgrammingError, match="closed"):
+                failed_connection.execute("SELECT 1")
+        assert owner.is_alive() and not release.is_set()
+        assert len(storage._connections) == connections_before  # noqa: SLF001
+        primary_complete = True
     finally:
-        release.set()
-        await asyncio.to_thread(owner.join, 1)
-    # An interrupted cold opener must close its incomplete connection and
-    # restore its scoped deadline. A later attempt can still prove the source.
-    prepared = await asyncio.to_thread(handler._prepare_sync, request, time.monotonic() + 2.0)  # noqa: SLF001
-    assert prepared is not None
+        cleanup_complete = False
+        try:
+            release.set()
+            await asyncio.to_thread(owner.join, 1)
+            monkeypatch.setattr(storage_core_module.sqlite3, "connect", original_connect)
+            monkeypatch.setattr(file_read_module, "time", original_file_read_time)
+            monkeypatch.setattr(handler, "_prepare_context", original_prepare_context)
+            cleanup_complete = True
+        finally:
+            if not primary_complete or not cleanup_complete:
+                worker_pool.shutdown(wait=True, cancel_futures=True)
+    try:
+        # The same worker can subsequently accept exactly one fresh connection,
+        # proving the failed opener and its scoped deadline were not retained.
+        def prepare_after_release():
+            return original_prepare(request, real_monotonic() + 1.5)
+
+        prepared = await asyncio.wait_for(
+            loop.run_in_executor(worker_pool, prepare_after_release),
+            timeout=2,
+        )
+        assert prepared is not None
+        assert len(storage._connections) == connections_before + 1  # noqa: SLF001
+    finally:
+        worker_pool.shutdown(wait=True, cancel_futures=True)

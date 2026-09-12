@@ -15,6 +15,16 @@ from friday.permissions import LEGACY_OWNER_USER_ID
 from tools import release_1_0_app_soak as soak
 
 
+def _response_control_rss_limit() -> int:
+    # A long-lived pytest worker can already exceed the isolated app's 1 GiB
+    # release budget. These controls test real response faults, with a fixed
+    # allocation allowance above that worker's existing resident memory.
+    status = Path("/proc/self/status").read_text(encoding="utf-8").splitlines()
+    rss = next(line.split()[1:] for line in status if line.startswith("VmRSS:"))
+    assert len(rss) == 2 and rss[1] == "kB"
+    return max(1 << 30, int(rss[0]) * 1024 + (256 << 20))
+
+
 @pytest.mark.parametrize(
     ("fault", "expected_failure", "failed_operation"),
     [
@@ -67,7 +77,7 @@ def test_actual_app_response_fault_rejects_the_affected_operation(
                 ),
             ],
             "resources": {
-                "max_rss_bytes": 1 << 30,
+                "max_rss_bytes": _response_control_rss_limit(),
                 "max_fd_count": 1024,
                 "max_thread_count": 128,
                 "max_database_bytes": 256 << 20,
@@ -191,7 +201,7 @@ def test_http_200_offline_without_reminder_effect_is_red_and_continues_only_iden
                 ),
             ],
             "resources": {
-                "max_rss_bytes": 1 << 30,
+                "max_rss_bytes": _response_control_rss_limit(),
                 "max_fd_count": 1024,
                 "max_thread_count": 128,
                 "max_database_bytes": 256 << 20,

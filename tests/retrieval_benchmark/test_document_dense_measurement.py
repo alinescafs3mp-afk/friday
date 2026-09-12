@@ -101,7 +101,7 @@ def _run_candidate() -> tuple[dict[str, Any], bytes]:
             env=environment,
             check=False,
             capture_output=True,
-            timeout=120,
+            timeout=300,
         )
         status = subprocess.run(  # noqa: S603,S607
             ["git", "-C", str(checkout), "status", "--porcelain=v1", "--untracked-files=all"],

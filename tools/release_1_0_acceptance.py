@@ -21,6 +21,7 @@ import shutil
 import stat
 import subprocess
 import sys
+import tempfile
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any
@@ -4858,8 +4859,83 @@ def audit_native_execution(
     }
 
 
+_EOL_ATTRIBUTES = ("text", "eol", "filter", "working-tree-encoding")
+_DECLARED_CRLF_ATTRIBUTES = ("set", "crlf", "unspecified", "unspecified")
+_CANDIDATE_READ_CHUNK = 1024 * 1024
+
+
+def _candidate_eol_attributes(candidate_sha: str, relative: str, gate: Any) -> tuple[str, ...]:
+    """Read only candidate-tree attributes, isolated from mutable attribute files."""
+    object_directory = Path(gate._git_output(ROOT, "rev-parse", "--git-path", "objects"))
+    if not object_directory.is_absolute():
+        object_directory = ROOT / object_directory
+    object_directory = object_directory.resolve(strict=True)
+    if not object_directory.is_dir():
+        raise AcceptanceError("gate_candidate_not_frozen")
+    with tempfile.TemporaryDirectory(prefix="friday-candidate-attributes-") as temporary:
+        git_directory = Path(temporary) / "repo.git"
+        git_directory.mkdir(mode=0o700)
+        (git_directory / "refs").mkdir(mode=0o700)
+        (git_directory / "HEAD").write_bytes(b"ref: refs/heads/unused\n")
+        environment = gate._git_environment()
+        environment.update(
+            {
+                "GIT_ATTR_NOSYSTEM": "1",
+                "GIT_DIR": str(git_directory),
+                "GIT_OBJECT_DIRECTORY": str(object_directory),
+                "GIT_WORK_TREE": str(ROOT),
+            }
+        )
+        arguments = (
+            gate.GIT,
+            "-c",
+            "core.attributesFile=/dev/null",
+            "check-attr",
+            f"--source={candidate_sha}",
+            "-z",
+            *_EOL_ATTRIBUTES,
+            "--",
+            relative,
+        )
+        if gate._ACTIVE_PROCESS_OWNER is not None:
+            raw = gate._ACTIVE_PROCESS_OWNER.capture(
+                gate.GateCommand(
+                    "candidate Git attribute read", arguments, environment, cwd=ROOT, timeout_s=60
+                ),
+                limit=64 << 10,
+            )
+        else:
+            try:
+                completed = subprocess.run(  # noqa: S603 - fixed Git and code-owned arguments
+                    arguments,
+                    capture_output=True,
+                    env=environment,
+                    cwd=ROOT,
+                    timeout=60,
+                    check=False,
+                )
+            except subprocess.TimeoutExpired as exc:
+                raise AcceptanceError("gate_candidate_not_frozen") from exc
+            if completed.returncode != 0 or len(completed.stdout) > 64 << 10:
+                raise AcceptanceError("gate_candidate_not_frozen")
+            raw = completed.stdout
+    try:
+        fields = raw.decode("utf-8").split("\x00")
+    except UnicodeDecodeError as exc:
+        raise AcceptanceError("gate_candidate_not_frozen") from exc
+    if fields[-1:] == [""]:
+        fields.pop()
+    if (
+        len(fields) != len(_EOL_ATTRIBUTES) * 3
+        or fields[::3] != [relative] * len(_EOL_ATTRIBUTES)
+        or fields[1::3] != list(_EOL_ATTRIBUTES)
+    ):
+        raise AcceptanceError("gate_candidate_not_frozen")
+    return tuple(fields[index] for index in range(2, len(fields), 3))
+
+
 def _require_candidate_file_bytes(candidate_sha: str) -> None:
-    """Hash every tracked blob independently of Git's cached stat/index flags."""
+    """Hash tracked bytes, allowing only candidate-declared CRLF materialization."""
     from tools import quality_gate as gate
 
     for option in ("-v", "-f"):
@@ -4884,25 +4960,71 @@ def _require_candidate_file_bytes(candidate_sha: str) -> None:
             or not 0 <= before.st_size <= 1 << 30
         ):
             raise AcceptanceError("gate_candidate_not_frozen")
-        digest = hashlib.sha1(usedforsecurity=False)  # Git object identity, not authentication.
-        digest.update(f"blob {before.st_size}\x00".encode())
+        raw_digest = hashlib.sha1(usedforsecurity=False)  # Git object identity, not authentication.
+        raw_digest.update(f"blob {before.st_size}\x00".encode())
         descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC)
         try:
             if gate._stat_identity(os.fstat(descriptor)) != gate._stat_identity(before):
                 raise AcceptanceError("gate_candidate_not_frozen")
             remaining = before.st_size
+            previous_was_cr = False
+            crlf_count = 0
+            lf_count = 0
             while remaining:
-                chunk = os.read(descriptor, min(remaining, 1024 * 1024))
+                read_size = min(remaining, _CANDIDATE_READ_CHUNK)
+                chunk = os.read(descriptor, read_size)
                 if not chunk:
                     raise AcceptanceError("gate_candidate_not_frozen")
-                digest.update(chunk)
+                raw_digest.update(chunk)
+                lf_count += chunk.count(b"\n")
+                crlf_count += chunk.count(b"\r\n") + int(previous_was_cr and chunk.startswith(b"\n"))
+                previous_was_cr = chunk.endswith(b"\r")
                 remaining -= len(chunk)
-            if (
-                os.read(descriptor, 1)
-                or digest.hexdigest() != oid
-                or gate._stat_identity(os.fstat(descriptor)) != gate._stat_identity(before)
-                or gate._stat_identity(path.lstat()) != gate._stat_identity(before)
+            if os.read(descriptor, 1) or gate._stat_identity(os.fstat(descriptor)) != gate._stat_identity(
+                before
             ):
+                raise AcceptanceError("gate_candidate_not_frozen")
+            if raw_digest.hexdigest() != oid:
+                if (
+                    crlf_count == 0
+                    or lf_count != crlf_count
+                    or _candidate_eol_attributes(candidate_sha, relative, gate) != _DECLARED_CRLF_ATTRIBUTES
+                ):
+                    raise AcceptanceError("gate_candidate_not_frozen")
+                normalized_size = before.st_size - crlf_count
+                normalized_digest = hashlib.sha1(usedforsecurity=False)
+                normalized_digest.update(f"blob {normalized_size}\x00".encode())
+                if os.lseek(descriptor, 0, os.SEEK_SET) != 0:
+                    raise AcceptanceError("gate_candidate_not_frozen")
+                remaining = before.st_size
+                pending_cr = False
+                normalized_bytes = 0
+                while remaining:
+                    read_size = min(remaining, _CANDIDATE_READ_CHUNK)
+                    chunk = os.read(descriptor, read_size)
+                    if not chunk:
+                        raise AcceptanceError("gate_candidate_not_frozen")
+                    remaining -= len(chunk)
+                    if pending_cr:
+                        chunk = b"\r" + chunk
+                    pending_cr = chunk.endswith(b"\r")
+                    if pending_cr:
+                        chunk = chunk[:-1]
+                    normalized = chunk.replace(b"\r\n", b"\n")
+                    normalized_digest.update(normalized)
+                    normalized_bytes += len(normalized)
+                if pending_cr:
+                    normalized_digest.update(b"\r")
+                    normalized_bytes += 1
+                if (
+                    os.read(descriptor, 1)
+                    or normalized_bytes != normalized_size
+                    or normalized_digest.hexdigest() != oid
+                ):
+                    raise AcceptanceError("gate_candidate_not_frozen")
+            if gate._stat_identity(os.fstat(descriptor)) != gate._stat_identity(
+                before
+            ) or gate._stat_identity(path.lstat()) != gate._stat_identity(before):
                 raise AcceptanceError("gate_candidate_not_frozen")
         finally:
             os.close(descriptor)

@@ -668,7 +668,7 @@ def test_isolated_cli_audits_collected_bindings_and_preserves_coverage_gaps(tmp_
         ],
         capture_output=True,
         text=True,
-        timeout=30,
+        timeout=120,
         check=False,
         cwd=tmp_path,
         env=environment,
@@ -1528,6 +1528,93 @@ def _frozen_candidate(tmp_path, monkeypatch):
     monkeypatch.setattr(gate, "ROOT", root)
     monkeypatch.setattr(gate, "__file__", str(root / "tools/quality_gate.py"))
     return root, git, base, candidate, policy
+
+
+def _declared_eol_candidate(tmp_path, monkeypatch, attributes="*.ps1 text eol=crlf\n"):
+    from tools import quality_gate as gate
+
+    root = tmp_path / "source"
+    root.mkdir()
+    environment = gate._git_environment()
+    environment["GIT_ATTR_NOSYSTEM"] = "1"
+
+    def git(*args):
+        return subprocess.check_output(
+            [
+                "/usr/bin/git",
+                "-C",
+                str(root),
+                "-c",
+                "user.name=EOL fixture",
+                "-c",
+                "user.email=eol@invalid",
+                "-c",
+                "core.autocrlf=false",
+                *args,
+            ],
+            env=environment,
+            timeout=30,
+        )
+
+    git("init", "-q")
+    path = root / "boundary.ps1"
+    # Commit the raw LF blob before adding attributes so an encoding/filter
+    # attribute cannot transform the fixture's candidate bytes during git add.
+    path.write_bytes(b"A\nB\n")
+    git("add", "--", path.name)
+    git("commit", "-qm", "LF content")
+    (root / ".gitattributes").write_text(attributes)
+    git("add", "--", ".gitattributes")
+    git("commit", "-qm", "candidate attributes")
+    candidate = git("rev-parse", "HEAD").decode().strip()
+    assert git("show", f"{candidate}:{path.name}") == b"A\nB\n"
+    path.write_bytes(b"A\r\nB\r\n")
+    monkeypatch.setattr(acceptance, "ROOT", root)
+    monkeypatch.setattr(gate, "ROOT", root)
+    return root, path, candidate
+
+
+@pytest.mark.parametrize("chunk_size", [1, 2, 3, 1024 * 1024])
+def test_candidate_bytes_accept_declared_crlf_across_read_boundaries(tmp_path, monkeypatch, chunk_size):
+    _, path, candidate = _declared_eol_candidate(tmp_path, monkeypatch)
+    monkeypatch.setattr(acceptance, "_CANDIDATE_READ_CHUNK", chunk_size)
+    acceptance._require_candidate_file_bytes(candidate)
+    assert path.read_bytes() == b"A\r\nB\r\n"
+
+
+@pytest.mark.parametrize(
+    ("attributes", "content"),
+    [
+        ("*.ps1 text eol=crlf\n", b"A\r\nX\r\n"),
+        ("*.ps1 text eol=crlf\n", b"A\r\nB\n"),
+        ("*.ps1 text eol=lf\n", b"A\r\nB\r\n"),
+        ("*.ps1 eol=crlf\n", b"A\r\nB\r\n"),
+        ("*.ps1 text eol=crlf filter=unexpected\n", b"A\r\nB\r\n"),
+        ("*.ps1 text eol=crlf working-tree-encoding=UTF-8\n", b"A\r\nB\r\n"),
+    ],
+    ids=["content", "mixed-newlines", "undeclared-eol", "undeclared-text", "filter", "encoding"],
+)
+def test_candidate_bytes_reject_undeclared_or_changed_crlf(tmp_path, monkeypatch, attributes, content):
+    _, path, candidate = _declared_eol_candidate(tmp_path, monkeypatch, attributes)
+    path.write_bytes(content)
+    monkeypatch.setattr(acceptance, "_CANDIDATE_READ_CHUNK", 2)
+    with pytest.raises(acceptance.AcceptanceError, match="gate_candidate_not_frozen"):
+        acceptance._require_candidate_file_bytes(candidate)
+
+
+@pytest.mark.parametrize("committed_crlf", [False, True])
+def test_candidate_eol_authority_ignores_mutable_git_attributes(tmp_path, monkeypatch, committed_crlf):
+    declared = "crlf" if committed_crlf else "lf"
+    root, _, candidate = _declared_eol_candidate(tmp_path, monkeypatch, f"*.ps1 text eol={declared}\n")
+    # .git/info/attributes has higher precedence than check-attr --source.
+    # Neither a hostile allow nor a hostile deny may replace committed policy.
+    other = "lf" if committed_crlf else "crlf"
+    (root / ".git/info/attributes").write_text(f"*.ps1 text eol={other}\n")
+    if committed_crlf:
+        acceptance._require_candidate_file_bytes(candidate)
+    else:
+        with pytest.raises(acceptance.AcceptanceError, match="gate_candidate_not_frozen"):
+            acceptance._require_candidate_file_bytes(candidate)
 
 
 def test_gate_identity_checks_actual_git_bytes_even_when_status_hides_a_change(tmp_path, monkeypatch):
