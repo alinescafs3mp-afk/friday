@@ -28,16 +28,14 @@ _B09_LEGACY_NEGATED = (
     "эти свойства не нужны для проверки."
 )
 _B09_LEGACY_QUOTE = (
-    "В отчёте написано: «Главное свойство хорошего структурного oracle — "
-    "точность проверки результата»."
+    "В отчёте написано: «Главное свойство хорошего структурного oracle — точность проверки результата»."
 )
 _B09_LEGACY_UNRELATED = (
     "Структурный oracle упомянут в заметке. Точный прогноз погоды относится "
     "к другой теме и никак не описывает эту проверку."
 )
 _B09_LEGACY_QUESTION = (
-    "Является ли главное свойство структурного oracle точностью и "
-    "детерминированностью проверки?"
+    "Является ли главное свойство структурного oracle точностью и детерминированностью проверки?"
 )
 _B09_NEW_QUOTE_FRAME = (
     "Утверждение «Главное свойство хорошего структурного oracle — независимость "
@@ -79,12 +77,8 @@ _A09_COUNTERFACTUAL = (
     "запуска искажали результат, следующий проход не был бы изолирован."
 )
 _EXPECTED_ATTACHMENT = "syn-attachment-0123456789abcdef0123"
-_B07_SUFFIX_HYPHEN = (
-    "SYN-ATTACHMENT-0123456789abcdef0123 SYN-ATTACHMENT-0123456789abcdef0123-wrong"
-)
-_B07_MISSING_HYPHEN = (
-    "SYN-ATTACHMENT-0123456789abcdef0123 SYN-ATTACHMENT0123456789abcdef0123"
-)
+_B07_SUFFIX_HYPHEN = "SYN-ATTACHMENT-0123456789abcdef0123 SYN-ATTACHMENT-0123456789abcdef0123-wrong"
+_B07_MISSING_HYPHEN = "SYN-ATTACHMENT-0123456789abcdef0123 SYN-ATTACHMENT0123456789abcdef0123"
 
 
 def _record(message: str) -> dict:
@@ -168,15 +162,11 @@ def test_r211_05_malformed_attachment_competitors_rejected() -> None:
     assert battery._opaque_attachment_has_competitor(_B07_SUFFIX_HYPHEN.casefold(), expected) is True
     assert battery._opaque_attachment_has_competitor(_B07_MISSING_HYPHEN.casefold(), expected) is True
     assert (
-        battery._closed_marker_exact(
-            _B07_SUFFIX_HYPHEN, expected, kind="ATTACHMENT", exact_once=False
-        )
+        battery._closed_marker_exact(_B07_SUFFIX_HYPHEN, expected, kind="ATTACHMENT", exact_once=False)
         is False
     )
     assert (
-        battery._closed_marker_exact(
-            _B07_MISSING_HYPHEN, expected, kind="ATTACHMENT", exact_once=False
-        )
+        battery._closed_marker_exact(_B07_MISSING_HYPHEN, expected, kind="ATTACHMENT", exact_once=False)
         is False
     )
     assert battery._closed_marker_exact(expected, expected, kind="ATTACHMENT", exact_once=False) is True

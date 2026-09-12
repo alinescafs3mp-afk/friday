@@ -1,4 +1,5 @@
 """Adjacent punctuation cannot hide an independently wrong attachment marker."""
+
 import pytest
 
 from tools import synthetic_live_battery as battery

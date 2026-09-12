@@ -150,10 +150,7 @@ def test_closed_mixed_census_accepts_b_and_a() -> None:
         cases = _pass_cases(battery_id)
         delta_ledger, evidence_ledger, total = _ledgers(cases)
         assert total["model_http"] == expected_http
-        assert (
-            battery._http_probe_reconciliation_exact(cases, delta_ledger, evidence_ledger, total)
-            is True
-        )
+        assert battery._http_probe_reconciliation_exact(cases, delta_ledger, evidence_ledger, total) is True
 
 
 @pytest.mark.parametrize("case_id", sorted(_B_MODEL | _A_MODEL))
@@ -192,9 +189,7 @@ def test_contradictory_swap_census_is_rejected(battery_id: str) -> None:
     forged[structural][1]["model_http"] = 1
     forged[model][1]["model_http"] = 0
     total = {key: sum(delta[key] for _case_id, delta in forged) for key in forged[0][1]}
-    assert total["model_http"] == sum(
-        1 for case in cases if not battery._package_c_structural_case(case)
-    )
+    assert total["model_http"] == sum(1 for case in cases if not battery._package_c_structural_case(case))
     assert battery._http_probe_reconciliation_exact(cases, forged, evidence_ledger, total) is False
 
 
@@ -203,14 +198,10 @@ def test_incomplete_pass_is_rejected(battery_id: str) -> None:
     cases = _pass_cases(battery_id)
     delta_ledger, evidence_ledger, total = _ledgers(cases)
     assert (
-        battery._http_probe_reconciliation_exact(
-            cases[:-1], delta_ledger[:-1], evidence_ledger[:-1], total
-        )
+        battery._http_probe_reconciliation_exact(cases[:-1], delta_ledger[:-1], evidence_ledger[:-1], total)
         is False
     )
-    assert (
-        battery._http_probe_reconciliation_exact(cases[:0], [], [], {"model_http": 0}) is False
-    )
+    assert battery._http_probe_reconciliation_exact(cases[:0], [], [], {"model_http": 0}) is False
 
 
 @pytest.mark.parametrize("battery_id", ["A", "B"])

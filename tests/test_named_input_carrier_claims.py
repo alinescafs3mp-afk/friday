@@ -11,9 +11,7 @@ from friday.agent_runtime import (
 
 @pytest.mark.parametrize("filename", ["sample.txt", "notes_v2.txt", "отчёт.v2.csv"])
 @pytest.mark.parametrize("style", ["{}", "`{}`"])
-@pytest.mark.parametrize(
-    "suffix", ["прикреплён вам в чат", "отправлен тебе", "загружен в чат"]
-)
+@pytest.mark.parametrize("suffix", ["прикреплён вам в чат", "отправлен тебе", "загружен в чат"])
 def test_named_file_delivery_needs_an_output_receipt(filename, style, suffix) -> None:
     answer = f"Файл {style.format(filename)} {suffix}."
     assert _runtime_unconfirmed_supported_deed(

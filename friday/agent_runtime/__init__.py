@@ -10286,11 +10286,7 @@ def _has_trailing_external_agent(text: str) -> bool:
         )
     match = _OUTSIDE_DEED_TRAILING_AGENT.search(candidate)
     purpose = _OUTSIDE_DEED_TRAILING_REAL_WORLD_PURPOSE.search(candidate)
-    if (
-        match is not None
-        and purpose is not None
-        and match.start() == purpose.start("modifier")
-    ):
+    if match is not None and purpose is not None and match.start() == purpose.start("modifier"):
         return False
     if match is not None and re.search(
         r"\b(?:в|во|на|к|из|от|для|через|с|со)\s+$",
@@ -10422,8 +10418,7 @@ def _claims_object_first_current_outside_deed(candidate: str) -> bool:
     if _OUTSIDE_DEED_CONTENT_CONTEXT.search(candidate):
         return False
     return not (
-        _has_explicit_external_deed_agent(candidate)
-        or _has_trailing_nominative_outside_deed_agent(candidate)
+        _has_explicit_external_deed_agent(candidate) or _has_trailing_nominative_outside_deed_agent(candidate)
     )
 
 
@@ -10443,8 +10438,7 @@ def _claims_current_barrier_completion(candidate: str) -> bool:
     if _OUTSIDE_DEED_CONTENT_CONTEXT.search(candidate):
         return False
     return not (
-        _has_explicit_external_deed_agent(candidate)
-        or _has_trailing_nominative_outside_deed_agent(candidate)
+        _has_explicit_external_deed_agent(candidate) or _has_trailing_nominative_outside_deed_agent(candidate)
     )
 
 
@@ -10473,26 +10467,14 @@ def _requests_to_fabricate_outside_deed(message: str) -> bool:
 
     visible = _classification_text(message)
     unquoted = " ".join(_QUOTED_TEXT.sub(" ", visible).split())
-    clauses = [
-        part.strip()
-        for part in _STRUCTURAL_REQUEST_CLAUSE_SPLIT.split(unquoted)
-        if part.strip()
-    ]
+    clauses = [part.strip() for part in _STRUCTURAL_REQUEST_CLAUSE_SPLIT.split(unquoted) if part.strip()]
     owned: list[str] = []
     for clause in clauses:
         request = _FABRICATED_OUTSIDE_DEED_LEAD.search(clause)
         nominal_request = _FABRICATED_OUTSIDE_DEED_NOMINAL_LEAD.search(clause)
-        owned_nominal_request = _FABRICATED_OUTSIDE_DEED_OWNED_NOMINAL_LEAD.search(
-            clause
-        )
-        nominal_claim = (
-            nominal_request.group("claim").strip(" ,:;—-")
-            if nominal_request is not None
-            else ""
-        )
-        nominal_has_external_agent = bool(
-            nominal_claim and _has_explicit_external_deed_agent(nominal_claim)
-        )
+        owned_nominal_request = _FABRICATED_OUTSIDE_DEED_OWNED_NOMINAL_LEAD.search(clause)
+        nominal_claim = nominal_request.group("claim").strip(" ,:;—-") if nominal_request is not None else ""
+        nominal_has_external_agent = bool(nominal_claim and _has_explicit_external_deed_agent(nominal_claim))
         nominal_event_owned = bool(
             nominal_request is not None
             and not nominal_has_external_agent
@@ -10501,9 +10483,7 @@ def _requests_to_fabricate_outside_deed(message: str) -> bool:
         if request is not None:
             request_frame = clause[: request.start("claim")]
             claim = request.group("claim").strip(" ,:;—-")
-            first_person_frame = bool(
-                _FABRICATED_OUTSIDE_DEED_FIRST_PERSON_FRAME.search(request_frame)
-            )
+            first_person_frame = bool(_FABRICATED_OUTSIDE_DEED_FIRST_PERSON_FRAME.search(request_frame))
             if _FABRICATED_OUTSIDE_DEED_CONTENT_FRAME.search(request_frame):
                 continue
             if (
@@ -10512,17 +10492,11 @@ def _requests_to_fabricate_outside_deed(message: str) -> bool:
                 and not _FABRICATED_OUTSIDE_DEED_AUTHORITY_GAP.search(claim)
             ):
                 continue
-            if (
-                re.match(r"^(?:я|мы)\b", claim, re.IGNORECASE)
-                and not first_person_frame
-            ):
+            if re.match(r"^(?:я|мы)\b", claim, re.IGNORECASE) and not first_person_frame:
                 continue
             claim = re.sub(r"^ты\b", "я", claim, flags=re.IGNORECASE)
             claim = re.sub(r"\bтобой\b", "мной", claim, flags=re.IGNORECASE)
-            if (
-                _has_explicit_external_deed_agent(claim)
-                or _has_trailing_nominative_outside_deed_agent(claim)
-            ):
+            if _has_explicit_external_deed_agent(claim) or _has_trailing_nominative_outside_deed_agent(claim):
                 continue
             if _FABRICATED_OUTSIDE_DEED_ELIDED_SELF.search(claim):
                 claim = f"я {claim}"
@@ -10537,11 +10511,8 @@ def _requests_to_fabricate_outside_deed(message: str) -> bool:
             # second, inevitably drifting list of real-world deeds.  A visible
             # third-party executor keeps this an ordinary report about that
             # party, not a request for Friday to own the completion.
-            if (
-                nominal_has_external_agent
-                or _FABRICATED_OUTSIDE_DEED_CONTENT_FRAME.search(
-                    clause[: nominal_request.start("claim")]
-                )
+            if nominal_has_external_agent or _FABRICATED_OUTSIDE_DEED_CONTENT_FRAME.search(
+                clause[: nominal_request.start("claim")]
             ):
                 continue
             claim = f"{nominal_claim} {nominal_request.group('status')}"
@@ -12542,11 +12513,14 @@ def _named_attachment_carrier_completion(clause: str) -> re.Match[str] | None:
     for filename in _ATTACHMENT_FILENAME_REFERENCE.finditer(visible):
         if len(filename.group()) > 256:
             continue
-        if re.search(
-            rf"\b{_SUPPORTED_FILE_OBJECT}\b[ \t]*\Z",
-            visible[: filename.start()],
-            re.IGNORECASE,
-        ) is None:
+        if (
+            re.search(
+                rf"\b{_SUPPORTED_FILE_OBJECT}\b[ \t]*\Z",
+                visible[: filename.start()],
+                re.IGNORECASE,
+            )
+            is None
+        ):
             continue
         if re.match(
             r"[ \t]+(?:(?:уже|теперь)[ \t]+)?"

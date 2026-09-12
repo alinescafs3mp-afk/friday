@@ -43,9 +43,7 @@ _SUBSTANTIVE_LEGACY = (
     "отличает корректную структуру результата от нарушенной."
 )
 _EXPECTED_ATTACHMENT = "syn-attachment-0123456789abcdef0123"
-_COUNTER_UNDERSCORE = (
-    "syn-attachment-0123456789abcdef0123 syn-attachment-0123456789abcdef0123_wrong"
-)
+_COUNTER_UNDERSCORE = "syn-attachment-0123456789abcdef0123 syn-attachment-0123456789abcdef0123_wrong"
 
 
 def _b09_20_case() -> battery.ExpandedCase:
@@ -117,9 +115,7 @@ def test_b09_20_oracle_does_not_reattach_legacy_semantic_groups() -> None:
 
 def test_marker_competitor_detects_underscore_junk_beside_valid_token() -> None:
     folded = _COUNTER_UNDERSCORE.casefold()
-    assert (
-        battery._opaque_attachment_has_competitor(folded, _EXPECTED_ATTACHMENT) is True
-    )
+    assert battery._opaque_attachment_has_competitor(folded, _EXPECTED_ATTACHMENT) is True
     assert (
         battery._closed_marker_exact(
             _COUNTER_UNDERSCORE, _EXPECTED_ATTACHMENT, kind="ATTACHMENT", exact_once=False
@@ -131,28 +127,16 @@ def test_marker_competitor_detects_underscore_junk_beside_valid_token() -> None:
 def test_marker_competitor_accepts_exact_token_and_rejects_truncation_foreign() -> None:
     expected = _EXPECTED_ATTACHMENT
     assert battery._opaque_attachment_has_competitor(expected, expected) is False
-    assert (
-        battery._closed_marker_exact(expected, expected, kind="ATTACHMENT", exact_once=False)
-        is True
-    )
+    assert battery._closed_marker_exact(expected, expected, kind="ATTACHMENT", exact_once=False) is True
     truncated = f"{expected} syn-attachment-0123456789abcdef012"
     foreign = f"{expected} syn-attachment-fffffffffffffffff000"
     glued = f"{expected}xx"
     assert battery._opaque_attachment_has_competitor(truncated, expected) is True
     assert battery._opaque_attachment_has_competitor(foreign, expected) is True
     assert battery._opaque_attachment_has_competitor(glued, expected) is True
-    assert (
-        battery._closed_marker_exact(truncated, expected, kind="ATTACHMENT", exact_once=False)
-        is False
-    )
-    assert (
-        battery._closed_marker_exact(foreign, expected, kind="ATTACHMENT", exact_once=False)
-        is False
-    )
-    assert (
-        battery._closed_marker_exact(glued, expected, kind="ATTACHMENT", exact_once=False)
-        is False
-    )
+    assert battery._closed_marker_exact(truncated, expected, kind="ATTACHMENT", exact_once=False) is False
+    assert battery._closed_marker_exact(foreign, expected, kind="ATTACHMENT", exact_once=False) is False
+    assert battery._closed_marker_exact(glued, expected, kind="ATTACHMENT", exact_once=False) is False
 
 
 def test_time_reminder_telegram_cardinality_unchanged() -> None:
@@ -162,7 +146,4 @@ def test_time_reminder_telegram_cardinality_unchanged() -> None:
     assert battery._closed_marker_exact(f"{time_marker} {time_marker}", time_marker, kind="TIME") is False
     assert battery._closed_marker_exact(f"{reminder} {reminder}", reminder, kind="REMINDER") is False
     assert battery._closed_marker_exact(f"{telegram} {telegram}", telegram, kind="TELEGRAM") is False
-    assert (
-        battery._closed_marker_exact(f"{telegram} передан без ошибок.", telegram, kind="TELEGRAM")
-        is True
-    )
+    assert battery._closed_marker_exact(f"{telegram} передан без ошибок.", telegram, kind="TELEGRAM") is True

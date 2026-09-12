@@ -57,15 +57,10 @@ def test_b05_unbalanced_delimiter_and_href_backtick_do_not_normalize() -> None:
 def test_b05_link_only_and_forbid_bare_url_remain() -> None:
     with_prose = f"Ссылка: {_B05_ANCHOR}"
     with_bare = f"{_B05_ANCHOR}\nАдрес: {_B05_URL}"
-    assert (
-        battery._markdown_source_exact(with_prose, label=_B05_LABEL, url=_B05_URL, only=True)
-        is False
-    )
+    assert battery._markdown_source_exact(with_prose, label=_B05_LABEL, url=_B05_URL, only=True) is False
     assert battery._markdown_source_exact(_B05_ANCHOR, label=_B05_LABEL, url=_B05_URL, only=True) is True
     assert (
-        battery._markdown_source_exact(
-            with_bare, label=_B05_LABEL, url=_B05_URL, forbid_bare_url=True
-        )
+        battery._markdown_source_exact(with_bare, label=_B05_LABEL, url=_B05_URL, forbid_bare_url=True)
         is False
     )
     assert (
@@ -80,13 +75,8 @@ def test_b05_anchor_local_negation_still_rejected() -> None:
 
 
 def test_b07_repeated_identical_attachment_is_accepted_without_exact_once() -> None:
-    quoted = (
-        f"Canary `{_ATTACHMENT}` и полная строка: Контрольный маркер: {_ATTACHMENT}."
-    )
-    assert (
-        battery._closed_marker_exact(quoted, _ATTACHMENT, kind="ATTACHMENT", exact_once=False)
-        is True
-    )
+    quoted = f"Canary `{_ATTACHMENT}` и полная строка: Контрольный маркер: {_ATTACHMENT}."
+    assert battery._closed_marker_exact(quoted, _ATTACHMENT, kind="ATTACHMENT", exact_once=False) is True
 
 
 def test_b07_rejects_wrong_truncated_concatenated_and_fake_attachment() -> None:
@@ -95,10 +85,7 @@ def test_b07_rejects_wrong_truncated_concatenated_and_fake_attachment() -> None:
     glued = f"{_ATTACHMENT}XX"
     fake = f"X{_ATTACHMENT}Y"
     assert battery._closed_marker_exact(wrong, _ATTACHMENT, kind="ATTACHMENT", exact_once=False) is False
-    assert (
-        battery._closed_marker_exact(truncated, _ATTACHMENT, kind="ATTACHMENT", exact_once=False)
-        is False
-    )
+    assert battery._closed_marker_exact(truncated, _ATTACHMENT, kind="ATTACHMENT", exact_once=False) is False
     assert battery._closed_marker_exact(glued, _ATTACHMENT, kind="ATTACHMENT", exact_once=False) is False
     assert battery._closed_marker_exact(fake, _ATTACHMENT, kind="ATTACHMENT", exact_once=False) is False
 
@@ -107,22 +94,16 @@ def test_b07_rejects_only_negated_and_mixed_polarity_occurrences() -> None:
     only_negated = f"{_ATTACHMENT} отсутствует"
     mixed = f"{_ATTACHMENT} найден. {_ATTACHMENT} отсутствует"
     assert (
-        battery._closed_marker_exact(only_negated, _ATTACHMENT, kind="ATTACHMENT", exact_once=False)
-        is False
+        battery._closed_marker_exact(only_negated, _ATTACHMENT, kind="ATTACHMENT", exact_once=False) is False
     )
-    assert (
-        battery._closed_marker_exact(mixed, _ATTACHMENT, kind="ATTACHMENT", exact_once=False) is False
-    )
+    assert battery._closed_marker_exact(mixed, _ATTACHMENT, kind="ATTACHMENT", exact_once=False) is False
 
 
 def test_b07_explicit_exact_once_prompt_rejects_duplicates() -> None:
     question = "Верни token только один раз из текущего вложения."
     assert battery._attachment_output_requires_exact_once(question) is True
     duplicated = f"{_ATTACHMENT} {_ATTACHMENT}"
-    assert (
-        battery._closed_marker_exact(duplicated, _ATTACHMENT, kind="ATTACHMENT", exact_once=True)
-        is False
-    )
+    assert battery._closed_marker_exact(duplicated, _ATTACHMENT, kind="ATTACHMENT", exact_once=True) is False
 
 
 def test_b07_current_attachment_prompts_do_not_own_output_cardinality() -> None:
@@ -139,10 +120,7 @@ def test_b07_time_reminder_telegram_exact_once_unchanged() -> None:
     assert battery._closed_marker_exact(f"{time_marker} {time_marker}", time_marker, kind="TIME") is False
     assert battery._closed_marker_exact(f"{reminder} {reminder}", reminder, kind="REMINDER") is False
     assert battery._closed_marker_exact(f"{telegram} {telegram}", telegram, kind="TELEGRAM") is False
-    assert (
-        battery._closed_marker_exact(f"{telegram} передан без ошибок.", telegram, kind="TELEGRAM")
-        is True
-    )
+    assert battery._closed_marker_exact(f"{telegram} передан без ошибок.", telegram, kind="TELEGRAM") is True
 
 
 def test_b09_20_accepts_justified_independent_structural_rule_paraphrase() -> None:

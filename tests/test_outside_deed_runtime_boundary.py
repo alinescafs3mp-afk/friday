@@ -417,8 +417,7 @@ async def test_a_verified_same_turn_quote_keeps_the_named_input_attachment_state
         source_text=f"Это полностью синтетический файл. Контрольный маркер: {marker}.",
     )
     model_answer = (
-        f"Файл {filename} прикреплён к caption-вопросу этого же хода. "
-        f"Контрольное значение: {marker}."
+        f"Файл {filename} прикреплён к caption-вопросу этого же хода. Контрольное значение: {marker}."
     )
 
     async def generate(context, message, attachments):  # noqa: ANN001

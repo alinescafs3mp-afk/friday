@@ -64,9 +64,7 @@ def _ledgers(
 ) -> tuple[list[tuple[str, dict[str, int]]], list[tuple[str, dict[str, bool | None]]], dict[str, int]]:
     delta_ledger = [(case.id, _closed_case_delta(case)) for case in cases]
     evidence_ledger = [(case.id, _route_evidence(case)) for case in cases]
-    total = {
-        key: sum(delta[key] for _case_id, delta in delta_ledger) for key in delta_ledger[0][1]
-    }
+    total = {key: sum(delta[key] for _case_id, delta in delta_ledger) for key in delta_ledger[0][1]}
     return delta_ledger, evidence_ledger, total
 
 
@@ -84,10 +82,7 @@ def test_b_p03_http_census_requires_zero_on_structural_and_send_on_others() -> N
     expected_model = sum(1 for case in cases if not battery._package_c_structural_case(case))
     assert total["model_http"] == expected_model
     assert expected_model == 7
-    assert (
-        battery._http_probe_reconciliation_exact(cases, delta_ledger, evidence_ledger, total)
-        is True
-    )
+    assert battery._http_probe_reconciliation_exact(cases, delta_ledger, evidence_ledger, total) is True
 
 
 def test_b_p03_rejects_structural_model_http_one() -> None:
@@ -126,18 +121,12 @@ def test_a_p03_mixed_census_rejects_model_owned_http_zero() -> None:
     expected_model = sum(1 for case in cases if not battery._package_c_structural_case(case))
     assert total["model_http"] == expected_model
     assert expected_model == 14
-    assert (
-        battery._http_probe_reconciliation_exact(cases, delta_ledger, evidence_ledger, total)
-        is True
-    )
+    assert battery._http_probe_reconciliation_exact(cases, delta_ledger, evidence_ledger, total) is True
     index = next(i for i, case in enumerate(cases) if not battery._package_c_structural_case(case))
     forged = copy.deepcopy(delta_ledger)
     forged[index][1]["model_http"] = 0
     forged_total = {key: sum(delta[key] for _case_id, delta in forged) for key in forged[0][1]}
-    assert (
-        battery._http_probe_reconciliation_exact(cases, forged, evidence_ledger, forged_total)
-        is False
-    )
+    assert battery._http_probe_reconciliation_exact(cases, forged, evidence_ledger, forged_total) is False
 
 
 def test_b_p03_does_not_waive_pass_wide_when_all_model_http_zero() -> None:
@@ -157,10 +146,7 @@ def test_b_p03_does_not_waive_pass_wide_when_all_model_http_zero() -> None:
             "Каждый тестовый проход получает новую базу, чтобы исключить влияние "
             "данных, оставшихся от предыдущих запусков."
         ),
-        (
-            "Каждый тестовый проход получает новую базу, чтобы исключить влияние "
-            "данных предыдущих запусков."
-        ),
+        ("Каждый тестовый проход получает новую базу, чтобы исключить влияние данных предыдущих запусков."),
         (
             "Каждый тестовый проход получает новую базу, чтобы исключить влияние "
             "предыдущих тестов на текущие результаты. Это гарантирует, что тесты "
