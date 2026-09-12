@@ -812,10 +812,25 @@ def test_boolean_cannot_satisfy_destructive_approval(tmp_path: Path) -> None:
 
 
 def test_symlink_executable_is_refused(tmp_path: Path) -> None:
+    # The resolver admits one hop to an attested physical executable, but
+    # refuses chains and loops. /usr/bin/true is itself an alias on some hosts.
+    target = Path("/usr/bin/true").resolve(strict=True)
+    direct = resolve_named(str(target))
     alias = tmp_path / "true-link"
-    alias.symlink_to("/usr/bin/true")
+    alias.symlink_to(target)
+    one_hop = resolve_named(str(alias))
+    assert one_hop.canonical_path == str(target)
+    assert one_hop.identity_tuple() == direct.identity_tuple()
+
+    chain = tmp_path / "true-chain"
+    chain.symlink_to(alias)
     with pytest.raises(CommandError, match="symlink_refused"):
-        resolve_named(str(alias))
+        resolve_named(str(chain))
+
+    loop = tmp_path / "loop"
+    loop.symlink_to(loop.name)
+    with pytest.raises(CommandError, match="symlink_refused"):
+        resolve_named(str(loop))
 
 
 def test_writable_executable_is_refused(tmp_path: Path) -> None:

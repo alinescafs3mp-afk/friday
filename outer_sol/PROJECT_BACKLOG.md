@@ -1,6 +1,6 @@
 # Friday: canonical project backlog
 
-Updated: 2026-09-12 (N7 DeepSeek Harness post-1.0 directive registered; N6 TinyFish design/intake queued after current R10 acceptance; Astra takeover; live production `0.208.57`; N4/F.6/F.8 mixed-journey acceptance reopened from runtime evidence; R10 RC→1.0 acceptance battery implemented for diagnostic checkpoint, product not accepted as 1.0; historical S3 witness preserved; Pandora unchanged)
+Updated: 2026-09-12 (N8 upstream adoption V5 registered for 1.0+ after RC acceptance; existing N7 extended by the same package without duplication; N6 TinyFish queued after current R10 acceptance; Astra takeover; live production `0.208.57`; N4/F.6/F.8 mixed-journey acceptance reopened from runtime evidence; R10 first baseline recorded, final acceptance incomplete; historical S3 witness preserved; Pandora unchanged)
 
 This is the project's only backlog and mutable status register. It owns the
 current production identity, execution order, acceptance gaps and owner actions.
@@ -121,7 +121,9 @@ deployed; the observation-bound consumed witness landed on live
 and S6 recovery/browse paths stay live.
 
 The current live product acceptance queue is N1–N5; N6 TinyFish is planned
-after R10 under the 2026-09-08 owner intake below. F.11 `0.208.57` is live assist.
+after R10 under the 2026-09-08 owner intake below. N8 upstream adoption and
+the existing N7 executor are scheduled for 1.0+, after RC acceptance; their
+intake does not expand the current R10 release criteria. F.11 `0.208.57` is live assist.
 Mixed-journey consume provider identity is live on `0.208.57`
 (`c8e245ea`). No further implementable product hop; Gemini/Pandora
 stay parked. Do not issue a no-product `0.208.58`.
@@ -156,25 +158,184 @@ Grok commit `1bfd839c` contains useful
 smokes, but its green harness did not establish an executable live runner or
 sound end-to-end oracles. This is an instrument finding, not a product baseline.
 
-Current preparation, 2026-09-12 (slice215): candidate088 composition contains
-2069 declared source files. Final source-bound collection found31444 nodes in
-13858 functions, adding397 nodes and removing none versus087; collection did
-not execute test bodies. All3 inventory tests passed. Sol130's94 new policies
-and the closed inventory have independent ACCEPT reviews; all old policies
-remain unchanged. Lab280 accepted the literal-test repair; Lab282 accepted the
-preparer's suite-identity correction. The protocol remains suite086 because that
-is the actual source-owned constant; candidate088 is not frozen or measured yet.
-Exact087 remains the latest completed canonical gate. Its31,038 passes do not
-certify this changed source; its model A/B result (58 B failures) and live160
-result (one failure) remain historical RED evidence.
+Current preparation, 2026-09-12 (slice227): private candidate088 is frozen
+at `46f363047bfca1e4846f705b08ab949e8d94e36f`, tree
+`e92a6f78cf6acf94c372d583ecc0be089cabc9ff`,2069 source files. Source216 final
+collection contains31444 nodes in13858 functions,0 test bodies; all3 inventory
+tests pass. Sol130/Lab281 preserve every old policy plus94 new declarations.
+Root and Lab285/286 completed the remaining test-delta and format-equivalence
+reviews. Formatting changed13 files with identical whole-file ASTs; canonical
+Ruff lint/format and mypy544 pass. The protocol remains the source-owned
+`r10-astra-harness-086-independent-content` despite candidate ID088.
 
-Owner-authorized GitHub checkpoint targets main directly, preserving the current
-source and this backlog without a release/version bump. The active acceptance
-snapshots and protected canonical index are retained while publication uses an
-isolated Git checkout. Pending: fresh088 dense measurement, canonical combined
-gate, configured-model A/B, full live160/native journeys, independent signed
-content reviews, installed observation, recovery/rollback and release acceptance.
-Production remains0.208.57; GO=false.
+Fresh owned offline dense measurement completed24 synthetic cases in45.772s,
+with0 foreign sources and clean cleanup/source/Git/tools/protected checks.
+It measures fixed synthetic ranking/reauthorization, not production embeddings
+or configured-model quality. Final freeze adds only the observed receipt after
+premeasurement commit6c8b484; prior evidence and source snapshots remain intact.
+Lab287 independently accepted these actual freeze/measurement records. Sol131
+was received, hash-verified and closed. Its first actual preparation failed
+before creating run directories: the validator assumed a universal review schema,
+where the accepted R3 input retains hash-bound JSON and Markdown review artifacts.
+Sol132 delivered the repaired preparer and actual rendered088 admission/launcher;
+its source package, independent review and generated pins were hash-verified,
+received and closed. Its independent child closure is verified. The owner
+confirmed Sol's recovery; native RESULT was consumed without duplicate execution.
+No canonical gate has launched. Sol133's private two-file Coding patch is
+received with independent source ACCEPT and all three child closures verified.
+Availability now requires actual child join/PID membership/limit proof;
+preexec SubprocessError returns fail-closed126. Root's actual local probe and
+three Coding files passed87 tests without skips in35.30s, with clean owned
+cleanup and no remaining Friday Coding units. GitHub cgroup authority remains
+unverified. Sol134 independently accepted the root alias fixture and failure
+message improvements; its RESULT was hash-verified, consumed and closed. Sol135
+is actively diagnosing hosted cgroup context and preparing a bounded workflow
+change if justified; the host cause is not yet proved. Root retains execution
+and integration authority.
+Known reproducible test failures now withhold candidate088's canonical run.
+Reviewed repairs must enter a successor snapshot; a prepared088 launcher alone
+cannot authorize execution of the known-red candidate. Lab288 delivered the independent binding
+map for the next model package. Root218 implemented its088 binder, including the
+new admission interface and collection/inventory bindings. Lab290 found a stale
+static-check receipt; root219 reran Ruff/AST/help and stale087-input rejection on
+the exact unchanged source bytes. Lab291 independently accepted that repair;
+the model088 binder now has source admission. Actual
+binding/rendering awaits exact088 preparation and its independent admission.
+The new signed plan for all6 independent content reviews is preregistered to
+the actual088 source digest; its lab job is reserved, not submitted, and the
+physical model pair has not run. A/B400 and full160 remain required in full.
+Root219 also implemented the native088 preparer, preserving the three canonical
+Word cases, current exact admission, sole certified wheel and cleanup/integrity
+requirements. Actual fixture/helper checks pass; stale087 input and its green
+certificate cannot certify088. Lab292 independently accepted the native088
+preparer source; native rendering still requires the successful current gate
+and retained wheel, followed by current execution review. The088 preparation
+mechanism is retained for truthful rebinding after the known failures are repaired.
+The adapted wheel-retention helper is ready to preserve the actual088 wheel
+after the canonical verifier and before scratch cleanup. No088 wheel exists yet;
+retention and certification are separate observations, and no rebuild is planned.
+
+Root223 also checked the two Lab299 CLI logging fixtures. The old fixture
+reproduces the missing ERROR capture while refusal and non-mutation assertions
+hold. The first repair passed21 test bodies but leaked pytest capture handlers
+at teardown; that failure evidence is retained. Root R2 restores only logging
+fields it changes. Both complete files now pass21 cases with poisoned logger
+state and21 normally, without skips/errors; all21 poisoned cases restore exact
+logger/handler/filter state. The unchanged old control still fails as expected.
+Independent Lab302 accepted the root R2 delta; no hosted or full-gate credit
+is inferred. Lab301 accepted all five new deterministic Coding policy declarations;
+actual successor collection completed31449 nodes in13863 functions with no
+test bodies. A proposed inventory parses/classifies all nodes and preserves
+all13858 old rules exactly, adding only the five declarations. The reviewed
+inventory is integrated in a fresh private source. Canonical Ruff lint, format
+(all1727 files), mypy544 and all1101 tests in11 affected files pass without
+skips/errors; owned cleanup is confirmed and source remained unchanged.
+Composition is exactly12 changed paths versus088, with no added/removed paths.
+The final hosted workflow is pending: Sol135 R1 was revised because cleanup
+errors were hidden and a pre-existing unit could be stopped without ownership.
+Its result round and revision135#2 are closed. Root225
+reproduced the collision defect on its own isolated canary: launch refused,
+then the old wrapper stopped the pre-existing fixture. No foreign service
+was touched. Two separate local user-service controls preserve cwd, environment,
+literal arguments, stdout/stderr and exact exit0/37; real Coding join/limits
+pass inside each service, and all owned units are gone. These are local259
+primitive controls, not final wrapper or GitHub255 acceptance.
+Lab303 delivered the four089 freeze/dense operators; root independently
+reviewed the delta and materialized byte-identical scripts with the required
+lowercase manifest name and matching paths. Actual parent088 admission and
+stale088-input refusal pass, without creating089 run directories. Lab304
+delivered the exact089 adapter from the proven132 mechanism. Independent
+Sol136 found two concrete problems: unpinned current helper bytes could be
+imported and promoted during preparation, and old/negative review receipts
+could be accepted by weak equality/substring checks. Sol137 is preparing the
+bounded correction; no actual089 render or full gate has run.
+
+Root226 reproduced two Sol135 G2 defects with real bounded user services:
+incorrect empty FragmentPath ownership and a transient registration race.
+Lab305 independently confirmed them and found loss of the signal exit code
+before ownership. Root R5 corrects these three paths and the private control
+recipe. The old cancellation control fails125 versus expected143; the new
+12 controls pass. Five actual local service cases pass: success with real
+Coding membership/limits plus env/cwd/stdio/literal argument, exact exit37,
+TERM cancellation, an untouched same-name canary, and deliberately failed
+stop reported as STOP_UNCONFIRMED while its finite service remains live.
+All five unit names subsequently disappear and saved cgroups are empty;
+owner103 cleanup and unchanged source are verified. Independent Lab306
+accepted the R5 bytes and retained root recipe. These are local systemd259
+controls, not GitHub255 or full-gate credit. Root227 materialized a fresh
+2070-file source with the12 accepted changes, final workflow, new hosted helper
+and this backlog:15 changed paths versus088, including one added helper and
+no removals. Final-source collection/inventory/static checks, measurement,
+freeze and public push remain pending.
+
+The actual088 matrix audit verifies all248 case bindings against31444 collected
+nodes with0 binding complaints. Its raw exit2 retains the19 known UI/chat/mount
+receipt gaps; all248 execution layers remain NOT_RUN without actual receipts.
+This is scope validation, not a passing gate or evidence of missing executors.
+
+GitHub main now contains the source checkpointb5c616e and formatting correction
+be63330. The first hosted run34682043196 remains RED at formatting before tests;
+run34682652060 completed RED at09:07:48 UTC:123 failed,28583 passed in3160.50s;
+Ruff lint/format and mypy544 passed, UI was NOT_RUN. Root222 compared all2069
+candidate files with publishedbe63330:2067 match; only dense evidence and this
+backlog differ, so all product/test bytes match. A real owned isolated probe
+reproduced67 failures across office42, temporal24 and HTTP-ledger1;67 other
+selected cases passed. This is current088 failure evidence, not a hosted-only
+explanation. Receipt: `~/.jericho/grok-takeover/ASTRA-222-ci-triage.json`.
+
+Root repaired one stale HTTP fixture using the previously admitted19 structural
+zero-model document IDs and40 opposite-send controls; all87 existing file tests
+pass; independent Lab296 ACCEPT received and hash-verified. A separate CPU fixture now consistently
+models8 physical CPUs and6 affinity CPUs, retaining its600% quota expectation;
+all57 existing file tests pass; independent Lab297 ACCEPT is received. Lab295's
+private office/time tests plus these repairs executed all950 whole-file cases:
+947 passed,3 failed. The latter expose a too-broad fixture assumption: A03-07
+still uses the arbiter, whereas the19 structural document IDs do not. Root
+retains the failures and repairs only that expected route/call count; source-only
+Lab295 acceptance is superseded for this one function. All39 existing parameter
+cases of the changed function now pass with clean owned cleanup and unchanged
+source/Git. Lab298 independently accepted the root delta; no second full950-case pass is claimed. Product code, canonical source
+and frozen088 remain unchanged. The other hosted failures still need evidence-based diagnosis:
+trusted PATH/interpreter provisioning, cgroup join/preexec, symlink behavior,
+app-soak, CLI logging and deadline behavior. Lab297's retained-log triage is received. Root also collected all31444 tests
+and executed the7 app fault controls plus1 deadline case:8 passed,31436 deselected;
+RSS564132..596740KiB,24threads. Collection alone on localhost did not reproduce
+the hosted failure, so process history/hosted causes remain unresolved. Existing
+app/deadline asserts gain allowlisted failure diagnostics without changed
+predicates, deadlines or resource thresholds. A stale symlink fixture now checks
+physical-target one-hop identity and explicit two-hop/loop refusals; one actual
+existing test passes, independent Sol134 ACCEPT received. The two Lab299 CLI
+fixtures have the root R2 correction and actual controls described above.
+
+Root prepared a workflow-only permission fix for the disposable GitHub VM:
+remove group/world-write bits from four executable directories and the exact
+Python3.14.4 toolcache tree, then run the existing trusted-PATH/native-interpreter
+guards as the normal runner. YAML/bash/embedded-Python checks and two rejection
+controls pass; no local host permission changes. Independent Lab300 source
+ACCEPT is hash-verified and received; actual hosted execution remains pending. No guard, negative control, case or
+threshold is waived. Sol133 adds five deterministic tests: successor inventory
+must explicitly register all five and refresh against actual collection before
+the canonical gate; existing policy assignments remain unchanged.
+
+Lab294's app-hour interface repair has independent root source review. The
+physical3600s duration,15s cadence,3720/3780 deadlines and30s cleanup remain.
+Execution still requires the repaired accepted candidate, actual green gate,
+sole certified wheel and review of the concrete rendered inputs.
+
+Publication uses an isolated checkout; canonical local main/index and active acceptance
+snapshots remain pinned. Final release Git identity must be reconciled and
+validated normally; checkpoint publication grants no acceptance credit.
+Owner instruction, 2026-09-12: accumulate small changes locally and publish
+substantial completed blocks directly to main at checkpoints, not each edit.
+
+Pending: finish reviewed CI/test repairs and freeze their successor, then the
+canonical combined20/4 gate, configured-model A/B, full live160 and native
+journeys, independent signed content reviews, physical app-hour, installed
+observation, recovery/rollback and release acceptance. Existing088 preparers
+remain retained source mechanisms and require truthful successor binding;
+no old acceptance or wheel transfers automatically. Exact087 remains the latest completed
+canonical gate (31,038 passes); its58 model-B failures and one live160 failure
+remain historical RED. Production remains0.208.57; GO=false.
 
 Retained candidate086 (turn207): final private candidate086 is frozen at
 `1eae8c00c4db30937207917062d8c2c172cfd2a4`, tree
@@ -555,7 +716,7 @@ cleanup, with current source/build projections and verifier digest checked. It
 is now certified by the green exact087 summary; native3 uses those exact bytes. Current exact/UI passed; model/native acceptance, installed/live, restore/rollback
 and release acceptance remain incomplete. Full goal ACTIVE.
 Latest completed exact result: `~/.jericho/grok-takeover/ASTRA-210-exact087-observed.json`.
-Current checkpoint: `~/.jericho/grok-takeover/ASTRA-215-terminal-checkpoint.json`.
+Current checkpoint: `~/.jericho/grok-takeover/ASTRA-220-terminal-checkpoint.json`.
 Current native087:3/3 selected Word document cases PASS on the sole certified
 wheel; actual fixture/DOCX bytes and cleanup verified in
 `~/.jericho/grok-takeover/ASTRA-210-native087-observed.json`.
@@ -5833,15 +5994,22 @@ repeating search is not Fetch acceptance. N6.F rollout/rollback remains independ
 ### N7 — Optional DeepSeek Harness executor and laboratory fault server
 
 Status: **candidate; owner directive registered, implementation/tests NOT_RUN**.
-Owner request: 2026-09-11; authoritative requirements:
-[FRIDAY_ASTRA_DEEPSEEK_HARNESS_ADOPTION_DIRECTIVE_RU.md](../FRIDAY_ASTRA_DEEPSEEK_HARNESS_ADOPTION_DIRECTIVE_RU.md).
+Owner request: 2026-09-11, consolidated by the owner-supplied V5 package on
+2026-09-12. Current complete requirements:
+[DSH_ADOPTION.md](../FRIDAY_ADOPTION_V5_EN_COMPLETE_b5c616e_2026-09-12/friday_adoption_v5_en/DSH_ADOPTION.md),
+with cross-donor decisions in its [DIRECTIVE.md](../FRIDAY_ADOPTION_V5_EN_COMPLETE_b5c616e_2026-09-12/friday_adoption_v5_en/DIRECTIVE.md).
+The original [Russian directive](../FRIDAY_ASTRA_DEEPSEEK_HARNESS_ADOPTION_DIRECTIVE_RU.md)
+is retained as historical input. V5 preserves E0–E7, A01–A24 and all original
+33 families, adding conditional DSH34/HX01 native hook configuration.
 This is one bounded post-release epic, not a separate mutable backlog. E0–E6
 below preserve the directive's identifiers. Astra owns design/integration/release,
 Sol independent review, Grok laboratory preparation and evidence.
 
 **Release boundary:** functional adoption follows accepted Friday1.0; it adds
-zero functional GO requirements to the current RC. E0 and isolated E1 may run
-earlier only with capacity independent of the R10 critical path. Existing N6
+zero functional GO requirements to the current RC. The owner's 2026-09-12 V5
+instruction schedules new adoption implementation/preparation after RC acceptance;
+current work is intake only. Previously collected E0/E1 read-only evidence is
+retained, without reopening early implementation. Existing N6
 TinyFish priority and scope remain. E0–E5 are required adoption work; E6 is
 conditional on demonstrated benefit after E5. E7 options are not authorized
 implementation commitments. Do not reopen Pandora or replace the development TUIs.
@@ -5886,7 +6054,7 @@ ownership seams, not claims that an ACP bridge or model gateway already exists.
 
 | Item / owner | Depends on / scope | Required result and acceptance |
 |---|---|---|
-| [ ] **N7.E0 — delivery and transport decision / Astra, Sol review** | Isolated preparation permitted; preserve R10 capacity. | Map existing owners/gaps and all directive§4 families as reuse/already-covered/configure/defer/reject. Bound ACP compatibility spike: pinned official Python ACP client + `dsh --profile acp`; verify handshake/capabilities, new/prompt/updates/cancel/close/permission callbacks and actual local model route via existing admission. Do not guess protocol version or substitute load for resume. If incompatible within spike, choose official SDK with one isolated process per Work Item; do not implement both transports or a new RPC library. ADR, adoption matrix, exemplar and revised estimate with exact candidate versions; no production dependency while disabled. |
+| [ ] **N7.E0 — delivery and transport decision / Astra, Sol review** | After RC acceptance under V5; retain earlier intake evidence and share N8.M0 delivery work. | Map existing owners/gaps and all directive§4 families as reuse/already-covered/configure/defer/reject. Bound ACP compatibility spike: pinned official Python ACP client + `dsh --profile acp`; verify handshake/capabilities, new/prompt/updates/cancel/close/permission callbacks and actual local model route via existing admission. Do not guess protocol version or substitute load for resume. If incompatible within spike, choose official SDK with one isolated process per Work Item; do not implement both transports or a new RPC library. ADR, adoption matrix, exemplar and revised estimate with exact candidate versions; no production dependency while disabled. |
 | [ ] **N7.E1 — complete HTTP/SSE fault server / Grok, Sol review** | Independent of E2 after pinned upstream selection; dev/test only. | Adopt upstream `packages/test-support/llm-mock-server` with its build/CLI/tests/licenses in pinned dev image; no invented installable binary. Exercise shipping Friday adapter and DSH over actual HTTP/SSE: connection refusal, partial disconnect, hang, empty/malformed response,429/5xx/auth/overflow/tool/max-token/success. Fail on exhausted sequence; separate servers/dynamic ports or deterministic schedules for global FIFO. DSH replay/test-support stays for DSH. Reproducible runner/fixtures/terminal assertions; mock PASS supplies no live-model credit. |
 | [ ] **N7.E2 — immutable runtime and local model profile / Astra** | Accepted1.0, E0; E1 preparation can run in parallel. | Reuse verified official artifact or upstream build from commit+lockfile; distinguish official SDK/runtime-bin/npm identities. Manifest binds repository/commit/package/platform/dependencies/image hashes/licenses/notices/build recipe/profile digest. Minimal composition on existing bundles; inspect actual tools, not assume sdk-minimal is full coding. Immutable runtime/config; OS isolation, job HOME/workspace/output, no host homes/secrets/Docker socket/Pandora. Local admission covers tools/compaction/children; no direct lease bypass/cloud fallback/telemetry/self-modification/unhandled ask_user. Reproducible build, offline/egress proof, local smoke and clear incompatible-provider refusal. |
 | [ ] **N7.E3 — one executor adapter / Astra, Sol review** | E0/E2; current Work Item remains sole task owner. | Bind authenticated owner/capability/snapshot/runtime/profile/model/budget to item+attempt+generation outside model text. Async preflight/dispatch/observation, startup cleanup and durable cursor. Quarantine and verify output provenance/path/type/size/digest with no-follow safe materialization; immutable independent acceptance specification and exact publication bytes. Model text/end_turn/SDK idle/exit0 are not success. Cancellation fences effects/publication before bounded transport/OS-tree cleanup; host-owned pause, late-event rejection, crash reconciliation and no blind replay of RUNNING/UNKNOWN/partial effects. Prove one real user-entry-to-publication scenario and safe pre-dispatch fallback. |
@@ -5932,6 +6100,118 @@ They require separate scope/benefit decisions. No live core self-modification,
 second global task engine, new watcher/Dispatcher or changes to Astra/Sol/Grok TUI
 coordination, reasoning or available parallelism. Broad old removed/deferred items
 below are not reopened by this bounded owner-authorized executor epic.
+
+**V5 reconciliation, 2026-09-12:** N8.M0–M3 first establish the authorized
+read/review journey; the N7 exemplar remains the subsequent isolated candidate
+patch and verified publication. E0/E2 share N8.M0 source acquisition/passports;
+E4 shares the N8.M1 asset delivery; E5 shares applicable N8.M3 evidence. Count
+shared work and costs once. Keep ACP first and the bounded per-attempt SDK
+fallback; no second required transport or executor. One DSH source pin serves
+the runtime, E1 fault fixture and optional hooks.
+
+E4 must apply the V5 native skill layout and selected 13-unit profile: immediate
+skill bundles, deterministic agent-profile conversion, one native provider and
+consumer, default HOME/project roots and watching disabled, actual loaded roster
+checked, read-only resources pinned per attempt. Remove foreign model aliases,
+automatic delegation and write permissions from the read-only review profile.
+DSH34/HX01 uses existing command-hook bridges only for selected compatible hooks;
+initial Stop/rewake stays off and G22 is required if hooks are selected. E6 may
+select N8.M4 CodeMode instead of an unimplemented PTC slice; do not implement both
+for the same purpose. These are post-acceptance requirements, not current RC work.
+
+### N8 — Upstream component adoption V5, after RC acceptance (1.0+)
+
+Status: **OWNER_INTAKE_REGISTERED — IMPLEMENTATION_QUEUED_POST_RC**.
+Owner instruction, 2026-09-12: adopt the supplied
+`FRIDAY_ADOPTION_V5_EN_COMPLETE_b5c616e_2026-09-12` package **after RC acceptance,
+for 1.0+**. It adds no functional GO requirements to current R10. Keep N6's
+existing priority and N7's single executor assignment. This section is the
+only mutable register for the package; the delivered directory remains an
+unchanged design input, not another backlog or accepted implementation.
+
+Sources: [README](../FRIDAY_ADOPTION_V5_EN_COMPLETE_b5c616e_2026-09-12/friday_adoption_v5_en/README.md),
+[main directive](../FRIDAY_ADOPTION_V5_EN_COMPLETE_b5c616e_2026-09-12/friday_adoption_v5_en/DIRECTIVE.md),
+[first vertical](../FRIDAY_ADOPTION_V5_EN_COMPLETE_b5c616e_2026-09-12/friday_adoption_v5_en/FIRST_VERTICAL.md),
+[recipes R1–R9](../FRIDAY_ADOPTION_V5_EN_COMPLETE_b5c616e_2026-09-12/friday_adoption_v5_en/IMPLEMENTATION_RECIPES.md),
+[catalog and selection states](../FRIDAY_ADOPTION_V5_EN_COMPLETE_b5c616e_2026-09-12/friday_adoption_v5_en/CATALOG.md),
+[Harness coverage](../FRIDAY_ADOPTION_V5_EN_COMPLETE_b5c616e_2026-09-12/friday_adoption_v5_en/HARNESS_COVERAGE.md)
+and [source index](../FRIDAY_ADOPTION_V5_EN_COMPLETE_b5c616e_2026-09-12/friday_adoption_v5_en/SOURCE_INDEX.md).
+V5 supersedes earlier adoption editions; its 96 catalog rows, 34 Harness
+families, 12 source consumers and seven recipes are overlapping coverage,
+including alternatives and exclusions, not additive mandatory feature counts.
+
+**Intake evidence:** the delivered complete file set passed verification
+(45 hashed files plus `SHA256SUMS`); its 48 supplied unit tests and Node regex
+check passed locally. The latter extracts nine source pins across seven recipes.
+Receipt: `~/.jericho/grok-takeover/ASTRA-221-adoption-v5-intake.json`.
+These checks validate the handoff helpers and structure only. No donor was
+fetched, built, installed or enabled; native vendir/Renovate validation,
+Friday integration, model journeys and acceptance remain NOT_RUN.
+
+The delivery references public checkpoint
+`b5c616ec4b39e3147f172e69ac5cebddcb0b8e4b`; intake observes local canonical HEAD
+`1bfd839c7906d2ff055437f64755b4601baf101d`, later published checkpoint `be63330`
+and the separate frozen R10 candidate088. None is a reason to reset ongoing
+work or transfer release evidence. Before implementation, reconcile the then
+current accepted source and unfinished changes, refresh relevant upstream
+repositories/releases/APIs/dependencies and notices, and select exact pins.
+The supplied source index is dated reference material, not a perpetual version
+lock. Preserve provenance/notices and visible local patches; legal decisions
+remain with the owner rather than becoming speculative scope blockers.
+
+**Selected first journey:** an authorized owner asks in Russian to locate and
+explain a defect in a fixed source snapshot. Friday returns useful findings with
+real file/line references, coverage limits and suggested checks through its
+existing final publication. The upload stays unchanged; a review is not a fix
+or test PASS. Development use and production `/coding` acceptance are separate.
+Reuse current coding selection/identity/admission, OrganRegistry/ExecutionKernel,
+Engineer Work Item/CommandKernel, LLMRouter/V12 and generated-file publication.
+Add only necessary adapters and at most one gated workbench facade; no new
+global queue, publisher, vault, memory store, loader or replacement team/TUI.
+
+| Item / owner | Dependencies and selected work | Completion evidence |
+|---|---|---|
+| [ ] **N8.M0 — deliveries and update policy / Astra; Sol review** | After RC acceptance; reconcile current owners once. Use vendir and existing Renovate for selected sources only; keep pristine source separate from exact patches/profiles. Share DSH provenance with N7.E0/E2. | Actual native config validation and generated locks, reproducible artifact/dependency/toolchain passports, current pin review. Merge narrowly scoped no-automerge rules after conflicting broad rules; exclude pristine nested manifests and unused alternatives, preserve unrelated policy. Accepted build/profile/state identity controls new jobs; intake creates no bot or schedule. |
+| [ ] **N8.M1 — review/QA/frontend assets and security review / Sol implementation; Astra integration** | M0; curated Claude review/feature/frontend and OpenHands QA assets, plus the complete security-guidance review API and import/test closure. Follow the supplied 13-unit selection and deterministic conversion. Reuse the admitted in-process local model for this first read-only path. | Packaged immutable resources, safe materialized symlink targets, actual loaded roster and task-specific selection; no inherited model aliases, hidden delegation/writes or HOME/plugin discovery. Security review cites actual inspected source and handles unsupported/malformed outcomes honestly. Shared N7.E4 assets are built once. |
+| [ ] **N8.M2 — one RepoMap / Sol implementation; Astra integration** | M0 and fixed authorized coding snapshots; use the complete pinned Aider map delivery. Reuse compatible grep-ast only for a demonstrated context gap. No replacement ranking/parser/index. | Snapshot-bound map with structured presence and coverage; native known-symbol, empty, unsupported-only, warning-prefix and changed-output controls. Banners/exit0 cannot establish a map; stale snapshots invalidate results. A bounded same-environment shim is an explicit private-API dependency if CLI adaptation is inadequate. Empty maps may use authorized direct reads with declared limits. |
+| [ ] **N8.M3 — first product journey and boundaries / Grok lab; Sol independent review; Astra acceptance** | M1/M2, applicable G01–G22 and existing exact gate/inventory. Development-only success is insufficient. | Real Friday owner input → admitted review → one exact published result; seeded defect found while valid behavior is retained. Clean installed wheel, own/foreign owner, mode/source scope, source drift, empty/unsupported maps, invalid/duplicate/nested assets, Unicode/large output/disk-full, model failure, cancel/late callbacks and real cleanup. Preserve existing Coding/Engineer/archive/primary-only/file delivery; current release and rollback procedures apply. |
+| [ ] **N8.M4/M5 — select one next useful journey / Astra; Grok evidence; Sol review** | After the first vertical and applicable accepted N7/host-tool/model boundaries. Choose CodeMode/OpenAPI/discovery **or** an OpenHands browser/workspace scenario on concrete benefit; do not activate both automatically. | Record the bounded selection and selected implementation with actual user evidence. CodeMode uses one complete package and host-validates every call, limits resources and preserves partial failures without replay; coordinate with conditional N7.E6. Browser separates action success from recording completeness and protects screenshots/storage. The unselected path remains conditional. No general Canvas/Web migration or second executor. |
+| [ ] **N8.M6 — applicable fixtures and development utilities / Grok; Sol review** | Attach required tests to their owning stages, not a new product runtime. OpenHands ACP mock covers transport controls; DSH HTTP/SSE fault server belongs to existing N7.E1; DSH replay remains internal. Benchmarks/release-note helpers only for concrete needs. | Distinct real HTTP/SSE and stdio boundary evidence, upstream tests retained, no mock-to-live credit or duplicate E1 delivery. Equal-model/resource benchmarks only when selected; optional utilities do not become new RC blockers or background agents. |
+
+**Acceptance traceability:** retain every G01–G22 identifier and map applicable
+requirements to the existing canonical test inventory and exact artifact/profile.
+G01–G06 cover off/missing-donor behavior, provenance, wheel-only resources,
+snapshot/tenant/mode authority and real execution observations; G07–G10 cover
+map freshness, review usefulness, actual model admission and ACP compatibility;
+G11–G16 cover stop/descendants/crash/UNKNOWN, candidate verification, exact
+publication and bounded Unicode/large/disk-full outcomes; G17–G19 apply to the
+selected CodeMode/browser contour; G20–G21 cover upgrade/rollback and existing
+behavior; G22 applies to selected native hooks. N7.A01–A24 remain required in
+their scope. Conditional checks stay explicitly conditional, not falsely green.
+The package's structural tests are not substitutes for these acceptance gates.
+
+All donor work stays inside authorized snapshots and enforced resource/model
+boundaries; no original Git history, Pandora, foreign data or host secrets in
+the worker. Do not switch to HOST_USER or globally relax limits to fit a donor.
+Cancel fences effects and publication before bounded process/inference cleanup;
+UNKNOWN is reconciled, never blindly replayed. Verify exact output outside the
+executor's writable area and publish once through Friday. Updates require new
+locks/builds/relevant checks and accepted artifact+adapter+profile+state; running
+jobs keep their version, and rollback preserves canonical receipts/user data.
+
+**Retained alternatives, not parallel commitments:** OpenCode/OpenClaude/OpenHands
+whole executors replace a concrete blocked choice or serve an accepted distinct
+scenario; they are not extra mandatory runtimes. Catalog `BUNDLED` stays inside
+the selected package; `GAP` needs an observed gap; `OPTIONAL`, `ALTERNATIVE`, `NO`
+and `INDEX` keep those meanings. Stop/rewake loops, cloud production fallbacks,
+automatic commits/pushes, new orchestration and live self-modification remain
+excluded. N7.E7 stays conditional as already recorded.
+
+The directive's M0–M3 6–11 and N7.E0–E5 10–18 engineering-day estimates are
+unmeasured references with overlapping work, not additive budgets or a current
+release ETA. Re-estimate after the first measured implementation boundary.
+Implementation advances only with scoped source, tests, independent review,
+actual journey and rollout evidence; registration closes none of those items.
 
 ### Removed from the active queue
 

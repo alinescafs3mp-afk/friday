@@ -9,6 +9,7 @@ from __future__ import annotations
 import fcntl
 import hashlib
 import json
+import logging
 import re
 import sys
 from datetime import UTC, datetime, timedelta
@@ -59,6 +60,39 @@ def _locked(path):
             return True
         fcntl.flock(stream, fcntl.LOCK_UN)
     return False
+
+
+@pytest.fixture(autouse=True)
+def isolate_cli_logger():
+    """Admit real friday.cli ERROR under inherited logger state; restore after.
+
+    These tests no-op cli.configure_logging, so they inherit disabled/propagate/
+    level and logging.disable from a prior test in the same process.
+    Restore only state changed here; pytest owns its capture handlers.
+    Do not stub Logger.error.
+    """
+
+    tracked = ("friday.cli", "friday")
+    snapshot = []
+    for name in tracked:
+        log = logging.getLogger(name)
+        snapshot.append((name, log.disabled, log.propagate, log.level))
+    disable_level = logging.root.manager.disable
+    logging.disable(logging.NOTSET)
+    for name in tracked:
+        log = logging.getLogger(name)
+        log.disabled = False
+        log.propagate = True
+        log.setLevel(logging.NOTSET)
+    try:
+        yield
+    finally:
+        logging.disable(disable_level)
+        for name, disabled, propagate, level in snapshot:
+            log = logging.getLogger(name)
+            log.disabled = disabled
+            log.propagate = propagate
+            log.setLevel(level)
 
 
 @pytest.fixture
@@ -276,6 +310,7 @@ def test_cli_token_commands_refuse_both_held_leases_without_rows_changed(
     before = _rows(storage)
     args = [command] + (["--user", TARGET] if command == "mint-token" else [target["id"]])
     caplog.clear()
+    caplog.set_level(logging.ERROR, logger="friday.cli")
     with _lease(settings, name):
         code, output, error = _run(monkeypatch, capsys, *args)
     assert code == 2 and output == "" and "API-токен" not in error

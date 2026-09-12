@@ -93,6 +93,7 @@ STAT_ANSWERS = {
         "Файлов — 303; Сущностей — 404; Связей — 505."
     ),
 }
+_EMPTY_CLOSED_PAST_TIMELINE = "В проверенной личной ленте за указанный интервал событий нет."
 
 
 def _cases(name: str) -> list[Any]:
@@ -571,9 +572,15 @@ async def test_all_frozen_time_questions_force_one_exact_bounded_tool_call(case:
     assert tools_used == [expected_tool]
     assert [item["tool"] for item in evidence] == [expected_tool]
     assert {"what_happened", "upcoming"}.isdisjoint(_tool_names(tools))
-    assert len(messages) == 1
-    assert "1900-01-01" not in messages[0]["content"]
-    assert "2999-12-31" not in messages[0]["content"]
+    if expected_tool == "what_happened":
+        assert messages == []
+        assert context.structural_answer == _EMPTY_CLOSED_PAST_TIMELINE
+    else:
+        assert len(messages) == 1
+        assert "1900-01-01" not in messages[0]["content"]
+        assert "2999-12-31" not in messages[0]["content"]
+    assert "1900-01-01" not in context.structural_answer
+    assert "2999-12-31" not in context.structural_answer
 
 
 @pytest.mark.parametrize(
@@ -621,7 +628,7 @@ async def test_a_past_multiday_window_ending_today_stops_at_local_now(
             {"since": expected_since, "until": FIXED_LOCAL_NOW, "limit": 40},
         )
     ]
-    assert context.structural_answer == ""
+    assert context.structural_answer == _EMPTY_CLOSED_PAST_TIMELINE
     assert {"what_happened", "upcoming"}.isdisjoint(_tool_names(tools))
 
 
@@ -1743,7 +1750,7 @@ def test_a_compound_global_count_projection_excludes_the_unrelated_clause(
         ),
         pytest.param(
             "Что было вчера? И сколько всего объектов знаний в моей базе?",
-            "Что было вчера",
+            "",
             "knowledge_objects",
             "past",
             "single_day",
@@ -1816,6 +1823,13 @@ async def test_compound_global_counts_execute_once_then_preserve_only_the_other_
         assert llm.main_tools == []
         assert sum("Часть просьбы человека уже решена" in call for call in llm.calls) == 1
         assert [call for call in kernel.calls if call[0] == "list_tags"] == [("list_tags", {})]
+        assert result["content"] == ""
+    elif time_direction == "past":
+        assert context.structural_answer.startswith(_EMPTY_CLOSED_PAST_TIMELINE)
+        assert _EMPTY_CLOSED_PAST_TIMELINE in context.structural_answer
+        assert STAT_ANSWERS[metric] in context.structural_answer
+        assert context.open_remainder == ""
+        assert llm.main_tools == []
         assert result["content"] == ""
     else:
         assert context.structural_answer == STAT_ANSWERS[metric]
@@ -2051,8 +2065,11 @@ async def test_a_positive_time_route_executes_only_its_selected_prefetch_despite
     )
 
     assert kernel.calls == [("what_happened", _time_arguments(case))]
-    assert {"what_happened", "upcoming"}.isdisjoint(llm.main_tools[0])
-    assert result["content"] == "Синтетический остаток обработан."
+    assert llm.main_tools == []
+    assert llm.attacked is False
+    assert all({"what_happened", "upcoming"}.isdisjoint(offered) for offered in llm.main_tools)
+    assert result["content"] == ""
+    assert context.structural_answer == _EMPTY_CLOSED_PAST_TIMELINE
 
 
 @pytest.mark.parametrize(
@@ -2086,7 +2103,7 @@ async def test_only_visible_temporal_text_controls_exact_routing_and_the_multi_g
     )
 
     assert kernel.calls == [("what_happened", _time_arguments(case))]
-    assert context.structural_answer == ""
+    assert context.structural_answer == _EMPTY_CLOSED_PAST_TIMELINE
     assert "несколько отдельных моментов" not in context.structural_answer
     assert {"what_happened", "upcoming"}.isdisjoint(_tool_names(tools))
 

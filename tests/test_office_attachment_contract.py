@@ -1529,10 +1529,15 @@ async def test_csv_exact_count_synonyms_reach_real_owned_runtime(
     attachment = _csv_count_attachment(count)
     projected = _bounded_attachment_projection([attachment])
     assert office_exact_request_detected(question)
-    assert office_arbiter_applies(question, projected)
+    needs_arbiter = control == "SYN-A03-07"
+    assert office_request_kind(question) == ("" if needs_arbiter else "count_records")
+    assert office_arbiter_applies(question, projected) is needs_arbiter
     exact = code_owned_office_answer(question, projected, kind_override="count_records")
     assert exact is not None and exact["status"] == "passed"
     assert exact["content"] == f"В документе {count} позиций."
+    if not needs_arbiter:
+        hostile = code_owned_office_answer(question, projected, kind_override="count_people")
+        assert hostile is not None and hostile["content"] == f"В документе {count} позиций."
 
     class CountArbiter:
         enabled = True
@@ -1564,7 +1569,7 @@ async def test_csv_exact_count_synonyms_reach_real_owned_runtime(
         attachments=[attachment],
         enable_tools=True,
     )
-    assert len(llm.questions) == 1
+    assert len(llm.questions) == int(needs_arbiter)
     assert result["message"] == f"В документе {count} позиций."
     rows = storage.get_conversation_messages(result["conversation_id"], user_id="alice")
     metadata = json.loads(rows[-1]["metadata_json"])
@@ -1581,10 +1586,20 @@ def test_compositional_whole_count_grammar_is_source_bound_and_code_owned(questi
     tagged = f"{question} Проверка GENERAL-WHOLE-COUNT."
     for surface in (question, tagged):
         assert office_exact_request_detected(surface)
+        proved_kind = office_request_kind(surface)
+        if proved_kind:
+            assert proved_kind == "count_records"
+            assert not office_arbiter_applies(surface, projected)
         answer = code_owned_office_answer(surface, projected, kind_override="count_records")
         assert answer is not None and answer["status"] == "passed"
         assert answer["content"] == "В документе 6 позиций."
-    assert office_arbiter_applies(tagged, projected)
+        if proved_kind:
+            hostile = code_owned_office_answer(surface, projected, kind_override="list_people")
+            assert hostile is not None and hostile["content"] == "В документе 6 позиций."
+    proved_kind = office_request_kind(tagged)
+    assert office_arbiter_applies(tagged, projected) is (not bool(proved_kind))
+    if proved_kind:
+        assert proved_kind == "count_records"
 
 
 @pytest.mark.parametrize("question", _CSV_COMPOSITIONAL_COUNT_REQUESTS)
@@ -1740,9 +1755,12 @@ async def test_real_runtime_cannot_ask_arbiter_to_replace_scoped_count_with_tota
 def test_quoted_other_scope_cannot_revoke_an_actual_whole_table_request():
     projected = _bounded_attachment_projection([_csv_count_attachment(16)])
     question = "Укажите cardinality записей в приложенном CSV. «Создай файл для отдела продаж»."
-    assert office_arbiter_applies(question, projected)
-    answer = code_owned_office_answer(question, projected, kind_override="count_records")
+    assert office_request_kind(question) == "count_records"
+    assert not office_arbiter_applies(question, projected)
+    answer = code_owned_office_answer(question, projected)
     assert answer is not None and answer["content"] == "В документе 16 позиций."
+    hostile = code_owned_office_answer(question, projected, kind_override="list_records")
+    assert hostile is not None and hostile["content"] == "В документе 16 позиций."
 
 
 _PARSE_SUMMARY_QUESTIONS = [

@@ -15,6 +15,33 @@ sys.path.insert(0, str(ROOT / "tools"))
 
 import synthetic_live_battery as battery  # noqa: E402
 
+# Frozen document requests whose accepted route owns the exact answer without
+# a model. Keep the fixture independent of the reconciliation predicate: using
+# that predicate to manufacture its own expected ledger would hide route drift.
+_DOCUMENT_ZERO_MODEL_IDS = frozenset(
+    {
+        "SYN-A03-03",
+        "SYN-A03-06",
+        "SYN-A03-08",
+        "SYN-A03-15",
+        "SYN-A03-19",
+        "SYN-A03-20",
+        "SYN-B03-02",
+        "SYN-B03-05",
+        "SYN-B03-06",
+        "SYN-B03-08",
+        "SYN-B03-09",
+        "SYN-B03-10",
+        "SYN-B03-11",
+        "SYN-B03-12",
+        "SYN-B03-16",
+        "SYN-B03-17",
+        "SYN-B03-18",
+        "SYN-B03-19",
+        "SYN-B03-20",
+    }
+)
+
 
 def _settings() -> SimpleNamespace:
     return SimpleNamespace(
@@ -173,6 +200,7 @@ def _closed_case_delta(case: battery.ExpandedCase) -> dict[str, int]:
         case.oracle_profile not in {"tenant_privacy", "reminder_creation"}
         and not battery._package_a_code_owned_case(case)
         and not battery._package_a_code_owned_temporal_case(case)
+        and case.id not in _DOCUMENT_ZERO_MODEL_IDS
     )
     delta = {
         **dict.fromkeys(battery._P01_CODE_OWNED_DELTA_ZERO_COUNTERS, 0),
@@ -209,7 +237,11 @@ def _route_evidence(case: battery.ExpandedCase) -> dict[str, bool | None]:
     return {
         "fabricated_outside_deed_request": False,
         "answer_present": True,
-        "model_spoke": case.oracle_profile not in {"tenant_privacy", "reminder_creation"},
+        "model_spoke": (
+            case.oracle_profile not in {"tenant_privacy", "reminder_creation"}
+            and not battery._package_a_code_owned_temporal_case(case)
+            and case.id not in _DOCUMENT_ZERO_MODEL_IDS
+        ),
         "outside_deed_replaced": False,
         "supported_deed_replaced": False,
         "remainder_known": True,
@@ -324,6 +356,33 @@ def test_http_reconciliation_closes_every_case_and_pass_budget(profile: str) -> 
             )
             is False
         )
+
+    if profile == "package_c_exact_documents":
+        # A and B each mix structural and model-owned requests. Prove both
+        # directions per case; a correct aggregate cannot hide an extra send
+        # on a structural request or a missing send on a model-owned one.
+        for battery_id in ("A", "B"):
+            document_cases = _pass_cases(profile, battery_id=battery_id)
+            document_deltas, document_evidence = _closed_ledgers(document_cases)
+            observed_zero_ids = {case_id for case_id, delta in document_deltas if delta["model_http"] == 0}
+            assert observed_zero_ids == {
+                case_id for case_id in _DOCUMENT_ZERO_MODEL_IDS if case_id.startswith(f"SYN-{battery_id}03-")
+            }
+            assert battery._http_probe_reconciliation_exact(
+                document_cases,
+                document_deltas,
+                document_evidence,
+                _sum_http_deltas([delta for _case_id, delta in document_deltas]),
+            )
+            for index, case in enumerate(document_cases):
+                altered = copy.deepcopy(document_deltas)
+                altered[index][1]["model_http"] = int(case.id in _DOCUMENT_ZERO_MODEL_IDS)
+                assert not battery._http_probe_reconciliation_exact(
+                    document_cases,
+                    altered,
+                    document_evidence,
+                    _sum_http_deltas([delta for _case_id, delta in altered]),
+                ), case.id
 
 
 @pytest.mark.parametrize("counter", ["model_http", "embedding_http", "reranker_http"])

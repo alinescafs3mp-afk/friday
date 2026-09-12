@@ -804,7 +804,11 @@ async def test_agentic_loop_cancels_an_entered_observe_tool_at_the_turn_wall(
         None,
     )
 
-    assert started.is_set() and cancelled.is_set()
+    assert started.is_set() and cancelled.is_set(), {
+        "entered": started.is_set(),
+        "cancelled": cancelled.is_set(),
+        "turn_deadline_expired": time.monotonic() >= context.turn_deadline,
+    }
 
 
 def test_api_chat_passes_one_admission_deadline_through_ingestion_and_agent(

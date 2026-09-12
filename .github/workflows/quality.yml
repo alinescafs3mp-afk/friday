@@ -36,6 +36,25 @@ jobs:
         with:
           python-version: "3.14.4"
 
+      - name: Seal hosted Python and executable directories
+        run: |
+          set -euo pipefail
+          # This step is confined to the disposable GitHub-hosted VM.
+          test "${RUNNER_ENVIRONMENT:-}" = github-hosted
+          python_root="${pythonLocation:-}"
+          test "$python_root" = /opt/hostedtoolcache/Python/3.14.4/x64
+          test -d "$python_root" && test ! -L "$python_root"
+          test "$(realpath -- "$python_root")" = "$python_root"
+          for directory in /usr/local/sbin /usr/local/bin /usr/sbin /usr/bin; do
+            test -d "$directory" && test ! -L "$directory"
+            stat --format='before %n uid=%u gid=%g mode=%a' -- "$directory"
+            sudo chmod go-w -- "$directory"
+            stat --format='after %n uid=%u gid=%g mode=%a' -- "$directory"
+          done
+          # Preserve file contents, ownership and executability. Do not follow links.
+          sudo find -P "$python_root" -xdev -type d -exec chmod go-w -- {} +
+          sudo find -P "$python_root" -xdev -type f -exec chmod go-w -- {} +
+
       - name: Set up Node.js
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
@@ -74,6 +93,38 @@ jobs:
       - name: Install Playwright Chromium
         run: .venv/bin/python -m playwright install --with-deps chromium
 
+      - name: Verify hosted runtime trust
+        run: |
+          set -euo pipefail
+          .venv/bin/python -I -B - <<'PYTHON'
+          import json
+          import os
+          import sys
+          sys.path.insert(0, os.getcwd())
+          from friday.organs.engineer.command.contracts import TrustedPathContract
+          from friday.organs.engineer.command.resolve import attest_trusted_path
+          from tools import exact_release_evidence
+          roots = attest_trusted_path(TrustedPathContract((
+              "/usr/local/sbin", "/usr/local/bin", "/usr/sbin", "/usr/bin", "/sbin", "/bin",
+          )))
+          try:
+              bound = exact_release_evidence._open_validation_interpreter()
+              try:
+                  print(json.dumps({
+                      "trusted_path": [root.path for root in roots],
+                      "validation_python": str(bound[1]),
+                      "bootstrap_file_bindings": len(bound[4]),
+                  }))
+              finally:
+                  for _, _, descriptor, _ in bound[4]:
+                      if descriptor >= 0:
+                          os.close(descriptor)
+                  os.close(bound[0])
+          finally:
+              for root in roots:
+                  os.close(root.dir_fd)
+          PYTHON
+
       - name: Authenticate hosted change capacity
         run: |
           set -euo pipefail
@@ -91,13 +142,21 @@ jobs:
           [[ "$base_sha" =~ ^[0-9a-f]{40}$ && "$base_sha" != "$candidate_sha" ]]
           git merge-base --is-ancestor "$base_sha" "$candidate_sha"
           install -d -m 0700 "$evidence_dir"
-          .venv/bin/python -I -B tools/quality_gate.py \
+          .venv/bin/python -I -B tools/hosted_quality_service.py \
+            --log-path "$RUNNER_TEMP/quality-gate.log" \
+            --runner-temp "$RUNNER_TEMP" \
+            --run-id "$GITHUB_RUN_ID" \
+            --run-attempt "$GITHUB_RUN_ATTEMPT" \
+            --runtime-max-sec 7200 \
+            --timeout-stop-sec 6 \
+            -- \
+            "$PWD/.venv/bin/python" -I -B "$PWD/tools/quality_gate.py" \
             --tier change \
             --candidate-sha "$candidate_sha" \
             --base-sha "$base_sha" \
             --evidence-dir "$evidence_dir" \
             --workers 4 \
-            --ui-workers 1 2>&1 | tee "$RUNNER_TEMP/quality-gate.log"
+            --ui-workers 1
 
       - name: Upload change-gate evidence
         if: always()

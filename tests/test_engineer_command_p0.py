@@ -1284,6 +1284,7 @@ def test_host_resource_limits_follow_parent_and_use_all_available_cpus(
         "_read_text",
         lambda path: "100000" if path == Path("/proc/sys/kernel/pid_max") else None,
     )
+    monkeypatch.setattr(os, "cpu_count", lambda: 8)
     monkeypatch.setattr(os, "sched_getaffinity", lambda _pid: frozenset(range(6)))
 
     limits = boundary_module.host_user_resource_limits()

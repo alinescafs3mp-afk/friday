@@ -164,12 +164,37 @@ def _probe_tree_enforcement() -> bool:
         tree = _allocate(limits)
     except (CodingTreeEnforcementError, OSError, subprocess.TimeoutExpired):
         return False
+    process: subprocess.Popen[bytes] | None = None
     try:
         _prove_limits(tree.cgroup, limits)
+
+        def _preexec() -> None:
+            _join_cgroup(tree.cgroup)
+
+        process = subprocess.Popen(  # noqa: S603 - closed trusted probe argv
+            (SLEEP_EXECUTABLE, "infinity"),
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            start_new_session=True,
+            env=_user_env(),
+            preexec_fn=_preexec,
+        )
+        if type(process.pid) is not int or process.pid <= 1:
+            raise CodingTreeEnforcementError("join")
+        if not _pid_in_tree(process.pid, tree.cgroup):
+            raise CodingTreeEnforcementError("join")
+        _prove_limits(tree.cgroup, limits)
         return True
-    except CodingTreeEnforcementError:
+    except (CodingTreeEnforcementError, OSError, ValueError, subprocess.SubprocessError):
         return False
     finally:
+        if process is not None and process.poll() is None:
+            _kill_tree(tree.cgroup)
+            with suppress(ProcessLookupError, PermissionError, OSError):
+                os.killpg(process.pid, signal.SIGKILL)
+            with suppress(OSError, subprocess.TimeoutExpired):
+                process.wait(timeout=5)
         _stop_unit(tree.unit)
 
 
@@ -437,7 +462,7 @@ def run_admitted_coding_tree_report(
             return CodingTreeCommandV1(process.wait(timeout=timeout_sec), b"")
         except subprocess.TimeoutExpired:
             return CodingTreeCommandV1(124, stderr)
-    except (CodingTreeEnforcementError, OSError, ValueError):
+    except (CodingTreeEnforcementError, OSError, ValueError, subprocess.SubprocessError):
         return empty
     finally:
         if process is not None and process.poll() is None:

@@ -8,6 +8,7 @@ from __future__ import annotations
 import fcntl
 import hashlib
 import json
+import logging
 import sqlite3
 import stat
 import sys
@@ -32,6 +33,39 @@ SCOPE = {
     "model_weights": "unchanged",
     "configuration_and_secrets": "unchanged",
 }
+
+
+@pytest.fixture(autouse=True)
+def isolate_cli_logger():
+    """Admit real friday.cli ERROR under inherited logger state; restore after.
+
+    These tests no-op cli.configure_logging, so they inherit disabled/propagate/
+    level and logging.disable from a prior test in the same process.
+    Restore only state changed here; pytest owns its capture handlers.
+    Do not stub Logger.error.
+    """
+
+    tracked = ("friday.cli", "friday")
+    snapshot = []
+    for name in tracked:
+        log = logging.getLogger(name)
+        snapshot.append((name, log.disabled, log.propagate, log.level))
+    disable_level = logging.root.manager.disable
+    logging.disable(logging.NOTSET)
+    for name in tracked:
+        log = logging.getLogger(name)
+        log.disabled = False
+        log.propagate = True
+        log.setLevel(logging.NOTSET)
+    try:
+        yield
+    finally:
+        logging.disable(disable_level)
+        for name, disabled, propagate, level in snapshot:
+            log = logging.getLogger(name)
+            log.disabled = disabled
+            log.propagate = propagate
+            log.setLevel(level)
 
 
 @pytest.fixture
@@ -238,6 +272,7 @@ def test_cli_restore_refuses_each_active_role_before_mutating_restore_stage(
     monkeypatch.setattr(FridayStorage, "_restore_backup_with_stopped_bridge", restore_stage)
     storage.close()
     caplog.clear()
+    caplog.set_level(logging.ERROR, logger="friday.cli")
     with _lease(settings, role):
         code, output, error = _run(monkeypatch, capsys, "restore-backup", ready["database"], "--yes")
     assert code == 2 and output == error == "" and calls == []
@@ -264,6 +299,7 @@ def test_cli_restore_rejects_corrupt_manifest_and_keeps_current_rows_and_archive
     files_before = _files(settings.backups_dir)
     storage.close()
     caplog.clear()
+    caplog.set_level(logging.ERROR, logger="friday.cli")
     code, output, error = _run(monkeypatch, capsys, "restore-backup", ready["database"], "--yes")
     assert code == 2 and output == error == ""
     assert [(r.levelname, r.getMessage()) for r in caplog.records if r.name == "friday.cli"] == [

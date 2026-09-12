@@ -131,7 +131,12 @@ def test_actual_app_response_fault_rejects_the_affected_operation(
     evidence = tmp_path / "fault-evidence"
     report = soak.run_actual_app_soak(tuned, policy, evidence)
 
-    assert observed["mutations"] == 1, "The fault must hit one actual product response"
+    assert observed["mutations"] == 1, {
+        "reason": "The fault must hit one actual product response",
+        "failure_codes": report["failure_codes"],
+        "request_accounting": report["request_accounting"],
+        "duration_coverage": report["duration_coverage"],
+    }
     assert report["status"] == "APP_SOAK_PROFILE_INCOMPLETE"
     assert report["failure_codes"][0] == expected_failure
     errors = [json.loads(p.read_text()) for p in evidence.glob("operation-*.error.json")]
@@ -228,7 +233,11 @@ def test_http_200_offline_without_reminder_effect_is_red_and_continues_only_iden
         sleeper=sleeper,
     )
 
-    assert observed == {"chat": 1, "identity_after_chat": 4}
+    assert observed == {"chat": 1, "identity_after_chat": 4}, {
+        "failure_codes": report["failure_codes"],
+        "request_accounting": report["request_accounting"],
+        "duration_coverage": report["duration_coverage"],
+    }
     assert report["status"] == "APP_SOAK_PROFILE_FAILED"
     assert report["functional_status"] == "FAIL"
     assert report["failure_codes"] == ["reminder_creation_not_observed"]
