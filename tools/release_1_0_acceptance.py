@@ -3277,24 +3277,36 @@ def _source_function_parameters(node: ast.FunctionDef | ast.AsyncFunctionDef) ->
     return tuple(names)
 
 
-def _source_expression_bound_names(expression: ast.AST | None) -> tuple[str, ...]:
+def _source_expression_bound_names(
+    expression: ast.AST | None,
+    expression_cache: dict[ast.AST, tuple[str, ...]] | None = None,
+) -> tuple[str, ...]:
     if expression is None:
         return ()
+    if expression_cache is None:
+        expression_cache = {}
+    cached = expression_cache.get(expression)
+    if cached is not None:
+        return cached
     names: list[str] = []
-
-    class NamedExpressionVisitor(ast.NodeVisitor):
-        def visit_NamedExpr(self, node: ast.NamedExpr) -> None:  # noqa: N802
-            names.extend(_source_target_names(node.target))
-            self.visit(node.value)
-
-        def visit_Lambda(self, node: ast.Lambda) -> None:  # noqa: N802
-            # Defaults execute when a lambda is created; its body is deferred.
-            for default in (*node.args.defaults, *node.args.kw_defaults):
-                if default is not None:
-                    self.visit(default)
-
-    NamedExpressionVisitor().visit(expression)
-    return tuple(names)
+    children: tuple[ast.AST, ...]
+    if isinstance(expression, ast.NamedExpr):
+        names.extend(_source_target_names(expression.target))
+        children = (expression.value,)
+    elif isinstance(expression, ast.Lambda):
+        # Defaults execute when a lambda is created; its body is deferred.
+        children = tuple(
+            default
+            for default in (*expression.args.defaults, *expression.args.kw_defaults)
+            if default is not None
+        )
+    else:
+        children = tuple(ast.iter_child_nodes(expression))
+    for child in children:
+        names.extend(_source_expression_bound_names(child, expression_cache))
+    result = tuple(names)
+    expression_cache[expression] = result
+    return result
 
 
 def _source_definition_binding_expressions(
@@ -3353,7 +3365,12 @@ def _source_loop_control_transfer_line(body: Sequence[ast.stmt]) -> int | None:
     return None
 
 
-def _source_scope_bound_names(body: Sequence[ast.stmt]) -> tuple[str, ...]:
+def _source_scope_bound_names(
+    body: Sequence[ast.stmt],
+    expression_cache: dict[ast.AST, tuple[str, ...]] | None = None,
+) -> tuple[str, ...]:
+    if expression_cache is None:
+        expression_cache = {}
     bound: set[str] = set()
     external: set[str] = set()
 
@@ -3362,10 +3379,10 @@ def _source_scope_bound_names(body: Sequence[ast.stmt]) -> tuple[str, ...]:
             if isinstance(node, ast.Assign):
                 for target in node.targets:
                     bound.update(_source_target_names(target))
-                bound.update(_source_expression_bound_names(node.value))
+                bound.update(_source_expression_bound_names(node.value, expression_cache))
             elif isinstance(node, (ast.AnnAssign, ast.AugAssign)):
                 bound.update(_source_target_names(node.target))
-                bound.update(_source_expression_bound_names(node.value))
+                bound.update(_source_expression_bound_names(node.value, expression_cache))
             elif isinstance(node, ast.Delete):
                 for target in node.targets:
                     bound.update(_source_target_names(target))
@@ -3380,21 +3397,21 @@ def _source_scope_bound_names(body: Sequence[ast.stmt]) -> tuple[str, ...]:
             elif isinstance(node, (ast.Global, ast.Nonlocal)):
                 external.update(node.names)
             elif isinstance(node, ast.If):
-                bound.update(_source_expression_bound_names(node.test))
+                bound.update(_source_expression_bound_names(node.test, expression_cache))
                 visit(node.body)
                 visit(node.orelse)
             elif isinstance(node, (ast.For, ast.AsyncFor)):
                 bound.update(_source_target_names(node.target))
-                bound.update(_source_expression_bound_names(node.iter))
+                bound.update(_source_expression_bound_names(node.iter, expression_cache))
                 visit(node.body)
                 visit(node.orelse)
             elif isinstance(node, ast.While):
-                bound.update(_source_expression_bound_names(node.test))
+                bound.update(_source_expression_bound_names(node.test, expression_cache))
                 visit(node.body)
                 visit(node.orelse)
             elif isinstance(node, (ast.With, ast.AsyncWith)):
                 for item in node.items:
-                    bound.update(_source_expression_bound_names(item.context_expr))
+                    bound.update(_source_expression_bound_names(item.context_expr, expression_cache))
                     bound.update(_source_target_names(item.optional_vars))
                 visit(node.body)
             elif isinstance(node, (ast.Try, ast.TryStar)):
@@ -3406,17 +3423,17 @@ def _source_scope_bound_names(body: Sequence[ast.stmt]) -> tuple[str, ...]:
                 visit(node.orelse)
                 visit(node.finalbody)
             elif isinstance(node, ast.Match):
-                bound.update(_source_expression_bound_names(node.subject))
+                bound.update(_source_expression_bound_names(node.subject, expression_cache))
                 for case in node.cases:
                     for pattern in ast.walk(case.pattern):
                         if isinstance(pattern, (ast.MatchAs, ast.MatchStar)) and pattern.name is not None:
                             bound.add(pattern.name)
                         elif isinstance(pattern, ast.MatchMapping) and pattern.rest is not None:
                             bound.add(pattern.rest)
-                    bound.update(_source_expression_bound_names(case.guard))
+                    bound.update(_source_expression_bound_names(case.guard, expression_cache))
                     visit(case.body)
             else:
-                bound.update(_source_expression_bound_names(node))
+                bound.update(_source_expression_bound_names(node, expression_cache))
 
     visit(body)
     return tuple(sorted(bound - external))
@@ -3492,7 +3509,13 @@ def _source_scan_body(
     inherited_bindings: Mapping[str, _SourceReceiverBinding],
     path: Path,
     root: Path,
+    expression_cache: dict[ast.AST, tuple[str, ...]] | None = None,
 ) -> tuple[tuple[str, ...], dict[str, _SourceReceiverBinding], frozenset[str]]:
+    # The parsed module is private and unchanged throughout this scan. Cache only
+    # syntax-derived names, never binding-dependent route or ambiguity decisions.
+    # A new top-level scan receives a fresh cache, including after AST/file edits.
+    if expression_cache is None:
+        expression_cache = {}
     bindings = dict(inherited_bindings)
     local_known: dict[str, tuple[str, str]] = {}
     found: list[str] = []
@@ -3523,7 +3546,7 @@ def _source_scan_body(
             value = node.value
         names = tuple(name for target in targets for name in _source_target_names(target))
         simple = bool(names) and all(isinstance(target, ast.Name) for target in targets)
-        expression_names = _source_expression_bound_names(value)
+        expression_names = _source_expression_bound_names(value, expression_cache)
         expression_mutations = _source_mark_ambiguous(bindings, expression_names)
         mutated.update(expression_mutations)
         for name in expression_mutations:
@@ -3553,7 +3576,9 @@ def _source_scan_body(
         loop_body: Sequence[ast.stmt],
         entry: Mapping[str, _SourceReceiverBinding],
     ) -> tuple[tuple[str, ...], dict[str, _SourceReceiverBinding], frozenset[str]]:
-        first_found, first_state, first_mutations = _source_scan_body(loop_body, entry, path, root)
+        first_found, first_state, first_mutations = _source_scan_body(
+            loop_body, entry, path, root, expression_cache
+        )
         transfer_line = _source_loop_control_transfer_line(loop_body)
         receiver_names = {name for name, binding in entry.items() if binding is not None} | set(
             _LEGACY_API_DECORATOR_RECEIVERS
@@ -3572,7 +3597,7 @@ def _source_scan_body(
         for name in carried:
             repeated_entry[name] = None
         repeated_found, repeated_state, repeated_mutations = _source_scan_body(
-            loop_body, repeated_entry, path, root
+            loop_body, repeated_entry, path, root, expression_cache
         )
         return (
             repeated_found,
@@ -3588,7 +3613,7 @@ def _source_scan_body(
             names = _source_target_names(node.target)
             affected = _source_mark_ambiguous(
                 bindings,
-                (*names, *_source_expression_bound_names(node.value)),
+                (*names, *_source_expression_bound_names(node.value, expression_cache)),
             )
             mutated.update(affected)
             for name in affected:
@@ -3616,12 +3641,16 @@ def _source_scan_body(
                 surface = _source_decorator_surface(decorator, bindings, path, root)
                 if surface is not None:
                     found.append(surface)
-                affected = _source_mark_ambiguous(bindings, _source_expression_bound_names(decorator))
+                affected = _source_mark_ambiguous(
+                    bindings, _source_expression_bound_names(decorator, expression_cache)
+                )
                 mutated.update(affected)
                 for name in affected:
                     local_known.pop(name, None)
             for expression in _source_definition_binding_expressions(node):
-                affected = _source_mark_ambiguous(bindings, _source_expression_bound_names(expression))
+                affected = _source_mark_ambiguous(
+                    bindings, _source_expression_bound_names(expression, expression_cache)
+                )
                 mutated.update(affected)
                 for name in affected:
                     local_known.pop(name, None)
@@ -3629,19 +3658,25 @@ def _source_scan_body(
             if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
                 shadowed = (
                     *_source_function_parameters(node),
-                    *_source_scope_bound_names(node.body),
+                    *_source_scope_bound_names(node.body, expression_cache),
                 )
                 _source_mark_ambiguous(child_bindings, shadowed)
-            child_found, _, _ = _source_scan_body(node.body, child_bindings, path, root)
+            child_found, _, _ = _source_scan_body(node.body, child_bindings, path, root, expression_cache)
             found.extend(child_found)
             mutated.update(_source_mark_ambiguous(bindings, (node.name,)))
             local_known.pop(node.name, None)
             continue
         if isinstance(node, ast.If):
-            test_mutations = _source_mark_ambiguous(bindings, _source_expression_bound_names(node.test))
+            test_mutations = _source_mark_ambiguous(
+                bindings, _source_expression_bound_names(node.test, expression_cache)
+            )
             mutated.update(test_mutations)
-            body_found, body_state, body_mutations = _source_scan_body(node.body, bindings, path, root)
-            else_found, else_state, else_mutations = _source_scan_body(node.orelse, bindings, path, root)
+            body_found, body_state, body_mutations = _source_scan_body(
+                node.body, bindings, path, root, expression_cache
+            )
+            else_found, else_state, else_mutations = _source_scan_body(
+                node.orelse, bindings, path, root, expression_cache
+            )
             found.extend((*body_found, *else_found))
             replace_state(
                 _source_merge_bindings((body_state, else_state)),
@@ -3649,13 +3684,17 @@ def _source_scan_body(
             )
             continue
         if isinstance(node, (ast.For, ast.AsyncFor)):
-            iter_mutations = _source_mark_ambiguous(bindings, _source_expression_bound_names(node.iter))
+            iter_mutations = _source_mark_ambiguous(
+                bindings, _source_expression_bound_names(node.iter, expression_cache)
+            )
             mutated.update(iter_mutations)
             body_start = dict(bindings)
             target_mutations = _source_mark_ambiguous(body_start, _source_target_names(node.target))
             body_found, body_state, body_mutations = scan_loop_body(node.body, body_start)
             loop_state = _source_merge_bindings((bindings, body_state))
-            else_found, else_state, else_mutations = _source_scan_body(node.orelse, loop_state, path, root)
+            else_found, else_state, else_mutations = _source_scan_body(
+                node.orelse, loop_state, path, root, expression_cache
+            )
             found.extend((*body_found, *else_found))
             replace_state(
                 else_state,
@@ -3663,11 +3702,15 @@ def _source_scan_body(
             )
             continue
         if isinstance(node, ast.While):
-            test_mutations = _source_mark_ambiguous(bindings, _source_expression_bound_names(node.test))
+            test_mutations = _source_mark_ambiguous(
+                bindings, _source_expression_bound_names(node.test, expression_cache)
+            )
             mutated.update(test_mutations)
             body_found, body_state, body_mutations = scan_loop_body(node.body, bindings)
             loop_state = _source_merge_bindings((bindings, body_state))
-            else_found, else_state, else_mutations = _source_scan_body(node.orelse, loop_state, path, root)
+            else_found, else_state, else_mutations = _source_scan_body(
+                node.orelse, loop_state, path, root, expression_cache
+            )
             found.extend((*body_found, *else_found))
             replace_state(else_state, (*body_mutations, *else_mutations))
             continue
@@ -3676,16 +3719,24 @@ def _source_scan_body(
             with_mutations: set[str] = set()
             for item in node.items:
                 with_mutations.update(
-                    _source_mark_ambiguous(child, _source_expression_bound_names(item.context_expr))
+                    _source_mark_ambiguous(
+                        child, _source_expression_bound_names(item.context_expr, expression_cache)
+                    )
                 )
                 with_mutations.update(_source_mark_ambiguous(child, _source_target_names(item.optional_vars)))
-            child_found, child_state, child_mutations = _source_scan_body(node.body, child, path, root)
+            child_found, child_state, child_mutations = _source_scan_body(
+                node.body, child, path, root, expression_cache
+            )
             found.extend(child_found)
             replace_state(child_state, (*with_mutations, *child_mutations))
             continue
         if isinstance(node, (ast.Try, ast.TryStar)):
-            body_found, body_state, body_mutations = _source_scan_body(node.body, bindings, path, root)
-            else_found, normal_state, else_mutations = _source_scan_body(node.orelse, body_state, path, root)
+            body_found, body_state, body_mutations = _source_scan_body(
+                node.body, bindings, path, root, expression_cache
+            )
+            else_found, normal_state, else_mutations = _source_scan_body(
+                node.orelse, body_state, path, root, expression_cache
+            )
             found.extend((*body_found, *else_found))
             exits = [normal_state]
             handler_mutations: set[str] = set()
@@ -3697,7 +3748,7 @@ def _source_scan_body(
                     handler_start[handler.name] = None
                     handler_mutations.add(handler.name)
                 handler_found, handler_state, branch_mutations = _source_scan_body(
-                    handler.body, handler_start, path, root
+                    handler.body, handler_start, path, root, expression_cache
                 )
                 found.extend(handler_found)
                 exits.append(handler_state)
@@ -3712,8 +3763,12 @@ def _source_scan_body(
                 safety_start = dict(merged)
                 for name in branch_mutations:
                     safety_start[name] = None
-                final_found, _, safety_mutations = _source_scan_body(node.finalbody, safety_start, path, root)
-                _, final_state, final_mutations = _source_scan_body(node.finalbody, merged, path, root)
+                final_found, _, safety_mutations = _source_scan_body(
+                    node.finalbody, safety_start, path, root, expression_cache
+                )
+                _, final_state, final_mutations = _source_scan_body(
+                    node.finalbody, merged, path, root, expression_cache
+                )
                 found.extend(final_found)
                 replace_state(
                     final_state,
@@ -3727,7 +3782,9 @@ def _source_scan_body(
                 replace_state(merged, tuple(branch_mutations))
             continue
         if isinstance(node, ast.Match):
-            subject_mutations = _source_mark_ambiguous(bindings, _source_expression_bound_names(node.subject))
+            subject_mutations = _source_mark_ambiguous(
+                bindings, _source_expression_bound_names(node.subject, expression_cache)
+            )
             mutated.update(subject_mutations)
             exits: list[Mapping[str, _SourceReceiverBinding]] = [dict(bindings)]
             case_mutations: set[str] = set()
@@ -3741,17 +3798,19 @@ def _source_scan_body(
                         pattern_names.append(pattern.rest)
                 case_mutations.update(_source_mark_ambiguous(case_start, pattern_names))
                 case_mutations.update(
-                    _source_mark_ambiguous(case_start, _source_expression_bound_names(case.guard))
+                    _source_mark_ambiguous(
+                        case_start, _source_expression_bound_names(case.guard, expression_cache)
+                    )
                 )
                 case_found, case_state, branch_mutations = _source_scan_body(
-                    case.body, case_start, path, root
+                    case.body, case_start, path, root, expression_cache
                 )
                 found.extend(case_found)
                 exits.append(case_state)
                 case_mutations.update(branch_mutations)
             replace_state(_source_merge_bindings(exits), tuple(case_mutations))
             continue
-        affected = _source_mark_ambiguous(bindings, _source_expression_bound_names(node))
+        affected = _source_mark_ambiguous(bindings, _source_expression_bound_names(node, expression_cache))
         mutated.update(affected)
         for name in affected:
             local_known.pop(name, None)

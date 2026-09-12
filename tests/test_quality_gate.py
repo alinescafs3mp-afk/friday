@@ -14,7 +14,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from tools import quality_gate
+from tools import hosted_quality_service, quality_gate
 
 CANONICAL_GATE_COMMAND = ".venv/bin/python -I -B tools/quality_gate.py"
 CANONICAL_GATE_GUIDANCE = (
@@ -545,7 +545,19 @@ def test_clean_workflow_pins_the_zero_skip_toolchain() -> None:
         for value in ("sysctl -w", "--share-net", "sudo /usr/bin/bwrap", "continue-on-error:")
     )
     gate = workflow.split("- name: Run closed synthetic change gate\n", 1)[1].split("- name:", 1)[0]
-    assert "set -euo pipefail" in gate and '2>&1 | tee "$RUNNER_TEMP/quality-gate.log"' in gate
+    assert "set -euo pipefail" in gate
+    # The owned service forwards output and preserves the gate's exit status.
+    # Keep the log and finite stop contract bound to the actual workflow entry.
+    assert ".venv/bin/python -I -B tools/hosted_quality_service.py" in gate
+    assert '--log-path "$RUNNER_TEMP/quality-gate.log"' in gate
+    assert '--runner-temp "$RUNNER_TEMP"' in gate
+    assert '--run-id "$GITHUB_RUN_ID"' in gate and '--run-attempt "$GITHUB_RUN_ATTEMPT"' in gate
+    assert "timeout-minutes: 180" in workflow
+    assert "--runtime-max-sec 10200" in gate and "--timeout-stop-sec 6" in gate
+    assert hosted_quality_service.MAX_RUNTIME_SECONDS == 10_200
+    assert hosted_quality_service.GateConfig.__dataclass_fields__["runtime_max_sec"].default == 10_200
+    assert '"$PWD/.venv/bin/python" -I -B "$PWD/tools/quality_gate.py"' in gate
+    assert (quality_gate.ROOT / "tools/hosted_quality_service.py").is_file()
     upload = workflow.split("- name: Upload change-gate evidence\n", 1)[1]
     assert "if: always()" in upload and "${{ runner.temp }}/quality-gate.log" in upload
     assert "if-no-files-found: error" in upload
@@ -576,7 +588,11 @@ def test_ui_module_inventory_cannot_silently_drift() -> None:
     assert discovered == set(quality_gate.UI_TEST_MODULES)
 
 
-def test_closed_gate_defaults_use_bounded_ui_parallelism(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_closed_gate_defaults_use_bounded_ui_parallelism(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
     args = quality_gate.build_parser().parse_args([])
 
     assert (args.workers, args.ui_workers) == (20, 4)
@@ -602,6 +618,48 @@ def test_closed_gate_defaults_use_bounded_ui_parallelism(monkeypatch: pytest.Mon
     )
     assert ui.argv[ui.argv.index("-n") : ui.argv.index("-n") + 3] == ("-n", "4", "--dist=loadscope")
     assert ui.argv[-12:] == quality_gate.UI_TEST_MODULES
+    assert quality_gate._TIER_PHASE_TIMEOUT_SECONDS == {
+        ("change", "non-UI"): 7_200,
+        ("change", "UI"): 1_800,
+    }
+    assert (
+        quality_gate._tier_pytest_command(
+            **common,
+            timeout_s=quality_gate._TIER_PHASE_TIMEOUT_SECONDS[("change", "non-UI")],
+        ).timeout_s
+        == 7_200
+    )
+
+    nodeid = "tests/test_probe.py::test_failure_identity"
+    selection = tmp_path / "selection.json"
+    _write_collection(selection, (nodeid,))
+    values = {
+        quality_gate._COLLECTION_OPTION: str(tmp_path / "collection.json"),
+        quality_gate._SELECTION_OPTION: str(selection),
+        "numprocesses": 4,
+    }
+    report = SimpleNamespace(
+        failed=True,
+        nodeid=nodeid,
+        when="call",
+        longrepr="private failure body must not be logged",
+    )
+    config = SimpleNamespace(getoption=lambda name, default=None: values.get(name, default))
+    worker_config = SimpleNamespace(
+        getoption=lambda name, default=None: values.get(name, default), workerinput={}
+    )
+    assert quality_gate._partial_failure_reporting_enabled(config, str(selection))
+    assert not quality_gate._partial_failure_reporting_enabled(worker_config, str(selection))
+    with monkeypatch.context() as state:
+        state.setattr(quality_gate, "_REPORT_PARTIAL_FAILURES", True)
+        state.setattr(quality_gate, "_TIER_SELECTION", frozenset((nodeid,)))
+        state.setattr(quality_gate, "_PARTIAL_FAILURES", set())
+        quality_gate.pytest_runtest_logreport(report)
+        quality_gate.pytest_runtest_logreport(report)
+        assert capsys.readouterr().out.splitlines() == [
+            "",
+            'FRIDAY_GATE_PARTIAL_FAILURE {"nodeid":"tests/test_probe.py::test_failure_identity","when":"call"}',
+        ]
     monkeypatch.setattr(quality_gate.os, "process_cpu_count", lambda: 24, raising=False)
     monkeypatch.setattr(
         quality_gate.shutil,

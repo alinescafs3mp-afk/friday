@@ -22,6 +22,7 @@ from typing import BinaryIO, Protocol
 
 SYSTEMD_RUN = "/usr/bin/systemd-run"
 SYSTEMCTL = "/usr/bin/systemctl"
+MAX_RUNTIME_SECONDS = 10_200
 CGROUP_ROOT = Path("/sys/fs/cgroup")
 INFRA_EXIT = 125
 MANAGER_TIMEOUT = 4.0
@@ -111,7 +112,7 @@ class GateConfig:
     runner_temp: Path
     run_id: str
     run_attempt: str
-    runtime_max_sec: int = 7200
+    runtime_max_sec: int = MAX_RUNTIME_SECONDS
     timeout_stop_sec: int = 6
 
 
@@ -403,7 +404,7 @@ def _build_launch(
         raise HostedGateError("COMMAND_INVALID")
     if not (1 <= config.timeout_stop_sec <= 30):
         raise HostedGateError("STOP_TIMEOUT_INVALID")
-    if not (1 <= config.runtime_max_sec <= 7200):
+    if not (1 <= config.runtime_max_sec <= MAX_RUNTIME_SECONDS):
         raise HostedGateError("RUNTIME_MAX_INVALID")
     argv = [
         SYSTEMD_RUN,
@@ -811,7 +812,7 @@ def _parse_gate(argv: Sequence[str]) -> GateConfig:
     parser.add_argument("--runner-temp", required=True, type=Path)
     parser.add_argument("--run-id", required=True)
     parser.add_argument("--run-attempt", required=True)
-    parser.add_argument("--runtime-max-sec", type=int, default=7200)
+    parser.add_argument("--runtime-max-sec", type=int, default=MAX_RUNTIME_SECONDS)
     parser.add_argument("--timeout-stop-sec", type=int, default=6)
     parser.add_argument("command", nargs=argparse.REMAINDER)
     args = parser.parse_args(list(argv))

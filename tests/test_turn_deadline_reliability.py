@@ -9,6 +9,7 @@ import inspect
 import textwrap
 import threading
 import time
+from contextlib import suppress
 from dataclasses import replace
 from types import SimpleNamespace
 from typing import Any
@@ -745,6 +746,36 @@ async def test_agentic_loop_cancels_an_entered_observe_tool_at_the_turn_wall(
     storage.ensure_user("alice", preset_key="owner")
     started = asyncio.Event()
     cancelled = asyncio.Event()
+    stdlib_monotonic = time.monotonic
+    loop = asyncio.get_running_loop()
+    loop_time_func = loop.time.__func__
+    # Independent of the turn wall. Line 66774 is now+model_budget > fixed wall,
+    # not elapsed model consumption; the 0.01s fixture lost remaining wall in setup.
+    model_budget_sec = 30.0
+    wall_after_tool_selected_sec = 0.5
+    origin = stdlib_monotonic()
+    clock = {"mode": "setup", "wall_started": origin}
+
+    def loop_monotonic() -> float:
+        if clock["mode"] == "setup":
+            return origin
+        return origin + model_budget_sec + (stdlib_monotonic() - clock["wall_started"])
+
+    class _RuntimeTimeProxy:
+        def __init__(self, real_time: Any, monotonic_fn: Any) -> None:
+            object.__setattr__(self, "_real_time", real_time)
+            object.__setattr__(self, "_monotonic_fn", monotonic_fn)
+
+        def monotonic(self) -> float:
+            return object.__getattribute__(self, "_monotonic_fn")()
+
+        def __getattr__(self, name: str) -> Any:
+            return getattr(object.__getattribute__(self, "_real_time"), name)
+
+    monkeypatch.setattr(agent_runtime_module, "time", _RuntimeTimeProxy(time, loop_monotonic))
+    assert time.monotonic is stdlib_monotonic
+    assert agent_runtime_module.time is not time
+    assert loop.time.__func__ is loop_time_func
 
     class _ObserveKernel:
         @staticmethod
@@ -767,10 +798,12 @@ async def test_agentic_loop_cancels_an_entered_observe_tool_at_the_turn_wall(
 
     class _OneObserveModel:
         enabled = True
-        total_budget_sec = 0.01
+        total_budget_sec = model_budget_sec
 
         async def chat(self, _messages, *, tools=None, **_kwargs):  # noqa: ANN001
             if tools:
+                clock["wall_started"] = stdlib_monotonic()
+                clock["mode"] = "wall"
                 return {
                     "content": "",
                     "tool_calls": [
@@ -793,22 +826,57 @@ async def test_agentic_loop_cancels_an_entered_observe_tool_at_the_turn_wall(
         conversation_id="observe-tool-deadline",
         user_id="alice",
         person_id="alice",
-        turn_deadline=time.monotonic() + 0.03,
+        turn_deadline=origin + model_budget_sec + wall_after_tool_selected_sec,
     )
 
-    await runtime._agentic_loop(  # noqa: SLF001
-        context,
-        "выполни синтетическое чтение",
-        ActorContext(user_id="alice", preset_key="owner", source="test"),
-        [_schema("slow_observe")],
-        None,
+    loop_task = asyncio.create_task(
+        runtime._agentic_loop(  # noqa: SLF001
+            context,
+            "выполни синтетическое чтение",
+            ActorContext(user_id="alice", preset_key="owner", source="test"),
+            [_schema("slow_observe")],
+            None,
+        )
     )
-
-    assert started.is_set() and cancelled.is_set(), {
-        "entered": started.is_set(),
-        "cancelled": cancelled.is_set(),
-        "turn_deadline_expired": time.monotonic() >= context.turn_deadline,
-    }
+    entered_schedule_sec = 15.0
+    started_wait = asyncio.create_task(started.wait())
+    try:
+        assert time.monotonic is stdlib_monotonic
+        assert loop.time.__func__ is loop_time_func
+        done, _pending = await asyncio.wait(
+            {started_wait, loop_task},
+            timeout=entered_schedule_sec,
+            return_when=asyncio.FIRST_COMPLETED,
+        )
+        if started_wait not in done:
+            loop_exc = loop_task.exception() if loop_task.done() else None
+            raise AssertionError(
+                {
+                    "entered": started.is_set(),
+                    "cancelled": cancelled.is_set(),
+                    "loop_done": loop_task.done(),
+                    "loop_exception": None if loop_exc is None else f"{type(loop_exc).__name__}: {loop_exc}",
+                    "turn_deadline_expired": loop_monotonic() >= context.turn_deadline,
+                    "schedule_sec": entered_schedule_sec,
+                    "stdlib_monotonic_is_real": time.monotonic is stdlib_monotonic,
+                }
+            )
+        await started_wait
+        await asyncio.wait_for(cancelled.wait(), timeout=wall_after_tool_selected_sec + 2.0)
+        await asyncio.wait_for(loop_task, timeout=entered_schedule_sec)
+        assert started.is_set() and cancelled.is_set(), {
+            "entered": started.is_set(),
+            "cancelled": cancelled.is_set(),
+            "turn_deadline_expired": loop_monotonic() >= context.turn_deadline,
+        }
+    finally:
+        for waiter in (started_wait, loop_task):
+            if not waiter.done():
+                waiter.cancel()
+        for waiter in (started_wait, loop_task):
+            if not waiter.done():
+                with suppress(asyncio.CancelledError, Exception):
+                    await asyncio.wait_for(waiter, timeout=2.0)
 
 
 def test_api_chat_passes_one_admission_deadline_through_ingestion_and_agent(

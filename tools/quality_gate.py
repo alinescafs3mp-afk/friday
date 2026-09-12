@@ -100,6 +100,11 @@ _LEGACY_COMPARISON_BUILD_PROFILE = "legacy-git-archive-umask-0002-v1"
 _MAX_COLLECTION_BYTES = 64 << 20
 _MAX_COLLECTION_NODES = 100_000
 _MAX_COLLECTION_NODE_BYTES = 256 << 10
+_TIER_PHASE_TIMEOUT_SECONDS = {
+    ("change", "non-UI"): 7_200,
+    ("change", "UI"): 1_800,
+}
+_PARTIAL_FAILURE_PREFIX = "FRIDAY_GATE_PARTIAL_FAILURE "
 _OBSERVATION_TEST_ENV = (
     "FRIDAY_TEST_BACKUPS_DIR",
     "FRIDAY_REAL_SYNCTHING_BINARY",
@@ -116,6 +121,8 @@ _COLLECTION_INVALID_ATTESTATIONS: set[str] = set()
 _COLLECTION_ORIGIN_ERRORS_BY_WORKER: dict[str, str] = {}
 _SERIAL_COLLECTION: tuple[str, ...] | None = None
 _TIER_SELECTION: frozenset[str] | None = None
+_PARTIAL_FAILURES: set[tuple[str, str]] = set()
+_REPORT_PARTIAL_FAILURES = False
 _ACTIVE_PROCESS_OWNER: Any = None
 _BOOTSTRAP_SOURCES: dict[str, str] = {}
 _BOOTSTRAP_PATHS = (
@@ -265,7 +272,9 @@ def pytest_addoption(parser: Any) -> None:
 def pytest_sessionstart(session: Any) -> None:
     """Reset process-local plugin evidence before one pytest session."""
 
-    global _SERIAL_COLLECTION, _TIER_SELECTION
+    global _REPORT_PARTIAL_FAILURES, _SERIAL_COLLECTION, _TIER_SELECTION
+    _REPORT_PARTIAL_FAILURES = False
+    _PARTIAL_FAILURES.clear()
     if not session.config.getoption(_COLLECTION_OPTION):
         return
     _COLLECTIONS_BY_WORKER.clear()
@@ -278,10 +287,15 @@ def pytest_sessionstart(session: Any) -> None:
     _SERIAL_COLLECTION = None
     selection_path = session.config.getoption(_SELECTION_OPTION)
     _TIER_SELECTION = frozenset(collection_nodeids(selection_path)) if selection_path else None
+    _REPORT_PARTIAL_FAILURES = _partial_failure_reporting_enabled(session.config, selection_path)
 
     site = _validated_installed_site(os.environ)
     if site is not None:
         _require_installed_wheel_imports(site)
+
+
+def _partial_failure_reporting_enabled(config: Any, selection_path: str) -> bool:
+    return bool(selection_path) and not hasattr(config, "workerinput")
 
 
 def _validated_installed_site(environment: Mapping[str, str]) -> Path | None:
@@ -329,6 +343,28 @@ def pytest_collection_modifyitems(items: list[Any]) -> None:
         if any(name == _NODEID_PROPERTY for name, _value in properties):
             raise RuntimeError(f"duplicate {_NODEID_PROPERTY} property on {item.nodeid}")
         properties.append((_NODEID_PROPERTY, item.nodeid))
+
+
+def pytest_runtest_logreport(report: Any) -> None:
+    """Stream bounded failure identity before a timeout can discard JUnit."""
+
+    if not _REPORT_PARTIAL_FAILURES or not report.failed:
+        return
+    nodeid = report.nodeid
+    when = report.when
+    if _TIER_SELECTION is None or nodeid not in _TIER_SELECTION or when not in {"setup", "call", "teardown"}:
+        raise RuntimeError("partial failure report escaped the sealed selection")
+    key = (nodeid, when)
+    if key in _PARTIAL_FAILURES:
+        return
+    _PARTIAL_FAILURES.add(key)
+    payload = json.dumps(
+        {"nodeid": nodeid, "when": when},
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    print("\n" + _PARTIAL_FAILURE_PREFIX + payload, flush=True)
 
 
 def _write_collection_manifest(path: str, nodeids: Sequence[str]) -> None:
@@ -1699,6 +1735,7 @@ def _tier_pytest_command(
     distribution: str,
     basetemp: str | Path,
     collect_only: bool = False,
+    timeout_s: int = 3600,
 ) -> GateCommand:
     parallel = ("-n", "0") if workers == 1 else ("-n", str(workers), f"--dist={distribution}")
     pytest_arguments = (
@@ -1740,7 +1777,7 @@ def _tier_pytest_command(
         ),
         command_environment,
         cwd=source,
-        timeout_s=3600,
+        timeout_s=timeout_s,
     )
 
 
@@ -2738,6 +2775,7 @@ def _execute_tier_impl(
                                 workers=workers,
                                 distribution="loadscope" if label == "UI" else "load",
                                 basetemp=group_root / "pytest",
+                                timeout_s=_TIER_PHASE_TIMEOUT_SECONDS.get((args.tier, label), 3600),
                             )
                             scratch_baseline = _directory_bytes(scratch)
                             budget_mb = sum(node.scratch_mb for node in nodes)

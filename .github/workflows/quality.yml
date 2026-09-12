@@ -21,7 +21,7 @@ concurrency:
 jobs:
   quality:
     runs-on: ubuntu-24.04
-    timeout-minutes: 120
+    timeout-minutes: 180
     env:
       QUALITY_GATE_BASE_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event_name == 'push' && github.event.before || inputs.base_sha }}
 
@@ -147,7 +147,7 @@ jobs:
             --runner-temp "$RUNNER_TEMP" \
             --run-id "$GITHUB_RUN_ID" \
             --run-attempt "$GITHUB_RUN_ATTEMPT" \
-            --runtime-max-sec 7200 \
+            --runtime-max-sec 10200 \
             --timeout-stop-sec 6 \
             -- \
             "$PWD/.venv/bin/python" -I -B "$PWD/tools/quality_gate.py" \

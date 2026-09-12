@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ast
 from pathlib import Path
 
 import pytest
@@ -326,3 +327,39 @@ def test_definition_defaults_and_nested_loop_else_do_not_keep_stale_router(tmp_p
     root = _write_source_tree(tmp_path, routes)
     with pytest.raises(acceptance.AcceptanceError, match="api_source_router_binding_ambiguous"):
         acceptance.discover_api_from_source(root)
+
+
+def test_source_scan_recomputes_names_after_same_ast_changes(tmp_path):
+    tree = ast.parse(
+        """
+from fastapi import APIRouter
+router = APIRouter(prefix="/api/cache")
+(unrelated := make_unknown())
+@router.get("/one")
+def one():
+    pass
+"""
+    )
+    path = tmp_path / "friday" / "routes.py"
+    expected = ("api:GET /api/cache/one",)
+    assert acceptance._source_scope_surfaces(tree.body, {}, path, tmp_path) == expected
+    assignment = next(node for node in ast.walk(tree) if isinstance(node, ast.NamedExpr))
+    assert isinstance(assignment.target, ast.Name)
+    assignment.target.id = "router"
+    with pytest.raises(acceptance.AcceptanceError, match="api_source_router_binding_ambiguous"):
+        acceptance._source_scope_surfaces(tree.body, {}, path, tmp_path)
+    assignment.target.id = "unrelated"
+    assert acceptance._source_scope_surfaces(tree.body, {}, path, tmp_path) == expected
+
+
+def test_source_expression_names_preserve_defaults_order_and_recheck_edits():
+    expression = ast.parse(
+        "lambda first=(outer := (inner := 1)), *, second=(extra := 2): (deferred := 3)",
+        mode="eval",
+    ).body
+    assert acceptance._source_expression_bound_names(expression) == ("outer", "inner", "extra")
+    assert isinstance(expression, ast.Lambda)
+    default = expression.args.defaults[0]
+    assert isinstance(default, ast.NamedExpr) and isinstance(default.target, ast.Name)
+    default.target.id = "changed"
+    assert acceptance._source_expression_bound_names(expression) == ("changed", "inner", "extra")

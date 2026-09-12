@@ -5,7 +5,7 @@ import hashlib
 import json
 import time
 from collections.abc import Callable, Iterator
-from contextlib import ExitStack, contextmanager
+from contextlib import ExitStack, contextmanager, suppress
 from dataclasses import replace
 from types import SimpleNamespace
 from typing import Any, NoReturn, cast
@@ -2819,49 +2819,86 @@ async def test_distinct_successor_never_reconciles_retained_predecessor_in_execu
     async def forbidden_legacy() -> dict[str, object]:
         raise AssertionError("legacy cannot run after predecessor ownership")
 
+    # Scheduling only: admission+claim under exact089 xdist, not a product SLA.
+    # wait_for(2s) expired before both readers started; 5s execute deadline must
+    # outlive that wait or deadline_exhausted masquerades as non-start.
+    readers_started_schedule_sec = 20.0
+    predecessor_deadline_sec = 25.0
+    cancel_drain_schedule_sec = 5.0
     predecessor = asyncio.create_task(
         controller.execute(
             surface,
             legacy_primary=forbidden_legacy,
-            absolute_deadline=time.monotonic() + 5,
+            absolute_deadline=time.monotonic() + predecessor_deadline_sec,
         )
     )
-    await asyncio.wait_for(
-        asyncio.gather(file_reader.started.wait(), web_reader.started.wait()),
-        timeout=2,
-    )
-    predecessor.cancel()
-    interrupted = await asyncio.wait_for(predecessor, timeout=2)
-    successor = replace(
-        surface,
-        ingress_binding=SupervisorAssistIngressBindingV1.from_claimed_request(
-            source_ref="assist-controller:retained-successor",
-            request_fingerprint_sha256="d" * 64,
-        ),
-    )
-    legacy_calls = 0
-    legacy_response = {"message": "independent successor"}
+    started_wait = asyncio.gather(file_reader.started.wait(), web_reader.started.wait())
+    try:
+        done, _pending = await asyncio.wait(
+            {started_wait, predecessor},
+            timeout=readers_started_schedule_sec,
+            return_when=asyncio.FIRST_COMPLETED,
+        )
+        if started_wait not in done:
+            owner_exc = predecessor.exception() if predecessor.done() else None
+            owner_res = predecessor.result() if predecessor.done() and owner_exc is None else None
+            raise AssertionError(
+                {
+                    "file_started": file_reader.started.is_set(),
+                    "web_started": web_reader.started.is_set(),
+                    "owner_done": predecessor.done(),
+                    "owner_exception": None
+                    if owner_exc is None
+                    else f"{type(owner_exc).__name__}: {owner_exc}",
+                    "owner_outcome": getattr(owner_res, "outcome", None),
+                    "schedule_sec": readers_started_schedule_sec,
+                    "deadline_sec": predecessor_deadline_sec,
+                }
+            )
+        await started_wait
+        predecessor.cancel()
+        interrupted = await asyncio.wait_for(predecessor, timeout=cancel_drain_schedule_sec)
+        successor = replace(
+            surface,
+            ingress_binding=SupervisorAssistIngressBindingV1.from_claimed_request(
+                source_ref="assist-controller:retained-successor",
+                request_fingerprint_sha256="d" * 64,
+            ),
+        )
+        legacy_calls = 0
+        legacy_response = {"message": "independent successor"}
 
-    async def successor_legacy() -> dict[str, object]:
-        nonlocal legacy_calls
-        legacy_calls += 1
-        return legacy_response
+        async def successor_legacy() -> dict[str, object]:
+            nonlocal legacy_calls
+            legacy_calls += 1
+            return legacy_response
 
-    result = await controller.execute(
-        successor,
-        legacy_primary=successor_legacy,
-        absolute_deadline=time.monotonic() + 3,
-    )
-    current = adapter.load_current(AssistConversationScope(surface.actor.user_id, surface.conversation_id))
+        result = await controller.execute(
+            successor,
+            legacy_primary=successor_legacy,
+            absolute_deadline=time.monotonic() + 3,
+        )
+        current = adapter.load_current(
+            AssistConversationScope(surface.actor.user_id, surface.conversation_id)
+        )
 
-    assert interrupted.outcome is SupervisorAssistOutcome.INTERRUPTED
-    assert result.outcome is SupervisorAssistOutcome.LEGACY
-    assert result.response is legacy_response
-    assert legacy_calls == 1
-    assert adapter.restart_calls == 0
-    assert observed == []
-    assert current is not None and current.state is CompareCurrentFileWebGraphState.ACTIVE
-    assert controller.semantic_supervisor_status()["retained_active_graphs"] == 1
+        assert interrupted.outcome is SupervisorAssistOutcome.INTERRUPTED
+        assert result.outcome is SupervisorAssistOutcome.LEGACY
+        assert result.response is legacy_response
+        assert legacy_calls == 1
+        assert adapter.restart_calls == 0
+        assert observed == []
+        assert current is not None and current.state is CompareCurrentFileWebGraphState.ACTIVE
+        assert controller.semantic_supervisor_status()["retained_active_graphs"] == 1
+    finally:
+        for waiter in (started_wait, predecessor):
+            if not waiter.done():
+                waiter.cancel()
+        for waiter in (started_wait, predecessor):
+            if not waiter.done():
+                with suppress(asyncio.CancelledError, Exception):
+                    await asyncio.wait_for(waiter, timeout=cancel_drain_schedule_sec)
+        await controller.close()
 
 
 @pytest.mark.asyncio
