@@ -546,8 +546,10 @@ async def test_late_file_fill_receives_attachment_dialogue_and_web_evidence(
         actor: ActorContext,
         *,
         blocks: list[dict[str, Any]] | None = None,
+        body_is_request_owned: bool = False,
     ) -> dict[str, str]:
         captured_build.update({"request": prompt, "answer": answer, "actor": actor, "blocks": blocks})
+        captured_build["body_is_request_owned"] = body_is_request_owned
         return {
             "kind": "document",
             "filename": "Сводный отчёт.xlsx",
@@ -583,4 +585,5 @@ async def test_late_file_fill_receives_attachment_dialogue_and_web_evidence(
     assert any(current_fact in item for item in delivered)
     assert captured_build["request"].startswith("Оформи")
     assert captured_build["blocks"]
+    assert captured_build["body_is_request_owned"] is False
     assert result is not None and result["filename"].endswith(".xlsx")
