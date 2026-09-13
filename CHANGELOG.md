@@ -1,3 +1,14 @@
+## 0.208.58 — Unreleased
+
+### Preserve grounded output and truthful R10 acceptance evidence
+
+- Preserve grounded generated-file output and continuation recovery, and keep
+  emphasis cleanup from changing labels. Tighten document, Telegram identity,
+  and soak acceptance evidence and negative controls.
+- Reserve a distinct package/runtime version for final release preparation.
+  Final dense evidence must be measured against this version; final release
+  checks, immutable activation, and live acceptance remain pending.
+
 ## 0.208.57 — 2026-09-07
 
 ### Carry mixed-journey web provider identity on a shadow_to_assist sibling
