@@ -580,20 +580,14 @@ def _worker_task_ids() -> frozenset[int]:
     return task_ids
 
 
-def _require_worker_task_ids(
-    expected: frozenset[int], *, confirm_vanished_extra: bool = False
-) -> None:
+def _require_worker_task_ids(expected: frozenset[int], *, confirm_vanished_extra: bool = False) -> None:
     observed = _worker_task_ids()
     if observed == expected:
         return
     # /proc may return the TID of a just-joined Python helper while that task
     # disappears. Confirm only that one-way race with an immediate exact
     # resample; missing, persistent, or changing task sets remain failures.
-    if (
-        confirm_vanished_extra
-        and expected.issubset(observed)
-        and _worker_task_ids() == expected
-    ):
+    if confirm_vanished_extra and expected.issubset(observed) and _worker_task_ids() == expected:
         return
     raise NativeError("native_unowned_worker_thread")
 

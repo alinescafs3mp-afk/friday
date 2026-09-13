@@ -1641,14 +1641,10 @@ def test_worker_task_census_resamples_only_a_vanished_extra(
 
     monkeypatch.setattr(native, "_worker_task_ids", census)
     if accepted:
-        native._require_worker_task_ids(
-            frozenset({101}), confirm_vanished_extra=confirm_vanished_extra
-        )
+        native._require_worker_task_ids(frozenset({101}), confirm_vanished_extra=confirm_vanished_extra)
     else:
         with pytest.raises(native.NativeError, match="^native_unowned_worker_thread$"):
-            native._require_worker_task_ids(
-                frozenset({101}), confirm_vanished_extra=confirm_vanished_extra
-            )
+            native._require_worker_task_ids(frozenset({101}), confirm_vanished_extra=confirm_vanished_extra)
     assert len(calls) == expected_calls
 
 
