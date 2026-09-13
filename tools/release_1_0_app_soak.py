@@ -366,6 +366,7 @@ def safe_settings_identity(settings: Any) -> dict[str, Any]:
     """Exact configuration identity with secret values deliberately absent."""
 
     profile = getattr(getattr(settings, "profile", None), "name", "")
+    zone = _effective_local_zone(settings)
     return {
         "schema": "friday.release-1-0-app-soak-config.v1",
         "home": str(Path(settings.home).resolve()),
@@ -374,7 +375,7 @@ def safe_settings_identity(settings: Any) -> dict[str, Any]:
         "profile": str(profile),
         "shared_archive": settings.shared_archive,
         "llm_enabled": settings.llm_enabled,
-        "local_timezone": str(settings.local_timezone or "UTC"),
+        "local_timezone": str(zone),
         "reminders_enabled": settings.reminders_enabled,
         "reminders_lead_days": settings.reminders_lead_days,
         "quiet_hours_start": settings.quiet_hours_start,
@@ -405,7 +406,7 @@ def validate_settings(settings: Any, policy: SoakPolicy, *, canonical_owner_id: 
         raise AppSoakError("principal_chat_not_allowlisted")
     if policy.owner.chat_id not in set(settings.telegram_owner_chat_ids):
         raise AppSoakError("owner_chat_not_configured")
-    zone = ZoneInfo(str(settings.local_timezone or "UTC"))
+    zone = _effective_local_zone(settings)
     hour = datetime.now(zone).hour
     start, end = int(settings.quiet_hours_start), int(settings.quiet_hours_end)
     quiet = start != end and (
@@ -414,6 +415,21 @@ def validate_settings(settings: Any, policy: SoakPolicy, *, canonical_owner_id: 
     if quiet:
         raise AppSoakError("current_time_is_quiet_hours")
     return identity
+
+
+def _effective_local_zone(settings: Any) -> Any:
+    """Resolve an empty setting with the same machine-zone rule as the product."""
+
+    name = str(getattr(settings, "local_timezone", "") or "").strip()
+    if name:
+        return ZoneInfo(name)
+    from friday.execution_kernel import _machine_zone
+
+    return _machine_zone()
+
+
+def _effective_local_day(settings: Any) -> str:
+    return datetime.now(_effective_local_zone(settings)).date().isoformat()
 
 
 def build_expected(policy: SoakPolicy, *, local_day: str) -> dict[str, Any]:
@@ -2523,7 +2539,7 @@ def run_actual_app_soak(
         policy,
         canonical_owner_id=LEGACY_OWNER_USER_ID,
     )
-    local_day = datetime.now(ZoneInfo(str(settings.local_timezone or "UTC"))).date().isoformat()
+    local_day = _effective_local_day(settings)
     expected = build_expected(policy, local_day=local_day)
     bundle = PrivateBundle(evidence_dir, policy.resources.max_evidence_bytes)
     started = clock()

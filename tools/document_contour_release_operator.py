@@ -13,6 +13,7 @@ credentials stay in process memory and are never placed in argv or reports.
 from __future__ import annotations
 
 import argparse
+import asyncio
 import ctypes
 import errno
 import hashlib
@@ -32,11 +33,10 @@ import time
 from collections.abc import Callable, Mapping, Sequence
 from contextlib import suppress
 from dataclasses import dataclass, field
-from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from types import TracebackType
 from typing import Any, Protocol
-from urllib.parse import urlsplit, urlunsplit
+from urllib.parse import urlsplit
 
 import httpx
 
@@ -46,6 +46,7 @@ if not sys.path or sys.path[0] != _root_import_path:
     sys.path.insert(0, _root_import_path)
 
 import friday as _friday_package  # noqa: E402
+from friday.agent_runtime.llm import LLMRouter  # noqa: E402
 from friday.diagnostics import (  # noqa: E402
     collect_document_contour_guarded_bridge_queue_snapshot,
 )
@@ -54,6 +55,14 @@ from friday.diagnostics.runtime_lease import (  # noqa: E402
     inspect_process_lease,
     process_owns_lease,
 )
+from friday.model_profiles import (  # noqa: E402
+    QWEN38_27B_SGLANG_V12_PROFILE,
+    v12_model_profile_for,
+)
+from friday.v12_model_runtime import (  # noqa: E402, PLC2701
+    _sample_sglang_load_without_raw_retention,
+)
+from friday.v12_model_transport import RouterV12MetricsTransport  # noqa: E402
 
 OPERATOR_SCHEMA = "friday.document-contour-release-operator.v1"
 OBSERVER_SNAPSHOT_SCHEMA = "friday.document-contour-observer-snapshot.v1"
@@ -67,13 +76,18 @@ BATTERY_CASE_IDS = ("D06", "D07", "D08")
 
 _EXPECTED_DEPENDENCY_HASHES = {
     "tools/document_contour_live_battery.py": (
-        "65619244ac2df24be951ee2ca71fd2a547897b26066173b2c2ecd7a538c210b2"
+        "71cb9e4e3a3e3ccf7efe7291178e750fad1b8eea684b21cc1f7f384d46261d4a"
     ),
     "friday/diagnostics/__init__.py": ("9e8593a74f1ae12d49e17fd873ef508385e0f074fae45169679ba937c0616446"),
     "friday/diagnostics/runtime_lease.py": (
         "6986bcef0d21d1754672ad784746fbc205b4822de708c71b16dd93576f3d1926"
     ),
     "friday/admin_api/_overview.py": ("322873e979178985e2e3cffc7d2c8690cc97f27c5970f9a06db9b1fb9e524677"),
+    "friday/config/__init__.py": ("1f78d346285fc75f6794d13ed0c48ec0aca82ef6e8792a47554ab72b0754dbcb"),
+    "friday/agent_runtime/llm.py": ("67e68a012c7d94a24244579923341e18287a7215610ba2a3330bded612e71ec6"),
+    "friday/model_profiles.py": ("21ea29d72540b07b26a54bfe927a806aa8aa1f9799578f69bfaa055042e3ac67"),
+    "friday/v12_model_runtime.py": ("ea1c6b700a11114fdc3799fe9d744e0a6a7d527cb0cef949300d6fb5d254b3d7"),
+    "friday/v12_model_transport.py": ("3f8d4c4e8ed513696a4c9ac39aad845595c46dad597b105f1d41c92e696f0363"),
 }
 
 _MODEL_ENV_ALLOWLIST = frozenset(
@@ -139,11 +153,6 @@ _UNIT_RE = re.compile(r"[A-Za-z0-9_.@:-]{1,128}\.service")
 _HEX40_RE = re.compile(r"[0-9a-f]{40}")
 _HEX64_RE = re.compile(r"[0-9a-f]{64}")
 _ENV_KEY_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
-_PROMETHEUS_SAMPLE_RE = re.compile(
-    r"^(?P<name>[A-Za-z_:][A-Za-z0-9_:]*)(?:\{.*\})?\s+"
-    r"(?P<value>[^\s]+)(?:\s+[0-9]+)?\s*$"
-)
-
 MAX_PRIVATE_JSON_BYTES = 1 << 20
 MAX_ENV_BYTES = 1 << 20
 MAX_HTTP_BYTES = 2 << 20
@@ -819,28 +828,53 @@ def _validate_stopped_snapshot(payload: Mapping[str, Any], backend_pid: int) -> 
     }
     if set(payload) != exact_keys or payload.get("schema") != OBSERVER_SNAPSHOT_SCHEMA:
         raise OperatorFailure("stopped_snapshot_invalid")
+    observed_backend_pid = payload.get("backend_pid")
+    queue_state = payload.get("bridge_queue_state")
     if (
-        type(payload.get("backend_pid")) is not int
-        or payload.get("backend_pid") != backend_pid
-        or _require_bool(payload, "backend_lease_owned", "stopped_snapshot_invalid") is not True
-        or payload.get("bridge_queue_state") != "present"
-        or _require_bool(
-            payload,
-            "bridge_lease_acquired_for_snapshot",
-            "stopped_snapshot_invalid",
-        )
-        is not True
-        or _require_bool(payload, "bridge_lease_released", "stopped_snapshot_invalid") is not True
-        or _require_nonnegative_int(
-            payload,
-            "physical_outbound_pending",
-            "stopped_snapshot_invalid",
-        )
-        != 0
-        or _require_nonnegative_int(payload, "inbound_pending", "stopped_snapshot_invalid") != 0
-        or _require_nonnegative_int(payload, "dead_letter", "stopped_snapshot_invalid") != 0
+        type(observed_backend_pid) is not int
+        or type(queue_state) is not str
+        or queue_state not in {"present", "absent", "active_uninspected", "lease_unavailable"}
     ):
-        raise OperatorFailure("stopped_snapshot_not_clear")
+        raise OperatorFailure("stopped_snapshot_invalid")
+    backend_lease_owned = _require_bool(payload, "backend_lease_owned", "stopped_snapshot_invalid")
+    physical_outbound = _require_nonnegative_int(
+        payload,
+        "physical_outbound_pending",
+        "stopped_snapshot_invalid",
+    )
+    bridge_lease_acquired = _require_bool(
+        payload,
+        "bridge_lease_acquired_for_snapshot",
+        "stopped_snapshot_invalid",
+    )
+    bridge_lease_released = _require_bool(
+        payload,
+        "bridge_lease_released",
+        "stopped_snapshot_invalid",
+    )
+    inbound_pending = _require_nonnegative_int(
+        payload,
+        "inbound_pending",
+        "stopped_snapshot_invalid",
+    )
+    dead_letter = _require_nonnegative_int(payload, "dead_letter", "stopped_snapshot_invalid")
+
+    if observed_backend_pid != backend_pid:
+        raise OperatorFailure("stopped_snapshot_backend_identity_mismatch")
+    if not backend_lease_owned:
+        raise OperatorFailure("stopped_snapshot_backend_lease_not_owned")
+    if queue_state != "present":
+        raise OperatorFailure("stopped_snapshot_bridge_queue_not_present")
+    if not bridge_lease_acquired:
+        raise OperatorFailure("stopped_snapshot_bridge_lease_not_acquired")
+    if not bridge_lease_released:
+        raise OperatorFailure("stopped_snapshot_bridge_lease_not_released")
+    if physical_outbound:
+        raise OperatorFailure("stopped_snapshot_outbound_not_empty")
+    if inbound_pending:
+        raise OperatorFailure("stopped_snapshot_inbound_not_empty")
+    if dead_letter:
+        raise OperatorFailure("stopped_snapshot_dead_letter_not_empty")
 
 
 def _validate_held_snapshot(payload: Mapping[str, Any], backend_pid: int) -> None:
@@ -1339,29 +1373,35 @@ def _tls_context(settings: Any) -> ssl.SSLContext | bool:
         raise OperatorFailure("backend_tls_ca_invalid") from exc
 
 
-def _parse_dispatcher_epoch(body: bytes) -> str:
+async def _sample_dispatcher_epoch(
+    settings: Any,
+    *,
+    http_transport: httpx.AsyncBaseTransport | None = None,
+) -> str:
+    """Return the registered Qwen3.8 process identity without retaining raw responses."""
+
+    profile = v12_model_profile_for(settings.profile.name, settings.llm_model)
+    if profile is not QWEN38_27B_SGLANG_V12_PROFILE or settings.llm_enabled is not True:
+        raise OperatorFailure("dispatcher_profile_mismatch")
     try:
-        text = body.decode("utf-8")
-    except UnicodeError as exc:
-        raise OperatorFailure("dispatcher_metrics_invalid") from exc
-    epochs: list[str] = []
-    for line in text.splitlines():
-        match = _PROMETHEUS_SAMPLE_RE.fullmatch(line.strip())
-        if match is None or match.group("name") != "process_start_time_seconds":
-            continue
-        value = match.group("value")
-        try:
-            number = Decimal(value)
-        except InvalidOperation as exc:
-            raise OperatorFailure("dispatcher_metrics_invalid") from exc
-        if not number.is_finite() or number <= 0:
-            raise OperatorFailure("dispatcher_metrics_invalid")
-        epochs.append(value)
-    if len(epochs) != 1:
-        raise OperatorFailure("dispatcher_metrics_epoch_missing")
-    # Hashing this normalized numeric identity prevents accidental public output
-    # of host timing data while retaining exact equality semantics.
-    return _sha256(str(Decimal(epochs[0]).normalize()).encode("ascii"))
+        router = LLMRouter(settings)
+        transport = RouterV12MetricsTransport(router, http_transport=http_transport)
+        deadline = time.monotonic() + HTTP_TOTAL_TIMEOUT_SEC
+        sample, failure = await _sample_sglang_load_without_raw_retention(
+            transport,
+            profile=profile,
+            metrics_deadline=deadline,
+            absolute_deadline=deadline,
+        )
+    except asyncio.CancelledError:
+        raise
+    except OperatorFailure:
+        raise
+    except Exception:
+        raise OperatorFailure("dispatcher_identity_failed") from None
+    if failure is not None or sample is None or _HEX64_RE.fullmatch(sample.process_epoch_sha256) is None:
+        raise OperatorFailure("dispatcher_identity_failed")
+    return sample.process_epoch_sha256
 
 
 def _bounded_response_body(
@@ -1600,15 +1640,6 @@ class LiveRuntime:
             trust_env=False,
             follow_redirects=False,
         )
-        model_headers = {"Accept": "text/plain"}
-        if settings.llm_api_key:
-            model_headers["Authorization"] = f"Bearer {settings.llm_api_key}"
-        self._dispatcher_client = httpx.Client(
-            headers=model_headers,
-            verify=True,
-            trust_env=False,
-            follow_redirects=False,
-        )
         self._backend_pidfd = -1
         self._bridge_pidfd = -1
         self._backend_baseline: ServiceFingerprint | None = None
@@ -1756,28 +1787,20 @@ class LiveRuntime:
         return self._get_json("/api/admin/document-contour-observer-snapshot")
 
     def dispatcher_epoch(self) -> str:
-        parsed = urlsplit(self.model_url)
-        metrics_url = urlunsplit((parsed.scheme, parsed.netloc, "/metrics", "", ""))
-        deadline = self.monotonic() + HTTP_TOTAL_TIMEOUT_SEC
         try:
-            with self._dispatcher_client.stream(
-                "GET",
-                metrics_url,
-                timeout=HTTP_TIMEOUT_SEC,
-            ) as response:
-                if response.status_code != 200:
-                    raise OperatorFailure("dispatcher_metrics_status_failed")
-                body = _bounded_response_body(
-                    response,
-                    maximum_bytes=MAX_HTTP_BYTES,
-                    deadline=deadline,
-                    monotonic=self.monotonic,
-                )
+            asyncio.get_running_loop()
+        except RuntimeError:
+            pass
+        else:
+            raise OperatorFailure("dispatcher_identity_context_invalid")
+        try:
+            return asyncio.run(_sample_dispatcher_epoch(self.settings))
+        except asyncio.CancelledError:
+            raise
         except OperatorFailure:
             raise
-        except httpx.HTTPError as exc:
-            raise OperatorFailure("dispatcher_metrics_failed") from exc
-        return _parse_dispatcher_epoch(body)
+        except Exception:
+            raise OperatorFailure("dispatcher_identity_failed") from None
 
     def stop_bridge(self) -> None:
         # ``systemctl stop`` uses SIGTERM.  The deployed CLI is driven by
@@ -2256,11 +2279,10 @@ class LiveRuntime:
 
     def close(self) -> None:
         failed = False
-        for client in (self._backend_client, self._dispatcher_client):
-            try:
-                client.close()
-            except BaseException:
-                failed = True
+        try:
+            self._backend_client.close()
+        except BaseException:
+            failed = True
         for attribute in ("_backend_pidfd", "_bridge_pidfd"):
             descriptor = int(getattr(self, attribute, -1))
             setattr(self, attribute, -1)

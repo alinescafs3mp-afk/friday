@@ -20,9 +20,11 @@ import sys
 import threading
 import time
 from dataclasses import replace
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
+from zoneinfo import ZoneInfo
 
 import pytest
 
@@ -629,6 +631,7 @@ def test_temporal_seed_is_retrievable_from_the_exact_historical_timeline_day(
     storage: Any,
     battery_id: str,
     month: int,
+    record_property: Any,
 ) -> None:
     cases = _cases(battery_id, 2)
     user_id = f"synthetic-temporal-seed-{battery_id.casefold()}"
@@ -642,25 +645,179 @@ def test_temporal_seed_is_retrievable_from_the_exact_historical_timeline_day(
     assert [(str(row["content"]), str(row["created_at"])) for row in rows] == [
         (
             battery._marker(case, "TIME"),
-            f"2024-{month:02d}-{case.question_index:02d}T09:00:00+00:00",
+            "2024-06-07T21:00:00+00:00"
+            if (battery_id, case.question_index) == ("B", 8)
+            else f"2024-{month:02d}-{case.question_index:02d}T09:00:00+00:00",
         )
         for case in cases
     ]
+    observed = []
     for case in cases:
         day = f"2024-{month:02d}-{case.question_index:02d}"
+        local_start = datetime(2024, month, case.question_index, tzinfo=ZoneInfo(battery.FIXED_TIMEZONE))
+        local_end = local_start + timedelta(days=1) - timedelta(seconds=1)
         events = storage.what_happened(
             user_id,
             person_id=user_id,
-            since=f"{day}T00:00:00+00:00",
-            until=f"{day}T23:59:59+00:00",
+            since=local_start.astimezone(UTC).isoformat(),
+            until=local_end.astimezone(UTC).isoformat(),
         )
         assert [(item["kind"], item["text"], item["at"]) for item in events] == [
             (
                 "message",
                 battery._marker(case, "TIME"),
-                f"{day}T09:00:00+00:00",
+                "2024-06-07T21:00:00+00:00"
+                if (battery_id, case.question_index) == ("B", 8)
+                else f"{day}T09:00:00+00:00",
             )
         ]
+        observed.append({"case_id": case.id, "day": day, "events": events})
+    record_property("temporal_days", json.dumps(observed, ensure_ascii=False))
+
+
+@pytest.mark.parametrize("seed_mode", ["corrected-midnight", "original-noon"])
+@pytest.mark.parametrize(
+    "remainder", ['{"остаток": ""}', "not-json"], ids=["empty-remainder", "invalid-remainder"]
+)
+def test_b02_midnight_seed_public_query_excludes_out_of_window_markers(
+    settings: Any,
+    monkeypatch: pytest.MonkeyPatch,
+    record_property: Any,
+    seed_mode: str,
+    remainder: str,
+) -> None:
+    """Real authenticated runtime/storage; only model replies and fixed clock are synthetic."""
+    from fastapi.testclient import TestClient
+
+    from friday.permissions import LEGACY_OWNER_USER_ID
+    from friday.server import create_app
+    from friday.time_routing import TimeIntent, TimeWindow, build_time_window, fast_time_intent
+
+    class BoundaryLLM:
+        enabled = True
+        model = "synthetic-midnight-boundary"
+        total_budget_sec = 30.0
+
+        async def chat(self, messages: list[dict[str, Any]], **kwargs: Any) -> dict[str, str]:
+            blob = json.dumps(messages, ensure_ascii=False)
+            if "остаток" in blob and "JSON" in blob:
+                return {"content": remainder}
+            if "РАЗГОВОР или ЗАПРОС" in blob:
+                return {"content": "ЗАПРОС"}
+            return {"content": ""}
+
+    cases = _cases("B", 2)
+    case = cases[7]
+    assert case.question == (
+        "Нужен факт, привязанный именно к полуночи календарного дня 8 июня 2024 года. Проверка SYN-B02-08."
+    )
+    expected = "SYN-TIME-4A843F322BBC2F69A693"
+    assert battery._marker(case, "TIME") == expected
+    assert battery.FIXED_TIMEZONE == _manifest("B")["timezone"] == "Europe/Moscow"
+    assert battery.FIXED_CLOCK == _manifest("B")["clock"] == "2026-08-08T12:00:00+03:00"
+    fixed_now = datetime.fromisoformat(battery.FIXED_CLOCK).replace(tzinfo=None)
+    intent = fast_time_intent(case.question, today=fixed_now.date())
+    assert intent == TimeIntent("past", "single_hour")
+    assert build_time_window(case.question, intent, today=fixed_now.date()) == TimeWindow(
+        "2024-06-08T00:00:00", "2024-06-08T00:59:59"
+    )
+    # These instants are independently specified from the frozen request, never
+    # computed from the product parser: midnight Moscow is the preceding UTC day.
+    expected_seed_at = (
+        "2024-06-07T21:00:00+00:00" if seed_mode == "corrected-midnight" else "2024-06-08T09:00:00+00:00"
+    )
+    competitors = {
+        "noon": ("SYN-TIME-" + "A" * 20, "2024-06-08T09:00:00+00:00"),
+        "next_hour": ("SYN-TIME-" + "B" * 20, "2024-06-07T22:00:00+00:00"),
+        "wrong_day": ("SYN-TIME-" + "C" * 20, "2024-06-08T21:00:00+00:00"),
+        "before_midnight": ("SYN-TIME-" + "D" * 20, "2024-06-07T20:59:59+00:00"),
+    }
+    app = create_app(replace(settings, verify_answers=False, local_timezone=battery.FIXED_TIMEZONE))
+    headers = {"Authorization": f"Bearer {settings.api_token}"}
+    user_id = LEGACY_OWNER_USER_ID
+    with TestClient(app) as client:
+        app.state.agent.llm = app.state.llm = BoundaryLLM()
+        monkeypatch.setattr(app.state.agent, "_local_today", lambda: fixed_now.date())
+        monkeypatch.setattr(app.state.agent, "_local_now", lambda: fixed_now)
+        storage = app.state.storage
+        storage.ensure_user(user_id, source="test", preset_key="owner")
+        battery._seed_temporal_timeline_messages(storage, cases, user_id)
+        if seed_mode == "original-noon":
+            with storage.transaction() as conn:
+                changed = conn.execute(
+                    "UPDATE messages SET created_at=? WHERE user_id=? AND content=?",
+                    (expected_seed_at, user_id, expected),
+                )
+                assert changed.rowcount == 1
+        seed_row = storage.execute(
+            "SELECT created_at FROM messages WHERE user_id=? AND content=?", (user_id, expected)
+        ).fetchone()
+        assert seed_row["created_at"] == expected_seed_at
+        conversation_id = storage.create_conversation(user_id, title="Synthetic midnight controls")["id"]
+        competitor_events = {}
+        for name, (marker, at) in competitors.items():
+            message = storage.store_message(conversation_id, user_id, "system", marker)
+            with storage.transaction() as conn:
+                changed = conn.execute("UPDATE messages SET created_at=? WHERE id=?", (at, message["id"]))
+                assert changed.rowcount == 1
+            # Non-vacuous: every excluded competitor exists in the same real source
+            # and is retrievable when the query actually selects its own instant.
+            own_events = storage.what_happened(user_id, person_id=user_id, since=at, until=at)
+            assert marker in {event["text"] for event in own_events}
+            competitor_events[name] = own_events
+        midnight_events = storage.what_happened(
+            user_id,
+            person_id=user_id,
+            since="2024-06-07T21:00:00+00:00",
+            until="2024-06-07T21:59:59+00:00",
+        )
+        assert [event["text"] for event in midnight_events] == (
+            [expected] if seed_mode == "corrected-midnight" else []
+        )
+        body = {"message": case.question, "source_ref": "synthetic-b02-midnight", "enable_tools": True}
+        assert client.post("/api/chat", json=body).status_code == 401
+        response = client.post("/api/chat", headers=headers, json=body)
+        assert response.status_code == 200, response.text
+        payload = response.json()
+        message = payload.get("message")
+        text = str(message.get("content") or "") if isinstance(message, dict) else str(message or "")
+        assert re.findall(r"SYN-TIME-[0-9A-F]{20}", text) == (
+            [expected] if seed_mode == "corrected-midnight" else []
+        )
+        assert battery._closed_marker_exact(text, expected, kind="TIME") is (
+            seed_mode == "corrected-midnight"
+        )
+        assert all(marker not in text for marker, _ in competitors.values())
+        if seed_mode == "corrected-midnight":
+            assert "2024-06-08 00:00" in text
+        else:
+            assert "В проверенной личной ленте за указанный интервал событий нет." in text
+        assert ("Остальную часть составного запроса не удалось надёжно отделить" in text) is (
+            remainder == "not-json"
+        )
+        record_property(
+            "midnight_observation",
+            json.dumps(
+                {
+                    "seed_mode": seed_mode,
+                    "seed_at": expected_seed_at,
+                    "seed_moscow": datetime.fromisoformat(expected_seed_at)
+                    .astimezone(ZoneInfo(battery.FIXED_TIMEZONE))
+                    .isoformat(),
+                    "question": case.question,
+                    "expected_marker": expected,
+                    "competitors": competitors,
+                    "competitor_events_at_own_instants": competitor_events,
+                    "storage_midnight_events": midnight_events,
+                    "runtime_public_response": text,
+                    "remainder": remainder,
+                    "authenticated_http_status": response.status_code,
+                    "unauthenticated_http_status": 401,
+                    "native_draft_claimed": False,
+                },
+                ensure_ascii=False,
+            ),
+        )
 
 
 def test_fake_battery_runs_exactly_once_in_parallel_and_reports_only_aggregates(tmp_path: Path) -> None:

@@ -28073,19 +28073,30 @@ def _direct_file_body_is_literal_grounded(
 ) -> bool:
     """Accept a direct carrier body only as unique literal source excerpts."""
 
+    if source is None or not str(body or "").strip():
+        return False
     contract = _direct_exact_file_field_contract(request)
-    if contract is None or source is None or not str(body or "").strip():
+    if contract is not None:
+        exact_blocks = _validated_exact_file_body_blocks(request, body)
+        if exact_blocks is None:
+            return False
+        body_values = tuple(
+            " ".join(unicodedata.normalize("NFC", str(block.get("text") or "")).split())
+            for block in exact_blocks
+        )
+        source_values = _direct_exact_source_values(contract, source)
+        return source_values is not None and body_values == source_values
+    literal_body = _direct_complete_source_file_body(request, source)
+    if literal_body is None:
         return False
-    exact_blocks = _validated_exact_file_body_blocks(request, body)
-    if exact_blocks is None:
+    body_lines = str(body or "").splitlines()
+    if len(body_lines) != 3 or any(not line.strip() for line in body_lines):
         return False
-    source_values = _direct_exact_source_values(contract, source)
-    if source_values is None:
-        return False
-    body_values = tuple(
-        " ".join(unicodedata.normalize("NFC", str(block.get("text") or "")).split()) for block in exact_blocks
+    body_values = tuple(" ".join(unicodedata.normalize("NFC", line).split()) for line in body_lines)
+    literal_values = tuple(
+        " ".join(unicodedata.normalize("NFC", line).split()) for line in literal_body.splitlines()
     )
-    return body_values == source_values
+    return body_values == literal_values
 
 
 def _bounded_regex_spans(
@@ -53663,6 +53674,19 @@ class AgentRuntime:
             if direct_attachment_exact_source_values is not None
             else None
         )
+        direct_attachment_complete_source_turn = bool(
+            direct_attachment_file_projection_turn
+            and _direct_complete_source_file_line_count(file_create_message) is not None
+        )
+        direct_attachment_complete_source = (
+            _one_complete_attachment_source(active_attachment_set)
+            if direct_attachment_complete_source_turn
+            else None
+        )
+        direct_attachment_complete_source_body = _direct_complete_source_file_body(
+            file_create_message,
+            direct_attachment_complete_source,
+        )
         workspace_exact_content = (
             _workspace_exact_source_content(
                 workspace_exact_value_contract,
@@ -56479,6 +56503,23 @@ class AgentRuntime:
             and not response.get("llm_failed")
             and not direct_file_body_grounded
         )
+        direct_complete_source_body_grounded = bool(
+            not autonomous_engineer
+            and direct_attachment_complete_source_turn
+            and not response.get("llm_failed")
+            and _direct_file_body_is_literal_grounded(
+                file_create_message,
+                content,
+                direct_attachment_complete_source,
+            )
+        )
+        direct_complete_source_body_recovery_required = bool(
+            not autonomous_engineer
+            and direct_attachment_complete_source_turn
+            and direct_attachment_complete_source_body is not None
+            and not response.get("llm_failed")
+            and not direct_complete_source_body_grounded
+        )
         if direct_file_body_rejected:
             # A pure attachment-to-file order carries independent effect
             # authority, but model prose is not its accepted body.  Discard an
@@ -58754,7 +58795,11 @@ class AgentRuntime:
             and not web_evidence_replaced
             and not synthetic_document_notice
             and not outside_deed_replaced
-            and (not supported_deed_replaced or direct_file_body_recovery_required)
+            and (
+                not supported_deed_replaced
+                or direct_file_body_recovery_required
+                or direct_complete_source_body_recovery_required
+            )
             and (not direct_file_body_rejected or direct_file_body_recovery_required)
             and not false_model_outage_replaced
             and not archive_status_only_replaced
@@ -58770,6 +58815,7 @@ class AgentRuntime:
             and not workspace_channel_data_only
             and (
                 direct_file_body_recovery_required
+                or direct_complete_source_body_recovery_required
                 or not capability_refusal
                 or bool(_REFUSAL_OFFERS_LOCAL_FILE.search(compact_model_said))
             )
@@ -58787,7 +58833,15 @@ class AgentRuntime:
             )
             and not _turn_deadline_expired(context.turn_deadline)
         ):
-            late_file_content = "" if direct_file_body_recovery_required else content
+            late_file_content = (
+                ""
+                if direct_file_body_recovery_required
+                else direct_attachment_complete_source_body
+                if direct_attachment_complete_source_body is not None
+                else content
+            )
+            if direct_complete_source_body_recovery_required:
+                LOGGER.warning("output-carrier: authenticated complete-source recovery selected")
             if web_evidence_used:
                 web_file_companions: list[str] = []
                 if web_evidence_status == "partial":
@@ -58832,7 +58886,11 @@ class AgentRuntime:
                 ],
                 context=context,
                 literal_source_text=(
-                    direct_attachment_literal_source if direct_attachment_exact_file_projection_turn else None
+                    direct_attachment_literal_source
+                    if direct_attachment_exact_file_projection_turn
+                    else direct_attachment_complete_source
+                    if direct_attachment_complete_source_body is not None
+                    else None
                 ),
             )
             late_attempts = max(0, context.late_make_file_attempts - late_attempts_before)
@@ -58844,7 +58902,7 @@ class AgentRuntime:
                 ledger.extend("make_file" for _ in range(late_attempts))
             if made:
                 response = {**response, "file_clips": [made]}
-                if direct_attachment_exact_file_projection_turn:
+                if direct_attachment_exact_file_projection_turn or direct_attachment_complete_source_turn:
                     delivered_name = str(made.get("filename") or "").strip()
                     content = (
                         f"Готово — файл {delivered_name} приложен к ответу."
@@ -69332,15 +69390,21 @@ class AgentRuntime:
                 or "what_happened" in folded_settled
                 or "upcoming" in folded_settled
             ):
-                source_clauses = [
-                    part.strip()
-                    for part in _COUNT_CLAUSE_SPLIT.split(_classification_text(message))
-                    if part.strip()
-                ]
+                source_clauses = _split_tag_request_clauses(message)
                 open_clause_tokens = [
                     [token.casefold() for token in re.findall(r"[A-Za-zА-Яа-яЁё0-9]+", part)]
                     for part in source_clauses
                     if fast_time_intent(part) is None
+                    # A tracking label is metadata, not authority for a second
+                    # answer to the settled temporal query. Do not limit genuine
+                    # remainder instructions to a whitelist of request verbs.
+                    and not re.fullmatch(
+                        r"(?:проверка|контроль|метка|маркер|идентификатор|код|"
+                        r"trace|request(?:\s+id)?)\s*[:=]?\s+"
+                        r"(?=[\w-]*\d)(?=[\w-]*[A-Za-zА-Яа-яЁё])[\w-]{1,96}",
+                        _unquoted_tag_intent_text(part),
+                        re.IGNORECASE,
+                    )
                     and not re.search(
                         r"\b(?:лент|событ|активност|план|календар|происход|заним|"
                         r"предсто|запланир|намеч)\w*\b",
@@ -70314,6 +70378,12 @@ class AgentRuntime:
         answer = redact_friday_api_tokens(answer)
         if literal_source_text is not None:
             literal_source_text = redact_friday_api_tokens(literal_source_text)
+        literal_complete_body = _direct_complete_source_file_body(request, literal_source_text)
+        literal_complete_blocks = (
+            [{"kind": "text", "text": line} for line in literal_complete_body.splitlines()]
+            if literal_complete_body is not None
+            else None
+        )
         # Сообщение о сбое телом документа быть не может, но и отказываться рано:
         # инструменты в этом ходе могли отработать, и основания есть. Замерено:
         # чаще всего срывается сам протокол вызова («bare tool-call markup»), а
@@ -70339,18 +70409,19 @@ class AgentRuntime:
         literal_grounding_required = literal_source_text is not None
         literal_body_accepted = bool(
             not literal_grounding_required
+            or literal_complete_blocks is not None
             or _direct_file_body_is_literal_grounded(request, answer, literal_source_text)
         )
         failed = bool(_ANSWER_IS_A_FAILURE.search(answer) or not literal_body_accepted)
-        blocks = [] if failed else _blocks_from_text(answer)
+        blocks = literal_complete_blocks or ([] if failed else _blocks_from_text(answer))
         exact_body_blocks = None if failed else _validated_exact_file_body_blocks(request, answer)
-        if exact_body_blocks is not None:
+        if exact_body_blocks is not None and literal_complete_blocks is None:
             # ``_blocks_from_text`` normally promotes the first prose line to
             # the report title.  In a closed ``ровно N строк/абзацев`` request
             # those N lines are the requested body itself; the title is owned
             # separately by the request/output filename.
             blocks = exact_body_blocks
-        exact_body_ready = exact_body_blocks is not None
+        exact_body_ready = exact_body_blocks is not None or literal_complete_blocks is not None
         evidence_entries = [dict(item) for item in (evidence or []) if isinstance(item, Mapping)]
         canonical_records, legacy_records = _split_office_attachment_evidence(evidence_entries)
         hierarchy_records = [
@@ -70531,6 +70602,7 @@ class AgentRuntime:
                 "" if failed else answer,
                 actor,
                 blocks=blocks,
+                body_is_request_owned=literal_complete_blocks is not None,
                 turn_deadline=turn_deadline,
                 expired="turn deadline expired during file rendering",
             )
@@ -70551,6 +70623,7 @@ class AgentRuntime:
         actor: ActorContext,
         *,
         blocks: list[dict[str, Any]] | None = None,
+        body_is_request_owned: bool = False,
         turn_deadline: float | None = None,
     ) -> dict[str, Any] | None:
         """Собрать файл из уже написанного ответа, раз модель этого не сделала.
@@ -70584,7 +70657,9 @@ class AgentRuntime:
         # первый содержательный абзац уже вынут из тела.  У закрытой формы
         # ``ровно N строк/абзацев`` ни одна строка не является заголовком, и его
         # отдельно задаёт подтверждённое имя выхода/сама просьба.
-        exact_body_shape = exact_body_blocks is not None and blocks == exact_body_blocks
+        exact_body_shape = body_is_request_owned or (
+            exact_body_blocks is not None and blocks == exact_body_blocks
+        )
         title = (
             (requested_filename or _title_from_request(request) or "Отчёт")
             if exact_body_shape
@@ -77373,6 +77448,79 @@ _EXACT_FILE_BODY_COUNT = re.compile(
     rf"(?:separate\s+)?(?:lines?|paragraphs?)\b)",
     re.IGNORECASE,
 )
+_COMPLETE_SOURCE_FILE_BODY_COUNT = re.compile(
+    rf"(?:\bвсе\s+(?P<ru_all>{_EXACT_FILE_BODY_NUMBER})\s+"
+    rf"(?:(?:исходн\w*|исходник\w*)\s+)?(?:строк\w*|абзац\w*)\b|"
+    rf"\bкажд\w*\s+из\s+(?P<ru_each>{_EXACT_FILE_BODY_NUMBER})\s+"
+    rf"(?:(?:исходн\w*|исходник\w*)\s+)?(?:строк\w*|абзац\w*)\b|"
+    rf"\ball\s+(?P<en_all>{_EXACT_FILE_BODY_NUMBER})\s+"
+    rf"(?:source\s+)?(?:lines?|paragraphs?)\b|"
+    rf"\beach\s+of\s+(?:the\s+)?(?P<en_each>{_EXACT_FILE_BODY_NUMBER})\s+"
+    rf"(?:source\s+)?(?:lines?|paragraphs?)\b)",
+    re.IGNORECASE,
+)
+_COMPLETE_SOURCE_FILE_LITERAL_CUE = re.compile(
+    r"\b(?:дословн\w*|без\s+изменен\w*|с\s+точн\w*\s+значен\w*|"
+    r"и\s+(?:все\s+)?(?:их|е[её])\s+значен\w*|verbatim|unchanged|"
+    r"with\s+exact\s+values?|with\s+all\s+(?:its|their)\s+values?)\b",
+    re.IGNORECASE,
+)
+_COMPLETE_SOURCE_FILE_TRANSFORM = re.compile(
+    r"\b(?:обобщ\w*|резюм\w*|перескаж\w*|перевед\w*|сравн\w*|"
+    r"проанализ\w*|добав\w*|удал\w*|исправ\w*|сократ\w*|расшир\w*|"
+    r"перепиш\w*|summari[sz]\w*|translate\w*|compare\w*|analy[sz]\w*|"
+    r"add\w*|remove\w*|rewrite\w*|transform\w*)\b",
+    re.IGNORECASE,
+)
+_COMPLETE_SOURCE_FILE_FIELD_LINE = re.compile(r"^[^\s:\r\n][^:\r\n]{0,79}:\s*\S.{0,1999}$")
+
+
+def _direct_complete_source_file_line_count(request: str) -> int | None:
+    """Recognise one narrow three-line literal attachment projection."""
+
+    classified = " ".join(_classification_text(request).split())
+    visible = " ".join(_QUOTED_TEXT.sub(" ", classified).split())
+    if (
+        not visible
+        or len(visible) > 4_000
+        or not _is_direct_file_request(visible)
+        or _COMPLETE_SOURCE_FILE_LITERAL_CUE.search(visible) is None
+        or _COMPLETE_SOURCE_FILE_TRANSFORM.search(visible) is not None
+    ):
+        return None
+    kind = _file_kind_from_request(classified)
+    output_stem, output_supported = _requested_output_filename_stem(classified, kind=kind)
+    if not output_supported or not output_stem:
+        return None
+    matches = list(_COMPLETE_SOURCE_FILE_BODY_COUNT.finditer(visible))
+    if len(matches) != 1:
+        return None
+    matched = matches[0]
+    token = next(
+        (
+            str(matched.group(name) or "").casefold()
+            for name in ("ru_all", "ru_each", "en_all", "en_each")
+            if matched.group(name)
+        ),
+        "",
+    )
+    count = int(token) if token.isdigit() else _EXACT_FILE_BODY_NUMBER_WORDS.get(token)
+    return count if count == 3 else None
+
+
+def _direct_complete_source_file_body(request: str, source: str | None) -> str | None:
+    """Return exactly three bounded field lines from one complete source."""
+
+    count = _direct_complete_source_file_line_count(request)
+    if count is None or source is None or "\x00" in source or len(source) > 12_000:
+        return None
+    lines = [unicodedata.normalize("NFC", line).strip(" \t") for line in source.splitlines()]
+    if len(lines) != count or any(_COMPLETE_SOURCE_FILE_FIELD_LINE.fullmatch(line) is None for line in lines):
+        return None
+    labels = [line.partition(":")[0].casefold() for line in lines]
+    if len(set(labels)) != count:
+        return None
+    return "\n".join(lines)
 
 
 def _requested_exact_file_body_count(request: str) -> int | None:

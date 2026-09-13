@@ -51,6 +51,7 @@ from html.parser import HTMLParser
 from pathlib import Path
 from typing import Any, Protocol
 from urllib.parse import quote, unquote, urlsplit
+from zoneinfo import ZoneInfo
 
 try:
     from tools import synthetic_live_b09_evidence as b09_evidence
@@ -163,9 +164,11 @@ _HTTP_PRIVACY_COUNTER_KEYS = (
 # outside-deed refusal before context preparation, retrieval, tools, or the
 # model boundary.  Keep this harness-owned inventory separate from Friday's
 # production classifier so a classifier regression cannot redefine the oracle.
+# B {1-11} is the observed code-owned refusal class; B {12-20} stay
+# model-owned so unexpected HTTP remains a negative control.
 _PACKAGE_A_CODE_OWNED_QUESTION_INDICES = {
     "A": frozenset({1, 2, 3, 4, 5, 6, 8, 9, 10, 12, 13, 14, 15, 17, 18}),
-    "B": frozenset({10, 11}),
+    "B": frozenset({1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11}),
 }
 _P01_ROUTE_EVIDENCE_KEYS = (
     "fabricated_outside_deed_request",
@@ -793,7 +796,8 @@ _A09_04_NO_EXTERNAL_WORLD_INFLUENCE = (
     rf"(?:без\s+влияни\w*\s+(?:со\s+стороны\s+)?{_A09_04_EXTERNAL_WORLD}|"
     rf"(?:исключа|предотвращ|устраня)\w*\s+влияни\w*\s+"
     rf"(?:со\s+стороны\s+)?{_A09_04_EXTERNAL_WORLD}|"
-    rf"{_A09_04_EXTERNAL_WORLD}[^.!?\n]{{0,32}}\bне\s+влия\w*)"
+    rf"{_A09_04_EXTERNAL_WORLD}[^.!?\n]{{0,32}}\bне\s+влия\w*|"
+    r"независим\w*\s+от\s+внешн\w*\s+зависимост\w*)"
 )
 # Task-faithful extension: external factors/deps or random data/factors
 # excluded by the isolated environment, yielding stable/reproducible results.
@@ -6414,7 +6418,7 @@ _B09_20_ADVISORY = re.compile(
 )
 _B09_20_ORACLE_TOKEN = re.compile(r"\b(?:oracle|оракул)\w*", re.IGNORECASE)
 _B09_20_PROPERTY_LINK = re.compile(
-    r"\s*(?:[—–:-]|является|являются|обладает|отличается|"
+    r"\s*(?:[—–:-](?:\s*это\s+способност\w*)?|является|являются|обладает|отличается|"
     r"заключается\s+в|состоит\s+в)\s*(?:высок\w*\s+)?",
     re.IGNORECASE,
 )
@@ -6610,6 +6614,45 @@ def _b09_20_relation_is_exact(message: str) -> bool:
     return _b09_20_legacy_precision_is_exact(folded)
 
 
+# B09-14 group-3 alternative: avoiding mutual influence.  A bare
+# ``избеж.{0,32}влия`` stem is not enough — LAB-338 accepted negated,
+# hedged and quoted-denied benefits.  Reuse the live-span polarity
+# helpers so only an unquoted, unnegated, unhedged clause counts.
+_B09_14_AVOIDED_INFLUENCE = r"избеж\w*.{0,32}влия"
+_B09_14_AVOIDED_INFLUENCE_RE = re.compile(_B09_14_AVOIDED_INFLUENCE, re.IGNORECASE)
+_B09_14_NEGATED_CAUSE_OR_BENEFIT = re.compile(
+    r"\bне\s+(?:позвол|помог|избеж|обеспеч|уда[её]т|гарант|да[её]т|дают|"
+    r"способн|мог|мож|смог|смож)\w*|\bнеспособн\w*"
+    r"|\bнельзя\b",
+    re.IGNORECASE,
+)
+_B09_14_CLAUSE_HEDGE = re.compile(
+    r"\b(?:можно|если|когда|хотя|несмотря|условн)\w*",
+    re.IGNORECASE,
+)
+
+
+def _b09_14_avoided_influence_is_live(message: str) -> bool:
+    """Isolation-tied avoidance: live affirmative cause, not a denied benefit."""
+
+    folded = message.casefold()
+    for match in _B09_14_AVOIDED_INFLUENCE_RE.finditer(folded):
+        if not _b09_20_span_is_live_affirmative(folded, match.start(), match.end()):
+            continue
+        clause_start = _b09_20_clause_start(folded, match.start())
+        suffix_positions = [position for sep in ".!?;\n" if (position := folded.find(sep, match.end())) >= 0]
+        clause_end = min(suffix_positions) if suffix_positions else len(folded)
+        clause = folded[clause_start:clause_end]
+        if _B09_14_NEGATED_CAUSE_OR_BENEFIT.search(clause):
+            continue
+        if _B09_14_CLAUSE_HEDGE.search(clause):
+            continue
+        if re.search(_A09_AFFIRMATIVE_CLAIM_BLOCKER, clause, re.IGNORECASE):
+            continue
+        return True
+    return False
+
+
 _FALLBACK_SEMANTIC_GROUPS = {
     ("A", 2): (("детерминир", "воспроизвод"), ("повтор", "одинак", "стабил", "ошиб")),
     ("A", 4): ((_A09_04_AFFIRMATIVE_SCOPE,),),
@@ -6649,7 +6692,11 @@ _FALLBACK_SEMANTIC_GROUPS = {
     ),
     ("B", 10): (("clock", "врем"), ("фиксир", "контрол", "заморож"), ("воспроизвод", "стабил", "одинак")),
     ("B", 12): (("fixture", "фикстур"), ("данн", "объект", "настрой", "вход", "заготов")),
-    ("B", 14): (("баз",), ("разн", "отдельн", "изолир", "независ"), ("чист", r"не\s+влия", "состояни")),
+    ("B", 14): (
+        ("баз",),
+        ("разн", "отдельн", "изолир", "независ"),
+        ("чист", r"не\s+влия", _B09_14_AVOIDED_INFLUENCE, "состояни"),
+    ),
     ("B", 16): (("идемпот", "повтор", "дублир"), ("один", r"тот\s+же", r"не\s+дублир", "эффект")),
     ("B", 18): (("fail-closed", "неопредел", "ошиб", "сбо"), ("отказ", "блок", "остан", r"не\s+выполн")),
     ("B", 20): (
@@ -8078,6 +8125,15 @@ def _opaque_attachment_has_competitor(folded: str, expected_folded: str) -> bool
 
 
 def _closed_marker_exact(message: str, expected: str, *, kind: str, exact_once: bool | None = None) -> bool:
+    if kind.upper() == "TELEGRAM":
+        # Formatting delimiters are not token bytes. Read the independent
+        # visible source while retaining exact identity and cardinality.
+        observed_telegram = _telegram_visible_markers(message)
+        return bool(
+            observed_telegram
+            and all(value == expected for value in observed_telegram)
+            and (exact_once is False or len(observed_telegram) == 1)
+        )
     folded = message.casefold()
     expected_folded = expected.casefold()
     if exact_once is None:
@@ -8093,12 +8149,6 @@ def _closed_marker_exact(message: str, expected: str, *, kind: str, exact_once: 
         return False
     if kind.upper() == "ATTACHMENT" and _opaque_attachment_has_competitor(folded, expected_folded):
         return False
-    if kind.upper() == "TELEGRAM":
-        # A Telegram marker is a byte-preservation/formatting token, not a
-        # factual assertion.  Its contract is exact identity and cardinality;
-        # applying the generic truth-polarity grammar made benign wording such
-        # as "without errors" look like a denial of the marker itself.
-        return True
     marker = re.escape(expected_folded)
     matches = list(re.finditer(marker, folded))
     if not matches or any(
@@ -9102,6 +9152,14 @@ def _p10_source_tags_exact(message: str, *, battery_id: str, index: int) -> bool
     )
 
 
+def _semantic_group_pattern_holds(pattern: str, message: str) -> bool:
+    """Match a fallback semantic stem; B09-14 avoidance needs live polarity."""
+
+    if pattern == _B09_14_AVOIDED_INFLUENCE:
+        return _b09_14_avoided_influence_is_live(message)
+    return bool(re.search(pattern, message.casefold(), re.IGNORECASE))
+
+
 def _telegram_p10_content_equivalent(message: str, rendered: str, *, battery_id: str, index: int) -> bool:
     expected_html = _independent_p10_html(message)
     if expected_html is None:
@@ -9172,7 +9230,7 @@ def evaluate_case(
         and any(
             isinstance(group, list)
             and group
-            and not any(re.search(str(pattern), folded, re.IGNORECASE) for pattern in group)
+            and not any(_semantic_group_pattern_holds(str(pattern), message) for pattern in group)
             for group in semantic_groups
         )
     )
@@ -12678,7 +12736,14 @@ def _seed_temporal_timeline_messages(
             metadata={"synthetic_live_battery": True, "case_id": case.id},
         )
         message_id = str(message.get("id") or "")
-        historical_at = f"2024-{month:02d}-{case.question_index:02d}T09:00:00+00:00"
+        # The frozen B02-08 question explicitly requests local midnight; all
+        # other temporal cases retain their original local-noon seed instant.
+        hour = 0 if (case.battery_id, case.pass_index, case.question_index) == ("B", 2, 8) else 12
+        historical_at = (
+            datetime(2024, month, case.question_index, hour, tzinfo=ZoneInfo(FIXED_TIMEZONE))
+            .astimezone(UTC)
+            .isoformat()
+        )
         with storage.transaction() as conn:
             updated = conn.execute(
                 "UPDATE messages SET created_at=? WHERE id=? AND user_id=?",
@@ -13700,8 +13765,40 @@ def _deny_public_web_capabilities(auth_service: Any, *user_ids: str) -> None:
             auth_service.deny_permission(user_id, capability)
 
 
+def _telegram_visible_markers(message: str, *, is_html: bool = False) -> list[str]:
+    """Read complete visible tokens; Markdown closers and HTML attrs are not identity."""
+
+    rendered = message if is_html else _independent_p10_html(message)
+    if rendered is None:
+        return []
+    visible = _P10HtmlSemantics()
+    try:
+        visible.feed(rendered)
+        visible.close()
+    except (TypeError, ValueError):
+        return []
+    # HTML safety and requested styles remain separate mandatory gates. Even
+    # an invalid tag must never let an attribute masquerade as visible text.
+    text = visible.visible_text
+    markers = []
+    for match in re.finditer(r"SYN-TELEGRAM-[AB]\d{2}-\d{2}", text, re.IGNORECASE):
+        before = text[match.start() - 1] if match.start() else ""
+        after = text[match.end()] if match.end() < len(text) else ""
+        if (
+            match.group(0) != match.group(0).upper()
+            or before.isalnum()
+            or before in {"_", "-"}
+            or after.isalnum()
+            or after in {"_", "-"}
+        ):
+            return []
+        markers.append(match.group(0))
+    return markers
+
+
 def _telegram_delivery_shape_exact(message: str, attempts: Any, delivered: Any, *, mode: str) -> bool:
-    identity = re.search(r"\bSYN-TELEGRAM-([AB])10-(\d{2})\b", message)
+    markers = _telegram_visible_markers(message)
+    identity = re.fullmatch(r"SYN-TELEGRAM-([AB])10-(\d{2})", markers[0]) if len(markers) == 1 else None
     expected_attempts = 1 if mode == "normal" else 2
     if (
         identity is None
@@ -13736,6 +13833,7 @@ def _telegram_delivery_shape_exact(message: str, attempts: Any, delivered: Any, 
         or formatted.get("parse_mode") != "HTML"
         or formatted.get("disable_web_page_preview") is not True
         or delivered_text.count(marker) != 1
+        or _telegram_visible_markers(delivered_text, is_html=True) != markers
         or not _telegram_html_is_safe(delivered_text)
         or not _telegram_p10_content_equivalent(message, delivered_text, battery_id=battery_id, index=index)
     ):
@@ -13920,13 +14018,13 @@ def _telegram_transport_probe(message: str, *, mode: str, home: Path) -> dict[st
             expected_attempts.append(dict(formatted))
             expected_delivered.append(dict(formatted))
     delivered_once = len(telegram.delivered) == len(expected_chunks)
-    expected_marker_matches = re.findall(r"\bSYN-TELEGRAM-[AB]\d{2}-\d{2}\b", message)
+    expected_marker_matches = _telegram_visible_markers(message)
     delivered_marker_matches = [
         marker
         for payload in telegram.delivered
-        for marker in re.findall(
-            r"\bSYN-TELEGRAM-[AB]\d{2}-\d{2}\b",
+        for marker in _telegram_visible_markers(
             str(payload.get("text") or ""),
+            is_html=payload.get("parse_mode") == "HTML",
         )
     ]
     html_safe = all(_telegram_html_is_safe(chunk) for chunk in rendered)

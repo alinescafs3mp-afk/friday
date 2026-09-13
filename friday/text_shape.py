@@ -2910,8 +2910,8 @@ def _repair_missing_emphasis_label(request: str, answer: str) -> str:
     """Retain an explicitly supplied word beside one emphasized literal.
 
     The entire request must be a local two-literal composition instruction.
-    Only a draft containing the exact value in one simple emphasis span can
-    be repaired; refusals, factual replies and unrelated prose stay untouched.
+    Repair the exact value alone or the exact label emphasized immediately
+    before its value; refusals, factual replies and unrelated prose stay untouched.
     """
 
     contract = explicit_emphasis_label_contract(request)
@@ -2922,6 +2922,8 @@ def _repair_missing_emphasis_label(request: str, answer: str) -> str:
     # generic span lexer to reinterpret those literal underscores.
     for delimiter in ("**", "__", "*", "_"):
         if answer == delimiter + contract.value + delimiter:
+            return delimiter + contract.label + " " + contract.value + delimiter
+        if answer == delimiter + contract.label + delimiter + " " + contract.value:
             return delimiter + contract.label + " " + contract.value + delimiter
     return answer
 

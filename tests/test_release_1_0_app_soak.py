@@ -10,6 +10,7 @@ import copy
 import hashlib
 import json
 import threading
+from datetime import UTC, datetime
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -25,6 +26,7 @@ from tools.release_1_0_app_soak import (
     ResourceSample,
     SoakPolicy,
     _digest,
+    _effective_local_day,
     _reminder_creation_failure,
     app_route_allowed,
     build_expected,
@@ -397,6 +399,43 @@ def test_settings_identity_records_bindings_without_secret_values(tmp_path: Path
     assert identity["api_token_configured"] is True
     assert identity["bridge_secret_configured"] is True
     assert identity["telegram_allowed_chat_ids"] == [5001, 5002, 5003, 5004]
+
+
+def test_empty_timezone_uses_machine_zone_for_identity_and_local_day(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import tools.release_1_0_app_soak as app_soak
+
+    settings = SimpleNamespace(
+        home=tmp_path,
+        database_path=tmp_path / "friday.db",
+        files_dir=tmp_path / "files",
+        profile=SimpleNamespace(name="isolated"),
+        shared_archive=False,
+        llm_enabled=False,
+        local_timezone="",
+        reminders_enabled=True,
+        reminders_lead_days=1,
+        quiet_hours_start=0,
+        quiet_hours_end=0,
+        telegram_effective_allowed_chat_ids=(5001,),
+        telegram_owner_chat_ids=(5001,),
+        api_token="configured",
+        telegram_bridge_secret="configured",
+    )
+    instant = datetime(2026, 9, 12, 21, 13, 48, tzinfo=UTC)
+
+    class FrozenDateTime(datetime):
+        @classmethod
+        def now(cls, tz=None):  # noqa: ANN001
+            return instant.astimezone(tz) if tz is not None else instant.replace(tzinfo=None)
+
+    monkeypatch.setenv("TZ", "Europe/Moscow")
+    monkeypatch.setattr(app_soak, "datetime", FrozenDateTime)
+
+    assert safe_settings_identity(settings)["local_timezone"] == "Europe/Moscow"
+    assert _effective_local_day(settings) == "2026-09-13"
 
 
 def test_independent_reader_rejects_missing_terminal_and_changed_run_identity(tmp_path: Path) -> None:

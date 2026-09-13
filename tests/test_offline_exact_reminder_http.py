@@ -255,3 +255,74 @@ def test_offline_controls_never_create_or_claim_a_reminder(
     )
     assert publication["content"] == data["message"]
     assert json.loads(publication["metadata_json"])["tools_used"] == []
+
+
+def test_exact_same_day_iso_reminder_after_prior_source_uses_machine_zone_while_model_is_off(
+    offline_owner_chat,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from datetime import UTC, datetime
+
+    import friday.execution_kernel as execution_kernel
+
+    actual_instant = datetime(2026, 9, 12, 21, 13, 48, tzinfo=UTC)
+
+    class FrozenDateTime(datetime):
+        @classmethod
+        def now(cls, tz=None):  # noqa: ANN001
+            return actual_instant.astimezone(tz) if tz is not None else actual_instant.replace(tzinfo=None)
+
+    monkeypatch.setenv("TZ", "Europe/Moscow")
+    monkeypatch.setattr(execution_kernel, "datetime", FrozenDateTime)
+
+    ctx = offline_owner_chat
+    uploaded = ctx["client"].post(
+        "/api/files",
+        files={
+            "file": (
+                "app-soak-prior.txt",
+                b"owned canary APP_SOAK_FILE_PRIOR_SOURCE_161\n",
+                "text/plain",
+            )
+        },
+        data={"source_ref": "app-soak:sol161:owner-file"},
+        headers={"Authorization": f"Bearer {ctx['settings'].api_token}"},
+    )
+    assert uploaded.status_code == 200, uploaded.text
+    assert uploaded.json()["promoted"] is True, uploaded.json()
+    assert ctx["settings"].local_timezone == ""
+    sources = ctx["client"].get(
+        "/api/knowledge/sources",
+        params={"q": "APP_SOAK_FILE_PRIOR_SOURCE_161", "limit": 20},
+        headers={"Authorization": f"Bearer {ctx['settings'].api_token}"},
+    )
+    assert sources.status_code == 200, sources.text
+    assert sources.json()["count"] == 1, sources.json()
+
+    today = "2026-09-13"
+    canary = "OFFLINE-REMINDER-HTTP-SAME-DAY-161"
+    effects_before = _complete_effect_state(ctx["app"].state.storage)
+    response = _bridge_request(
+        ctx["client"],
+        ctx["settings"],
+        "/api/chat",
+        {
+            "message": f"На {today} поставь напоминание «{canary}».",
+            "enable_tools": True,
+            "telegram_user": {"id": 5001, "first_name": "AppSoak", "language_code": "ru"},
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    data = response.json()
+    assert data["tools_used"] == ["remind"], data
+    assert data["message"].count(canary) == 1
+    effects_after = _complete_effect_state(ctx["app"].state.storage)
+    entities = _added_rows(effects_before["entities"], effects_after["entities"], key="id")
+    times = _added_rows(effects_before["times"], effects_after["times"], key="entity_id")
+    owners = _added_rows(effects_before["owners"], effects_after["owners"], key="entity_id")
+    assert len(entities) == len(times) == len(owners) == 1
+    assert entities[0]["name"] == canary
+    assert times[0]["occurred_at"] == today
+    assert owners[0]["person_id"] == LEGACY_OWNER_USER_ID
+    assert ctx["model_calls"] == []

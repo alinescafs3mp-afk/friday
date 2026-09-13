@@ -929,6 +929,15 @@ def test_d06_and_d08_apply_semantic_generation_integrity_and_d08_fixture_is_not_
     )
 
 
+def test_release_profile_is_registered_qwen38_sglang() -> None:
+    runner = _module()
+    from friday.config import PROFILES
+
+    assert runner._RELEASE_PROFILE == "qwen38-27b-nvfp4-sglang"
+    assert PROFILES[runner._RELEASE_PROFILE].inference_backend == "sglang"
+    assert PROFILES[runner._RELEASE_PROFILE].document_map_max_concurrency == 1
+
+
 def test_d08_live_case_uses_isolated_small_context_without_changing_release_profile(
     tmp_path,
     monkeypatch,

@@ -2,20 +2,25 @@
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 import os
 import signal
 import subprocess
 import threading
+from dataclasses import replace
 from io import BytesIO
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
+import httpx
 import pytest
 
 import tools.document_contour_release_operator as operator
+from friday.config import PROFILES
+from friday.model_profiles import QWEN38_27B_SGLANG_V12_PROFILE
 
 COMMIT = "a" * 40
 
@@ -226,12 +231,14 @@ class FakeRuntime:
         fail_call: int = 1,
         failure: BaseException | None = None,
         start_online: bool = True,
+        stopped_snapshot: dict[str, Any] | None = None,
     ) -> None:
         self.barrier_path = barrier_path
         self.fail_method = fail_method
         self.fail_call = fail_call
         self.failure = failure or operator.OperatorFailure("injected_failure")
         self.start_online = start_online
+        self.stopped_snapshot = stopped_snapshot
         self.calls: dict[str, int] = {}
         self.events: list[str] = []
         self.now = 0.0
@@ -280,10 +287,10 @@ class FakeRuntime:
 
     def observer_snapshot(self) -> dict[str, Any]:
         self._record("snapshot")
-        return (
-            _active_snapshot(BACKEND.main_pid)
-            if self.bridge_running or self.guard
-            else _stopped_snapshot(BACKEND.main_pid)
+        if self.bridge_running or self.guard:
+            return _active_snapshot(BACKEND.main_pid)
+        return dict(
+            _stopped_snapshot(BACKEND.main_pid) if self.stopped_snapshot is None else self.stopped_snapshot
         )
 
     def dispatcher_epoch(self) -> str:
@@ -995,18 +1002,91 @@ def test_request_must_bind_the_exact_canonical_receipt(field, replacement) -> No
 
 
 @pytest.mark.parametrize(
+    ("mutation", "failure_code"),
+    (
+        ({"backend_pid": BACKEND.main_pid + 1}, "stopped_snapshot_backend_identity_mismatch"),
+        ({"backend_lease_owned": False}, "stopped_snapshot_backend_lease_not_owned"),
+        ({"bridge_queue_state": "absent"}, "stopped_snapshot_bridge_queue_not_present"),
+        (
+            {"bridge_lease_acquired_for_snapshot": False},
+            "stopped_snapshot_bridge_lease_not_acquired",
+        ),
+        ({"bridge_lease_released": False}, "stopped_snapshot_bridge_lease_not_released"),
+        ({"physical_outbound_pending": 1}, "stopped_snapshot_outbound_not_empty"),
+        ({"inbound_pending": 1}, "stopped_snapshot_inbound_not_empty"),
+        ({"dead_letter": 1}, "stopped_snapshot_dead_letter_not_empty"),
+    ),
+)
+def test_stopped_snapshot_failures_are_public_and_restore_without_battery_spawn(
+    tmp_path,
+    mutation,
+    failure_code,
+) -> None:
+    config = _config(tmp_path)
+    projection = {**_stopped_snapshot(BACKEND.main_pid), **mutation}
+    runtime = FakeRuntime(config.barrier_dir, stopped_snapshot=projection)
+    barrier = _barrier(tmp_path)
+    try:
+        report, exit_code = operator.execute_operator(config, runtime, barrier)
+    finally:
+        barrier.close()
+
+    assert exit_code == 1
+    assert report == {
+        "schema": operator.OPERATOR_SCHEMA,
+        "status": "failed",
+        "commit": COMMIT,
+        "duration_ms": report["duration_ms"],
+        "failure_codes": [failure_code],
+        "signal": None,
+        "checks": {
+            "preflight_clear": True,
+            "bridge_stopped_clear": False,
+            "bridge_guard_clear": False,
+            "inter_run_observer_clear": False,
+            "battery_clear": False,
+            "backend_unchanged": False,
+            "dispatcher_unchanged": False,
+            "bridge_start_attempted": True,
+            "bridge_online_after": True,
+        },
+        "evidence_sha256": {},
+    }
+    assert runtime.events.count("start") == 1
+    assert runtime.start_calls == 1
+    assert runtime.bridge_running is True
+    assert "spawn" not in runtime.events
+    assert runtime.child is None
+    stopped_snapshot_index = runtime.events.index(
+        "snapshot",
+        runtime.events.index("snapshot") + 1,
+    )
+    assert stopped_snapshot_index < runtime.events.index("start")
+
+
+@pytest.mark.parametrize(
     "projection",
     (
-        {**_stopped_snapshot(BACKEND.main_pid), "physical_outbound_pending": 1},
-        {**_stopped_snapshot(BACKEND.main_pid), "inbound_pending": 1},
-        {**_stopped_snapshot(BACKEND.main_pid), "dead_letter": 1},
-        {**_stopped_snapshot(BACKEND.main_pid), "bridge_lease_released": False},
-        {**_stopped_snapshot(BACKEND.main_pid), "backend_pid": BACKEND.main_pid + 1},
         {**_stopped_snapshot(BACKEND.main_pid), "private": "body"},
+        {**_stopped_snapshot(BACKEND.main_pid), "schema": "private-schema"},
+        {**_stopped_snapshot(BACKEND.main_pid), "backend_pid": True},
+        {**_stopped_snapshot(BACKEND.main_pid), "backend_lease_owned": "private"},
+        {**_stopped_snapshot(BACKEND.main_pid), "bridge_queue_state": "private-state"},
+        {**_stopped_snapshot(BACKEND.main_pid), "bridge_queue_state": []},
+        {**_stopped_snapshot(BACKEND.main_pid), "bridge_lease_acquired_for_snapshot": 1},
+        {**_stopped_snapshot(BACKEND.main_pid), "bridge_lease_released": "private"},
+        {**_stopped_snapshot(BACKEND.main_pid), "physical_outbound_pending": -1},
+        {**_stopped_snapshot(BACKEND.main_pid), "inbound_pending": None},
+        {**_stopped_snapshot(BACKEND.main_pid), "dead_letter": "private"},
+        {
+            **_stopped_snapshot(BACKEND.main_pid),
+            "backend_pid": BACKEND.main_pid + 1,
+            "dead_letter": "private",
+        },
     ),
 )
 def test_stopped_snapshot_never_projects_uncertain_or_nonzero_state(projection) -> None:
-    with pytest.raises(operator.OperatorFailure):
+    with pytest.raises(operator.OperatorFailure, match="^stopped_snapshot_invalid$"):
         operator._validate_stopped_snapshot(projection, BACKEND.main_pid)
 
 
@@ -1155,37 +1235,348 @@ def test_live_bridge_stop_uses_cooperative_sigint_and_waits_for_clean_exit() -> 
     assert pauses == [operator.POLL_INTERVAL_SEC]
 
 
+def _dispatcher_epoch_sglang_metrics(*, running: str = "0.0", waiting: str = "0.0") -> bytes:
+    labels = 'engine_type="unified",model_name="dispatcher",moe_ep_rank="0",pp_rank="0",tp_rank="0"'
+    return (
+        f"sglang:num_running_reqs{{{labels}}} {running}\nsglang:num_queue_reqs{{{labels}}} {waiting}\n"
+    ).encode()
+
+
+def _dispatcher_epoch_server_info(*, random_seed: int = 786_846_033, **changes: Any) -> bytes:
+    runtime_profile = PROFILES["qwen38-27b-nvfp4-sglang"]
+    launch = runtime_profile.sglang_extra_args
+    assert launch is not None
+    value: dict[str, Any] = {
+        "status": "ready",
+        "version": runtime_profile.runtime_reported_version,
+        "model_path": f"/models/{runtime_profile.model_dir_name}",
+        "served_model_name": "dispatcher",
+        "random_seed": random_seed,
+        "context_length": runtime_profile.max_model_len,
+        "max_running_requests": runtime_profile.max_num_seqs,
+        "max_total_tokens": launch.max_total_tokens,
+        "max_total_num_tokens": launch.max_total_tokens,
+        "mem_fraction_static": launch.mem_fraction_static,
+        "kv_cache_dtype": runtime_profile.kv_cache_dtype,
+        "chunked_prefill_size": launch.chunked_prefill_size,
+        "mamba_ssm_dtype": launch.mamba_ssm_dtype,
+        "max_mamba_cache_size": launch.max_mamba_cache_size,
+        "disable_radix_cache": not launch.radix_cache_enabled,
+        "disable_cuda_graph": runtime_profile.eager_mode,
+        "cuda_graph_backend_decode": launch.cuda_graph_backend_decode,
+        "cuda_graph_max_bs_decode": launch.cuda_graph_max_bs_decode,
+        "cuda_graph_bs_decode": list(launch.cuda_graph_bs_decode),
+        "cuda_graph_backend_prefill": launch.cuda_graph_backend_prefill,
+        "attention_backend": launch.attention_backend,
+        "reasoning_parser": launch.reasoning_parser,
+        "tool_call_parser": launch.tool_call_parser,
+        "mm_feature_transport": launch.mm_feature_transport,
+        "limit_mm_data_per_request": json.loads(launch.limit_mm_data_per_request),
+        "enable_metrics": launch.metrics_enabled,
+        "weight_version": launch.weight_version,
+        "speculative_algorithm": launch.speculative_algorithm,
+        "speculative_draft_model_path": None,
+        "speculative_num_steps": None,
+    }
+    value.update(changes)
+    return json.dumps(value, separators=(",", ":")).encode()
+
+
+def _dispatcher_epoch_deployment_witness(
+    *,
+    random_seed: int = 786_846_033,
+    nonce: str = "a" * 64,
+    **changes: Any,
+) -> bytes:
+    runtime_profile = PROFILES["qwen38-27b-nvfp4-sglang"]
+    value: dict[str, Any] = {
+        "schema": "friday.sglang-deployment-witness.v1",
+        "profile_id": QWEN38_27B_SGLANG_V12_PROFILE.profile_id,
+        "engine_start_nonce": nonce,
+        "engine_random_seed": random_seed,
+        "engine_image_id": runtime_profile.engine_image_id,
+        "engine_base_image_digest": runtime_profile.engine_base_image_digest,
+        "engine_base_image_id": runtime_profile.engine_base_image_id,
+        "runtime_source_revision": runtime_profile.runtime_source_revision,
+        "runtime_reported_version": runtime_profile.runtime_reported_version,
+        "model_repository": runtime_profile.model_repository,
+        "model_revision": runtime_profile.model_revision,
+        "model_snapshot_manifest_sha256": runtime_profile.model_snapshot_manifest_sha256,
+        "model_quantization": runtime_profile.model_quantization,
+        "served_model_alias": QWEN38_27B_SGLANG_V12_PROFILE.served_model_alias,
+        "launch_manifest_sha256": runtime_profile.launch_manifest_sha256,
+        "proxy_image_id": runtime_profile.proxy_image_id,
+        "proxy_policy_sha256": runtime_profile.proxy_policy_sha256,
+    }
+    value.update(changes)
+    return json.dumps(value, separators=(",", ":")).encode()
+
+
+def _dispatcher_epoch_http_transport(
+    bodies: dict[str, bytes],
+    observed: list[httpx.Request],
+    *,
+    witness_after: bytes | None = None,
+) -> httpx.MockTransport:
+    def handler(request: httpx.Request) -> httpx.Response:
+        observed.append(request)
+        path = request.url.path
+        if path == "/_friday/v1/deployment-witness" and len(observed) == 4:
+            body = bodies[path] if witness_after is None else witness_after
+        else:
+            body = bodies[path]
+        return httpx.Response(200, content=body)
+
+    return httpx.MockTransport(handler)
+
+
+def _dispatcher_epoch_http_settings(settings):  # noqa: ANN001
+    return replace(
+        settings,
+        profile=PROFILES["qwen38-27b-nvfp4-sglang"],
+        llm_enabled=True,
+        llm_model="dispatcher",
+        llm_api_key="private-epoch-test-key",
+        llm_base_url="http://127.0.0.1:8001/v1",
+    )
+
+
+_DISPATCHER_EPOCH_PATHS = (
+    "/_friday/v1/deployment-witness",
+    "/metrics",
+    "/server_info",
+    "/_friday/v1/deployment-witness",
+)
+_DISPATCHER_INVALID_SEEDS = (
+    "null",
+    "true",
+    "0",
+    "-1",
+    "NaN",
+    "Infinity",
+    "-Infinity",
+    "1.5",
+    "1e0",
+    '"1"',
+    "1073741824",
+)
+
+
 @pytest.mark.parametrize(
-    ("body", "expected"),
+    "case",
     (
-        (b"process_start_time_seconds 1700000000\n", None),
-        (b"# HELP x y\nprocess_start_time_seconds 1700000000.5\n", None),
-        (b"", "dispatcher_metrics_epoch_missing"),
-        (
-            b"process_start_time_seconds 1\nprocess_start_time_seconds 2\n",
-            "dispatcher_metrics_epoch_missing",
-        ),
-        (b"process_start_time_seconds NaN\n", "dispatcher_metrics_invalid"),
-        (b"process_start_time_seconds +Inf\n", "dispatcher_metrics_invalid"),
-        (b"process_start_time_seconds 0\n", "dispatcher_metrics_invalid"),
+        "valid",
+        "minimum-seed",
+        "maximum-seed",
+        "missing-witness",
+        "missing-seed",
+        "duplicate-seed",
+        "wrong-profile",
+        "invalid-nonce",
+        "missing-metric",
+        "duplicate-metric",
+        "nan-metric",
+        "negative-metric",
+        "missing-server-seed",
+        "duplicate-server-seed",
+        "wrong-server-model",
+        "seed-mismatch",
+        "torn-witness",
+        *(f"witness-seed:{value}" for value in _DISPATCHER_INVALID_SEEDS),
+        *(f"server-seed:{value}" for value in _DISPATCHER_INVALID_SEEDS),
     ),
 )
-def test_dispatcher_epoch_parser_requires_one_positive_finite_metric(body, expected) -> None:
-    if expected is None:
-        value = operator._parse_dispatcher_epoch(body)
-        assert len(value) == 64
+def test_dispatcher_epoch_parser_requires_one_positive_finite_metric(settings, case: str) -> None:
+    """Retain the registered name for V12's exact positive seed and complete epoch tuple.
+
+    SGLang replaces the old decimal process-start metric with a deployment
+    witness bracketing metrics/server_info. Only the HTTP responses are fake;
+    the operator, router, transport, parsers and sampler execute unchanged.
+    """
+    witness_path, metrics_path, server_path, _ = _DISPATCHER_EPOCH_PATHS
+    seed = {"minimum-seed": 1, "maximum-seed": (1 << 30) - 1}.get(case, 786_846_033)
+    bodies = {
+        witness_path: _dispatcher_epoch_deployment_witness(random_seed=seed),
+        metrics_path: _dispatcher_epoch_sglang_metrics(),
+        server_path: _dispatcher_epoch_server_info(random_seed=seed),
+    }
+    witness_after = None
+    expected_calls = 4
+    valid = case in {"valid", "minimum-seed", "maximum-seed"}
+    if case.startswith(("witness-seed:", "server-seed:")):
+        location, raw_seed = case.split(":", 1)
+        path, key, expected_calls = (
+            (witness_path, "engine_random_seed", 1)
+            if location == "witness-seed"
+            else (server_path, "random_seed", 3)
+        )
+        bodies[path] = bodies[path].replace(f'"{key}":{seed}'.encode(), f'"{key}":{raw_seed}'.encode())
+    elif case in {"missing-witness", "missing-seed", "duplicate-seed", "wrong-profile", "invalid-nonce"}:
+        expected_calls = 1
+        if case == "missing-witness":
+            bodies[witness_path] = b""
+        elif case == "missing-seed":
+            bodies[witness_path] = bodies[witness_path].replace(f'"engine_random_seed":{seed},'.encode(), b"")
+        elif case == "duplicate-seed":
+            bodies[witness_path] = bodies[witness_path][:-1] + f',"engine_random_seed":{seed}}}'.encode()
+        elif case == "wrong-profile":
+            bodies[witness_path] = _dispatcher_epoch_deployment_witness(profile_id="wrong-profile")
+        else:
+            bodies[witness_path] = _dispatcher_epoch_deployment_witness(nonce="A" * 64)
+    elif case in {"missing-metric", "duplicate-metric", "nan-metric", "negative-metric"}:
+        expected_calls = 2
+        if case == "missing-metric":
+            bodies[metrics_path] = bodies[metrics_path].splitlines(keepends=True)[0]
+        elif case == "duplicate-metric":
+            bodies[metrics_path] += bodies[metrics_path].splitlines(keepends=True)[0]
+        else:
+            bodies[metrics_path] = _dispatcher_epoch_sglang_metrics(
+                running="NaN" if case == "nan-metric" else "-1"
+            )
+    elif case in {"missing-server-seed", "duplicate-server-seed", "wrong-server-model"}:
+        expected_calls = 3
+        if case == "missing-server-seed":
+            bodies[server_path] = bodies[server_path].replace(f'"random_seed":{seed},'.encode(), b"")
+        elif case == "duplicate-server-seed":
+            bodies[server_path] = bodies[server_path][:-1] + f',"random_seed":{seed}}}'.encode()
+        else:
+            bodies[server_path] = _dispatcher_epoch_server_info(served_model_name="wrong")
+    elif case == "seed-mismatch":
+        bodies[server_path] = _dispatcher_epoch_server_info(random_seed=seed + 1)
+    elif case == "torn-witness":
+        witness_after = _dispatcher_epoch_deployment_witness(nonce="b" * 64)
     else:
-        with pytest.raises(operator.OperatorFailure, match=expected):
-            operator._parse_dispatcher_epoch(body)
+        assert valid, case
+
+    observed: list[httpx.Request] = []
+    transport = _dispatcher_epoch_http_transport(bodies, observed, witness_after=witness_after)
+    configured = _dispatcher_epoch_http_settings(settings)
+    if valid:
+        epoch = asyncio.run(operator._sample_dispatcher_epoch(configured, http_transport=transport))
+        expected = json.dumps(json.loads(bodies[witness_path]), sort_keys=True, separators=(",", ":"))
+        assert epoch == hashlib.sha256(expected.encode()).hexdigest()
+    else:
+        with pytest.raises(operator.OperatorFailure, match="^dispatcher_identity_failed$"):
+            asyncio.run(operator._sample_dispatcher_epoch(configured, http_transport=transport))
+
+    assert [(request.method, str(request.url)) for request in observed] == [
+        ("GET", f"http://127.0.0.1:8001{path}") for path in _DISPATCHER_EPOCH_PATHS[:expected_calls]
+    ]
+    assert all(request.headers["authorization"] == "Bearer private-epoch-test-key" for request in observed)
 
 
-def test_dispatcher_epoch_comparison_does_not_collapse_distinct_decimal_samples() -> None:
-    first = operator._parse_dispatcher_epoch(b"process_start_time_seconds 1700000000.00000001\n")
-    second = operator._parse_dispatcher_epoch(b"process_start_time_seconds 1700000000.00000002\n")
-    assert first != second
-    assert operator._parse_dispatcher_epoch(b"process_start_time_seconds 1.0\n") == (
-        operator._parse_dispatcher_epoch(b"process_start_time_seconds 1e0\n")
+def test_dispatcher_epoch_comparison_does_not_collapse_distinct_decimal_samples(settings) -> None:
+    """Keep legacy precision coverage as exact V12 nonce/seed identity over HTTP.
+
+    Decimal process-start samples are no longer identity inputs. Decimal-looking
+    nonces that would collapse through float conversion must stay distinct;
+    JSON formatting and equivalent load metric notation must stay stable.
+    """
+    witness_path, metrics_path, server_path, _ = _DISPATCHER_EPOCH_PATHS
+    first_nonce = "0" * 48 + "9007199254740992"
+    second_nonce = "0" * 48 + "9007199254740993"
+    assert first_nonce != second_nonce and float(first_nonce) == float(second_nonce)
+    configured = _dispatcher_epoch_http_settings(settings)
+    epochs: list[str] = []
+    for nonce, seed, reorder in (
+        (first_nonce, 41, False),
+        (first_nonce, 41, True),
+        (second_nonce, 41, False),
+        (second_nonce, 42, False),
+    ):
+        witness = _dispatcher_epoch_deployment_witness(random_seed=seed, nonce=nonce)
+        reformatted = json.dumps(dict(reversed(tuple(json.loads(witness).items()))), indent=2).encode()
+        bodies = {
+            witness_path: reformatted if reorder else witness,
+            metrics_path: _dispatcher_epoch_sglang_metrics(running="1e0" if reorder else "1.0"),
+            server_path: _dispatcher_epoch_server_info(random_seed=seed),
+        }
+        observed: list[httpx.Request] = []
+        transport = _dispatcher_epoch_http_transport(bodies, observed, witness_after=reformatted)
+        epoch = asyncio.run(operator._sample_dispatcher_epoch(configured, http_transport=transport))
+        canonical = json.dumps(json.loads(witness), sort_keys=True, separators=(",", ":")).encode()
+        assert epoch == hashlib.sha256(canonical).hexdigest()
+        epochs.append(epoch)
+        assert [str(request.url) for request in observed] == [
+            f"http://127.0.0.1:8001{path}" for path in _DISPATCHER_EPOCH_PATHS
+        ]
+
+    assert epochs[0] == epochs[1]
+    assert len({epochs[0], epochs[2], epochs[3]}) == 3
+
+
+def test_dispatcher_epoch_sampler_uses_registered_q38_identity_tuple(monkeypatch) -> None:
+    settings = SimpleNamespace(
+        profile=SimpleNamespace(name="qwen38-27b-nvfp4-sglang"),
+        llm_model="dispatcher",
+        llm_enabled=True,
     )
+    router = object()
+    transport = object()
+    seam = object()
+    observed: dict[str, Any] = {}
+
+    monkeypatch.setattr(operator, "LLMRouter", lambda value: router if value is settings else None)
+
+    def create_transport(value, *, http_transport=None):  # noqa: ANN001
+        observed["router"] = value
+        observed["seam"] = http_transport
+        return transport
+
+    async def sample(value, *, profile, metrics_deadline, absolute_deadline):  # noqa: ANN001
+        observed["transport"] = value
+        observed["profile"] = profile
+        observed["deadline_equal"] = metrics_deadline == absolute_deadline
+        return SimpleNamespace(process_epoch_sha256="a" * 64), None
+
+    monkeypatch.setattr(operator, "RouterV12MetricsTransport", create_transport)
+    monkeypatch.setattr(operator, "_sample_sglang_load_without_raw_retention", sample)
+
+    assert asyncio.run(operator._sample_dispatcher_epoch(settings, http_transport=seam)) == "a" * 64
+    assert observed == {
+        "router": router,
+        "seam": seam,
+        "transport": transport,
+        "profile": operator.QWEN38_27B_SGLANG_V12_PROFILE,
+        "deadline_equal": True,
+    }
+
+
+def test_dispatcher_epoch_sampler_rejects_partial_tuple_and_wrong_profile(monkeypatch) -> None:
+    q38 = SimpleNamespace(
+        profile=SimpleNamespace(name="qwen38-27b-nvfp4-sglang"),
+        llm_model="dispatcher",
+        llm_enabled=True,
+    )
+    monkeypatch.setattr(operator, "LLMRouter", lambda _settings: object())
+    monkeypatch.setattr(operator, "RouterV12MetricsTransport", lambda *_args, **_kwargs: object())
+
+    async def rejected(*_args, **_kwargs):  # noqa: ANN002, ANN003
+        return None, SimpleNamespace(value="metrics_invalid")
+
+    monkeypatch.setattr(operator, "_sample_sglang_load_without_raw_retention", rejected)
+    with pytest.raises(operator.OperatorFailure, match="dispatcher_identity_failed"):
+        asyncio.run(operator._sample_dispatcher_epoch(q38))
+
+    wrong = SimpleNamespace(
+        profile=SimpleNamespace(name="qwen36-27b-nvfp4-nvidia"),
+        llm_model="dispatcher",
+        llm_enabled=True,
+    )
+    with pytest.raises(operator.OperatorFailure, match="dispatcher_profile_mismatch"):
+        asyncio.run(operator._sample_dispatcher_epoch(wrong))
+
+
+def test_live_runtime_dispatcher_epoch_uses_sync_boundary(monkeypatch) -> None:
+    runtime = object.__new__(operator.LiveRuntime)
+    runtime.settings = object()
+
+    async def sample(settings):  # noqa: ANN001
+        assert settings is runtime.settings
+        return "b" * 64
+
+    monkeypatch.setattr(operator, "_sample_dispatcher_epoch", sample)
+    assert runtime.dispatcher_epoch() == "b" * 64
 
 
 def test_streamed_http_body_has_a_total_deadline_even_for_small_trickle_chunks() -> None:
@@ -1297,6 +1688,7 @@ def test_barrier_is_empty_private_and_descriptor_pinned(tmp_path) -> None:
 def test_barrier_requires_a_private_stable_parent(tmp_path) -> None:
     shared_parent = tmp_path / "shared"
     shared_parent.mkdir(mode=0o755)
+    shared_parent.chmod(0o755)
     barrier_path = shared_parent / "barrier"
     barrier_path.mkdir(mode=0o700)
     with pytest.raises(operator.OperatorFailure, match="private_directory_invalid"):
@@ -1956,16 +2348,12 @@ def test_http_clients_keep_credentials_in_headers_and_disable_ambient_routing(mo
         bridge_unit="friday-bridge.service",
     )
     try:
-        assert len(calls) == 2
-        backend_client, dispatcher_client = calls
+        assert len(calls) == 1
+        backend_client = calls[0]
         assert backend_client["headers"]["Authorization"] == "Bearer OWNER-TOKEN-IN-MEMORY"
-        assert dispatcher_client["headers"]["Authorization"] == "Bearer MODEL-TOKEN-IN-MEMORY"
         assert backend_client["trust_env"] is False
-        assert dispatcher_client["trust_env"] is False
         assert backend_client["follow_redirects"] is False
-        assert dispatcher_client["follow_redirects"] is False
         assert backend_client["verify"] is True
-        assert dispatcher_client["verify"] is True
     finally:
         runtime.close()
 
@@ -1985,14 +2373,13 @@ def test_live_runtime_close_continues_after_baseexception_and_closes_pidfds() ->
 
     runtime = object.__new__(operator.LiveRuntime)
     runtime._backend_client = Client("backend", fail=True)
-    runtime._dispatcher_client = Client("dispatcher")
     backend_fd = os.open("/dev/null", os.O_RDONLY)
     bridge_fd = os.open("/dev/null", os.O_RDONLY)
     runtime._backend_pidfd = backend_fd
     runtime._bridge_pidfd = bridge_fd
     with pytest.raises(operator.OperatorFailure, match="runtime_close_failed"):
         runtime.close()
-    assert events == ["backend", "dispatcher"]
+    assert events == ["backend"]
     assert runtime._backend_pidfd == -1
     assert runtime._bridge_pidfd == -1
     for descriptor in (backend_fd, bridge_fd):
@@ -2140,7 +2527,7 @@ def test_git_candidate_checks_ignore_ambient_repository_and_network_controls(mon
 def test_dependency_hashes_are_frozen_to_the_authorized_inputs() -> None:
     assert operator._EXPECTED_DEPENDENCY_HASHES == {
         "tools/document_contour_live_battery.py": (
-            "65619244ac2df24be951ee2ca71fd2a547897b26066173b2c2ecd7a538c210b2"
+            "71cb9e4e3a3e3ccf7efe7291178e750fad1b8eea684b21cc1f7f384d46261d4a"
         ),
         "friday/diagnostics/__init__.py": (
             "9e8593a74f1ae12d49e17fd873ef508385e0f074fae45169679ba937c0616446"
@@ -2149,6 +2536,11 @@ def test_dependency_hashes_are_frozen_to_the_authorized_inputs() -> None:
             "6986bcef0d21d1754672ad784746fbc205b4822de708c71b16dd93576f3d1926"
         ),
         "friday/admin_api/_overview.py": ("322873e979178985e2e3cffc7d2c8690cc97f27c5970f9a06db9b1fb9e524677"),
+        "friday/config/__init__.py": ("1f78d346285fc75f6794d13ed0c48ec0aca82ef6e8792a47554ab72b0754dbcb"),
+        "friday/agent_runtime/llm.py": ("67e68a012c7d94a24244579923341e18287a7215610ba2a3330bded612e71ec6"),
+        "friday/model_profiles.py": ("21ea29d72540b07b26a54bfe927a806aa8aa1f9799578f69bfaa055042e3ac67"),
+        "friday/v12_model_runtime.py": ("ea1c6b700a11114fdc3799fe9d744e0a6a7d527cb0cef949300d6fb5d254b3d7"),
+        "friday/v12_model_transport.py": ("3f8d4c4e8ed513696a4c9ac39aad845595c46dad597b105f1d41c92e696f0363"),
     }
 
 

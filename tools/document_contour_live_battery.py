@@ -94,7 +94,7 @@ OBSERVER_REQUEST_SCHEMA = "friday.document-contour-live-battery.observer-request
 OBSERVER_RESPONSE_SCHEMA = "friday.document-contour-live-battery.observer-response.v2"
 _RUN_ID_ENV = "FRIDAY_DOCUMENT_BATTERY_RUN_ID"
 _RUN_ID_RE = re.compile(r"[0-9a-f]{64}")
-_RELEASE_PROFILE = "qwen36-27b-nvfp4-nvidia"
+_RELEASE_PROFILE = "qwen38-27b-nvfp4-sglang"
 INTER_RUN_OBSERVER_TIMEOUT_SEC = 180.0
 PROCESS_GROUP_EXIT_GRACE_SEC = 2.0
 PROCESS_GROUP_TERM_GRACE_SEC = 5.0
@@ -3458,9 +3458,10 @@ class _BoundedWorkerStdout:
     """Drain one bound worker pipe without letting output grow controller memory."""
 
     def __init__(self, process: subprocess.Popen[bytes], limit: int) -> None:
-        self.stream = process.stdout
-        if self.stream is None:
+        stream = process.stdout
+        if stream is None:
             raise BatteryFailure("worker_stdout_missing")
+        self.stream = stream
         self.process_group = int(process.pid)
         self.limit = limit
         self.output = bytearray()

@@ -26,6 +26,17 @@ def test_tracking_suffix_is_metadata_not_required_answer_text():
 
 
 @pytest.mark.parametrize(
+    "label,value", [("готово", "UNIT-52"), ("согласовано", "Заказ-17"), ("ready", "alpha_42")]
+)
+@pytest.mark.parametrize("style", ["*", "**", "_", "__"])
+def test_emphasized_label_and_adjacent_exact_value_share_one_span(label, value, style):
+    question = f"Подчеркни словом {label} значение {value} в коротком ответе."
+    actual = repair_explicit_text_shape(question, f"{style}{label}{style} {value}")
+    assert actual == f"{style}{label} {value}{style}"
+    assert repair_explicit_text_shape(question, actual) == actual
+
+
+@pytest.mark.parametrize(
     "label,value",
     [
         ("такси", "заказала"),
@@ -64,6 +75,7 @@ def test_ambiguous_source_compound_and_noninstruction_requests_are_unchanged(que
     assert explicit_emphasis_label_contract(question) is None
     assert not exact_emphasis_label_literal_owned(question, "*готово OWNED-7*")
     assert repair_explicit_text_shape(question, "*OWNED-7*") == "*OWNED-7*"
+    assert repair_explicit_text_shape(question, "*готово* OWNED-7") == "*готово* OWNED-7"
 
 
 @pytest.mark.parametrize(
@@ -78,6 +90,15 @@ def test_ambiguous_source_compound_and_noninstruction_requests_are_unchanged(que
         "*готово OWNED-7*",
         "**готово** *OWNED-7*",
         "`*OWNED-7*`",
+        "*готово* WRONG-7",
+        "*готово* owned-7",
+        "*Готово* OWNED-7",
+        "*готово* OWNED-7 OWNED-7",
+        "Описание: *готово* OWNED-7",
+        "*готово* OWNED-7\nСтрока с фактом.",
+        "*готово*  OWNED-7",
+        "`*готово* OWNED-7`",
+        "**готово* OWNED-7",
     ],
 )
 def test_refusal_prose_wrong_values_and_existing_labels_are_not_rewritten(answer):

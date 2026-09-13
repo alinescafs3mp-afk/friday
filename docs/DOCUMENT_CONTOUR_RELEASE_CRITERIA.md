@@ -151,7 +151,7 @@ Each run contains ten unique end-to-end document scenarios:
     provenance.
 
 Before the first case, the worker must fail closed unless the exact runtime
-profile is `qwen36-27b-nvfp4-nvidia` and its independent
+profile is `qwen38-27b-nvfp4-sglang` and its independent
 `document_map_max_concurrency` is exactly `1`.  Model-generation evidence is
 content-free and comes from runtime call boundaries, not prompt inspection:
 direct attachment synthesis, hierarchy plan, MAP leaf, REDUCE, hierarchy-final
@@ -283,7 +283,10 @@ The helper has one fail-closed state sequence:
 1. While the bridge is active, pin the backend PID with a pidfd and exact
    systemd fingerprint, bind the active bridge service PID to its exact recorded
    lease protocol, require backend health and zero physical outbound, and hash
-   the dispatcher's sole positive finite `process_start_time_seconds` sample.
+   the registered Qwen3.8/SGLang same-origin witness-before, exact metrics,
+   exact server-info and witness-after tuple; the two witnesses must be identical,
+   server-info must share the witness seed, and the canonical witness hash is the
+   dispatcher process identity.
 2. Arm restoration before issuing the single bridge stop.  Require the unit to
    become exactly inactive/dead with zero main/control PIDs, the old pidfd exited
    and its cgroup recursively unpopulated.

@@ -689,8 +689,11 @@ async def test_filename_substring_inventory_lists_names_without_hydrating_bodies
 async def test_exact_filename_result_continuations_use_only_durable_selected_pointer(
     settings,
     storage,
+    monkeypatch,
 ) -> None:
     runtime, actor, tenant = _runtime(settings, storage)
+    # The unqualified "13 числа" belongs to the fixture's August upload dates.
+    monkeypatch.setattr(runtime, "_local_today", lambda: date(2026, 8, 15))
     first_raw = _file(
         storage,
         tenant,

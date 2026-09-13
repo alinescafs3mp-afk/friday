@@ -2308,6 +2308,7 @@ async def test_cold_semantic_runtime_refresh_uses_only_fixed_canary_and_is_epoch
 @pytest.mark.asyncio
 async def test_semantic_runtime_refresh_preserves_shared_cooldown_and_recovers_on_later_demand(
     settings: Any,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     paths: list[str] = []
     inventory_valid = False
@@ -2333,6 +2334,11 @@ async def test_semantic_runtime_refresh_preserves_shared_cooldown_and_recovers_o
     )
     scheduler._supervisor_mode = SecondaryMode.SHADOW  # noqa: SLF001 - isolate promoted port
     scheduler.allowed_workloads = scheduler.allowed_workloads | {ModelWorkload.PLAN_CANDIDATE}
+    # Keep the cooldown clock fixed across the two immediate demands even when
+    # the host deschedules this test for more than its one-millisecond cooldown.
+    now = [time.monotonic()]
+    assert scheduler._client is not None  # noqa: SLF001 - isolate client clock
+    monkeypatch.setattr(scheduler._client, "_clock", lambda: now[0])  # noqa: SLF001
     try:
         assert not await scheduler.refresh_semantic_supervisor_runtime_admission(
             absolute_deadline_monotonic=time.monotonic() + 2.0,
@@ -2351,7 +2357,7 @@ async def test_semantic_runtime_refresh_preserves_shared_cooldown_and_recovers_o
         }
 
         inventory_valid = True
-        await asyncio.sleep(0.01)
+        now[0] += 0.01
         assert await scheduler.refresh_semantic_supervisor_runtime_admission(
             absolute_deadline_monotonic=time.monotonic() + 2.0,
         )

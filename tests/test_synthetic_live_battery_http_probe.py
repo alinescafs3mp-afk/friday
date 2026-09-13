@@ -673,7 +673,7 @@ def test_case_oracle_exposes_closed_http_counts_clear_flag_and_overflow_verdicts
 def test_p01_oracle_uses_the_independently_frozen_code_owned_inventory() -> None:
     expected = {
         "A": {1, 2, 3, 4, 5, 6, 8, 9, 10, 12, 13, 14, 15, 17, 18},
-        "B": {10, 11},
+        "B": {1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11},
     }
     for battery_id, expected_indices in expected.items():
         cases = _pass_cases("package_a_honesty", battery_id=battery_id)
