@@ -1611,6 +1611,48 @@ def test_worker_task_census_rejects_added_and_disappeared_ids(
 
 
 @pytest.mark.parametrize(
+    ("confirm_vanished_extra", "observations", "accepted", "expected_calls"),
+    [
+        (False, [frozenset({101, 202}), frozenset({101})], False, 1),
+        (True, [frozenset({101, 202}), frozenset({101})], True, 2),
+        (True, [frozenset({101, 202}), frozenset({101, 202})], False, 2),
+        (True, [frozenset({101, 202}), frozenset({101, 303})], False, 2),
+        (True, [frozenset(), frozenset({101})], False, 1),
+        (True, [frozenset({202}), frozenset({101})], False, 1),
+    ],
+    ids=[
+        "strict-default",
+        "vanished-extra",
+        "surviving-extra",
+        "changing-extra",
+        "missing-baseline",
+        "mixed-missing-added",
+    ],
+)
+def test_worker_task_census_resamples_only_a_vanished_extra(
+    monkeypatch, confirm_vanished_extra, observations, accepted, expected_calls
+):
+    samples = iter(observations)
+    calls = []
+
+    def census():
+        calls.append(True)
+        return next(samples)
+
+    monkeypatch.setattr(native, "_worker_task_ids", census)
+    if accepted:
+        native._require_worker_task_ids(
+            frozenset({101}), confirm_vanished_extra=confirm_vanished_extra
+        )
+    else:
+        with pytest.raises(native.NativeError, match="^native_unowned_worker_thread$"):
+            native._require_worker_task_ids(
+                frozenset({101}), confirm_vanished_extra=confirm_vanished_extra
+            )
+    assert len(calls) == expected_calls
+
+
+@pytest.mark.parametrize(
     "scenario",
     [
         "clear",

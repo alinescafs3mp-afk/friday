@@ -580,9 +580,22 @@ def _worker_task_ids() -> frozenset[int]:
     return task_ids
 
 
-def _require_worker_task_ids(expected: frozenset[int]) -> None:
-    if _worker_task_ids() != expected:
-        raise NativeError("native_unowned_worker_thread")
+def _require_worker_task_ids(
+    expected: frozenset[int], *, confirm_vanished_extra: bool = False
+) -> None:
+    observed = _worker_task_ids()
+    if observed == expected:
+        return
+    # /proc may return the TID of a just-joined Python helper while that task
+    # disappears. Confirm only that one-way race with an immediate exact
+    # resample; missing, persistent, or changing task sets remain failures.
+    if (
+        confirm_vanished_extra
+        and expected.issubset(observed)
+        and _worker_task_ids() == expected
+    ):
+        return
+    raise NativeError("native_unowned_worker_thread")
 
 
 def _enter_worker_containment(battery: Any) -> dict[str, Any]:
@@ -868,7 +881,7 @@ def _worker_contained(
     if runtime_live_after != expected_runtime or runtime_reloaded_after != expected_runtime:
         result["failure_codes"].append("native_runtime_identity_changed")
     try:
-        _require_worker_task_ids(task_ids)
+        _require_worker_task_ids(task_ids, confirm_vanished_extra=True)
     except NativeError:
         result["failure_codes"].append("native_unowned_worker_thread")
 
