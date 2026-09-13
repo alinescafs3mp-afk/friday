@@ -9,6 +9,7 @@ import threading
 import time
 from dataclasses import replace
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -348,7 +349,10 @@ def test_local_ocr_rejects_a_child_output_over_its_byte_cap(tmp_path: Path) -> N
     assert result.error == "local_ocr_failed"
 
 
-def test_local_ocr_multipage_work_shares_one_deadline(tmp_path: Path) -> None:
+def test_local_ocr_multipage_work_shares_one_deadline(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     executable = _fake_tesseract(
         tmp_path / "tesseract",
         ocr_action=(
@@ -357,13 +361,63 @@ def test_local_ocr_multipage_work_shares_one_deadline(tmp_path: Path) -> None:
         ),
     )
 
+    # Exercise real deadline cleanup without requiring Python startup to fit
+    # into a fraction of a second on a busy host.
+    processes: list[Any] = []
+    popen = ocr_module.subprocess.Popen
+
+    def tracked_popen(*args: Any, **kwargs: Any) -> Any:
+        process = popen(*args, **kwargs)
+        processes.append(process)
+        return process
+
+    with monkeypatch.context() as cleanup_patch:
+        cleanup_patch.setattr(ocr_module.subprocess, "Popen", tracked_popen)
+        with pytest.raises(TimeoutError, match="local OCR deadline reached"):
+            ocr_module._bounded_process(  # noqa: SLF001
+                [str(executable), "stdin", "stdout"],
+                b"slow-second-page",
+                deadline=time.monotonic() - 1,
+                output_limit=100_000,
+            )
+    assert len(processes) == 1
+    assert processes[0].poll() is not None
+    assert processes[0].stdin.closed and processes[0].stdout.closed
+
+    # Two pages each consume 0.15 seconds of one 0.2-second budget. A deadline
+    # reset on the second page would incorrectly accept both page texts.
+    clock = [100.0]
+    common_deadline = clock[0] + 0.2
+    page_deadlines: list[float] = []
+
+    def timed_process(
+        command: list[str],
+        payload: bytes,
+        *,
+        deadline: float,
+        output_limit: int,
+        environment: dict[str, str] | None = None,
+    ) -> tuple[int, bytes]:
+        del output_limit, environment
+        if "--list-langs" in command:
+            return 0, b"List of available languages:\nrus\neng\n"
+        page_deadlines.append(deadline)
+        clock[0] += 0.15
+        if clock[0] >= deadline:
+            raise TimeoutError("local OCR deadline reached")
+        return 0, b"FIRST" if payload.startswith(b"first") else b"SECOND"
+
+    monkeypatch.setattr(ocr_module, "time", SimpleNamespace(monotonic=lambda: clock[0]))
+    monkeypatch.setattr(ocr_module, "_bounded_process", timed_process)
+
     result = extract_local_ocr(
         [_asset(b"first-page"), _asset(b"slow-second-page")],
         max_text_chars=100_000,
         executable=str(executable),
-        deadline=time.monotonic() + 0.2,
+        deadline=common_deadline,
     )
 
+    assert page_deadlines == [common_deadline, common_deadline]
     assert result.success is False
     assert result.page_texts == ("FIRST",)
     assert result.pages_total == 2
