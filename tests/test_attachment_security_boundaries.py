@@ -366,19 +366,45 @@ async def test_office_intent_arbiter_uses_the_attachment_optional_stage_budget(
     )
     arbiter_calls = 0
     arbiter_cancelled = False
+    arbiter_budget_sec: float | None = None
 
     def no_regex_exact_answer(question, attachments, *, kind_override=""):
         del question, attachments, kind_override
         return None
 
-    async def hanging_office_arbiter(question):
-        nonlocal arbiter_calls, arbiter_cancelled
-        del question
-        arbiter_calls += 1
-        try:
-            await asyncio.Event().wait()
-        finally:
+    class CloseAwarePendingArbiter:
+        """Keep route admission observable even if its 10 ms await expires first."""
+
+        def __init__(self) -> None:
+            self._pending: asyncio.Future[None] = asyncio.get_running_loop().create_future()
+
+        async def _wait(self) -> None:
+            nonlocal arbiter_cancelled
+            try:
+                await self._pending
+            finally:
+                arbiter_cancelled = True
+
+        def __await__(self) -> Any:
+            return self._wait().__await__()
+
+        def close(self) -> None:
+            nonlocal arbiter_cancelled
+            if not self._pending.done():
+                self._pending.cancel()
             arbiter_cancelled = True
+
+    def hanging_office_arbiter(
+        question,
+        *,
+        turn_deadline: float | None = None,
+    ) -> CloseAwarePendingArbiter:
+        nonlocal arbiter_calls, arbiter_budget_sec
+        del question
+        assert turn_deadline is not None
+        arbiter_calls += 1
+        arbiter_budget_sec = turn_deadline - asyncio.get_running_loop().time()
+        return CloseAwarePendingArbiter()
 
     async def simple_context(user_id, message, conversation_id, **kwargs):
         del message
@@ -420,6 +446,7 @@ async def test_office_intent_arbiter_uses_the_attachment_optional_stage_budget(
     assert "Не могу надёжно проверить точное количество" in result["message"]
     assert "Обычный ответ после отказа optional Office routing." not in result["message"]
     assert arbiter_calls == 1
+    assert arbiter_budget_sec is not None and arbiter_budget_sec <= 0.01
     assert arbiter_cancelled is True
 
 
