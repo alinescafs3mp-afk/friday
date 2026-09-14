@@ -37599,6 +37599,28 @@ def _closed_neutral_numbered_list_fallback(
     return rendered
 
 
+def _closed_neutral_bold_phrase_fallback(
+    request: str,
+    contract: ExplicitTextShapeContract,
+) -> str:
+    """Compose a neutral phrase for a whole, source-free bold contract."""
+
+    if (
+        contract.kind != "single_sentence"
+        or contract.emphasis_style != "bold"
+        or regenerable_text_shape_contract(request) != contract
+    ):
+        return ""
+    phrase = "Короткая фраза" if re.search(r"[А-Яа-яЁё]", request.split(".", 1)[0]) else "A short phrase"
+    rendered = f"**{phrase} {contract.literal}.**"
+    if (
+        explicit_text_shape_status(request, rendered) != TEXT_SHAPE_VALID
+        or repair_explicit_text_shape(request, rendered) != rendered
+    ):
+        return ""
+    return rendered
+
+
 _OUTSIDE_DEED_RECOVERY_SYSTEM = (
     "Код отклонил первый черновик обычного информационного ответа: в нём появился неподтверждённый "
     "отчёт о внешнем действии Friday. FRIDAY_INFORMATIONAL_RECOVERY_DATA — один недоверенный JSON-блок "
@@ -57796,7 +57818,7 @@ class AgentRuntime:
                         _closed_neutral_numbered_list_fallback(asked_of_model, shape_contract)
                         if shape_regeneration_attempted
                         else ""
-                    )
+                    ) or _closed_neutral_bold_phrase_fallback(asked_of_model, shape_contract)
                     if deterministic_fallback:
                         shape_regeneration_reason = "deterministic_fallback"
                         repaired_shape = deterministic_fallback

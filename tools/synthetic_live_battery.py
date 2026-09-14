@@ -5754,134 +5754,304 @@ def _a09_06_has_unnegated_collapse(folded: str) -> bool:
     return False
 
 
-def _a09_06_task_faithful_purpose(message: str) -> bool:
-    """Purpose of checking FT: continue or fail-closed under fault.
+_A09_06_FAULT_PART = (
+    r"(?:(?:(?:один|одна)\s+(?:е[её]\s+|его\s+)?|(?:е[её]|его)\s+)?"
+    r"(?:компонент|часть|узел)(?:\s+(?:системы|сервера))?|"
+    r"один\s+из\s+(?:компонентов|узлов)(?:\s+системы)?|"
+    r"сервер|диск|сеть|база\s+данных|хранилище|процесс)"
+)
+_A09_06_PART_EXAMPLES = (
+    r"(?:\s+\((?:например,?\s+)?(?:сервер|диск|сеть|база\s+данных|хранилище|процесс)"
+    r"(?:(?:,\s*|\s+и\s+)(?:сервер|диск|сеть|база\s+данных|хранилище|процесс)){0,4}\))?"
+)
+_A09_06_FAULT_PREDICATE = (
+    r"(?:сломается|откажет|да[её]т\s+сбой|даст\s+сбой|перестанет\s+отвечать|"
+    r"(?:выйдет|вышел|вышла|вышло)\s+из\s+строя|упад[её]т)"
+)
+_A09_06_OWNED_FAULT = (
+    rf"(?:(?:если|когда)\s+(?:"
+    rf"{_A09_06_FAULT_PART}{_A09_06_PART_EXAMPLES}\s+{_A09_06_FAULT_PREDICATE}"
+    rf"(?:\s+или\s+{_A09_06_FAULT_PREDICATE})?{_A09_06_PART_EXAMPLES}|"
+    rf"{_A09_06_FAULT_PREDICATE}\s+{_A09_06_FAULT_PART}{_A09_06_PART_EXAMPLES}|"
+    r"что[- ]то\s+(?:пойд[её]т\s+не\s+так|сломается|откажет))|"
+    r"(?:при\s+(?:сбое|отказе|поломке)|из[- ]за\s+(?:ошибки|сбоя|отказа|поломки))"
+    r"(?:\s+(?:компонента|части|узла)(?:\s+системы)?|\s+(?:сервера|диска|сети))?)"
+)
+_A09_06_WHOLE_SUBJECT = (
+    r"(?:(?:вся\s+)?система(?:\s+в\s+целом)?|сервис|"
+    r"(?:вс[её]\s+)?остальное|остальная\s+часть|остальные\s+(?:компоненты|части|узлы))"
+)
+_A09_06_OWNED_CONTAINMENT = (
+    rf"{_A09_06_WHOLE_SUBJECT}\s+(?:продолж(?:ит|ат|ила|или|ала|али)\s+(?:работать|функционировать)|"
+    r"не\s+(?:сломается|сломалась|умр[её]т|погибнет|упад[её]т|упала|рухнет)(?:\s+(?:целиком|полностью))?|"
+    r"(?:корректно\s+(?:завершит\s+работу|завершится|завершилась|восстановится|восстановилась)|"
+    r"безопасно\s+(?:завершит\s+работу|завершится|завершилась|остановится|остановилась)))"
+    r"(?:\s+\((?:для\s+пользователей|без\s+потери\s+данных|"
+    r"пользователи\s+(?:получат|увидят)\s+(?:отч[её]т|сообщение))\))?"
+)
+_A09_06_PURPOSE_HEAD = (
+    r"(?:проверка\s+(?:отказоустойчивости|устойчивости\s+к\s+отказам)\s+нужна|"
+    r"отказоустойчивость\s+проверяют|проверяют\s+отказоустойчивость|"
+    r"проверять\s+отказоустойчивость\s+нужно)\s*,?\s*чтобы\s+"
+    r"(?:убедиться\s*(?::\s*|,\s*что\s+))?"
+)
+_A09_06_OWNED_PURPOSE = re.compile(
+    rf"{_A09_06_PURPOSE_HEAD}(?:"
+    rf"{_A09_06_OWNED_CONTAINMENT}(?:\s*,\s*|\s+)(?:даже\s+)?{_A09_06_OWNED_FAULT}|"
+    rf"{_A09_06_OWNED_FAULT}\s*,\s*{_A09_06_OWNED_CONTAINMENT})"
+    r"(?:,\s*а\s+пользователи\s+(?:не\s+потеряют\s+данные"
+    r"(?:\s+и\s+не\s+столкнутся\s+с\s+полным\s+(?:крахом|параличом)(?:\s+(?:сервиса|теста))?)?|"
+    r"не\s+столкнутся\s+с\s+полным\s+(?:крахом|параличом)(?:\s+сервиса)?))?\s*",
+    re.IGNORECASE,
+)
 
-    Component wording is a fault locus, not a demand for unasked user-data.
-    Incidental parenthetical outcome notes are not a role-word ban.
-    User/report words in parentheses are rejected only as the failing part.
-    """
+_A09_06_LATER_ANALOGY_FRAME = re.compile(
+    r"\b(?:это|вс[её]\s+это)\s+как\b|\b(?:аналог|пример)\w*\s*:",
+    re.IGNORECASE,
+)
+_A09_06_ANAPHOR_PREFIX_WORDS = frozenset(
+    {
+        "а",
+        "в",
+        "впоследствии",
+        "деле",
+        "затем",
+        "и",
+        "итоге",
+        "на",
+        "но",
+        "однако",
+        "позже",
+        "после",
+        "потом",
+        "при",
+        "реально",
+        "самом",
+        "тогда",
+        "фактически",
+        "целиком",
+        "этом",
+        "полностью",
+    }
+)
+
+
+def _a09_06_owned_whole_anaphors(first_sentence: str) -> frozenset[str]:
+    """Return pronouns licensed by the containment subject, not an analogy."""
+
+    containment = re.search(_A09_06_OWNED_CONTAINMENT, first_sentence, re.IGNORECASE)
+    if containment is None:
+        return frozenset()
+    words = _p09_words(containment.group(0))
+    if not words:
+        return frozenset()
+    if words[0] == "сервис":
+        return frozenset({"он"})
+    if words[0] == "остальные" or (words[0] in {"все", "всё"} and words[1:2] == ["остальные"]):
+        return frozenset({"они"})
+    if words[0] == "остальное" or (words[0] in {"все", "всё"} and words[1:2] == ["остальное"]):
+        return frozenset({"оно"})
+    return frozenset({"она"})
+
+
+def _a09_06_anaphor_prefix_is_bound(words: Sequence[str], first_role_or_predicate: int) -> bool:
+    """Allow only a short discourse/event prefix before an owned anaphor."""
+
+    prefix = words[:first_role_or_predicate]
+    return bool(
+        len(prefix) <= 4
+        and all(
+            word in _A09_06_ANAPHOR_PREFIX_WORDS or _p09_has_stem(word, ("сбо", "отказ", "полом", "ошиб"))
+            for word in prefix
+        )
+    )
+
+
+def _a09_06_adverse_operation_indexes(words: Sequence[str]) -> list[int]:
+    """Find affirmative whole-system failure predicates in one later clause."""
+
+    adverse: list[int] = []
+    for index, word in enumerate(words):
+        directly_negated = index > 0 and words[index - 1] in {"не", "ни"}
+        if _p09_has_stem(word, ("упад", "слом", "рухн", "умр", "погибн")):
+            if not directly_negated:
+                adverse.append(index)
+            continue
+        bounded_suffix = words[index + 1 : index + 4]
+        if (
+            (word.startswith("выйд") and bounded_suffix[:2] == ["из", "строя"])
+            or (
+                word.startswith(("даст", "даёт", "дает"))
+                and any(item.startswith("сбо") for item in bounded_suffix)
+            )
+            or (
+                word.startswith(("стан", "буд"))
+                and any(item.startswith("недоступ") for item in bounded_suffix)
+            )
+        ):
+            if not directly_negated:
+                adverse.append(index)
+            continue
+        works = any(
+            _p09_has_stem(candidate, ("работ", "функционир")) for candidate in words[index + 1 : index + 4]
+        )
+        if works and (
+            (word.startswith("перестан") and not directly_negated)
+            or (word.startswith("прекрат") and not directly_negated)
+            or (word.startswith("продолж") and directly_negated)
+        ):
+            adverse.append(index)
+    return adverse
+
+
+def _a09_06_adverse_data_loss_indexes(words: Sequence[str]) -> list[int]:
+    """Find affirmative loss predicates structurally bound to nearby data."""
+
+    adverse: list[int] = []
+    for index, word in enumerate(words):
+        bounded_suffix = words[index + 1 : index + 5]
+        ordinary_loss = _p09_has_stem(word, ("потер", "лиш", "утрат"))
+        left_without_data = word.startswith("остан") and "без" in bounded_suffix
+        if not ordinary_loss and not left_without_data:
+            continue
+        if not any(_p09_has_stem(candidate, ("данн",)) for candidate in words[max(0, index - 4) : index + 5]):
+            continue
+        directly_negated = index > 0 and words[index - 1] in {"не", "ни"}
+        auxiliary_negated = (
+            index > 1 and words[index - 2] in {"не", "ни"} and words[index - 1].startswith("буд")
+        )
+        if not directly_negated and not auxiliary_negated:
+            adverse.append(index)
+    return adverse
+
+
+def _a09_06_analogy_actor_anaphors(words: Sequence[str]) -> frozenset[str]:
+    """Conservatively infer surface agreement for an explicit analogy actor."""
+
+    if not words:
+        return frozenset()
+    actor = words[-1]
+    if actor in {"он", "она", "оно", "они"}:
+        return frozenset({actor})
+    if actor.endswith(("ая", "яя", "а", "я")):
+        return frozenset({"она"})
+    if actor.endswith(("ое", "ее", "о", "е", "ё")):
+        return frozenset({"оно"})
+    if actor.endswith(("ые", "ие", "ы", "и")):
+        return frozenset({"они"})
+    if re.search(r"[бвгджзклмнпрстфхцчшщй]\Z", actor):
+        return frozenset({"он"})
+    return frozenset()
+
+
+def _a09_06_owned_assertion_regions(
+    clause: str,
+    shadowed_anaphors: frozenset[str] = frozenset(),
+) -> tuple[tuple[str, frozenset[str]], ...]:
+    """Keep owned regions and bind a bounded comparison to its local actor."""
+
+    analogy = _A09_06_LATER_ANALOGY_FRAME.search(clause)
+    if analogy is None:
+        return ((clause, shadowed_anaphors),)
+    owned: list[tuple[str, frozenset[str]]] = []
+    prefix = clause[: analogy.start()]
+    if prefix.strip():
+        owned.append((prefix, shadowed_anaphors))
+    comparison = clause[analogy.end() :]
+    boundary = re.search(r"[,:–—]", comparison)
+    if boundary is not None:
+        local_anaphors = _a09_06_analogy_actor_anaphors(_p09_words(comparison[: boundary.start()]))
+        # Rebase the following assertion at the structural boundary.  A proven
+        # local actor shadows only its own matching pronoun; incompatible or
+        # ambiguous agreement stays fail-closed against the original owner.
+        owned.extend(
+            _a09_06_owned_assertion_regions(
+                comparison[boundary.end() :],
+                local_anaphors,
+            )
+        )
+    return tuple(region for region in owned if region[0].strip())
+
+
+def _a09_06_later_contradicts_owned_purpose(first_sentence: str, later_text: str) -> bool:
+    """Carry owned system/user roles into bounded later assertions."""
+
+    whole_anaphors = _a09_06_owned_whole_anaphors(first_sentence)
+    users_owned = any(word.startswith("пользовател") for word in _p09_words(first_sentence))
+    for framed_clause in re.split(r"[.!?;\n]+", later_text):
+        for clause, shadowed_anaphors in _a09_06_owned_assertion_regions(framed_clause):
+            # Full quoted/reported regions are already fail-closed by the outer
+            # assertion blocker and cannot establish an anaphoric contradiction.
+            if any(marker in clause for marker in ('"', "«", "»", "“", "”", "„")):
+                continue
+            words = _p09_words(clause)
+            if not words:
+                continue
+            whole_roles = [
+                index
+                for index, word in enumerate(words)
+                if word in whole_anaphors and word not in shadowed_anaphors
+            ]
+            for predicate in _a09_06_adverse_operation_indexes(words):
+                for role in whole_roles:
+                    if abs(predicate - role) <= 6 and _a09_06_anaphor_prefix_is_bound(
+                        words, min(role, predicate)
+                    ):
+                        return True
+            user_roles = [index for index, word in enumerate(words) if word.startswith("пользовател")]
+            if users_owned:
+                user_roles.extend(
+                    index
+                    for index, word in enumerate(words)
+                    if word == "они"
+                    and word not in shadowed_anaphors
+                    and _a09_06_anaphor_prefix_is_bound(words, index)
+                )
+            for predicate in _a09_06_adverse_data_loss_indexes(words):
+                if any(abs(predicate - role) <= 6 for role in user_roles):
+                    return True
+    return False
+
+
+def _a09_06_task_faithful_purpose(message: str) -> bool:
+    """Bind checking's purpose to a component fault and whole-system outcome."""
 
     folded = _a09_unquote_emphasis(message).casefold()
-    if re.search(
-        r"(?:слома|сбо|откаж|перестанет\s+отвеча)\w*\s*\(\s*"
-        r"(?:пользовател|отчёт|отчет)",
-        folded,
-        re.IGNORECASE,
-    ):
+    # Every accepting path owns an affirmative assertion.  Only single-word
+    # emphasis is transparent; quotation/instruction wrappers cannot supply it.
+    if re.search(_A09_AFFIRMATIVE_CLAIM_BLOCKER, folded, re.IGNORECASE):
         return False
     if re.search(
-        r"\bможет(?:\s+\w+){0,3}\s+(?:быть\s+)?(?:нужн|подтвержд|показыва|проверя)\w*",
+        rf"\b{_A09_06_WHOLE_SUBJECT}\s+(?:(?:вс[её]\s+равно|полностью|целиком)\s+)?"
+        r"(?:упад[её]т|сломается|рухнет|перестан\w*\s+работать|не\s+продолж\w*\s+работать)",
         folded,
-        re.IGNORECASE,
-    ):
-        return False
-    if (
-        re.search(
-            r"\b(?:отказоустойчивост|устойчивост\w*\s+к\s+отказ)\w*",
-            folded,
-            re.IGNORECASE,
-        )
-        is None
-    ):
+    ) or _a09_06_has_unnegated_collapse(folded):
         return False
     if re.search(
-        r"\bне\s+проверя\w*|"
-        r"\bнужн\w*\s+не\s+для\s+того\s*,?\s*чтобы|"
-        r"\bне\s+для\s+того\s*,?\s*чтобы",
+        r"\bпользовател\w*\s+потеря\w*\s+данн\w*|"
+        r"\bданн\w*\s+(?:буд\w*\s+)?потеря\w*",
         folded,
-        re.IGNORECASE,
     ):
         return False
-    if (
-        re.search(
-            r"(?:проверя\w*|проверк\w*)[^.!?\n]{0,48}\bчтобы\b|"
-            r"\bчтобы\b[^.!?\n]{0,24}\bубед\w*",
-            folded,
-            re.IGNORECASE,
-        )
-        is None
-    ):
+    # Parse a complete purpose sentence, never combine independent mentions
+    # from an analogy, quoted instruction, another actor or a later sentence.
+    # The two clause orders share exactly the same fault/containment roles.
+    first_boundary = re.search(r"[.!?\n]", folded)
+    first_sentence = (folded[: first_boundary.start()] if first_boundary is not None else folded).strip()
+    if _A09_06_OWNED_PURPOSE.fullmatch(first_sentence) is None:
         return False
-    if re.search(
-        r"\bчтобы\b[^.!?\n]{0,80}\bне\s+продолж\w*",
-        folded,
-        re.IGNORECASE,
-    ):
-        return False
-    if re.search(
-        r"\bесли\b[^.!?\n]{0,48}\bне\s+(?:слома|сбо|откаж|да[её]т\s+сбо)\w*",
-        folded,
-        re.IGNORECASE,
-    ):
-        return False
-    if re.search(
-        r"\b(?:на\s+деле|однако)\b[\s\S]{0,160}"
-        r"\b(?:перестан\w*[^.!?\n]{0,24}\bработ\w*|\bне\s+продолж\w*)",
-        folded,
-        re.IGNORECASE,
-    ):
-        return False
-    if _a09_06_has_unnegated_collapse(folded):
-        return False
-    if re.search(
-        r"(?:\bостальн\w*[^.!?\n]{0,40}\bперестан\w*[^.!?\n]{0,24}\bработ\w*|"
-        r"\bостальн\w*[^.!?\n]{0,40}\bне\s+продолж\w*|"
-        r"\bпользовател\w*(?![^.!?\n]{0,16}\bне\b)[^.!?\n]{0,32}\bпотеря\w*\s+данн\w*|"
-        r"\bданн\w*[^.!?\n]{0,24}\bбуд\w*\s+потеря\w*)",
-        folded,
-        re.IGNORECASE,
-    ):
-        return False
-    if re.search(
-        r"\bчтобы\b[^.!?\n]{0,48}\bсистем\w*[^.!?\n]{0,32}\bслома\w*"
-        r"[^.!?\n]{0,32}\bкогда\b[^.!?\n]{0,24}вс[её]\s+хорошо",
-        folded,
-        re.IGNORECASE,
-    ):
-        return False
-    fault = re.search(
-        r"(?:\bкогда\b[^.!?\n]{0,32}\bчто[- ]?то\b[^.!?\n]{0,24}"
-        r"\b(?:пойд\w*\s+не\s+так|слома|сбо|откаж)\w*|"
-        r"\bесли\b[^.!?\n]{0,48}(?:"
-        r"\b(?:слома|сбо|откаж|перестанет)\w*|"
-        r"\bвыйд\w*\s+из\s+строя|"
-        r"\bвышл\w*\s+из\s+строя|"
-        r"\bупад\w*)|"
-        r"\bпри\s+(?:сбо|отказ|поломк)\w*|"
-        r"\bиз[- ]?за\b[^.!?\n]{0,48}\b(?:ошибк|сбо|отказ|поломк)\w*)",
-        folded,
-        re.IGNORECASE,
-    )
-    continue_or_safe = re.search(
-        r"(?:\bпродолж\w*\s+работ\w*|"
-        r"\bне\s+слома\w*|"
-        r"\bкорректн\w*\s+(?:заверш|восстанов)\w*|"
-        r"\bбезопасн\w*\s+(?:заверш|останов|термин)\w*)",
-        folded,
-        re.IGNORECASE,
-    )
-    survival = re.search(r"\bсистем\w*\s+не\s+(?:умр|погибн)\w*", folded)
-    if survival is not None:
-        # The new wording is an affirmative purpose, not a quotation/hedge,
-        # and cannot hide a positive data-loss clause behind a negated death.
-        if re.search(_A09_AFFIRMATIVE_CLAIM_BLOCKER, folded, re.IGNORECASE):
-            survival = None
-        if any(
-            re.search(r"\bне\s+\Z", folded[max(0, loss.start() - 4) : loss.start()]) is None
-            for loss in re.finditer(r"\bпотеря\w*\s+данн\w*", folded)
-        ):
-            return False
-    return fault is not None and (continue_or_safe is not None or survival is not None)
+    later_text = folded[first_boundary.end() :] if first_boundary is not None else ""
+    return not _a09_06_later_contradicts_owned_purpose(first_sentence, later_text)
 
 
 def _a09_06_relation_is_exact(message: str) -> bool:
     folded = message.casefold()
     if re.search(_A09_06_RESILIENCE_RELATION, folded, re.IGNORECASE):
         return True
+    if re.search(r"\bчтобы\b", folded):
+        # A rejected purpose must not escape through the legacy bag of roles.
+        return _a09_06_task_faithful_purpose(message)
     if _a09_06_relation_graph(message):
-        return True
-    if _a09_06_task_faithful_purpose(message):
         return True
     if "(" in message or ")" in message:
         return False

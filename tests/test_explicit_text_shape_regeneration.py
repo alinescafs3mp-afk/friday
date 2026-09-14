@@ -14,6 +14,7 @@ from friday.agent_runtime import (
     AgentContext,
     AgentRuntime,
     _attachment_reference_kind,
+    _closed_neutral_bold_phrase_fallback,
     _closed_neutral_numbered_list_fallback,
     _intra_file_record_set_count,
     file_turn_authority,
@@ -268,6 +269,47 @@ def test_closed_bold_phrase_contract_owns_the_full_transport_shape() -> None:
         )
         == TEXT_SHAPE_VALID
     )
+
+
+@pytest.mark.parametrize(
+    ("user_text", "expected"),
+    [
+        (RU_BOLD_PHRASE, "**Короткая фраза SYN-TELEGRAM-A10-02.**"),
+        (
+            "Compose one concise phrase with bold Markdown emphasis. "
+            "Include marker SAMPLE-MARK-73. Control: SAMPLE-CTRL-73.",
+            "**A short phrase SAMPLE-MARK-73.**",
+        ),
+    ],
+)
+def test_bold_fallback_copies_the_requested_literal_without_model_text(user_text: str, expected: str) -> None:
+    contract = regenerable_text_shape_contract(user_text)
+    assert contract is not None
+
+    rendered = _closed_neutral_bold_phrase_fallback(user_text, contract)
+
+    assert rendered == expected
+    assert explicit_text_shape_status(user_text, rendered) == TEXT_SHAPE_VALID
+    assert contract.control not in rendered
+
+
+@pytest.mark.parametrize(
+    "user_text",
+    [
+        RU_BOLD_PHRASE.replace("для транспортного теста", "по данным файла"),
+        "Цитата: «" + RU_BOLD_PHRASE + "»",
+        RU_BOLD_PHRASE.replace("с жирным", "без жирного"),
+        RU_BOLD_PHRASE.replace("Включи маркер", "Не включай маркер"),
+        RU_BOLD_PHRASE + " Затем отправь уведомление.",
+        RU_BOLD_PHRASE.replace("SYN-TELEGRAM-A10-02", "DIFFERENT-MARK-18"),
+        RU_SENTENCE,
+    ],
+)
+def test_bold_fallback_rejects_changed_authority_even_with_a_preparsed_contract(user_text: str) -> None:
+    contract = regenerable_text_shape_contract(RU_BOLD_PHRASE)
+    assert contract is not None
+
+    assert _closed_neutral_bold_phrase_fallback(user_text, contract) == ""
 
 
 @pytest.mark.parametrize(
@@ -1273,6 +1315,35 @@ async def test_chat_regenerates_a_misspelled_bold_transport_marker_once(
         "literal": "SYN-TELEGRAM-A10-02",
         "word_list": False,
     }
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("retry", ["**СYN-TELEGRAM-A10-02**", "**SYN-TELEGRAM-A10-02**", ""])
+async def test_chat_does_not_restore_corrupted_bold_marker_after_failed_regeneration(
+    settings: object,
+    storage: object,
+    monkeypatch: pytest.MonkeyPatch,
+    retry: str,
+) -> None:
+    original = "**СYN-TELEGRAM-A10-02**"
+    router = _SequenceRouter([{"content": original}, {"content": retry}])
+
+    result, metadata = await _run_chat_with_invalid_shape(
+        settings=settings,
+        storage=storage,
+        monkeypatch=monkeypatch,
+        router=router,
+        message=RU_BOLD_PHRASE,
+    )
+
+    assert result["message"] == "**Короткая фраза SYN-TELEGRAM-A10-02.**"
+    assert len(router.calls) == 2
+    assert result["tools_used"] == []
+    assert result["exact_text_shape_owned"] is True
+    assert metadata["text_shape_regeneration"] == {"accepted": False, "attempted": True}
+    assert metadata["text_shape_regeneration_reason"] == "deterministic_fallback"
+    messages = storage.get_conversation_messages(str(result["conversation_id"]), user_id="alice")
+    assert [row["content"] for row in messages if row["role"] == "assistant"] == [result["message"]]
 
 
 @pytest.mark.asyncio

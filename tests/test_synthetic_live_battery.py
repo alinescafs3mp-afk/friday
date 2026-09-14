@@ -3783,6 +3783,449 @@ def test_live_resilience_task_faithful_accepts_component_without_unasked_user_da
     assert "content_required_alternative_missing" not in failures
 
 
+_A09_06_RECORDED_PURPOSE = (
+    "Отказоустойчивость проверяют, чтобы убедиться, что система не «упадет» целиком, "
+    "когда выйдет из строя один её компонент (сервер, диск, сеть). Простыми словами: "
+    "это как проверить, что у дома есть запасной вход — если основной закроется, "
+    "дом не станет недоступным."
+)
+_A09_06_PURPOSE_PARAPHRASE = (
+    "Отказоустойчивость проверяют, чтобы убедиться, что система не сломается, "
+    "если выйдет из строя один её компонент (сервер, диск, сеть). Простыми словами: "
+    "это как проверить, что у дома есть запасной вход — если основной закроется, "
+    "дом не станет недоступным."
+)
+
+
+@pytest.mark.parametrize(
+    "message",
+    [
+        _A09_06_RECORDED_PURPOSE,
+        _A09_06_PURPOSE_PARAPHRASE,
+        "Отказоустойчивость проверяют, чтобы система продолжала работать даже при сбое.",
+        "Отказоустойчивость проверяют, чтобы система корректно завершилась при сбое.",
+        "Отказоустойчивость проверяют, чтобы система безопасно остановилась при сбое.",
+        (
+            "Проверка отказоустойчивости нужна, чтобы убедиться: если часть системы сломается, "
+            "вся система продолжит работать (пользователи получат отчёт)."
+        ),
+        _A09_06_RECORDED_PURPOSE.replace("когда", "если", 1),
+        _A09_06_RECORDED_PURPOSE.replace("не «упадет» целиком", "не сломается", 1),
+        _A09_06_RECORDED_PURPOSE.replace("выйдет из строя один её компонент", "один её компонент откажет"),
+        _A09_06_RECORDED_PURPOSE.split(". Простыми словами:")[0] + ".",
+        (
+            "Проверка отказоустойчивости нужна, чтобы убедиться: когда диск выйдет из строя, "
+            "вся система продолжит работать."
+        ),
+        ("Проверять отказоустойчивость нужно, чтобы система не сломалась, когда что-то пойдёт не так."),
+        (
+            "Проверяют отказоустойчивость, чтобы убедиться: при отказе компонента системы, "
+            "остальные узлы продолжат работать."
+        ),
+        ("Отказоустойчивость проверяют, чтобы убедиться, что система не умрёт, если сервер сломается."),
+        (
+            "Отказоустойчивость проверяют, чтобы убедиться: если компонент системы откажет, "
+            "система безопасно остановится."
+        ),
+    ],
+)
+def test_a09_06_purpose_binds_fault_and_containment_paraphrases(message: str) -> None:
+    case = _cases("A", 9)[5]
+    assert (
+        case.question == "Объясни простыми словами, зачем проверять отказоустойчивость. Контроль SYN-A09-06."
+    )
+    record = _satisfying_record(case)
+    record["response"]["message"] = message
+
+    assert battery._a09_06_task_faithful_purpose(message) is True
+    assert battery._a09_06_relation_is_exact(message) is True
+    assert battery.evaluate_case(case, record, latency_ms=1)["failure_codes"] == []
+
+
+@pytest.mark.parametrize(
+    "message",
+    [
+        # The two false acceptances documented against unchanged current105.
+        _A09_06_PURPOSE_PARAPHRASE.replace("если выйдет", "если не выйдет"),
+        "Цитата: «" + _A09_06_PURPOSE_PARAPHRASE + "»",
+        # Fault polarity belongs to its predicate, in both word/clause orders.
+        _A09_06_RECORDED_PURPOSE.replace("когда выйдет", "когда не выйдет"),
+        _A09_06_RECORDED_PURPOSE.replace("выйдет из строя один её компонент", "один её компонент не откажет"),
+        _A09_06_RECORDED_PURPOSE.replace("когда выйдет", "когда никогда не выйдет"),
+        _A09_06_RECORDED_PURPOSE.replace("выйдет из строя", "не перестанет отвечать"),
+        _A09_06_RECORDED_PURPOSE.replace("выйдет из строя", "не упадёт"),
+        # Whole-system polarity, role swaps and negated checking/purpose.
+        _A09_06_RECORDED_PURPOSE.replace("не «упадет» целиком", "«упадет» целиком"),
+        _A09_06_RECORDED_PURPOSE.replace("система не", "отчёт не", 1),
+        _A09_06_RECORDED_PURPOSE.replace("один её компонент", "один пользователь"),
+        _A09_06_RECORDED_PURPOSE.replace("один её компонент", "вся система"),
+        _A09_06_RECORDED_PURPOSE.replace("система не", "другая система не", 1),
+        _A09_06_RECORDED_PURPOSE.replace("проверяют", "не проверяют", 1),
+        _A09_06_RECORDED_PURPOSE.replace("проверяют, чтобы", "проверяют не для того, чтобы", 1),
+        _A09_06_RECORDED_PURPOSE.replace("проверяют, чтобы", "могут проверять, чтобы", 1),
+        # An unrelated clause/analogy cannot donate the missing fault or outcome.
+        _A09_06_RECORDED_PURPOSE.replace(
+            ", когда выйдет из строя один её компонент (сервер, диск, сеть)", ", в штатном режиме"
+        ),
+        _A09_06_RECORDED_PURPOSE.replace(", когда выйдет из строя", ". В другом случае выйдет из строя"),
+        _A09_06_RECORDED_PURPOSE.replace("система не «упадет» целиком, когда", "система ведёт журнал, когда")
+        + " Отдельный сервер продолжит работать.",
+        _A09_06_RECORDED_PURPOSE.replace(", когда", ", а документация говорит, что когда"),
+        _A09_06_RECORDED_PURPOSE.replace("(сервер, диск, сеть)", "(сервер, но система упадет целиком)"),
+        _A09_06_RECORDED_PURPOSE.replace("(сервер, диск, сеть)", "(пользователь, отчёт)"),
+        # Whole claims, partial relation quotes and instruction wrappers.
+        "«" + _A09_06_RECORDED_PURPOSE + "»",
+        '"' + _A09_06_PURPOSE_PARAPHRASE + '"',
+        "```" + _A09_06_PURPOSE_PARAPHRASE + "```",
+        "Скажи: " + _A09_06_PURPOSE_PARAPHRASE,
+        "В инструкции написано: " + _A09_06_PURPOSE_PARAPHRASE,
+        _A09_06_RECORDED_PURPOSE.replace("когда выйдет из строя", "когда «выйдет из строя»"),
+        # Later contradictions and data loss still invalidate the assertion.
+        _A09_06_RECORDED_PURPOSE + " Однако система упадет целиком.",
+        _A09_06_RECORDED_PURPOSE + " Система всё равно упадет целиком.",
+        _A09_06_RECORDED_PURPOSE + " Система перестанет работать.",
+        _A09_06_RECORDED_PURPOSE + " Пользователи потеряют данные.",
+        _A09_06_RECORDED_PURPOSE + " Данные будут потеряны.",
+        _A09_06_RECORDED_PURPOSE + " Это неверно.",
+        (
+            "Проверка отказоустойчивости нужна, чтобы убедиться: если часть системы сломается, "
+            "вся система продолжит работать (пользователи потеряют данные)."
+        ),
+        (
+            "Проверка отказоустойчивости нужна, чтобы убедиться: если часть системы сломается, "
+            "вся система продолжит работать (другая система упадет)."
+        ),
+        # A rejected purpose cannot escape through the legacy relation graph.
+        (
+            "Проверка отказоустойчивости нужна, чтобы убедиться: если часть системы не сломается, "
+            "вся система продолжит работать, а пользователи не потеряют данные."
+        ),
+        (
+            "Проверка отказоустойчивости нужна, чтобы убедиться: если часть системы сломается, "
+            "другая система продолжит работать, а пользователи не потеряют данные."
+        ),
+    ],
+)
+def test_a09_06_purpose_rejects_unowned_or_reversed_relations(message: str) -> None:
+    case = _cases("A", 9)[5]
+    record = _satisfying_record(case)
+    record["response"]["message"] = message
+
+    assert battery._a09_06_task_faithful_purpose(message) is False
+    assert battery._a09_06_relation_is_exact(message) is False
+    assert (
+        "content_semantic_group_missing" in battery.evaluate_case(case, record, latency_ms=1)["failure_codes"]
+    )
+
+
+_A09_06_CONTRADICTION_BASE = (
+    "Отказоустойчивость проверяют, чтобы убедиться, что система не сломается, "
+    "если выйдет из строя один её компонент (сервер, диск, сеть)."
+)
+_A09_06_USER_CONTRADICTION_BASE = (
+    "Проверка отказоустойчивости нужна, чтобы убедиться: если часть системы сломается, "
+    "вся система продолжит работать, а пользователи не потеряют данные."
+)
+
+
+@pytest.mark.parametrize(
+    "later",
+    [
+        "На деле она перестанет работать.",
+        "После отказа она всё-таки упадёт.",
+        "Фактически она полностью сломается.",
+        "При этом пользователи лишатся данных.",
+    ],
+)
+def test_a09_06_purpose_rejects_sol204_later_contradictions(later: str) -> None:
+    case = _cases("A", 9)[5]
+    message = f"{_A09_06_CONTRADICTION_BASE} {later}"
+    record = _satisfying_record(case)
+    record["response"]["message"] = message
+
+    assert battery._a09_06_task_faithful_purpose(message) is False
+    assert battery._a09_06_relation_is_exact(message) is False
+    assert (
+        "content_semantic_group_missing" in battery.evaluate_case(case, record, latency_ms=1)["failure_codes"]
+    )
+
+
+@pytest.mark.parametrize(
+    "predicate",
+    [
+        "перестанет работать",
+        "упадёт",
+        "полностью сломается",
+        "выйдет из строя",
+        "даст сбой",
+        "станет недоступной",
+        "прекратит работать",
+    ],
+)
+@pytest.mark.parametrize("predicate_first", [False, True])
+@pytest.mark.parametrize("negated", [False, True])
+@pytest.mark.parametrize("pronoun", ["она", "он"])
+def test_a09_06_later_operation_binds_polarity_role_and_clause_order(
+    predicate: str,
+    predicate_first: bool,
+    negated: bool,
+    pronoun: str,
+) -> None:
+    owned_predicate = (
+        "полностью не сломается"
+        if negated and predicate == "полностью сломается"
+        else f"не {predicate}"
+        if negated
+        else predicate
+    )
+    relation = f"{owned_predicate} {pronoun}" if predicate_first else f"{pronoun} {owned_predicate}"
+    message = f"{_A09_06_CONTRADICTION_BASE} После отказа {relation}."
+    expected = negated or pronoun != "она"
+    case = _cases("A", 9)[5]
+    record = _satisfying_record(case)
+    record["response"]["message"] = message
+
+    assert battery._a09_06_task_faithful_purpose(message) is expected
+    assert battery._a09_06_relation_is_exact(message) is expected
+    failures = battery.evaluate_case(case, record, latency_ms=1)["failure_codes"]
+    assert ("content_semantic_group_missing" not in failures) is expected
+
+
+@pytest.mark.parametrize(
+    ("later", "expected"),
+    [
+        ("При этом пользователи лишатся данных.", False),
+        ("При этом данных лишатся пользователи.", False),
+        ("При этом они утратят данные.", False),
+        ("При этом они останутся без данных.", False),
+        ("При этом пользователи не лишатся данных.", True),
+        ("При этом они не останутся без данных.", True),
+        ("При этом данные не будут потеряны пользователями.", True),
+        ("При этом операторы лишатся данных.", True),
+    ],
+)
+def test_a09_06_later_data_loss_binds_user_role_and_polarity(later: str, expected: bool) -> None:
+    first = (
+        "Проверка отказоустойчивости нужна, чтобы убедиться: если часть системы сломается, "
+        "вся система продолжит работать, а пользователи не потеряют данные."
+    )
+    message = f"{first} {later}"
+    case = _cases("A", 9)[5]
+    record = _satisfying_record(case)
+    record["response"]["message"] = message
+
+    assert battery._a09_06_task_faithful_purpose(message) is expected
+    assert battery._a09_06_relation_is_exact(message) is expected
+    failures = battery.evaluate_case(case, record, latency_ms=1)["failure_codes"]
+    assert ("content_semantic_group_missing" not in failures) is expected
+
+
+def test_a09_06_later_anaphora_does_not_bind_unrelated_analogy_actor() -> None:
+    message = (
+        "Отказоустойчивость проверяют, чтобы убедиться: если сервер откажет, "
+        "сервис продолжит работать. Простыми словами: это как дом: он перестанет работать."
+    )
+
+    assert battery._a09_06_task_faithful_purpose(message) is True
+    assert battery._a09_06_relation_is_exact(message) is True
+
+
+@pytest.mark.parametrize(
+    ("first", "later"),
+    [
+        pytest.param(
+            _A09_06_CONTRADICTION_BASE,
+            "На деле она перестанет работать, это как дом.",
+            id="lab414-owned-before-frame",
+        ),
+        pytest.param(
+            _A09_06_CONTRADICTION_BASE,
+            "Это как дом, она перестанет работать.",
+            id="lab414-frame-before-owned",
+        ),
+        pytest.param(
+            _A09_06_CONTRADICTION_BASE,
+            "На деле перестанет работать она, пример: дом.",
+            id="predicate-before-example-frame",
+        ),
+        pytest.param(
+            _A09_06_CONTRADICTION_BASE,
+            "Пример: дом, перестанет работать она.",
+            id="example-frame-before-predicate",
+        ),
+        pytest.param(
+            _A09_06_USER_CONTRADICTION_BASE,
+            "При этом пользователи лишатся данных, это как дом.",
+            id="data-loss-before-frame",
+        ),
+        pytest.param(
+            _A09_06_USER_CONTRADICTION_BASE,
+            "Это как дом, данных лишатся пользователи.",
+            id="frame-before-data-loss",
+        ),
+        pytest.param(
+            _A09_06_USER_CONTRADICTION_BASE,
+            "При этом они утратят данные, пример: дом.",
+            id="user-anaphor-before-example-frame",
+        ),
+        pytest.param(
+            _A09_06_USER_CONTRADICTION_BASE,
+            "Пример: дом, они останутся без данных.",
+            id="example-frame-before-user-anaphor",
+        ),
+    ],
+)
+def test_a09_06_analogy_scope_does_not_hide_owned_assertions(first: str, later: str) -> None:
+    case = _cases("A", 9)[5]
+    message = f"{first} {later}"
+    record = _satisfying_record(case)
+    record["response"]["message"] = message
+
+    assert battery._a09_06_task_faithful_purpose(message) is False
+    assert battery._a09_06_relation_is_exact(message) is False
+    assert (
+        "content_semantic_group_missing" in battery.evaluate_case(case, record, latency_ms=1)["failure_codes"]
+    )
+
+
+@pytest.mark.parametrize(
+    ("first", "later"),
+    [
+        pytest.param(
+            _A09_06_CONTRADICTION_BASE,
+            "На деле она не перестанет работать, это как дом.",
+            id="negated-before-frame",
+        ),
+        pytest.param(
+            _A09_06_CONTRADICTION_BASE,
+            "Это как дом, она не перестанет работать.",
+            id="negated-after-frame",
+        ),
+        pytest.param(
+            _A09_06_CONTRADICTION_BASE,
+            "Это как машина, она перестанет работать.",
+            id="same-gender-feminine-local-actor",
+        ),
+        pytest.param(
+            _A09_06_CONTRADICTION_BASE,
+            "Простыми словами: это как машина: она перестанет работать.",
+            id="same-gender-feminine-colon-scope",
+        ),
+        pytest.param(
+            "Отказоустойчивость проверяют, чтобы убедиться: если сервер откажет, сервис продолжит работать.",
+            "Это как дом: он перестанет работать.",
+            id="same-gender-masculine-local-actor",
+        ),
+        pytest.param(
+            "Отказоустойчивость проверяют, чтобы убедиться: если сервер откажет, "
+            "всё остальное продолжит работать.",
+            "Это как окно, оно перестанет работать.",
+            id="same-gender-neuter-local-actor",
+        ),
+        pytest.param(
+            "Отказоустойчивость проверяют, чтобы убедиться: если сервер откажет, "
+            "остальные узлы продолжат работать.",
+            "Это как часы, они перестанут работать.",
+            id="same-number-plural-local-actor",
+        ),
+        pytest.param(
+            _A09_06_CONTRADICTION_BASE,
+            "Это как дом, он перестанет работать.",
+            id="unrelated-masculine-actor",
+        ),
+        pytest.param(
+            _A09_06_USER_CONTRADICTION_BASE,
+            "Это как операторы: они лишатся данных.",
+            id="local-plural-data-actor",
+        ),
+        pytest.param(
+            _A09_06_USER_CONTRADICTION_BASE,
+            "Это как дом, операторы лишатся данных.",
+            id="unrelated-explicit-data-actor",
+        ),
+        pytest.param(
+            _A09_06_USER_CONTRADICTION_BASE,
+            "Это как дом, пользователи не лишатся данных.",
+            id="negated-data-loss-after-frame",
+        ),
+    ],
+)
+def test_a09_06_analogy_scope_preserves_local_actors_and_polarity(first: str, later: str) -> None:
+    case = _cases("A", 9)[5]
+    message = f"{first} {later}"
+    record = _satisfying_record(case)
+    record["response"]["message"] = message
+
+    assert battery._a09_06_task_faithful_purpose(message) is True
+    assert battery._a09_06_relation_is_exact(message) is True
+    assert (
+        "content_semantic_group_missing"
+        not in battery.evaluate_case(case, record, latency_ms=1)["failure_codes"]
+    )
+
+
+@pytest.mark.parametrize(
+    ("containment", "owned_pronoun", "unrelated_pronoun"),
+    [
+        ("система продолжит работать", "она", "он"),
+        ("сервис продолжит работать", "он", "она"),
+        ("остальная часть продолжит работать", "она", "оно"),
+        ("всё остальное продолжит работать", "оно", "они"),
+        ("остальные узлы продолжат работать", "они", "оно"),
+    ],
+)
+def test_a09_06_later_anaphor_agrees_with_owned_whole_role(
+    containment: str,
+    owned_pronoun: str,
+    unrelated_pronoun: str,
+) -> None:
+    first = f"Отказоустойчивость проверяют, чтобы убедиться: если сервер откажет, {containment}."
+
+    assert battery._a09_06_task_faithful_purpose(f"{first} Затем {owned_pronoun} рухнет.") is False
+    assert battery._a09_06_task_faithful_purpose(f"{first} Затем {unrelated_pronoun} рухнет.") is True
+
+
+def test_a09_06_quoted_later_failure_remains_nonaffirmative() -> None:
+    message = _A09_06_CONTRADICTION_BASE + " Цитата: «она перестанет работать»."
+    case = _cases("A", 9)[5]
+    record = _satisfying_record(case)
+    record["response"]["message"] = message
+
+    assert battery._a09_06_task_faithful_purpose(message) is False
+    assert battery._a09_06_relation_is_exact(message) is False
+    assert (
+        "content_semantic_group_missing" in battery.evaluate_case(case, record, latency_ms=1)["failure_codes"]
+    )
+
+
+@pytest.mark.parametrize("conditional", ["если", "когда"])
+@pytest.mark.parametrize("fault_first", [True, False])
+@pytest.mark.parametrize(
+    "predicate", ["сломается", "откажет", "выйдет из строя", "упадёт", "даёт сбой", "перестанет отвечать"]
+)
+def test_a09_06_purpose_owns_polarity_in_both_clause_orders(
+    conditional: str, fault_first: bool, predicate: str
+) -> None:
+    fault = f"{conditional} компонент системы {predicate}"
+    containment = "система продолжит работать"
+    relation = f"{fault}, {containment}" if fault_first else f"{containment}, {fault}"
+    positive = "Проверка отказоустойчивости нужна, чтобы убедиться: " + relation + "."
+    case = _cases("A", 9)[5]
+    controls = [
+        (positive, True),
+        (positive.replace(predicate, "не " + predicate), False),
+        (positive.replace(containment, "другая " + containment), False),
+        (positive.replace(relation, relation.replace(", ", ". ")), False),
+        ("«" + positive + "»", False),
+    ]
+    for message, expected in controls:
+        record = _satisfying_record(case)
+        record["response"]["message"] = message
+        assert battery._a09_06_relation_is_exact(message) is expected, message
+        failures = battery.evaluate_case(case, record, latency_ms=1)["failure_codes"]
+        assert ("content_semantic_group_missing" not in failures) is expected, message
+
+
 def test_live_fail_closed_state_relation_is_owned() -> None:
     message = (
         "Fail-closed — это поведение системы, при которой при сбое или потере питания "
