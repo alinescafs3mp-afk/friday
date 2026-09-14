@@ -147,33 +147,77 @@ def test_discovery_failure_cannot_fall_back_to_source_only_or_leak_details(
     assert homes and all(not home.exists() for home in homes)
 
 
-def test_default_discovery_blocks_actual_constructor_egress(monkeypatch):
+def test_default_discovery_blocks_actual_constructor_egress(monkeypatch, tmp_path):
+    import json
     import socket
 
     from tools import synthetic_live_battery as battery
 
     original_run = battery._run_worker_bounded
-    with socket.socket() as listener:
-        listener.bind(("127.0.0.1", 0))
-        listener.listen(1)
-        listener.settimeout(0.1)
-        port = listener.getsockname()[1]
+    for guard_enabled in (True, False):
+        report_path = tmp_path / f"constructor-egress-{guard_enabled}.json"
+        with socket.socket() as listener:
+            listener.bind(("127.0.0.1", 0))
+            listener.listen(4)
+            port = listener.getsockname()[1]
+            if guard_enabled:
+                # Other parallel tests can complete a handshake to this port.
+                # The oracle must identify the injected constructor's attempts.
+                with socket.create_connection(("127.0.0.1", port), timeout=0.2):
+                    pass
 
-        def run(argv, **kwargs):
-            command = list(argv)
-            index = command.index("-c") + 1
-            hook = (
-                "import socket;"
-                f"a.discover_api_from_runtime=lambda settings:socket.create_connection(('127.0.0.1',{port}),timeout=0.2);"
-                "raise SystemExit(a._runtime_discovery_worker())"
-            )
-            command[index] = command[index].replace("raise SystemExit(a._runtime_discovery_worker())", hook)
-            return original_run(command, **kwargs)
+            def run(
+                argv, *, _probe_port=port, _guard_enabled=guard_enabled, _report_path=report_path, **kwargs
+            ):
+                command = list(argv)
+                index = command.index("-c") + 1
+                original = "raise SystemExit(a._runtime_discovery_worker())"
+                assert command[index].count(original) == 1
+                hook = (
+                    "import contextlib,json,socket,sys\n"
+                    "from pathlib import Path\n"
+                    "from types import SimpleNamespace\n"
+                    "from tools import synthetic_live_battery as battery\n"
+                    "record={'entered':False,'outcome':'not_called','connect_events':[]}\n"
+                    "def audit(event,args):\n"
+                    "    if event=='socket.connect':\n"
+                    "        record['connect_events'].append(list(args[1]))\n"
+                    "sys.addaudithook(audit)\n"
+                    "def probe(settings):\n"
+                    "    record['entered']=True\n"
+                    "    try:\n"
+                    f"        with socket.create_connection(('127.0.0.1',{_probe_port}),timeout=0.2):\n"
+                    "            record['outcome']='connected'\n"
+                    "    except PermissionError:\n"
+                    "        record['outcome']='denied'\n"
+                    "        raise\n"
+                    "    raise RuntimeError('constructor_probe_complete')\n"
+                    "a.discover_api_from_runtime=probe\n"
+                    + (
+                        ""
+                        if _guard_enabled
+                        else "battery.LocalEndpointNetworkGuard=lambda *_:contextlib.nullcontext("
+                        "SimpleNamespace(denied_attempts=0))\n"
+                    )
+                    + "try:\n"
+                    "    result=a._runtime_discovery_worker()\n"
+                    "finally:\n"
+                    f"    Path({str(_report_path)!r}).write_text(json.dumps(record),encoding='utf-8')\n"
+                    "raise SystemExit(result)"
+                )
+                command[index] = command[index].replace(original, hook)
+                return original_run(command, **kwargs)
 
-        monkeypatch.setattr(battery, "_run_worker_bounded", run)
-        with pytest.raises(acceptance.AcceptanceError, match="runtime_surface_discovery_failed"):
-            acceptance.discover_surfaces()
-        # A worker returning an error is insufficient: the injected constructor
-        # must not have reached even this owned model-free endpoint.
-        with pytest.raises(TimeoutError):
-            listener.accept()
+            monkeypatch.setattr(battery, "_run_worker_bounded", run)
+            with pytest.raises(acceptance.AcceptanceError, match="runtime_surface_discovery_failed"):
+                acceptance.discover_surfaces()
+            report = json.loads(report_path.read_text(encoding="utf-8"))
+            assert report["entered"] is True
+            if guard_enabled:
+                assert report["outcome"] == "denied"
+                assert report["connect_events"] == []
+            else:
+                # The same probe must detect a real connection when its guard
+                # is removed, even though discovery still reports an error.
+                assert report["outcome"] == "connected"
+                assert report["connect_events"] == [["127.0.0.1", port]]
