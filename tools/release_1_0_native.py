@@ -19,6 +19,7 @@ import stat
 import sys
 import sysconfig
 import tempfile
+import threading
 import time
 import tomllib
 import traceback
@@ -580,14 +581,126 @@ def _worker_task_ids() -> frozenset[int]:
     return task_ids
 
 
-def _require_worker_task_ids(expected: frozenset[int], *, confirm_vanished_extra: bool = False) -> None:
+def _worker_task_start_time(task_id: int) -> int | None:
+    try:
+        raw = Path(f"/proc/self/task/{task_id}/stat").read_text(encoding="ascii")
+        closing = raw.rfind(")")
+        if not raw.startswith(f"{task_id} (") or closing < 3:
+            return None
+        fields = raw[closing + 2 :].split()
+        start_time = int(fields[19])
+    except (IndexError, OSError, UnicodeError, ValueError):
+        return None
+    return start_time if start_time > 0 else None
+
+
+@dataclass(frozen=True, slots=True)
+class _WorkerThreadRecord:
+    thread: threading.Thread
+    native_id: int
+    start_time: int
+
+
+class _WorkerThreadOwnership:
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._started: dict[threading.Thread, _WorkerThreadRecord] = {}
+        self._joined: set[threading.Thread] = set()
+
+    def record_start(self, thread: threading.Thread) -> None:
+        native_id = thread.native_id
+        start_time = _worker_task_start_time(native_id) if native_id is not None else None
+        if (
+            native_id is None
+            or native_id <= 0
+            or start_time is None
+            or thread.native_id != native_id
+            or not thread.is_alive()
+        ):
+            return
+        with self._lock:
+            self._started[thread] = _WorkerThreadRecord(thread, native_id, start_time)
+
+    def record_join(self, thread: threading.Thread) -> None:
+        if thread.is_alive():
+            return
+        with self._lock:
+            if thread in self._started:
+                self._joined.add(thread)
+
+    def retired(self) -> tuple[_WorkerThreadRecord, ...]:
+        with self._lock:
+            records = tuple(
+                self._started[thread]
+                for thread in self._joined
+                if thread.native_id == self._started[thread].native_id and not thread.is_alive()
+            )
+        return tuple(sorted(records, key=lambda record: record.native_id))
+
+
+@contextlib.contextmanager
+def _record_worker_thread_ownership():
+    ownership = _WorkerThreadOwnership()
+    original_start = threading.Thread.start
+    original_join = threading.Thread.join
+
+    def start(thread: threading.Thread, *args: Any, **kwargs: Any) -> Any:
+        result = original_start(thread, *args, **kwargs)
+        ownership.record_start(thread)
+        return result
+
+    def join(thread: threading.Thread, *args: Any, **kwargs: Any) -> Any:
+        result = original_join(thread, *args, **kwargs)
+        ownership.record_join(thread)
+        return result
+
+    threading.Thread.start = start
+    threading.Thread.join = join
+    try:
+        yield ownership
+    finally:
+        hooks_changed = threading.Thread.start is not start or threading.Thread.join is not join
+        threading.Thread.start = original_start
+        threading.Thread.join = original_join
+        if hooks_changed:
+            raise NativeError("native_worker_thread_owner_changed")
+
+
+def _owned_retired_tasks(task_ids: frozenset[int], records: Sequence[_WorkerThreadRecord]) -> bool:
+    by_id: dict[int, _WorkerThreadRecord] = {}
+    for record in records:
+        if (
+            not isinstance(record, _WorkerThreadRecord)
+            or record.native_id in by_id
+            or record.thread.native_id != record.native_id
+            or record.thread.is_alive()
+        ):
+            return False
+        by_id[record.native_id] = record
+    return all(
+        task_id in by_id and _worker_task_start_time(task_id) == by_id[task_id].start_time
+        for task_id in task_ids
+    )
+
+
+def _require_worker_task_ids(
+    expected: frozenset[int], *, retired_threads: Sequence[_WorkerThreadRecord] = ()
+) -> None:
     observed = _worker_task_ids()
     if observed == expected:
         return
-    # /proc may return the TID of a just-joined Python helper while that task
-    # disappears. Confirm only that one-way race with an immediate exact
-    # resample; missing, persistent, or changing task sets remain failures.
-    if confirm_vanished_extra and expected.issubset(observed) and _worker_task_ids() == expected:
+    extras = observed - expected
+    if not expected.issubset(observed) or not extras or not _owned_retired_tasks(extras, retired_threads):
+        raise NativeError("native_unowned_worker_thread")
+    # A successful join can precede removal of that exact owned task from
+    # /proc. One no-wait consistency read permits only monotone retirement;
+    # missing, unknown, live, reused or newly appearing task IDs still fail.
+    confirmed = _worker_task_ids()
+    if (
+        expected.issubset(confirmed)
+        and confirmed.issubset(observed)
+        and _owned_retired_tasks(confirmed - expected, retired_threads)
+    ):
         return
     raise NativeError("native_unowned_worker_thread")
 
@@ -824,7 +937,7 @@ def _worker_contained(
     secondary_runtime = {}
     try:
         app = create_app(settings)
-        with TestClient(app) as client:
+        with _record_worker_thread_ownership() as thread_ownership, TestClient(app) as client:
             if settings.secondary_llm_enabled:
                 secondary_runtime["startup"] = _secondary_observation(
                     app, expected_mode=settings.secondary_llm_mode
@@ -844,6 +957,7 @@ def _worker_contained(
             )
             for digest, payload in session.artifacts.items():
                 battery._secure_write_bytes(evidence.parent / f"artifact-{digest}.bin", payload)
+        retired_threads = thread_ownership.retired()
     finally:
         containment["phase"].live = False
 
@@ -875,7 +989,7 @@ def _worker_contained(
     if runtime_live_after != expected_runtime or runtime_reloaded_after != expected_runtime:
         result["failure_codes"].append("native_runtime_identity_changed")
     try:
-        _require_worker_task_ids(task_ids, confirm_vanished_extra=True)
+        _require_worker_task_ids(task_ids, retired_threads=retired_threads)
     except NativeError:
         result["failure_codes"].append("native_unowned_worker_thread")
 

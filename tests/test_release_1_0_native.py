@@ -1610,29 +1610,140 @@ def test_worker_task_census_rejects_added_and_disappeared_ids(
     assert native._leave_worker_containment(containment, restore_guards=False) is False
 
 
+def test_worker_thread_ownership_records_only_started_and_joined_and_restores_hooks(monkeypatch):
+    original_start = threading.Thread.start
+    original_join = threading.Thread.join
+    release = threading.Event()
+    with native._record_worker_thread_ownership() as ownership:
+        joined = threading.Thread(target=release.wait)
+        joined.start()
+        release.set()
+        joined.join()
+    assert threading.Thread.start is original_start
+    assert threading.Thread.join is original_join
+    assert [record.thread for record in ownership.retired()] == [joined]
+
+    outside_release = threading.Event()
+    outside = threading.Thread(target=outside_release.wait)
+    outside.start()
+    with native._record_worker_thread_ownership() as ownership:
+        outside_release.set()
+        outside.join()
+    assert ownership.retired() == ()
+
+    with (
+        pytest.raises(RuntimeError, match="^closed test failure$"),
+        native._record_worker_thread_ownership(),
+    ):
+        raise RuntimeError("closed test failure")
+    assert threading.Thread.start is original_start
+    assert threading.Thread.join is original_join
+
+    with (
+        pytest.raises(native.NativeError, match="^native_worker_thread_owner_changed$"),
+        native._record_worker_thread_ownership(),
+    ):
+        threading.Thread.start = original_start
+    assert threading.Thread.start is original_start
+    assert threading.Thread.join is original_join
+
+    class CaptureRaceThread:
+        def __init__(self, native_id, *, alive):
+            self.native_id = native_id
+            self.alive = alive
+
+        def is_alive(self):
+            return self.alive
+
+    monkeypatch.setattr(native, "_worker_task_start_time", lambda _task_id: 77)
+    retired_during_capture = CaptureRaceThread(202, alive=False)
+    ownership = native._WorkerThreadOwnership()
+    ownership.record_start(retired_during_capture)
+    ownership.record_join(retired_during_capture)
+    assert ownership.retired() == ()
+
+    reused_during_capture = CaptureRaceThread(303, alive=True)
+
+    def reused_start_time(_task_id):
+        reused_during_capture.native_id = 404
+        return 88
+
+    monkeypatch.setattr(native, "_worker_task_start_time", reused_start_time)
+    ownership = native._WorkerThreadOwnership()
+    ownership.record_start(reused_during_capture)
+    reused_during_capture.native_id = 303
+    reused_during_capture.alive = False
+    ownership.record_join(reused_during_capture)
+    assert ownership.retired() == ()
+
+
+def test_worker_task_census_rejects_unavailable_and_invalid_observations(monkeypatch):
+    real_listdir = os.listdir
+    monkeypatch.setattr(os, "listdir", lambda path: [] if path == "/proc/self/task" else real_listdir(path))
+    with pytest.raises(native.NativeError, match="^native_worker_thread_census_invalid$"):
+        native._worker_task_ids()
+
+    def unavailable(path):
+        if path == "/proc/self/task":
+            raise OSError("closed test failure")
+        return real_listdir(path)
+
+    monkeypatch.setattr(os, "listdir", unavailable)
+    with pytest.raises(native.NativeError, match="^native_worker_thread_census_unavailable$"):
+        native._worker_task_ids()
+
+
 @pytest.mark.parametrize(
-    ("confirm_vanished_extra", "observations", "accepted", "expected_calls"),
+    (
+        "recorded_ids",
+        "alive_ids",
+        "observations",
+        "observed_start_times",
+        "accepted",
+        "expected_calls",
+    ),
     [
-        (False, [frozenset({101, 202}), frozenset({101})], False, 1),
-        (True, [frozenset({101, 202}), frozenset({101})], True, 2),
-        (True, [frozenset({101, 202}), frozenset({101, 202})], False, 2),
-        (True, [frozenset({101, 202}), frozenset({101, 303})], False, 2),
-        (True, [frozenset(), frozenset({101})], False, 1),
-        (True, [frozenset({202}), frozenset({101})], False, 1),
+        ((), (), [{101, 202}, {101}], {}, False, 1),
+        ((202,), (), [{101, 202}, {101}], {202: [77]}, True, 2),
+        ((202,), (), [{101, 202}, {101, 202}], {202: [77, 77]}, True, 2),
+        ((202, 303), (), [{101, 202}, {101, 303}], {202: [77]}, False, 2),
+        ((), (), [set(), {101}], {}, False, 1),
+        ((), (), [{202}, {101}], {}, False, 1),
+        ((202,), (202,), [{101, 202}, {101}], {}, False, 1),
+        ((202,), (), [{101, 202}, {101}], {202: [99]}, False, 1),
+        ((202, 303), (), [{101, 202}, {101, 202, 303}], {202: [77]}, False, 2),
+        (
+            (202, 303),
+            (),
+            [{101, 202, 303}, {101, 303}],
+            {202: [77], 303: [88, 88]},
+            True,
+            2,
+        ),
     ],
     ids=[
         "strict-default",
         "vanished-extra",
-        "surviving-extra",
+        "retired-extra-still-visible",
         "changing-extra",
         "missing-baseline",
         "mixed-missing-added",
+        "live-recorded-extra",
+        "reused-task-id",
+        "new-extra",
+        "shrinking-retired-extras",
     ],
 )
-def test_worker_task_census_resamples_only_a_vanished_extra(
-    monkeypatch, confirm_vanished_extra, observations, accepted, expected_calls
+def test_worker_task_census_accepts_only_owned_retired_extras(
+    monkeypatch,
+    recorded_ids,
+    alive_ids,
+    observations,
+    observed_start_times,
+    accepted,
+    expected_calls,
 ):
-    samples = iter(observations)
+    samples = iter(frozenset(observation) for observation in observations)
     calls = []
 
     def census():
@@ -1640,11 +1751,22 @@ def test_worker_task_census_resamples_only_a_vanished_extra(
         return next(samples)
 
     monkeypatch.setattr(native, "_worker_task_ids", census)
+    start_times = {task_id: iter(values) for task_id, values in observed_start_times.items()}
+    monkeypatch.setattr(native, "_worker_task_start_time", lambda task_id: next(start_times[task_id]))
+    record_start_times = {202: 77, 303: 88}
+    retired_threads = tuple(
+        native._WorkerThreadRecord(
+            thread=SimpleNamespace(native_id=task_id, is_alive=lambda task_id=task_id: task_id in alive_ids),
+            native_id=task_id,
+            start_time=record_start_times[task_id],
+        )
+        for task_id in recorded_ids
+    )
     if accepted:
-        native._require_worker_task_ids(frozenset({101}), confirm_vanished_extra=confirm_vanished_extra)
+        native._require_worker_task_ids(frozenset({101}), retired_threads=retired_threads)
     else:
         with pytest.raises(native.NativeError, match="^native_unowned_worker_thread$"):
-            native._require_worker_task_ids(frozenset({101}), confirm_vanished_extra=confirm_vanished_extra)
+            native._require_worker_task_ids(frozenset({101}), retired_threads=retired_threads)
     assert len(calls) == expected_calls
 
 
