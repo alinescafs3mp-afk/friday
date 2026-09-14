@@ -1,1 +1,8 @@
-{"historical_evidence_sha256":"472c036d021be31d59f07a6d89448f7da282f36ce80a9093e5cc5c5075995eea","instrument_sha256":"fd489c05b86f680b5cb29b150284add6f025099f59deb048ad1aa0bd8a2c08ec","observed_source_commit":"000d906521983e14ea7e80981f509193c3aed8e0","release_sha256":"ce341339d6129966d1d57382ddd503224a4fa204d72c2a239cf21a86657e0e41","schema":"friday.document-dense-recall.current-candidate.v1","stable_envelope_sha256":"04d3ff170ddf1c1dcedc165707b4cdc067cc41ee227f27685100b80c14d7da3f"}
+{
+  "historical_evidence_sha256": "472c036d021be31d59f07a6d89448f7da282f36ce80a9093e5cc5c5075995eea",
+  "instrument_sha256": "fd489c05b86f680b5cb29b150284add6f025099f59deb048ad1aa0bd8a2c08ec",
+  "observed_source_commit": "95e66f431fee5e08352844071fed29d45290720e",
+  "release_sha256": "856f73c55535a0597723377abbc71c5646ece91a1a5e661523b779de7e89ac46",
+  "schema": "friday.document-dense-recall.current-candidate.v1",
+  "stable_envelope_sha256": "a8d02ddda9221e19aeb4147d8d759ed3099a2f069c76df98702a97d96266673f"
+}
