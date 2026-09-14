@@ -150,19 +150,55 @@ def test_discovery_failure_cannot_fall_back_to_source_only_or_leak_details(
 def test_default_discovery_blocks_actual_constructor_egress(monkeypatch, tmp_path):
     import json
     import socket
+    import threading
+    from contextlib import contextmanager
 
     from tools import synthetic_live_battery as battery
 
     original_run = battery._run_worker_bounded
-    for guard_enabled in (True, False):
-        report_path = tmp_path / f"constructor-egress-{guard_enabled}.json"
+
+    @contextmanager
+    def accepting_listener():
+        stop_accepting = threading.Event()
+        acceptor_ready = threading.Event()
+        listener_errors = []
         with socket.socket() as listener:
             listener.bind(("127.0.0.1", 0))
             listener.listen(4)
+            listener.settimeout(0.05)
+
+            def accept_connections():
+                acceptor_ready.set()
+                while not stop_accepting.is_set():
+                    try:
+                        connection, _ = listener.accept()
+                    except TimeoutError:
+                        continue
+                    except OSError as exc:
+                        if not stop_accepting.is_set():
+                            listener_errors.append(
+                                {"type": type(exc).__name__, "errno": exc.errno, "message": str(exc)}
+                            )
+                        return
+                    connection.close()
+
+            acceptor = threading.Thread(target=accept_connections, name="constructor-egress-acceptor")
+            acceptor.start()
+            try:
+                assert acceptor_ready.wait(1.0)
+                yield listener, listener_errors
+            finally:
+                stop_accepting.set()
+                acceptor.join(timeout=1.0)
+                assert not acceptor.is_alive()
+
+    for guard_enabled in (True, False):
+        report_path = tmp_path / f"constructor-egress-{guard_enabled}.json"
+        with accepting_listener() as (listener, listener_errors):
             port = listener.getsockname()[1]
             if guard_enabled:
-                # Other parallel tests can complete a handshake to this port.
-                # The oracle must identify the injected constructor's attempts.
+                # A foreign client must not be mistaken for the injected
+                # constructor merely because it completes a TCP handshake.
                 with socket.create_connection(("127.0.0.1", port), timeout=0.2):
                     pass
 
@@ -178,7 +214,7 @@ def test_default_discovery_blocks_actual_constructor_egress(monkeypatch, tmp_pat
                     "from pathlib import Path\n"
                     "from types import SimpleNamespace\n"
                     "from tools import synthetic_live_battery as battery\n"
-                    "record={'entered':False,'outcome':'not_called','connect_events':[]}\n"
+                    "record={'entered':False,'outcome':'not_called','connect_events':[],'exception':None}\n"
                     "def audit(event,args):\n"
                     "    if event=='socket.connect':\n"
                     "        record['connect_events'].append(list(args[1]))\n"
@@ -188,8 +224,11 @@ def test_default_discovery_blocks_actual_constructor_egress(monkeypatch, tmp_pat
                     "    try:\n"
                     f"        with socket.create_connection(('127.0.0.1',{_probe_port}),timeout=0.2):\n"
                     "            record['outcome']='connected'\n"
-                    "    except PermissionError:\n"
-                    "        record['outcome']='denied'\n"
+                    "    except OSError as exc:\n"
+                    "        record['outcome']='denied' if isinstance(exc,PermissionError) else "
+                    "'connect_error'\n"
+                    "        record['exception']={'type':type(exc).__name__,'errno':exc.errno,"
+                    "'message':str(exc)}\n"
                     "        raise\n"
                     "    raise RuntimeError('constructor_probe_complete')\n"
                     "a.discover_api_from_runtime=probe\n"
@@ -212,12 +251,17 @@ def test_default_discovery_blocks_actual_constructor_egress(monkeypatch, tmp_pat
             with pytest.raises(acceptance.AcceptanceError, match="runtime_surface_discovery_failed"):
                 acceptance.discover_surfaces()
             report = json.loads(report_path.read_text(encoding="utf-8"))
-            assert report["entered"] is True
+            diagnostics = {"probe": report, "listener_errors": listener_errors}
+            assert report["entered"] is True, diagnostics
             if guard_enabled:
-                assert report["outcome"] == "denied"
-                assert report["connect_events"] == []
+                assert report["outcome"] == "denied", diagnostics
+                assert report["connect_events"] == [], diagnostics
+                assert report["exception"]["type"] == "PermissionError", diagnostics
+                assert "errno" in report["exception"], diagnostics
             else:
                 # The same probe must detect a real connection when its guard
                 # is removed, even though discovery still reports an error.
-                assert report["outcome"] == "connected"
-                assert report["connect_events"] == [["127.0.0.1", port]]
+                assert report["outcome"] == "connected", diagnostics
+                assert report["connect_events"] == [["127.0.0.1", port]], diagnostics
+                assert report["exception"] is None, diagnostics
+            assert listener_errors == [], diagnostics
