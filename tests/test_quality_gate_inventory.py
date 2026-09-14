@@ -47,11 +47,13 @@ def test_checked_in_inventory_closes_semantics_tiers_parameters_and_host_boundar
     # all prior resource policies remain exact.
     # Candidate097 adds one transient-extra-task census control at 8 MiB.
     # Native-thread census repair replaces one control with three (+16 MiB).
-    assert sum(rule.scratch_mb for rule in value.rules if rule.tier != "nightly") == 50_314
+    # Candidate106 adds one 64 MiB text-regeneration declaration; prior budgets remain exact.
+    # One A09 ownership/polarity regression function adds 1 MiB.
+    assert sum(rule.scratch_mb for rule in value.rules if rule.tier != "nightly") == 50_379
     assert nightly == {"tests/retrieval_benchmark/test_conversation_harness.py::test_manifest_is_one_closed_six_by_four_conversation_matrix", "tests/retrieval_benchmark/test_conversation_harness.py::test_second_offline_run_is_byte_identical_and_never_uses_network", "tests/retrieval_benchmark/test_document_harness.py::test_document_manifest_is_one_closed_five_class_corpus", "tests/retrieval_benchmark/test_document_harness.py::test_second_offline_document_run_is_byte_identical_and_network_forbidden", "tests/retrieval_benchmark/test_harness.py::test_ephemeral_manifest_has_at_least_twenty_cases_and_all_ten_classes", "tests/retrieval_benchmark/test_harness.py::test_two_offline_real_path_runs_are_byte_identical", "tests/test_obsidian_syncthing_live.py::test_pinned_syncthing_generates_and_accepts_the_managed_rest_contract", "tests/test_schema_migration_chain.py::test_every_real_backup_migrates_and_opens", "tests/test_windows_gateway_publish_recovery.py::test_native_powershell_projection_passes"}
     # Three A10 symbol-shape controls retain this family's change tier.
-    # Five explicit text-shape and two outside-deed functions join the previous35.
-    assert sum(rule.tier == "change" and any(name in rule.function_id for name in large) for rule in value.rules) == 42
+    # Six explicit text-shape and two outside-deed functions join the previous 35.
+    assert sum(rule.tier == "change" and any(name in rule.function_id for name in large) for rule in value.rules) == 43
     expected = {
         "tests/test_auth_hardening.py::test_failed_auth_attempts_are_rate_limited_per_ip": "security.authentication-and-untrusted-input", "tests/test_backup_mirror.py::test_encrypted_mirror_roundtrip": "schema.migration-backup-and-restore",
         "tests/test_agent_obsidian_production_composition.py::test_note_create_append_and_daily_exact_messages_mutate_the_real_vault": "storage.transaction-and-lifecycle", "tests/test_keyboard_layout.py::test_digits_and_unmapped_characters_survive": "configuration.policy-version-compatibility",
