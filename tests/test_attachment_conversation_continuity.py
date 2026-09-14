@@ -3603,6 +3603,7 @@ async def test_named_word_request_delivers_the_actual_file_from_one_source(
         attachments=[_current_attachment(storage, source)],
         enable_tools=True,
     )
+    assert llm.calls, "A complete-source file request must reach primary synthesis."
     assert len(result["files"]) == 1, result["message"]
     generated = result["files"][0]
     assert generated["filename"] == output_name
@@ -3997,11 +3998,23 @@ async def test_reported_file_action_causes_no_kernel_effect(settings, storage, m
     assert result["files"] == []
 
 
+@pytest.mark.parametrize(
+    "message",
+    [
+        "Прочитай три строки из файла source.txt и создай Word-файл result.docx. Сохрани все три строки.",
+        "Назови оба пункта этого файла. Затем создай Word-файл result.docx и "
+        "сохрани все три исходные строки с точными значениями.",
+        "Создай Word-файл result.docx и сохрани все три исходные строки с точными "
+        "значениями. Затем назови оба пункта этого файла.",
+    ],
+    ids=["explicit-selection", "selector-before-carrier", "carrier-before-selector"],
+)
 @pytest.mark.asyncio
 async def test_explicit_record_selection_before_file_creation_still_requires_known_structure(
     settings,
     storage,
     monkeypatch,
+    message,
 ):
     from test_long_document_query_contract import _DocumentLLM
 
@@ -4027,7 +4040,7 @@ async def test_explicit_record_selection_before_file_creation_still_requires_kno
     monkeypatch.setattr(runtime, "_prepare_context", prepare)
     result = await runtime.chat(
         "alice",
-        "Прочитай три строки из файла source.txt и создай Word-файл result.docx. Сохрани все три строки.",
+        message,
         actor=ActorContext(user_id="alice", preset_key="owner", source="telegram-bridge"),
         attachments=[_current_attachment(storage, source)],
         enable_tools=True,

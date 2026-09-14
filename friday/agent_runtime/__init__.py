@@ -16533,9 +16533,28 @@ def _intra_file_record_set_phrase_count(message: str) -> int | None:
     if _requested_exact_file_body_count(message) is not None:
         return None
     text = _record_source_command_text(message)
-    matched = _INTRA_FILE_RECORD_SET_REQUEST.search(text)
-    if matched is None:
+    matches = list(_INTRA_FILE_RECORD_SET_REQUEST.finditer(text))
+    if not matches:
         return None
+    # A proved complete-source carrier owns only its own count/noun span.  In
+    # particular, ``сохрани ... каждую из трёх строк`` describes the new file's
+    # body, not a lookup of three numbered records.  Keep a separate selector
+    # elsewhere in the same compound request, regardless of clause order.
+    if _direct_complete_source_file_line_count(message) is not None:
+        carrier_spans = tuple(
+            carrier.span() for carrier in _COMPLETE_SOURCE_FILE_BODY_COUNT.finditer(text)
+        )
+        matches = [
+            candidate
+            for candidate in matches
+            if not any(
+                start <= candidate.start() and candidate.end() <= end
+                for start, end in carrier_spans
+            )
+        ]
+        if not matches:
+            return None
+    matched = matches[0]
     # A command to retain all source lines in a newly requested file does not
     # ask to select numbered list items before generating that file. Keep
     # genuine "прочитай три строки ... и создай" selection requests distinct.
