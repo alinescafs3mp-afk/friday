@@ -16541,16 +16541,11 @@ def _intra_file_record_set_phrase_count(message: str) -> int | None:
     # body, not a lookup of three numbered records.  Keep a separate selector
     # elsewhere in the same compound request, regardless of clause order.
     if _direct_complete_source_file_line_count(message) is not None:
-        carrier_spans = tuple(
-            carrier.span() for carrier in _COMPLETE_SOURCE_FILE_BODY_COUNT.finditer(text)
-        )
+        carrier_spans = tuple(carrier.span() for carrier in _COMPLETE_SOURCE_FILE_BODY_COUNT.finditer(text))
         matches = [
             candidate
             for candidate in matches
-            if not any(
-                start <= candidate.start() and candidate.end() <= end
-                for start, end in carrier_spans
-            )
+            if not any(start <= candidate.start() and candidate.end() <= end for start, end in carrier_spans)
         ]
         if not matches:
             return None
