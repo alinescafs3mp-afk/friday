@@ -1077,8 +1077,11 @@ def _bridge_queue_status_without_live_open(path: Path) -> dict[str, Any]:
         boundary.release()
 
 
-_DOCUMENT_CONTOUR_OBSERVER_SCHEMA = "friday.document-contour-observer-snapshot.v1"
-_DOCUMENT_CONTOUR_GUARDED_QUEUE_SCHEMA = "friday.document-contour-guarded-bridge-queue.v1"
+_DOCUMENT_CONTOUR_OBSERVER_SCHEMA = "friday.document-contour-observer-snapshot.v2"
+_DOCUMENT_CONTOUR_GUARDED_QUEUE_SCHEMA = "friday.document-contour-guarded-bridge-queue.v2"
+_DOCUMENT_CONTOUR_DEAD_LETTER_ROW_DOMAIN = b"friday.document-contour.dead-letter-row.v1\0"
+_DOCUMENT_CONTOUR_DEAD_LETTER_SET_DOMAIN = b"friday.document-contour.dead-letter-set.v1\0"
+_DOCUMENT_CONTOUR_DEAD_LETTER_IDENTITY_LIMIT = 4096
 
 
 def _private_directory_identity(status: os.stat_result) -> tuple[int, ...]:
@@ -1197,7 +1200,15 @@ class _PinnedBridgeQueue:
 
 
 def _bridge_queue_counts_only(queue: _PinnedBridgeQueue) -> dict[str, Any]:
-    """Read status aggregates from the exact descriptor-bound stopped queue."""
+    """Read content-free identities and counts from the exact stopped queue.
+
+    The protected-set projection deliberately names every observed column.  In
+    particular it never asks SQLite for the payload, backend response, ordering
+    key, or error text.  A row fingerprint covers the complete permitted tuple;
+    the set fingerprint then covers sorted ``(update_id, row_fingerprint)``
+    pairs so replacements, additions, removals, and metadata mutations are all
+    distinguishable without publishing message bodies.
+    """
 
     queue.revalidate()
     descriptor_path = f"/proc/self/fd/{queue.file_descriptor}"
@@ -1218,15 +1229,113 @@ def _bridge_queue_counts_only(queue: _PinnedBridgeQueue) -> dict[str, Any]:
             str(row["status"]): int(row["n"])
             for row in conn.execute("SELECT status, COUNT(*) AS n FROM updates GROUP BY status").fetchall()
         }
+        dead_letter_rows = conn.execute(
+            """SELECT update_id, status, attempts, failed_at, created_at, last_attempt_at
+                 FROM updates
+                WHERE status='dead_letter'
+                ORDER BY update_id
+                LIMIT ?""",
+            (_DOCUMENT_CONTOUR_DEAD_LETTER_IDENTITY_LIMIT + 1,),
+        ).fetchall()
     finally:
         conn.close()
     if not set(counts) <= {"pending", "dead_letter"}:
         raise RuntimeError("observer queue contains an unknown state")
+    dead_letter = int(counts.get("dead_letter", 0))
+    if (
+        dead_letter > _DOCUMENT_CONTOUR_DEAD_LETTER_IDENTITY_LIMIT
+        or len(dead_letter_rows) > _DOCUMENT_CONTOUR_DEAD_LETTER_IDENTITY_LIMIT
+    ):
+        raise RuntimeError("observer dead-letter identity limit exceeded")
+
+    identities: list[dict[str, int | str]] = []
+    seen_update_ids: set[int] = set()
+    for row in dead_letter_rows:
+        update_id = row["update_id"]
+        status = row["status"]
+        attempts = row["attempts"]
+        failed_at = row["failed_at"]
+        created_at = row["created_at"]
+        last_attempt_at = row["last_attempt_at"]
+        numeric_created_at = (
+            float(created_at)
+            if not isinstance(created_at, bool) and isinstance(created_at, (int, float))
+            else math.nan
+        )
+        numeric_last_attempt_at = (
+            float(last_attempt_at)
+            if not isinstance(last_attempt_at, bool) and isinstance(last_attempt_at, (int, float))
+            else math.nan
+        )
+        numeric_failed_at = (
+            None
+            if failed_at is None
+            else (
+                float(failed_at)
+                if not isinstance(failed_at, bool) and isinstance(failed_at, (int, float))
+                else math.nan
+            )
+        )
+        if (
+            isinstance(update_id, bool)
+            or not isinstance(update_id, int)
+            or update_id < 0
+            or status != "dead_letter"
+            or isinstance(attempts, bool)
+            or not isinstance(attempts, int)
+            or attempts < 0
+            or not math.isfinite(numeric_created_at)
+            or numeric_created_at < 0
+            or not math.isfinite(numeric_last_attempt_at)
+            or numeric_last_attempt_at < 0
+            or (
+                numeric_failed_at is not None
+                and (not math.isfinite(numeric_failed_at) or numeric_failed_at < 0)
+            )
+        ):
+            raise RuntimeError("observer dead-letter identity is malformed")
+        if update_id in seen_update_ids:
+            raise RuntimeError("observer dead-letter update_id is duplicated")
+        seen_update_ids.add(update_id)
+        row_material = json.dumps(
+            [
+                update_id,
+                status,
+                attempts,
+                numeric_failed_at,
+                numeric_created_at,
+                numeric_last_attempt_at,
+            ],
+            ensure_ascii=False,
+            allow_nan=False,
+            separators=(",", ":"),
+        ).encode("utf-8")
+        identities.append(
+            {
+                "update_id": update_id,
+                "row_fingerprint": hashlib.sha256(
+                    _DOCUMENT_CONTOUR_DEAD_LETTER_ROW_DOMAIN + row_material
+                ).hexdigest(),
+            }
+        )
+    identities.sort(key=lambda item: (int(item["update_id"]), str(item["row_fingerprint"])))
+    if len(identities) != dead_letter:
+        raise RuntimeError("observer dead-letter count and identity set disagree")
+    set_material = json.dumps(
+        [[item["update_id"], item["row_fingerprint"]] for item in identities],
+        ensure_ascii=False,
+        allow_nan=False,
+        separators=(",", ":"),
+    ).encode("utf-8")
     queue.revalidate()
     return {
         "state": "present",
         "pending": int(counts.get("pending", 0)),
-        "dead_letter": int(counts.get("dead_letter", 0)),
+        "dead_letter": dead_letter,
+        "dead_letter_set_sha256": hashlib.sha256(
+            _DOCUMENT_CONTOUR_DEAD_LETTER_SET_DOMAIN + set_material
+        ).hexdigest(),
+        "dead_letter_identities": identities,
     }
 
 
@@ -1294,6 +1403,8 @@ def collect_document_contour_guarded_bridge_queue_snapshot(
         "bridge_queue_state": str(queue["state"]),
         "inbound_pending": queue["pending"],
         "dead_letter": queue["dead_letter"],
+        "dead_letter_set_sha256": queue["dead_letter_set_sha256"],
+        "dead_letter_identities": queue["dead_letter_identities"],
     }
 
 
@@ -1343,6 +1454,8 @@ def collect_document_contour_observer_snapshot(
             "bridge_lease_released": False,
             "inbound_pending": None,
             "dead_letter": None,
+            "dead_letter_set_sha256": None,
+            "dead_letter_identities": None,
         }
 
     pinned: _PinnedBridgeQueue | None = None
@@ -1376,6 +1489,8 @@ def collect_document_contour_observer_snapshot(
         "bridge_lease_released": True,
         "inbound_pending": queue["pending"],
         "dead_letter": queue["dead_letter"],
+        "dead_letter_set_sha256": queue["dead_letter_set_sha256"],
+        "dead_letter_identities": queue["dead_letter_identities"],
     }
 
 

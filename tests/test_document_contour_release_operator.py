@@ -23,6 +23,7 @@ from friday.config import PROFILES
 from friday.model_profiles import QWEN38_27B_SGLANG_V12_PROFILE
 
 COMMIT = "a" * 40
+PROTECTED_IDENTITIES = ((101, "1" * 64), (202, "2" * 64))
 
 
 def _canonical(payload: dict[str, Any]) -> bytes:
@@ -34,6 +35,44 @@ def _private_json(path: Path, payload: dict[str, Any]) -> bytes:
     path.write_bytes(encoded)
     path.chmod(0o600)
     return encoded
+
+
+def _protected_payload(
+    identities: tuple[tuple[int, str], ...] = PROTECTED_IDENTITIES,
+) -> dict[str, Any]:
+    return {
+        "schema": operator.PROTECTED_DEAD_LETTER_SET_SCHEMA,
+        "row_fingerprint_schema": operator.DEAD_LETTER_ROW_FINGERPRINT_SCHEMA,
+        "set_fingerprint_schema": operator.DEAD_LETTER_SET_FINGERPRINT_SCHEMA,
+        "fingerprint_scope": operator.DEAD_LETTER_FINGERPRINT_SCOPE,
+        "dead_letter_count": len(identities),
+        "dead_letter_set_sha256": operator._dead_letter_set_sha256(identities),
+        "dead_letter_identities": _identity_payload(identities),
+    }
+
+
+def _protected_pin(
+    tmp_path: Path,
+    identities: tuple[tuple[int, str], ...] = PROTECTED_IDENTITIES,
+) -> tuple[operator.PinnedPrivateFile, operator.ProtectedDeadLetterSet]:
+    path = tmp_path / "protected-dead-letter-set.json"
+    _private_json(path, _protected_payload(identities))
+    pinned = operator.PinnedPrivateFile(
+        path,
+        maximum_bytes=operator.MAX_PRIVATE_JSON_BYTES,
+        invalid_code="protected_dead_letter_set_invalid",
+    )
+    return pinned, operator._parse_protected_dead_letter_set(pinned)
+
+
+def _protected_set(
+    identities: tuple[tuple[int, str], ...] = PROTECTED_IDENTITIES,
+) -> operator.ProtectedDeadLetterSet:
+    return operator.ProtectedDeadLetterSet(
+        explicit=True,
+        identities=identities,
+        dead_letter_set_sha256=operator._dead_letter_set_sha256(identities),
+    )
 
 
 def _receipt(
@@ -137,7 +176,11 @@ def _worker_report(run_index: int) -> dict[str, Any]:
     }
 
 
-def _request(receipt: dict[str, Any], receipt_bytes: bytes) -> dict[str, Any]:
+def _request(
+    receipt: dict[str, Any],
+    receipt_bytes: bytes,
+    protected_set: operator.ProtectedDeadLetterSet = operator.EMPTY_PROTECTED_DEAD_LETTER_SET,
+) -> dict[str, Any]:
     return {
         "schema": operator.OBSERVER_REQUEST_SCHEMA,
         "commit": COMMIT,
@@ -146,6 +189,10 @@ def _request(receipt: dict[str, Any], receipt_bytes: bytes) -> dict[str, Any]:
         "run_receipt_sha256": operator._sha256(receipt_bytes),
         "worker_report_sha256": receipt["worker_report_sha256"],
         "challenge": "e" * 64,
+        "protected_dead_letter_count": protected_set.count if protected_set.explicit else None,
+        "protected_dead_letter_set_sha256": (
+            protected_set.dead_letter_set_sha256 if protected_set.explicit else None
+        ),
     }
 
 
@@ -160,10 +207,19 @@ def _active_snapshot(pid: int) -> dict[str, Any]:
         "bridge_lease_released": False,
         "inbound_pending": None,
         "dead_letter": None,
+        "dead_letter_set_sha256": None,
+        "dead_letter_identities": None,
     }
 
 
-def _stopped_snapshot(pid: int) -> dict[str, Any]:
+def _identity_payload(identities: tuple[tuple[int, str], ...]) -> list[dict[str, Any]]:
+    return [{"update_id": update_id, "row_fingerprint": fingerprint} for update_id, fingerprint in identities]
+
+
+def _stopped_snapshot(
+    pid: int,
+    identities: tuple[tuple[int, str], ...] = (),
+) -> dict[str, Any]:
     return {
         "schema": operator.OBSERVER_SNAPSHOT_SCHEMA,
         "backend_pid": pid,
@@ -173,17 +229,21 @@ def _stopped_snapshot(pid: int) -> dict[str, Any]:
         "bridge_lease_acquired_for_snapshot": True,
         "bridge_lease_released": True,
         "inbound_pending": 0,
-        "dead_letter": 0,
+        "dead_letter": len(identities),
+        "dead_letter_set_sha256": operator._dead_letter_set_sha256(identities),
+        "dead_letter_identities": _identity_payload(identities),
     }
 
 
-def _guarded_snapshot() -> dict[str, Any]:
+def _guarded_snapshot(identities: tuple[tuple[int, str], ...] = ()) -> dict[str, Any]:
     return {
         "schema": operator.GUARDED_QUEUE_SCHEMA,
         "bridge_guard_held": True,
         "bridge_queue_state": "present",
         "inbound_pending": 0,
-        "dead_letter": 0,
+        "dead_letter": len(identities),
+        "dead_letter_set_sha256": operator._dead_letter_set_sha256(identities),
+        "dead_letter_identities": _identity_payload(identities),
     }
 
 
@@ -232,6 +292,7 @@ class FakeRuntime:
         failure: BaseException | None = None,
         start_online: bool = True,
         stopped_snapshot: dict[str, Any] | None = None,
+        guarded_snapshots: list[dict[str, Any]] | None = None,
     ) -> None:
         self.barrier_path = barrier_path
         self.fail_method = fail_method
@@ -239,6 +300,7 @@ class FakeRuntime:
         self.failure = failure or operator.OperatorFailure("injected_failure")
         self.start_online = start_online
         self.stopped_snapshot = stopped_snapshot
+        self.guarded_snapshots = list(guarded_snapshots or [])
         self.calls: dict[str, int] = {}
         self.events: list[str] = []
         self.now = 0.0
@@ -248,6 +310,7 @@ class FakeRuntime:
         self.released = False
         self.start_calls = 0
         self.closed = False
+        self.config: operator.OperatorConfig | None = None
 
     def _record(self, name: str) -> None:
         self.events.append(name)
@@ -318,6 +381,8 @@ class FakeRuntime:
     def guarded_queue_snapshot(self, boundary: Any) -> dict[str, Any]:
         self._record("queue")
         assert boundary is self.guard
+        if self.guarded_snapshots:
+            return dict(self.guarded_snapshots.pop(0))
         return _guarded_snapshot()
 
     def spawn_battery(
@@ -328,6 +393,7 @@ class FakeRuntime:
         self._record("spawn")
         assert config.freeze_commit == COMMIT
         assert self.guard is not None and self.guard.acquired
+        self.config = config
         self.child = FakeChild()
         owner.child = self.child
         return self.child
@@ -339,7 +405,13 @@ class FakeRuntime:
         first_bytes = _private_json(self.barrier_path / "run-1-receipt.json", first)
         _private_json(
             self.barrier_path / "run-1-observer-request.json",
-            _request(first, first_bytes),
+            _request(
+                first,
+                first_bytes,
+                self.config.protected_dead_letter_set
+                if self.config is not None
+                else operator.EMPTY_PROTECTED_DEAD_LETTER_SET,
+            ),
         )
 
     def _finish_successfully(self, child: FakeChild) -> None:
@@ -350,6 +422,7 @@ class FakeRuntime:
         first_bytes = (self.barrier_path / "run-1-receipt.json").read_bytes()
         first = json.loads(first_bytes.decode("utf-8"))
         response_bytes = (self.barrier_path / "run-1-observer.json").read_bytes()
+        response = json.loads(response_bytes.decode("utf-8"))
         response_sha = operator._sha256(response_bytes)
         report = {
             "schema": operator.BATTERY_REPORT_SCHEMA,
@@ -381,6 +454,11 @@ class FakeRuntime:
                 "run_receipt_sha256": operator._sha256(first_bytes),
                 "worker_report_sha256": first["worker_report_sha256"],
                 "response_sha256": response_sha,
+                "protected_dead_letter_count": response["protected_dead_letter_count"],
+                "protected_dead_letter_set_sha256": response["protected_dead_letter_set_sha256"],
+                "dead_letter_count": response["dead_letter_count"],
+                "dead_letter_set_sha256": response["dead_letter_set_sha256"],
+                "dead_letter_zero": response["dead_letter_zero"],
                 **{key: True for key in operator._OBSERVER_BOOLEAN_FIELDS},
             },
             "runs": child.run_reports,
@@ -431,13 +509,20 @@ class FakeRuntime:
         self.closed = True
 
 
-def _config(tmp_path: Path) -> operator.OperatorConfig:
+def _config(
+    tmp_path: Path,
+    *,
+    protected_set: operator.ProtectedDeadLetterSet = operator.EMPTY_PROTECTED_DEAD_LETTER_SET,
+    protected_path: Path | None = None,
+) -> operator.OperatorConfig:
     return operator.OperatorConfig(
         freeze_commit=COMMIT,
         env_file=tmp_path / "env",
         barrier_dir=tmp_path / "barrier",
         backend_unit="friday-backend.service",
         bridge_unit="friday-bridge.service",
+        protected_dead_letter_set_file=protected_path,
+        protected_dead_letter_set=protected_set,
     )
 
 
@@ -475,6 +560,8 @@ def test_golden_contour_holds_guard_through_both_runs_and_restarts_once(tmp_path
         "run_receipt_sha256": report["evidence_sha256"]["run_1_receipt_sha256"],
         "worker_report_sha256": operator._sha256(operator._canonical_json(_worker_report(1))),
         "challenge": "e" * 64,
+        "protected_dead_letter_count": None,
+        "protected_dead_letter_set_sha256": None,
         "status": "passed",
         "bridge_stopped": True,
         "bridge_operator_guard_held": True,
@@ -483,6 +570,9 @@ def test_golden_contour_holds_guard_through_both_runs_and_restarts_once(tmp_path
         "outbound_pending_zero": True,
         "inbound_pending_zero": True,
         "dead_letter_zero": True,
+        "dead_letter_matches_protected_set": True,
+        "dead_letter_count": 0,
+        "dead_letter_set_sha256": operator.EMPTY_DEAD_LETTER_SET_SHA256,
         "dispatcher_unchanged": True,
     }
     assert set(report["evidence_sha256"]) == {
@@ -492,6 +582,120 @@ def test_golden_contour_holds_guard_through_both_runs_and_restarts_once(tmp_path
         "run_1_receipt_sha256",
         "run_2_receipt_sha256",
     }
+
+
+def test_explicit_protected_set_passes_exactly_and_emits_truthful_nonzero_observer(
+    tmp_path,
+) -> None:
+    pinned, protected = _protected_pin(tmp_path)
+    config = _config(
+        tmp_path,
+        protected_set=protected,
+        protected_path=pinned.path,
+    )
+    queue = _guarded_snapshot(PROTECTED_IDENTITIES)
+    runtime = FakeRuntime(
+        config.barrier_dir,
+        stopped_snapshot=_stopped_snapshot(BACKEND.main_pid, PROTECTED_IDENTITIES),
+        guarded_snapshots=[queue for _ in range(6)],
+    )
+    barrier = _barrier(tmp_path)
+    try:
+        report, exit_code = operator.execute_operator(
+            config,
+            runtime,
+            barrier,
+            protected_set_file=pinned,
+        )
+    finally:
+        barrier.close()
+        pinned.close()
+
+    assert exit_code == 0
+    assert report["status"] == "passed"
+    assert runtime.calls["queue"] == 6
+    response = json.loads((config.barrier_dir / "run-1-observer.json").read_text())
+    assert response["protected_dead_letter_count"] == len(PROTECTED_IDENTITIES)
+    assert response["protected_dead_letter_set_sha256"] == protected.dead_letter_set_sha256
+    assert response["dead_letter_count"] == len(PROTECTED_IDENTITIES)
+    assert response["dead_letter_set_sha256"] == protected.dead_letter_set_sha256
+    assert response["dead_letter_zero"] is False
+    assert response["dead_letter_matches_protected_set"] is True
+    assert "dead_letter_identities" not in response
+    encoded_report = json.dumps(report)
+    assert "dead_letter_identities" not in encoded_report
+    assert all(fingerprint not in encoded_report for _, fingerprint in PROTECTED_IDENTITIES)
+
+
+def test_pinned_protected_set_change_after_stop_fails_closed_and_restores_bridge(tmp_path) -> None:
+    pinned, protected = _protected_pin(tmp_path)
+    config = _config(
+        tmp_path,
+        protected_set=protected,
+        protected_path=pinned.path,
+    )
+    runtime = FakeRuntime(
+        config.barrier_dir,
+        stopped_snapshot=_stopped_snapshot(BACKEND.main_pid, PROTECTED_IDENTITIES),
+    )
+    original_stop = runtime.stop_bridge
+
+    def stop_and_mutate_pin() -> None:
+        original_stop()
+        changed = ((101, "1" * 64), (202, "3" * 64))
+        _private_json(pinned.path, _protected_payload(changed))
+
+    runtime.stop_bridge = stop_and_mutate_pin  # type: ignore[method-assign]
+    barrier = _barrier(tmp_path)
+    try:
+        report, exit_code = operator.execute_operator(
+            config,
+            runtime,
+            barrier,
+            protected_set_file=pinned,
+        )
+    finally:
+        barrier.close()
+        pinned.close()
+
+    assert exit_code == 1
+    assert report["failure_codes"] == ["protected_dead_letter_set_invalid"]
+    assert runtime.start_calls == 1
+    assert runtime.bridge_running is True
+    assert "spawn" not in runtime.events
+
+
+def test_inter_run_guarded_set_change_is_rejected_before_observer_publication(tmp_path) -> None:
+    pinned, protected = _protected_pin(tmp_path)
+    config = _config(
+        tmp_path,
+        protected_set=protected,
+        protected_path=pinned.path,
+    )
+    exact = _guarded_snapshot(PROTECTED_IDENTITIES)
+    changed = _guarded_snapshot(((101, "1" * 64), (202, "3" * 64)))
+    runtime = FakeRuntime(
+        config.barrier_dir,
+        stopped_snapshot=_stopped_snapshot(BACKEND.main_pid, PROTECTED_IDENTITIES),
+        guarded_snapshots=[exact, exact, changed],
+    )
+    barrier = _barrier(tmp_path)
+    try:
+        report, exit_code = operator.execute_operator(
+            config,
+            runtime,
+            barrier,
+            protected_set_file=pinned,
+        )
+    finally:
+        barrier.close()
+        pinned.close()
+
+    assert exit_code == 1
+    assert report["failure_codes"] == ["guarded_queue_protected_dead_letter_set_mismatch"]
+    assert not (config.barrier_dir / "run-1-observer.json").exists()
+    assert runtime.start_calls == 1
+    assert runtime.released is True
 
 
 def test_battery_report_projection_is_exact_and_bound_to_receipts(tmp_path) -> None:
@@ -524,6 +728,15 @@ def test_battery_report_projection_is_exact_and_bound_to_receipts(tmp_path) -> N
     observer_false = json.loads(json.dumps(payload))
     observer_false["inter_run_observer"]["bridge_operator_guard_held"] = False
     mutations.append(observer_false)
+    forged_zero = json.loads(json.dumps(payload))
+    forged_zero["inter_run_observer"]["dead_letter_zero"] = False
+    mutations.append(forged_zero)
+    forged_count = json.loads(json.dumps(payload))
+    forged_count["inter_run_observer"]["dead_letter_count"] = 1
+    mutations.append(forged_count)
+    forged_set_match = json.loads(json.dumps(payload))
+    forged_set_match["inter_run_observer"]["dead_letter_matches_protected_set"] = False
+    mutations.append(forged_set_match)
     receipt_substitution = json.loads(json.dumps(payload))
     receipt_substitution["run_receipts"][1]["worker_report_sha256"] = "f" * 64
     mutations.append(receipt_substitution)
@@ -990,6 +1203,8 @@ def test_receipt_validator_is_exact_and_fail_closed(mutation, code) -> None:
         ("run_receipt_sha256", "1" * 64),
         ("worker_report_sha256", "2" * 64),
         ("challenge", "3" * 63),
+        ("protected_dead_letter_count", 0),
+        ("protected_dead_letter_set_sha256", operator.EMPTY_DEAD_LETTER_SET_SHA256),
     ),
 )
 def test_request_must_bind_the_exact_canonical_receipt(field, replacement) -> None:
@@ -999,6 +1214,85 @@ def test_request_must_bind_the_exact_canonical_receipt(field, replacement) -> No
     request[field] = replacement
     with pytest.raises(operator.OperatorFailure, match="observer_request_invalid"):
         operator._validate_observer_request(request, receipt, receipt_bytes, commit=COMMIT)
+
+
+def test_exact_protected_set_file_schema_is_canonical_and_metadata_only() -> None:
+    payload = _protected_payload()
+    content = _canonical(payload)
+    pinned = SimpleNamespace(content=content, content_sha256=operator._sha256(content))
+    protected = operator._parse_protected_dead_letter_set(pinned)
+    assert protected.explicit is True
+    assert protected.identities == PROTECTED_IDENTITIES
+    assert protected.count == 2
+    assert protected.dead_letter_set_sha256 == operator._dead_letter_set_sha256(PROTECTED_IDENTITIES)
+    assert "metadata_only" in operator.DEAD_LETTER_FINGERPRINT_SCOPE
+    for excluded in ("payload_json", "backend_response_json", "last_error", "ordering_key"):
+        assert excluded in operator.DEAD_LETTER_FINGERPRINT_SCOPE
+
+
+def test_explicit_empty_pin_is_distinct_from_absent_pin() -> None:
+    payload = _protected_payload(())
+    content = _canonical(payload)
+    pinned = SimpleNamespace(content=content, content_sha256=operator._sha256(content))
+    protected = operator._parse_protected_dead_letter_set(pinned)
+    assert protected.explicit is True
+    assert protected.count == 0
+    assert protected.dead_letter_set_sha256 == operator.EMPTY_DEAD_LETTER_SET_SHA256
+    assert protected != operator.EMPTY_PROTECTED_DEAD_LETTER_SET
+
+
+def test_protected_set_file_rejects_count_only_baselines_and_identity_ambiguity() -> None:
+    mutations: list[dict[str, Any]] = []
+
+    count_only = _protected_payload()
+    count_only["dead_letter_identities"] = []
+    count_only["dead_letter_count"] = len(PROTECTED_IDENTITIES)
+    mutations.append(count_only)
+
+    forged_digest = _protected_payload()
+    forged_digest["dead_letter_set_sha256"] = "f" * 64
+    mutations.append(forged_digest)
+
+    unsorted = _protected_payload()
+    unsorted["dead_letter_identities"] = list(reversed(unsorted["dead_letter_identities"]))
+    mutations.append(unsorted)
+
+    duplicate = _protected_payload()
+    duplicate["dead_letter_identities"][1]["update_id"] = 101
+    mutations.append(duplicate)
+
+    body_bearing = _protected_payload()
+    body_bearing["dead_letter_identities"][0]["payload_json"] = "forbidden-body"
+    mutations.append(body_bearing)
+
+    wrong_scope = _protected_payload()
+    wrong_scope["fingerprint_scope"] = "whole_row"
+    mutations.append(wrong_scope)
+
+    boolean_id = _protected_payload()
+    boolean_id["dead_letter_identities"][0]["update_id"] = True
+    mutations.append(boolean_id)
+
+    for payload in mutations:
+        content = _canonical(payload)
+        pinned = SimpleNamespace(content=content, content_sha256=operator._sha256(content))
+        with pytest.raises(operator.OperatorFailure, match="^protected_dead_letter_set_invalid$"):
+            operator._parse_protected_dead_letter_set(pinned)
+
+
+def test_protected_set_file_rejects_noncanonical_bytes_and_identity_overflow() -> None:
+    payload = _protected_payload()
+    pretty = json.dumps(payload, ensure_ascii=False, sort_keys=True, indent=2).encode() + b"\n"
+    pinned = SimpleNamespace(content=pretty, content_sha256=operator._sha256(pretty))
+    with pytest.raises(operator.OperatorFailure, match="^protected_dead_letter_set_invalid$"):
+        operator._parse_protected_dead_letter_set(pinned)
+
+    oversized = [
+        {"update_id": index, "row_fingerprint": "a" * 64}
+        for index in range(operator.MAX_PROTECTED_DEAD_LETTER_IDENTITIES + 1)
+    ]
+    with pytest.raises(operator.OperatorFailure, match="^protected_dead_letter_set_invalid$"):
+        operator._parse_identity_list(oversized, code="protected_dead_letter_set_invalid")
 
 
 @pytest.mark.parametrize(
@@ -1090,6 +1384,43 @@ def test_stopped_snapshot_never_projects_uncertain_or_nonzero_state(projection) 
         operator._validate_stopped_snapshot(projection, BACKEND.main_pid)
 
 
+def test_absent_pin_rejects_a_structurally_valid_nonempty_set() -> None:
+    projection = _stopped_snapshot(BACKEND.main_pid, PROTECTED_IDENTITIES)
+    with pytest.raises(operator.OperatorFailure, match="^stopped_snapshot_dead_letter_not_empty$"):
+        operator._validate_stopped_snapshot(projection, BACKEND.main_pid)
+
+
+@pytest.mark.parametrize(
+    ("name", "observed"),
+    (
+        ("extra", (*PROTECTED_IDENTITIES, (303, "3" * 64))),
+        ("missing", PROTECTED_IDENTITIES[:1]),
+        ("replaced_update_id", ((101, "1" * 64), (303, "2" * 64))),
+        ("mutated_metadata_fingerprint", ((101, "1" * 64), (202, "3" * 64))),
+    ),
+)
+def test_stopped_snapshot_requires_exact_protected_metadata_identities(name, observed) -> None:
+    del name
+    protected = _protected_set()
+    projection = _stopped_snapshot(BACKEND.main_pid, observed)
+    with pytest.raises(
+        operator.OperatorFailure,
+        match="^stopped_snapshot_protected_dead_letter_set_mismatch$",
+    ):
+        operator._validate_stopped_snapshot(projection, BACKEND.main_pid, protected)
+
+
+def test_stopped_snapshot_rejects_a_digest_inconsistent_with_its_identity_list() -> None:
+    projection = _stopped_snapshot(BACKEND.main_pid, PROTECTED_IDENTITIES)
+    projection["dead_letter_set_sha256"] = "f" * 64
+    with pytest.raises(operator.OperatorFailure, match="^stopped_snapshot_invalid$"):
+        operator._validate_stopped_snapshot(
+            projection,
+            BACKEND.main_pid,
+            _protected_set(),
+        )
+
+
 @pytest.mark.parametrize(
     "projection",
     (
@@ -1097,6 +1428,8 @@ def test_stopped_snapshot_never_projects_uncertain_or_nonzero_state(projection) 
         {**_active_snapshot(BACKEND.main_pid), "inbound_pending": 0},
         {**_active_snapshot(BACKEND.main_pid), "bridge_queue_state": "lease_unavailable"},
         {**_active_snapshot(BACKEND.main_pid), "bridge_lease_acquired_for_snapshot": True},
+        {**_active_snapshot(BACKEND.main_pid), "dead_letter_set_sha256": "0" * 64},
+        {**_active_snapshot(BACKEND.main_pid), "dead_letter_identities": []},
     ),
 )
 def test_held_snapshot_requires_the_external_guard_projection(projection) -> None:
@@ -1117,6 +1450,31 @@ def test_held_snapshot_requires_the_external_guard_projection(projection) -> Non
 def test_guarded_queue_projection_is_exact_and_zero(projection) -> None:
     with pytest.raises(operator.OperatorFailure):
         operator._validate_guarded_queue(projection)
+
+
+@pytest.mark.parametrize(
+    "observed",
+    (
+        (*PROTECTED_IDENTITIES, (303, "3" * 64)),
+        PROTECTED_IDENTITIES[:1],
+        ((101, "1" * 64), (303, "2" * 64)),
+        ((101, "1" * 64), (202, "3" * 64)),
+    ),
+)
+def test_guarded_queue_rejects_any_protected_set_substitution(observed) -> None:
+    with pytest.raises(
+        operator.OperatorFailure,
+        match="^guarded_queue_protected_dead_letter_set_mismatch$",
+    ):
+        operator._validate_guarded_queue(_guarded_snapshot(observed), _protected_set())
+
+
+def test_guarded_queue_accepts_the_exact_metadata_identity_set() -> None:
+    observed = operator._validate_guarded_queue(
+        _guarded_snapshot(PROTECTED_IDENTITIES),
+        _protected_set(),
+    )
+    assert observed.identities == PROTECTED_IDENTITIES
 
 
 def test_live_guarded_read_uses_only_the_public_descriptor_bound_collector(
@@ -2527,10 +2885,10 @@ def test_git_candidate_checks_ignore_ambient_repository_and_network_controls(mon
 def test_dependency_hashes_are_frozen_to_the_authorized_inputs() -> None:
     assert operator._EXPECTED_DEPENDENCY_HASHES == {
         "tools/document_contour_live_battery.py": (
-            "71cb9e4e3a3e3ccf7efe7291178e750fad1b8eea684b21cc1f7f384d46261d4a"
+            "3749abdbe19080d7f4108809df9508b88306d9ae7d006a0c616aa02190e782a0"
         ),
         "friday/diagnostics/__init__.py": (
-            "9e8593a74f1ae12d49e17fd873ef508385e0f074fae45169679ba937c0616446"
+            "0add438a16df83036a29e3fa68bf98425f3228d770ba2951bbe25985bdc1383a"
         ),
         "friday/diagnostics/runtime_lease.py": (
             "6986bcef0d21d1754672ad784746fbc205b4822de708c71b16dd93576f3d1926"

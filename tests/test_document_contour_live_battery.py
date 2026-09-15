@@ -1087,8 +1087,14 @@ def _closed_worker_outcome(runner, run_id: str, run_index: int, *, status: str =
     return runner.WorkerProcessOutcome(**defaults)
 
 
-def _clear_observer_projection(runner, request):
-    response = {
+def _clear_observer_response(runner, request):
+    protected_count = request["protected_dead_letter_count"]
+    protected_sha256 = request["protected_dead_letter_set_sha256"]
+    dead_letter_count = 0 if protected_count is None else protected_count
+    dead_letter_set_sha256 = (
+        runner.EMPTY_DEAD_LETTER_SET_SHA256 if protected_sha256 is None else protected_sha256
+    )
+    return {
         "schema": runner.OBSERVER_RESPONSE_SCHEMA,
         "commit": request["commit"],
         "run_id_hash": request["run_id_hash"],
@@ -1097,15 +1103,24 @@ def _clear_observer_projection(runner, request):
         "worker_report_sha256": request["worker_report_sha256"],
         "challenge": request["challenge"],
         "status": "passed",
+        "protected_dead_letter_count": protected_count,
+        "protected_dead_letter_set_sha256": protected_sha256,
         "bridge_stopped": True,
         "bridge_operator_guard_held": True,
         "backend_healthy": True,
         "backend_unchanged": True,
         "outbound_pending_zero": True,
         "inbound_pending_zero": True,
-        "dead_letter_zero": True,
+        "dead_letter_count": dead_letter_count,
+        "dead_letter_set_sha256": dead_letter_set_sha256,
+        "dead_letter_zero": dead_letter_count == 0,
+        "dead_letter_matches_protected_set": True,
         "dispatcher_unchanged": True,
     }
+
+
+def _clear_observer_projection(runner, request):
+    response = _clear_observer_response(runner, request)
     return runner._validate_observer_response(response, request)
 
 
@@ -2028,25 +2043,10 @@ def test_barrier_receipts_are_atomic_private_regular_files_and_response_is_bound
         receipt_sha256="c" * 64,
         worker_report_sha256="d" * 64,
         challenge="e" * 64,
+        protected_dead_letter_count=None,
+        protected_dead_letter_set_sha256=None,
     )
-    response = {
-        "schema": runner.OBSERVER_RESPONSE_SCHEMA,
-        "commit": request["commit"],
-        "run_id_hash": request["run_id_hash"],
-        "run_index": request["run_index"],
-        "run_receipt_sha256": request["run_receipt_sha256"],
-        "worker_report_sha256": request["worker_report_sha256"],
-        "challenge": request["challenge"],
-        "status": "passed",
-        "bridge_stopped": True,
-        "bridge_operator_guard_held": True,
-        "backend_healthy": True,
-        "backend_unchanged": True,
-        "outbound_pending_zero": True,
-        "inbound_pending_zero": True,
-        "dead_letter_zero": True,
-        "dispatcher_unchanged": True,
-    }
+    response = _clear_observer_response(runner, request)
     response_path = prepared / "run-1-observer.json"
     try:
         runner._atomic_pinned_private_write(
@@ -2260,6 +2260,8 @@ def test_pinned_barrier_detects_swap_away_and_same_inode_restore(tmp_path) -> No
         ("run_receipt_sha256", "0" * 64),
         ("worker_report_sha256", "1" * 64),
         ("challenge", "2" * 64),
+        ("protected_dead_letter_count", 1),
+        ("protected_dead_letter_set_sha256", "3" * 64),
     ),
 )
 def test_observer_cannot_substitute_run_or_report_binding(field, replacement) -> None:
@@ -2270,32 +2272,17 @@ def test_observer_cannot_substitute_run_or_report_binding(field, replacement) ->
         receipt_sha256="c" * 64,
         worker_report_sha256="d" * 64,
         challenge="e" * 64,
+        protected_dead_letter_count=None,
+        protected_dead_letter_set_sha256=None,
     )
-    response = {
-        "schema": runner.OBSERVER_RESPONSE_SCHEMA,
-        "commit": request["commit"],
-        "run_id_hash": request["run_id_hash"],
-        "run_index": request["run_index"],
-        "run_receipt_sha256": request["run_receipt_sha256"],
-        "worker_report_sha256": request["worker_report_sha256"],
-        "challenge": request["challenge"],
-        "status": "passed",
-        "bridge_stopped": True,
-        "bridge_operator_guard_held": True,
-        "backend_healthy": True,
-        "backend_unchanged": True,
-        "outbound_pending_zero": True,
-        "inbound_pending_zero": True,
-        "dead_letter_zero": True,
-        "dispatcher_unchanged": True,
-    }
+    response = _clear_observer_response(runner, request)
     response[field] = replacement
 
     with pytest.raises(runner.BatteryFailure, match="inter_run_observer_binding_mismatch"):
         runner._validate_observer_response(response, request)
 
 
-def test_observer_requires_v2_operator_guard_semantics() -> None:
+def test_observer_requires_v3_operator_guard_semantics() -> None:
     runner = _module()
     request = runner._observer_request(
         commit="a" * 40,
@@ -2303,25 +2290,12 @@ def test_observer_requires_v2_operator_guard_semantics() -> None:
         receipt_sha256="c" * 64,
         worker_report_sha256="d" * 64,
         challenge="e" * 64,
+        protected_dead_letter_count=None,
+        protected_dead_letter_set_sha256=None,
     )
-    response = {
-        "schema": "friday.document-contour-live-battery.observer-response.v1",
-        "commit": request["commit"],
-        "run_id_hash": request["run_id_hash"],
-        "run_index": request["run_index"],
-        "run_receipt_sha256": request["run_receipt_sha256"],
-        "worker_report_sha256": request["worker_report_sha256"],
-        "challenge": request["challenge"],
-        "status": "passed",
-        "bridge_stopped": True,
-        "bridge_lease_free": True,
-        "backend_healthy": True,
-        "backend_unchanged": True,
-        "outbound_pending_zero": True,
-        "inbound_pending_zero": True,
-        "dead_letter_zero": True,
-        "dispatcher_unchanged": True,
-    }
+    response = _clear_observer_response(runner, request)
+    response["schema"] = "friday.document-contour-live-battery.observer-response.v1"
+    response["bridge_lease_free"] = response.pop("bridge_operator_guard_held")
 
     with pytest.raises(runner.BatteryFailure, match="inter_run_observer_response_invalid"):
         runner._validate_observer_response(response, request)
@@ -2334,6 +2308,186 @@ def test_observer_requires_v2_operator_guard_semantics() -> None:
         match="inter_run_observer_bridge_operator_guard_held_failed",
     ):
         runner._validate_observer_response(response, request)
+
+
+def test_observer_accepts_only_the_explicit_exact_protected_metadata_set() -> None:
+    runner = _module()
+    request = runner._observer_request(
+        commit="a" * 40,
+        run_hash="b" * 64,
+        receipt_sha256="c" * 64,
+        worker_report_sha256="d" * 64,
+        challenge="e" * 64,
+        protected_dead_letter_count=2,
+        protected_dead_letter_set_sha256="1" * 64,
+    )
+    response = _clear_observer_response(runner, request)
+
+    projection = runner._validate_observer_response(response, request)
+
+    assert projection["dead_letter_count"] == 2
+    assert projection["dead_letter_set_sha256"] == "1" * 64
+    assert projection["dead_letter_zero"] is False
+    assert projection["dead_letter_matches_protected_set"] is True
+    assert projection["protected_dead_letter_count"] == 2
+    assert projection["protected_dead_letter_set_sha256"] == "1" * 64
+
+
+def test_observer_rejects_absent_protected_pin_binding_in_the_request() -> None:
+    runner = _module()
+    request = runner._observer_request(
+        commit="a" * 40,
+        run_hash="b" * 64,
+        receipt_sha256="c" * 64,
+        worker_report_sha256="d" * 64,
+        challenge="e" * 64,
+        protected_dead_letter_count=None,
+        protected_dead_letter_set_sha256=None,
+    )
+    response = _clear_observer_response(runner, request)
+    request.pop("protected_dead_letter_count")
+
+    with pytest.raises(runner.BatteryFailure, match="inter_run_observer_protected_set_pin_invalid"):
+        runner._validate_observer_response(response, request)
+
+
+@pytest.mark.parametrize(
+    ("observed_count", "observed_sha256"),
+    (
+        pytest.param(3, "1" * 64, id="extra-row"),
+        pytest.param(1, "1" * 64, id="missing-row"),
+        pytest.param(2, "2" * 64, id="mutated-fingerprint"),
+        pytest.param(2, "3" * 64, id="replaced-update-id"),
+    ),
+)
+def test_observer_rejects_any_nonexact_protected_set(
+    observed_count,
+    observed_sha256,
+) -> None:
+    runner = _module()
+    request = runner._observer_request(
+        commit="a" * 40,
+        run_hash="b" * 64,
+        receipt_sha256="c" * 64,
+        worker_report_sha256="d" * 64,
+        challenge="e" * 64,
+        protected_dead_letter_count=2,
+        protected_dead_letter_set_sha256="1" * 64,
+    )
+    response = _clear_observer_response(runner, request)
+    response["dead_letter_count"] = observed_count
+    response["dead_letter_set_sha256"] = observed_sha256
+    response["dead_letter_zero"] = observed_count == 0
+
+    with pytest.raises(runner.BatteryFailure, match="inter_run_observer_protected_set_mismatch"):
+        runner._validate_observer_response(response, request)
+
+
+@pytest.mark.parametrize(
+    ("count", "digest", "zero"),
+    (
+        pytest.param(1, "1" * 64, True, id="forged-zero-with-nonempty"),
+        pytest.param(0, None, False, id="forged-nonzero-with-empty"),
+    ),
+)
+def test_observer_dead_letter_zero_is_derived_only_from_observed_count(count, digest, zero) -> None:
+    runner = _module()
+    pinned_digest = runner.EMPTY_DEAD_LETTER_SET_SHA256 if digest is None else digest
+    request = runner._observer_request(
+        commit="a" * 40,
+        run_hash="b" * 64,
+        receipt_sha256="c" * 64,
+        worker_report_sha256="d" * 64,
+        challenge="e" * 64,
+        protected_dead_letter_count=count,
+        protected_dead_letter_set_sha256=pinned_digest,
+    )
+    response = _clear_observer_response(runner, request)
+    response["dead_letter_zero"] = zero
+
+    with pytest.raises(runner.BatteryFailure, match="inter_run_observer_dead_letter_zero_inconsistent"):
+        runner._validate_observer_response(response, request)
+
+
+@pytest.mark.parametrize(
+    ("mutation", "failure"),
+    (
+        pytest.param("nonempty-default", "dead_letter_not_zero", id="default-does-not-baseline"),
+        pytest.param(
+            "wrong-empty-digest",
+            "dead_letter_evidence_invalid",
+            id="default-empty-digest-bound",
+        ),
+        pytest.param("malformed-observed-digest", "dead_letter_evidence_invalid", id="malformed-hash"),
+        pytest.param("oversized-observed", "dead_letter_evidence_invalid", id="oversized-count"),
+        pytest.param("absent-match", "response_invalid", id="absent-match-evidence"),
+        pytest.param("false-match", "dead_letter_matches_protected_set_failed", id="false-match-evidence"),
+        pytest.param("extra-key", "response_invalid", id="strict-extra-key"),
+    ),
+)
+def test_observer_default_and_match_evidence_fail_closed(mutation, failure) -> None:
+    runner = _module()
+    request = runner._observer_request(
+        commit="a" * 40,
+        run_hash="b" * 64,
+        receipt_sha256="c" * 64,
+        worker_report_sha256="d" * 64,
+        challenge="e" * 64,
+        protected_dead_letter_count=None,
+        protected_dead_letter_set_sha256=None,
+    )
+    response = _clear_observer_response(runner, request)
+    if mutation == "nonempty-default":
+        response["dead_letter_count"] = 1
+        response["dead_letter_set_sha256"] = "1" * 64
+        response["dead_letter_zero"] = False
+    elif mutation == "wrong-empty-digest":
+        response["dead_letter_set_sha256"] = "1" * 64
+    elif mutation == "malformed-observed-digest":
+        response["dead_letter_set_sha256"] = "A" * 64
+    elif mutation == "oversized-observed":
+        response["dead_letter_count"] = 4_097
+        response["dead_letter_zero"] = False
+    elif mutation == "absent-match":
+        response.pop("dead_letter_matches_protected_set")
+    elif mutation == "false-match":
+        response["dead_letter_matches_protected_set"] = False
+    else:
+        response["unexpected"] = True
+
+    with pytest.raises(runner.BatteryFailure, match=f"inter_run_observer_{failure}"):
+        runner._validate_observer_response(response, request)
+
+
+@pytest.mark.parametrize(
+    ("count", "digest"),
+    (
+        pytest.param(None, "1" * 64, id="missing-count"),
+        pytest.param(1, None, id="missing-digest"),
+        pytest.param(-1, "1" * 64, id="negative-count"),
+        pytest.param(4_097, "1" * 64, id="oversized-count"),
+        pytest.param(True, "1" * 64, id="boolean-count"),
+        pytest.param(1, "A" * 64, id="noncanonical-digest"),
+        pytest.param(0, "1" * 64, id="zero-with-nonempty-digest"),
+        pytest.param(
+            1,
+            "f0be97144a676e0c1e9b25c932b45a99d01242bab59a4a8edcf0417bcf49f521",
+            id="nonzero-with-empty-digest",
+        ),
+    ),
+)
+def test_protected_dead_letter_cli_pin_requires_an_exact_pair(count, digest) -> None:
+    runner = _module()
+
+    with pytest.raises(runner.BatteryFailure, match="protected_dead_letter_pin_invalid"):
+        runner._protected_dead_letter_pin(
+            SimpleNamespace(
+                protected_dead_letter_count=count,
+                protected_dead_letter_set_sha256=digest,
+            )
+        )
+
+    assert runner._protected_dead_letter_pin(SimpleNamespace()) == (None, None)
 
 
 def test_barrier_rejects_symlink_or_nonprivate_files(tmp_path) -> None:

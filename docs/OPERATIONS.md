@@ -918,10 +918,11 @@ previous и сохраняет `0.207.90/schema50` immutable fallback.
 previous и сохраняет `0.207.90/schema50` immutable fallback.
 `0.208.57/schema50` DDL не меняет, принимает exact `0.208.56/schema50` как
 previous и сохраняет `0.207.90/schema50` immutable fallback.
-Кандидат `0.208.58/schema50` DDL не меняет. Для его предстоящей активации
-`0.208.57/schema50` используется как previous и совместимый immutable fallback;
-копия `0.208.56/schema50` сохраняется. Эта схема перехода не подтверждает
-выполнение приёмки или активации кандидата.
+Кандидат `0.208.59/schema50` DDL не меняет. Для его предстоящей активации
+`0.208.58/schema50` используется как previous и совместимый immutable fallback;
+копии `0.208.57/schema50` и `0.208.56/schema50` сохраняются. Эта схема перехода
+не подтверждает выполнение приёмки или активации кандидата; фактический
+production указан в [canonical backlog](../outer_sol/PROJECT_BACKLOG.md).
 
 0.206.4 использует SQLite schema 34; Obsidian-релиз 0.207.2 поднимает её до
 schema 35. Новое поле имени загрузки принадлежит
@@ -1195,7 +1196,7 @@ process-owned result. Acquire одноразовый: отказ, timeout, drift
 attestation не разрешают повторный acquire на меньшем или новом tier.
 
 Во время probe `/api/health` ещё недоступен. Ждите до 420 секунд и дополнительно
-требуйте `status=ok` и `version=0.208.58`.
+требуйте `status=ok` и `version=0.208.59`.
 
 HTTP `status=ok` при `installed_mode=legacy` означает безопасную деградацию, но
 не успешный canary. В `canary`/`v12` Sentinel не реже раза в минуту

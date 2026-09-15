@@ -1,6 +1,6 @@
 # Friday: canonical project backlog
 
-Updated: 2026-09-12 (N8 upstream adoption V5 registered for 1.0+ after RC acceptance; existing N7 extended by the same package without duplication; N6 TinyFish queued after current R10 acceptance; Astra takeover; live production `0.208.57`; N4/F.6/F.8 mixed-journey acceptance reopened from runtime evidence; R10 first baseline recorded, final acceptance incomplete; historical S3 witness preserved; Pandora unchanged)
+Updated: 2026-09-15 (verified production `0.208.58`; canonical DR restoration, rollback and generation publication completed in Astra358; final R10/F.0–F.11 acceptance incomplete. N9 Hermes, N8 upstream adoption V5, N7 and N6 TinyFish remain after current R10 acceptance; historical S3 witness preserved; Pandora unchanged.)
 
 This is the project's only backlog and mutable status register. It owns the
 current production identity, execution order, acceptance gaps and owner actions.
@@ -16,7 +16,49 @@ The 2026-09-03 post-backlog audit snapshot (`main` `43a16c8b`, source
 live host, the laptop or Telegram. Do not copy historical release claims
 forward or treat a source correction as a deployed release.
 
-## Current production identity (last repository-reported)
+## Current production identity (verified 2026-09-15, Astra358)
+
+The running sealed release is `0.208.58`, source commit
+`5497d28dedf49b219fcc2112d6b391ba6cbbc690`, schema 50. Its tree manifest is
+`b789dfe7b49e296114c95b1ad2e4a2bf1db57bf82af438b2c361826bc87291c8` and wheel is
+`e9b53fc8720116a08a21c9afb917524447a7a5e28eaed3a09ebde51a516f62f3`.
+Canonical activation is clear; trusted-CA HTTPS health is 200/ok/0.208.58.
+Backend and Telegram bridge remain active after the power interruption.
+The original Astra349 activation command remains failed; successful cutover
+records and the separate Astra353 authentication/enrollment are preserved as
+distinct facts. Do not rewrite that failed command or repeat activation.
+
+Astra358 executed the independently admitted sealed DR lifecycle once in
+135.909 seconds. The actual backup restoration and rollback exercised fallback
+`0.208.57`: both databases reopened twice with integrity/foreign-key checks,
+Obsidian and engineer files matched, and all four backup surfaces were verified.
+Scratch was removed. The rehearsal recorded zero production-surface writes,
+network calls and systemctl calls; backend and bridge PIDs were unchanged.
+Canonical DR index advanced from authenticated revision 278 to clear revision
+280, publishing generation
+`eb0cf2331a17df6c9d8b42f136a9646b1af8559ea76c2e30a8204d046b895bd2`.
+Evidence: `/home/jericho/.jericho/grok-takeover/ASTRA-358-dr107-received.json`,
+SHA-256 `7206570916c0e46e588a9dfb51532e193741fd835d2fd660e817ddae7c592ad3`.
+Retention remains `review_required`; this run performed no retention apply.
+
+Final acceptance still requires the document protected-set repair and two fresh
+D06/D07/D08 runs, official AB400 with six signed independent content judgments,
+the real one-hour soak, dedicated Telegram access and actual user readback,
+final observation/bundle and all remaining F.0–F.11 obligations. Lab455 accepted
+the completed DR artifact and the seven prerequisite evidence bindings; Lab454
+accepted the preserved AB/hour source package. Lab456 accepted Sol221's complete
+document protected-set repair, and Lab457 accepted the finite metadata capture
+caller as source only. Sol223 supplied the authoritative 32,060-test collection,
+complete classification and resource inventory, with 18 focused checks passed.
+Astra360 is composing candidate `0.208.59`; it has not passed the full gate or
+been deployed. Expected historical metadata authority and exact capture/live
+admission remain pending; no current identity set is inferred from a count.
+No old runtime result transfers to new candidate bytes. Keep historical ten messages,
+current/fallback releases, golden DR evidence, backups and preimages protected.
+The old source and runtime summaries below are historical evidence, not renewed
+claims about current configuration or completion.
+
+### Historical production snapshot before the 0.208.58 cutover
 
 Branch: `main`. Source corrections below are not a sealed or deployed release.
 
@@ -121,8 +163,9 @@ deployed; the observation-bound consumed witness landed on live
 and S6 recovery/browse paths stay live.
 
 The current live product acceptance queue is N1–N5; N6 TinyFish is planned
-after R10 under the 2026-09-08 owner intake below. N8 upstream adoption and
-the existing N7 executor are scheduled for 1.0+, after RC acceptance; their
+after R10 under the 2026-09-08 owner intake below. N8 upstream adoption,
+the existing N7 executor and the N9 Hermes addendum are scheduled for 1.0+,
+after RC acceptance; their
 intake does not expand the current R10 release criteria. F.11 `0.208.57` is live assist.
 Mixed-journey consume provider identity is live on `0.208.57`
 (`c8e245ea`). No further implementable product hop; Gemini/Pandora
@@ -158,7 +201,382 @@ Grok commit `1bfd839c` contains useful
 smokes, but its green harness did not establish an executable live runner or
 sound end-to-end oracles. This is an instrument finding, not a product baseline.
 
-Current preparation, 2026-09-12 (slice227): private candidate088 is frozen
+Parent execution, 2026-09-12 (slice227–228): final candidate089 is frozen at
+`6a7f056aa653f4cba98ece8fb97f6be99c0fb07a`, tree
+`1f7acbfddeb4eedaeb857591c2c7a3b380a2b12c`,2070 source files.
+The exact source composition has15 changes versus088; the final freeze adds
+only its actual current dense receipt. Fresh collection31449 nodes/13863
+functions, inventory3/3 and Ruff/mypy pass; all13858 parent policies remain
+unchanged plus5 accepted declarations. Sol138 independently accepted source
+integration and12 current review receipts. Offline dense24/24 has0 foreign
+sources and clean ownership/integrity; real-model quality is still pending.
+Sol137 repaired exact preparation pins; Lab307 accepted its source and Lab308
+accepted the actual rendered8-pin integration. The canonical20/4 exact089 run at `/var/tmp/e089-mj24us65` is now RED:
+31342 non-UI PASS/4 FAIL in812.06s; UI NOT_RUN. Owner103 terminated cleanly
+in895.77s, source/Git/Office/tool/index unchanged. Failures are the obsolete
+workflow tee assertion, standalone coverage audit30s timeout, supervisor
+reader-start timeout and entered-tool wall test stopping on its earlier10ms
+model budget. First raw failures remain immutable. Root repaired the workflow
+assertion to require the actual owned log/finite stop/canonical child command;
+that focused check passes and Sol140 independently accepted it. The unchanged coverage
+CLI passes separately in10.926s; root profiling identifies repeated AST surface
+scanning as the main CPU cost. No audit timeout or product SLA was widened. Its sole built wheel `422c127b64b6938663dd3baa5a4a0ac2d664962b4bbad51f91a4d9e5d518b62e`
+is already retained from the canonical verifier before scratch cleanup; this
+is preservation, not certification. Publicmain checkpoint `f79e732b6a63679eb8d67ca5494408d1c6663292`
+has the identical tree. GitHub run34694085183 is also RED: the hosted4/1
+non-UI phase exceeded3600s at about60%; UI did not run. Only the gate log was
+uploaded, so its failure markers do not establish individual failed nodeids.
+Sol142 completed the bounded diagnosis; root232 independently accepted the repair.
+The next candidate uses finite change-phase7200/1800s, hosted controller10200s
+and job180min, justified by measured hosted throughput. Individual test policies
+and exact-release phase limits remain unchanged. A flushed failure node/stage
+marker now survives timeout before JUnit finalization; actual owned15s xdist2
+control confirmed one marker and complete cleanup. No old hosted run was retried.
+Local HEAD/index/foreign work and production0.208.57 are intact.
+Sol139 delivered the model089 source mechanism; Astra independently accepted its
+source in231. Binding/render remain unexecuted, with fresh successor pins required.
+Lab309 delivered native3/hour089
+adapters; received/hash-verified/ACKed. Independent231 review found that both
+preparers omit top-level validator equality in the eight-pin review check.
+The original validation blocks accept a missing or divergent validator field;
+this is an input-contract defect, not evidence of a whole runtime bypass.
+Lab309G2 delivered the narrow closed-field repair; Sol143 independently accepted
+both actual15-key/all8-reference validators, with2 positive and14 negative
+controls. This is source-mechanism acceptance only; fresh successor binding and
+actual native/hour execution are still required.
+Their actual execution is barred by089 RED. Lab311G2 supplied the two timing-test
+repairs after independent correction of its first proposal; Sol141 accepted
+the final source and root's observed positive/negative controls.
+The owner confirmed the GPT-OSS laptop is available again. Root228 created
+and verified the signed089 preregistration for all6 independent content cases,
+bound to current source digest `82e792817bc21962acf313d8e41b9c3e3ecc150c59d01c84b89d12395d88a089`
+and the actual visible lab instance. The criteria/questions/source facts stay
+unchanged; the future pair is absent and reserved Lab310 job is not submitted.
+Root model-binding input is prepared but unexecuted;089 RED now bars runtime
+admission. Keep this signed plan and adapters as truthful preparation evidence,
+with a fresh reviewed successor binding required after the failures are fixed.
+
+Current repair checkpoint229: private successor source contains7 changed files
+versus089. Source-router AST names are reused only within one immutable module
+scan, preserving scope/binding decisions and fail-closed checks. Measured API
+discovery fell from5.53s to3.70s with the same229 routes; peak process memory
+rose from298780 to320408KiB. The30s CLI watchdog remains unchanged and its
+focused execution took8.33s. Source-router/coverage/workflow checks passed;
+the first packet's only failure was the missing exact scratch-total adjustment
+for two new64MiB tests. The corrected inventory and both full timing-test
+modules subsequently passed80 tests; disabling the wall wrapper produced the
+one required negative failure before cleanup. Sol140/141 independently accepted
+all7 changed files. Fresh final-source collection binds31451 nodes/13865
+functions; all13863 prior inventory policies are unchanged, plus2 declarations
+and128MiB. Canonical Ruff lint/format1728 and mypy544 pass; owned runs preserved
+source and confirmed cleanup. Evidence: private `ASTRA-229-final-source090-validated.json`
+and `ASTRA-229-sol141-received.json`. At that checkpoint090 was not frozen.
+Lab312 delivered its four source/dense/final-freeze scripts, independently
+accepted by Astra and subsequently used in232 after the source decision.
+Checkpoint230 additionally ran the full affected modules on20 workers:326 PASS,
+zero failures/skips in32.25s, source unchanged and cleanup confirmed. This covers
+the original concurrency concern without claiming a full gate. Actual collection,
+inventory and both independent source reviews are bound in the private090 core
+input. Checkpoint232 extends the accepted core to10 changed files using Sol142
+repair; full quality-gate modules118PASS, Ruff/mypy and fresh31451collection pass.
+The actual source-input/review bind this2070-file snapshot, all4 current review
+receipts and the same inventory policies. Source premeasurement090 is frozen at
+`ddd8088abad99b2c45642ce968c405be71999c14`; current owned offline dense24/24
+passed with0 foreign sources and complete source/Git/protected cleanup.
+Root232 then froze final090 at `01e18fb0f8c29c1172f22cb9870a57c10642e356`,
+tree `67e618edad194f683b4cc955de83960df01c8b2f`. Actual raw source/Git and clean
+status verified; only the measured receipt differs from premeasurement, with
+prior088+089 lineage preserved. Sol144 prepares the090 exact source adapter;
+Lab313 independently accepted the current10-file composition in233, verifying
+all2070 bytes, four current review receipts and inventory binding. Root233
+accepted Sol144 exact090 source with15 independent controls, including the actual
+final candidate header and false verdict/coverage/manifest rejection. Actual
+exact preparation completed with current source/Git/protected hashes intact;
+Lab316 independently accepted the actual8-pin/15-field rendering; root234
+verified all pins and installed its receipt unchanged. The single canonical090
+exact run passed under owner103:31348 non-UI and94 UI tests,20/4 workers,
+866.46s including confirmed cleanup, unchanged source/Git/Office/tools/index.
+All31442 selected nodes executed; the other9 inventory nodes are nightly-tier
+and receive no execution credit from this exact run. Canonical summary
+`183d6ddeda490c11b3a05c69e2838d950e8c0b9890caf0d9bd50171e081d9347`
+records certification eligibility, zero retries and106 clean owned/auxiliary
+commands. Its actual sole wheel was retained before scratch cleanup, hash
+`ee875cf96a1fa0220de009ad6d3bafd573bf00dbe85de3993f2eedf13e064f3a`;
+the terminal gate and runtime wheel hashes match those retained bytes exactly.
+Private root evidence: `ASTRA-235-exact090-observed.json`.
+Publicmain checkpoint `67211a835c1722210b4a07f8ac0d4469ba267304`
+was pushed with exactly frozen090 tree `67e618edad194f683b4cc955de83960df01c8b2f`;
+GitHub run34700474960 completed RED at2026-09-12T16:23:43Z:
+28 failed,28685 passed in5317.03s, no retry. The local exact PASS above remains
+scoped to its actual execution. Root also signed the preregistered six-case
+090 content plan before any responses, using unchanged questions/rubric/source
+facts; source digest `a71a686acabea27fcf4f2b1d698e0fbc31847660cada281d4ee1bc2ab6ea44a7`.
+The content job is reserved only, not submitted; AB/full160 execution
+has not started. Sol145 delivered the model090 binder; its9 files were
+hash-verified, with independent source ACCEPT from Lab317. Root234
+created and separately reviewed the actual closed6-field input with current090
+preparation/review, unchanged model-config hash and the signed six-case plan;
+Root235 actually bound the four model-source files. Sol147 passed19 independent
+checks and requested one correction: emitted command metadata still named the
+old Lab252 review. Root created an immutable R2 package changing only that string
+to the pinned current-review precondition; Lab319 accepted the exact delta.
+Actual R2 render then failed before output: the current 7,056,993-byte collection
+exceeded the generic 2MiB reader. Root236 preserved that failed attempt and
+prepared R3 with an explicit 8MiB collection bound; all other JSON retains the
+2MiB default, and the three templates/contract files are unchanged. Lab320
+accepted the narrow repair after4 positive/negative controls. Root236 actually
+rendered R3 once to a fresh directory (prepared4c6c2fac), verified all8 artifact
+pins. Sol150 executed both import-only inspections successfully but rejected
+the full160 artifact-ID prefix before any model call. Root R4 changes that
+prefix to the actual canonical `PRE-RELEASE-ALL-<16hex>`; Sol152 independently
+accepted this source delta. R4 remains unrendered, bound to090; future source
+requires fresh bindings. No AB/full160 execution has occurred. Lab315 native/hour090
+source was delivered, but root found both review validators still requiring089
+schema/assignment; its positive controls also used089. Pure root probes confirm
+current090 contract rejection. Root234 independently accepted315G2 after16
+bounded controls: both helpers accept the actual316 receipt and reject089,
+missing/mismatched validator and extra fields. Only four schema/assignment
+literals and the unchanged runner's package path differ; hour-runner bytes
+remain unchanged. A further current-source check found the native helper's
+old087 quality-gate hash;315G3 explicitly pins the independently reviewed090
+hash and preserves the other4 source pins. Root verified that narrow delta and
+actually prepared all3 native Word fixtures with the certified current wheel
+and exact summary; Sol148 independently accepted the actual preparation. Hour preparation
+found that the actual37,681,029-byte summary exceeds its generic16MiB read
+bound. Root accepted Lab318's receipt-only64MiB fix after6 bounded controls,
+preserving generic limits and the complete canonical report. Actual hour090
+plan/context are now prepared with an empty run root; paired native/hour
+execution review was accepted from Sol148, all artifact/input hashes verified,
+and both execution receipts installed byte-for-byte. Root236 launched the
+three native Word scenarios under controller184/owner103 with the canonical
+exclusive slot: all3 PASS, current certified wheel exact, source/Git/Office/tools
+and index unchanged, cleanup ECHILD/restored and lease reacquired. The required
+248-case denominator is preserved; the other245 receive no native-run credit.
+The actual hour attempt failed before application workload at child172 policy/
+context digest equality; cleanup and integrity are clean, no hour duration
+credit. First CLI attempt had a mistyped source hash and was rejected before
+target import with recorded ERROR70; actual corrected invocation used the
+verified preparation pin. Failed runroot remains immutable. Lab321 established
+integer context values versus canonical float serialization as the cause.
+Its repair extracts the actual canonical policy; root R2 adds a hash check
+before importing that helper. Sol152 independently accepted R2; fresh
+preparation/execution is deferred until the next coherent source candidate.
+The actual physical3600s/1GiB policy is unchanged. Two prepublication Sol
+control-script crashes were traced to an incomplete field-shape probe and
+missing AST dedent; both corrected failure points passed targeted root checks.
+Sol146 delivered durable named FAIL/ERROR reporting with nonzero exits and
+preserved reports; root accepted the helper source and verified the unchanged
+closed packages and recorded fault-injection evidence. System reporting stays
+enabled. The owner then reported two148 review-script crashes. The retained
+traceback shows a list-to-count comparison; the published correction uses
+actual lengths31442/31451 and passes root verification. Sol149 reconciled
+both attempts: the earlier KeyError read the inventory hash from the wrong
+candidate level (task-log evidence); the later retained traceback compared lists
+with integers. Both corrections are in the published review. The persistent
+rule now requires the accepted reporter before the first new diagnostic main;
+root236 also uses its assignment-labelled boundary with recorded nonzero
+errors. Sol149 is closed; its unchanged accepted review was not replayed. The
+accepted148 package remains immutable and is not replayed. No whole runtime
+bypass is claimed. No release or model-quality credit is implied.
+
+Checkpoint237: the actual read-only aggregate audit stopped at frozen-byte
+identity. All11 differing files are committed `text eol=crlf` PowerShell scripts;
+their raw bytes match the frozen manifest and normalized bytes match Git.
+Sol151 repaired the verifier to accept only that exact committed policy while
+preserving raw/content/stat/link and mutable-attribute guards. Root reviewed
+the implementation and added12 passing regressions, including split read
+boundaries, content/mixed-EOL mutations, filters/encoding and mutable attributes.
+Ruff formatting preserves whole-file ASTs. Evidence:
+`ASTRA-237-eol-root-accepted.json`; integration requires3 new inventory
+declarations and192MiB declared scratch, preserving all old policies.
+
+The hosted28 failures divide into7 response-control RSS failures,1 CLI watchdog,
+1 SQLite timing oracle,18 reminder fixtures and1 dense timeout. Root's first
+three-file repair passed10 focused tests at actual1,128,402,944-byte inherited
+RSS, including the independent resource-overflow negative. Sol152 accepted
+RSS and CLI changes but found two SQLite oracle gaps: exact50ms construction
+and closing the incomplete cold connection. Sol153 supplied real positive
+and two negative controls, but root found a remaining scheduling coupling:
+a correctly expired worker can return before opening SQLite. Sol154 separates
+that valid path from the mandatory close-path witness.
+Lab323 ran the proposed reminder fixture and dense changes:31 reminder tests
+and1 dense test passed with confirmed cleanup. Crucially, the original reminder
+test also passed under UTC; the proposed extra clock patches are not accepted
+as a demonstrated fix. Root accepted only the bounded dense timeout change.
+Root then found an earlier test deleting `friday.server` from `sys.modules`
+without restoration. Lab324 reproduced the exact failure: the collected app
+retained old globals while the fixture patched a reimported module. Scoped
+`monkeypatch.delitem` restores the module after the triggering test; the ordered
+trigger plus entire reminder module then passed32 tests in26.46s. Root accepted
+the one-line change against both actual runs; reminder assertions are unchanged.
+Neither static findings nor a timeout increase imply hosted PASS. No GitHub
+retry or product deployment has occurred.
+
+Checkpoint238: five accepted changes are composed privately (EOL verifier,
+coverage regressions plus CLI timeout, response-control RSS, dense timeout and
+the module-registry restoration). The original reminder fixture is preserved.
+The inventory test's expected scratch sum is adjusted from49,781 to49,973MiB
+for the three reviewed64MiB declarations; the actual inventory refresh awaits
+fresh collection. These changes currently touch6 files in the private source.
+The four091 freeze/dense operators now bind actual090 parent/admission/wheel
+and retain088/089/090 as prior-only evidence; Sol154 independently reviews
+this adaptation. The bounded validation operator is prepared to collect all
+nodes, refresh only the reviewed inventory declarations, and then run canonical
+static checks, a fresh full collection and affected coverage/inventory modules.
+It has not run: source readiness requires the remaining reviewed writer repair.
+Lab325 independently reviews this validation operator; Sol154 owns the writer
+repair and separately reviews the091 freeze/dense operators.
+
+Checkpoint239: root accepted Sol154's repaired writer oracle: the deliberately
+late real worker returns before opening SQLite; a fresh deadline separately
+witnesses failed-opener closure and successful reuse of the same worker after
+writer release. Baseline1 PASS and both intended mutants FAIL, cleanup clear.
+The accepted test is now composed privately (7 changed files,2070 total).
+Sol154 independently accepted the four091 freeze/dense operators; its task is
+closed. Lab325 found collection isolation and shared test-home problems in the
+validation operator. Its result is received and closed; no validation was run.
+Lab326 repairs these helpers and retains explicit timeout/admission outcomes,
+while Sol155 prepares the independent exact091 successor. Root will review
+their actual changes. Required readiness and inventory refresh remain pending;
+existing090 evidence stays historical. Production and release status unchanged.
+
+Checkpoint242: actual candidate091 exact-release passed on the frozen tree
+`a2e6de20c19386930d6ea5df646339a50653dfb1` / commit
+`e63df8efe86cb2b255e41ea2b7c9a0f4be31cd0d`. All31,454 selected tests passed:
+31,360 non-UI and94 UI. The inventory contains31,463 nodes; nine nightly-only
+nodes were outside this gate and receive no execution credit. All19 owned and87
+auxiliary commands passed, retry_count=0. Owner finished in854.64s with unforced
+cleanup, ECHILD/restored subreaper and unchanged source/Git/index/tools/Office.
+Evidence: `ASTRA-242-exact091-observed.json`; canonical summary
+`/var/tmp/e091-4y80_fb5/gate/quality-gate-summary.json`.
+
+The sole actual091 wheel was retained unchanged before temporary gate cleanup:
+`8d9f563c6f117275bb2ceb7ef079546fdc803ee7412dea5cac794849ec8e39c4`.
+No rebuild is needed. The same source tree is already published in `main` as
+`e276d7d293e3bdeddbe1c720713aa2db6dfde82f`; hosted run34712979082 remains
+in_progress. Canonical dirty work/index and production0.208.57 are unchanged.
+Fresh fixed synthetic dense recall passed24/24 over140 documents, and the
+239 focused source checks passed earlier; these are separate from live quality.
+
+Checkpoint243: all243 required deterministic/UI/harness matrix cases are
+reconciled to actual091 selected-node evidence (225 canonical-pytest,15 journeys,
+3 harness). Matrix denominator is249 total/248 required: native3 Word, Telegram
+roundtrip and app-soak remain five required live cases. This is layer-specific
+coverage, not global release completion; `ASTRA-243-matrix091-exact-reconciliation.json`.
+
+Canonical signed-six preregistration actually passed in1.698s without model
+calls. Current plan4376a9e6 binds the final091 source digest and reserved content
+review job332 (not submitted). Sol157 final package accepted after independent
+root confirmation of the repaired prior-key-location redaction; runtime operators
+are unchanged from the actual preregistration. No re-signing or replay required.
+
+Checkpoint244: actual native091 Word run completed with2 PASS and1 product
+FAIL on first attempts. FIRST-GEN and NAMED-CYRILLIC delivered validated DOCX;
+NAMED-VERSION failed `one_required_artifact_missing`. All runtime probes passed,
+owned cleanup was unforced/confirmed, source/Git/index/tools/Office unchanged,
+lease reacquired. Retain this product failure in baseline; no retry or fix to
+091 while independent baseline runs continue. Evidence:
+`ASTRA-244-native091-observed.json` and `ASTRA-244-matrix091-live-update.json`.
+After the completed hour in245, current matrix is245 required PASS,2 FAIL
+(named-version Word and app-soak),1 NOT_RUN (Telegram),
+249total/248required; other release-wide obligations remain separate.
+
+Sol158 final independent native/hour review accepted; source/runtime contracts
+and actual hour validate-only check passed. Lab334 actual AB400/full160 execution
+reviews accepted. Checkpoint245: AB completed RED on the first run: A200/200,
+B157/200 automatic PASS and43 FAIL. Forty B failures inherit two pass-level
+ledger mismatches (P01 HTTP; P02 audit/tools), with additional case-specific
+findings; independent product-defect count remains under causal review. Both
+tails and owned unforced cleanup/integrity are clear. Signed-six review remains
+NOT_RUN because its canonical task builder requires green closed rows; reserved
+job332 is not submitted. `ASTRA-245-ab091-observed.json` retains exact evidence.
+Full160 completed RED on the first run:159/160 PASS, one `SYN-A09-04`
+semantic-oracle failure. All reconciliation, privacy, runtime identity and
+exact-once/concurrency4 checks are clear; cleanup is unforced/ECHILD/restored and
+the lease was reacquired. `ASTRA-245-full160091-observed.json` pins the result.
+The actual one-sentence answer explains reproducibility independently of external
+dependencies; root suspects an oracle false negative, pending independent review
+(`ASTRA-245-a0904-triage.json`). This does not change the canonical RED.
+Physical-hour completed under accepted158 review:3600.033s independent read-only
+observation,239 identity rounds/four requests each, clean unforced ownership and
+unchanged source/inputs. Offline reminder creation failed;
+dependent reminder operations are NOT_RUN, so full planned mixed-soak coverage is
+false. `ASTRA-245-hour091-observed.json` preserves this actual091 FAIL separately
+from the prior182 evidence. Lab336 grouped B failures; Lab337 confirmed oracle
+false negatives for A09-04/B09-14/B09-20 and a B01 code-route inventory mismatch.
+B10-16 emphasis and B02 extra/missing temporal facts remain product findings.
+Lab338's repair passed410+286 focused tests, but root review246 reproduced three
+new B09-14 false positives: denied benefit, impossible benefit and an explicitly
+repudiated quoted claim. The old oracle rejects all three. Lab339 corrects this
+new alternative while retaining valid answers and existing negative controls;
+`ASTRA-246-lab338-reviewed.json` records REVISE. No baseline status is overridden.
+Lab335 confirmed recursive historical
+admission validation in source; its unmeasured optimization proposal is not
+admitted and current pinned operators remain unchanged.
+Named-version Word diagnosis is accepted and its child tree closed:
+`ASTRA-245-word091-cause-accepted.json`. Retained logs identify the initial
+unsupported-completion guard; its sticky flag prevents the late DOCX builder,
+while recovery only covers four exact fields and this fixture has three lines.
+The model draft/actual route flags were not retained, so upstream attribution
+remains unknown. Future repair must support the authorized source-to-file request
+while preserving truthful completion reporting and source authority.
+
+Document10x2 already has a canonical release operator with its own bridge outage,
+observer and restoration. Its original preflight stopped before any service
+write on six conflicting legacy aliases. A private effective configuration now
+preserves all231 Settings and45 model keys of both deployed services, including
+the explicit database_must_exist override. Corrected one-shot read-only preflight
+passed backend/bridge/snapshot checks, but blocked on
+`dispatcher_metrics_epoch_missing`; this is an actual unfulfilled prerequisite,
+not document-model failure. `ASTRA-244-document091-input-accepted.json` pins it.
+The bounded input subagent result was accepted and its entire tree closed.
+Sol159 identified observer/profile drift: frozen document contour requires
+Qwen3.6/vLLM process-start metrics; the actual primary is Qwen3.8/SGLang and lacks
+that metric. Startup durations are not an acceptable restart identity. Existing
+V12 witness/server-info seed binding is the supported replacement, pending actual
+tuple observation. Sol160 prepares a coherent isolated operator/battery/criteria
+migration with controls; no product, service or frozen091 changes are authorized
+by this preparation. `ASTRA-245-sol159-received.json` retains the diagnosis.
+Checkpoint246: Sol160's coherent migration is source-reviewed and accepted.
+One actual four-GET V12 tuple passed witness stability and server-info seed
+binding;264 focused tests and patch round-trip passed. Root reviewed the code
+and unchanged bridge/queue/backend/recovery paths. `ASTRA-246-sol160-received.json`
+and `ASTRA-246-document092-source-review.json` retain the exact package.
+Six reviewed files (document migration plus hosted deadline test repair) are
+composed in a private clean-base clone, pending the oracle correction and final
+batch validation: `ASTRA-246-integration092-staging.json`. Frozen091 and product
+remain unchanged; document10x2 is still NOT_RUN pending the immutable candidate.
+
+Reminder diagnosis correction246: prior183 permission-bound model-off fix is
+already present in091, and the old/current HTTP tests have identical ASTs. The
+redundant old patch was rejected before writes. A pure current-source probe
+accepts the actual soak ISO-date request and its effect projection unchanged,
+with reminder authority proved. Therefore the091 failure has the same symptom
+as182 but its root is not yet established as the same. Sol161 now reproduces the
+exact public-HTTP actor/config/prior-turn context and locates the remaining
+prefetch/tool/publication failure. `ASTRA-246-reminder091-diagnosis-correction.json`
+supersedes the earlier same-cause inference; no duplicate fix or live replay.
+
+Telegram dedicated test bot/chat and real-user receipt observer clarification
+remains pending. AB400+independent signed6, full160, document10x2, Telegram,
+physical3600s hour and installed/live/recovery/activation/observation remain
+incomplete; the named-version product defect also requires correction/final
+retest after diagnostic baseline. Hosted34712979082 completed with1 failed and
+28,724 passed non-UI tests: ingestion deadline wall-time assertion observed1.529s
+against1.5s; the preceding TimeoutError and unfinished-extractor assertions passed.
+An isolated test repair is now root-reviewed:19 focused tests pass; four mutation
+controls reject bypassed/renewed/inflated deadlines and premature raw persistence.
+The same injected scheduling pause fails the old wall-time oracle and passes the
+replacement precise-budget/real-timer/ordering check. Original hosted scheduling
+trace remains unavailable. Package `astra245-hosted-deadline.kRinKTFG/root-accepted-manifest.json`
+is staged for the next coherent harness batch, not integrated; no full-gate retry.
+The child's transport failed after tests, so root recovered existing evidence
+without replay and confirmed closure of its tree.
+Evidence: `ASTRA-245-hosted091-observed.json`. Production0.208.57 unchanged;
+GO=false. N6afterR10;
+N7/N8afterRCacceptance,1.0+.
+
+Historical088 preparation (superseded by089; no current gate credit): private candidate088 is frozen
 at `46f363047bfca1e4846f705b08ab949e8d94e36f`, tree
 `e92a6f78cf6acf94c372d583ecc0be089cabc9ff`,2069 source files. Source216 final
 collection contains31444 nodes in13858 functions,0 test bodies; all3 inventory
@@ -6212,6 +6630,111 @@ unmeasured references with overlapping work, not additive budgets or a current
 release ETA. Re-estimate after the first measured implementation boundary.
 Implementation advances only with scoped source, tests, independent review,
 actual journey and rollout evidence; registration closes none of those items.
+
+### N9 — Hermes addendum to V5, after RC acceptance (1.0+)
+
+Status: **OWNER_INTAKE_REGISTERED — IMPLEMENTATION_QUEUED_POST_RC**.
+Owner instruction, 2026-09-13: study
+`FRIDAY_HERMES_ASTRA_DIRECTIVE_EN_2026-09-13` and register it **for 1.0+,
+like the previous V5 package**. Intake adds no functional GO requirement to
+current R10 and does not reopen or replace its frozen candidate. N6 keeps its
+priority. N7/N8 retain their common architecture, selected executor and existing
+capability slots. This section is the only mutable register for the Hermes
+addendum; the supplied files remain unchanged design inputs.
+
+Sources: [start here](../FRIDAY_HERMES_ASTRA_DIRECTIVE_EN_2026-09-13/friday_hermes_adoption_v1_en/ASTRA_START_HERE.md),
+[directive](../FRIDAY_HERMES_ASTRA_DIRECTIVE_EN_2026-09-13/friday_hermes_adoption_v1_en/DIRECTIVE.md),
+[deduplication](../FRIDAY_HERMES_ASTRA_DIRECTIVE_EN_2026-09-13/friday_hermes_adoption_v1_en/DEDUPLICATION.md),
+[first vertical](../FRIDAY_HERMES_ASTRA_DIRECTIVE_EN_2026-09-13/friday_hermes_adoption_v1_en/FIRST_VERTICAL.md),
+[recipes R1–R13](../FRIDAY_HERMES_ASTRA_DIRECTIVE_EN_2026-09-13/friday_hermes_adoption_v1_en/IMPLEMENTATION_RECIPES.md),
+[catalog HE01–HE50](../FRIDAY_HERMES_ASTRA_DIRECTIVE_EN_2026-09-13/friday_hermes_adoption_v1_en/CATALOG.md),
+[acceptance HA01–HA46 and journeys J1–J8](../FRIDAY_HERMES_ASTRA_DIRECTIVE_EN_2026-09-13/friday_hermes_adoption_v1_en/ACCEPTANCE.md),
+[findings](../FRIDAY_HERMES_ASTRA_DIRECTIVE_EN_2026-09-13/friday_hermes_adoption_v1_en/FINDINGS.md)
+and [source index](../FRIDAY_HERMES_ASTRA_DIRECTIVE_EN_2026-09-13/friday_hermes_adoption_v1_en/SOURCE_INDEX.md).
+The 50 families, 13 recipes, eight journey descriptions and ten candidate
+assets overlap; they are not additive implementation commitments. All supplied
+asset activation flags remain false, and all HA cases remain NOT_RUN against
+Friday. Preserve catalog dispositions, including conditional and parked work.
+
+**Intake evidence:** the existing delivered directory matches all 40 ZIP entries;
+39 content hashes plus the checksum manifest were verified. All 54 supplied
+kit tests passed locally in a disposable copy, including the ten explicitly
+scoped helper characterizations and temporary patch controls. Receipt:
+`~/.jericho/grok-takeover/ASTRA-267-hermes-intake.json`.
+These establish handoff integrity and helper behavior, not complete upstream
+inspection, Friday integration or product acceptance. No Hermes source fetch,
+dependency installation, native build, model journey or activation ran.
+
+The handoff names Hermes `422bc9bde9d212ab3741fbc45a871a3938436d59`
+and Friday reference `e276d7d293e3bdeddbe1c720713aa2db6dfde82f`.
+They are dated references, not instructions to reset the current workspace or
+permanent implementation pins. At HM0 reconcile the then-current accepted
+source, active work and N7/N8 evidence; refresh relevant upstream source,
+releases/APIs/dependencies and notices before selecting exact delivery pins.
+The kit contains three small reference Python files and a notice, not the full
+Hermes source or a generated vendir lock. Catalog-only assets, including the
+first source-review candidates, still require complete body/dependency review.
+
+**First selected consumer:** choose one J1/J2 vertical after HM0. Extend the
+existing N8 read-only source-review path with one useful adapted debugging or
+inspection resource; if that need is already satisfied, choose the concrete
+document-to-proposed-actions gap instead. Preserve the original upload and
+authorized source revision. Return Russian findings with real file/span
+references, coverage and uncertainty through Friday's existing publisher.
+Document actions retain may/should/must, conflicting versions, missing owners,
+Russian dates and unreadable spans; a proposal creates no external task,
+calendar record or follow-up job. The two first branches are alternatives.
+
+| Item / owner | Dependencies and selected scope | Completion evidence |
+|---|---|---|
+| [ ] **N9.HM0 — reconciliation and delivery / Astra; Sol review** | After RC acceptance. Share N8.M0 vendir/update/provenance work and N7 source/runtime decisions. Resolve selected rows as reuse_existing, extend_existing, new_consumer or alternative_not_selected, using current evidence. | Exact source/materialization plan, complete selected package/import closure, derived patches and artifact/resource/profile identities; real generated lock and applicable native validation. No second owner, updater or mandatory executor. Deduplication success does not claim an unselected Hermes implementation. |
+| [ ] **N9.HM1 — immutable resources and one consumer / Sol implementation; Astra integration; Grok evidence** | HM0; share N8.M1–M3 loader/resources/review journey and applicable N7.E4 assets. R1/R7 and selected R8 resources; exactly one J1 or J2. | Whole reviewed bundles with support paths, deterministic instruction conversion and actual loaded roster/digest. Explicit roots and full required instructions; no inherited installs/model aliases/delegation or upload write authority. Actual owner ingress → admitted local model/source reads → useful grounded report → one verified published artifact. Planted-defect/clean or document-version/modality controls, tenant/scope/revocation/cancel and immutable-upload evidence. |
+| [ ] **N9.HM2 — recoverable output gap / Sol implementation; Astra integration** | Named consumer/output gap after comparison with existing spill/result handling; R4, HE11/HE12. Reuse equivalent accepted behavior with no redundant code. | Bounded preview plus exact recoverable artifact, byte/character accounting, truncation/continuation/retention states. Zero, negative, bool and Unicode limits; notice overhead explicit. Trusted ancestor traversal, foreign/revoked handles, disk-full and partial writes tested. Missing full output is explicit; never replay a completed mutating command to recover stdout. |
+| [ ] **N9.HM3 — one watcher or HAR workflow / Astra; Sol review; Grok lab** | Actual user need and existing scheduler/event or browser owner; select R5 or R6, J3 or J4. These later journeys are not prerequisites for HM1. | Watcher: durable fetched/pending/acknowledged/UNKNOWN distinction, one cursor owner and operation keys; 50 events with cap20 retain the remaining30. Test duplicates/revisions, corrupted state, overflow/baseline, restart/late receipt and network/pagination; no-change tick makes zero model calls. HAR alternative: private capture/redaction of headers/query/body, exact host/principal authorization and one independently verified approved read client; uncertainty/unsupported APIs explicit, writes separately authorized. |
+| [ ] **N9.HM4 — verified skill candidates and promotion / Sol implementation; Astra integration; Grok evidence** | Accepted HM1 and repeatable task corpus; R2/J5, existing resource/proposal owner. HE06 curation and HE07 distribution remain deferred, not automatic new services. | Task/outcome-bound candidate revisions, procedure-level deduplication, complete structure/dependency/capability/secret checks and independent scenarios before promotion. Failed/poisoned/stale candidates cannot activate; all origins checked, scanner failure means unavailable, match secrets not logged. Promotion grants no execution authority. Immutable attempt bundles, immediate authorization revocation, concurrent-update controls and reversible new-job activation; any selected maintenance protects referenced/recovery skills. |
+| [ ] **N9.HM5 — one justified PTC/discovery delta / Astra; Sol review; Grok comparison** | Measured gap in existing N7.E6/N8.M4 or admitted discovery slot; R3/R9 and J6. HE23's catalog ADAPT disposition does not remove this conditional entry gate. | One extension or alternative; no duplicate PTC engine or new tool authority. Current nested tool/arguments/grants, effective OS/network/process isolation, aggregate model/resource limits and per-cell revocation; preserve partial effects without whole-program replay. Discovery uses actor-admitted inventory, handles Russian/mixed queries, stale schemas and no-match honestly; compare with existing eager tools on equal model/resources before claiming benefit. |
+| [ ] **N9.HM6 — optional whole executor or browser specialization / Astra; Sol review; Grok lab** | Concrete selected-executor blocker or independently useful specialization, within N7/N8's existing slots; R10–R12/J7 and applicable R11 controls. Do not reselect a working executor. | One isolated complete runtime/protocol family with verified interpreter/dependency compatibility, handshake and admitted local model boundary. ACP first for N7; another transport needs a concrete unmet need. Source/runtime/build/profile/state identities, attempt/epoch/cancel/descendant/crash/UNKNOWN controls, trusted exact results and existing publisher. Browser principal/action/recording evidence remain distinct. No Hermes core import or second dependency universe in Friday core, raw model-service bypass or cloud fallback. |
+| [ ] **N9.HM-LAB — scoped developer evidence / Grok; Sol review** | Authorized disposable snapshot; selected R8/R13/J8 probes or metrics, sharing N8.M6 and N7.E1 fixtures. Development-only work may run alongside post-RC implementation. | Bounded useful report with explicit excluded-tree/import/parser/metric coverage and failure states, safe debug targets/private locals and real cleanup. Missing radon or parser errors are not zero/clean metrics. Retain canonical tests and actual HTTP/SSE/ACP fixtures; no broad metrics-driven refactor, duplicate fixture system or mock-to-live credit. |
+
+**Acceptance traceability:** retain every HA01–HA46 identifier and map applicable
+cases to the owning packet, canonical inventory and exact source/build/bundle.
+HA01–HA08 cover intake and skill authority; HA09–HA12 candidate promotion and
+curation; HA13–HA17 nested PTC authority/isolation/partial effects; HA18–HA20
+output bounds/private artifacts; HA21–HA26 watcher pending state and transport;
+HA27–HA29 HAR scope/redaction; HA30–HA33 source/citation semantics and proposed
+actions; HA34 safe debugging; HA35–HA36 discovery; HA37–HA40 worker, transport
+and descendant lifecycle; HA41 compaction under uncertainty; HA42 browser
+principal/evidence; HA43 lab coverage; HA44–HA46 rollout, exact publication and
+equal-resource evaluation. Shared ingress/auth/output/cancel/publication
+regressions remain mandatory for a selected consumer; optional cases remain
+conditional, never falsely green. N7.A01–A24 and N8.G01–G22 retain their scope.
+
+Preserve SourceRef/PassageRef and final reauthorization. Document-local citation
+labels and literal quote matches prove neither source authenticity nor semantic
+entailment; do not replace current extraction, Office structure evidence, search
+coverage or Obsidian state. Use existing Work Item, execution/Organ/model leases,
+scheduler, resource/proposal and final publication owners. Resources describe
+procedure and cannot grant authority or attest to completed effects. An accepted
+owner command remains autonomous within its existing grant; untrusted uploaded
+skills/projects do not inherit host capabilities. Production inference remains
+local, including summaries, skill proposals and any selected child execution.
+
+Updates use the V5 mechanism and new immutable source/build/adapter/profile
+identities; active jobs keep their accepted versions, while revocation is checked
+immediately at authorization. Rollback changes routing/resource selection and
+preserves receipts/readable artifacts; it cannot undo external effects by replay
+or overwrite user work. Preserve prior compatible state or prove migration
+compatibility. Measured quality, verification, latency, calls/tokens/resources and
+actual cache telemetry stay distinct; no unmeasured savings claim or silent
+reasoning/context/parallelism reduction.
+
+**Not reopened:** Hermes memory stores, channels/gateways, TUI transplant,
+cron/kanban/team orchestration, marketplace/managed cloud connectors, credential
+pools, new billing, hidden delegation or donor direct message sending. No second
+RepoMap, loader, shell/PTY/LSP stack, MCP authority, scheduler or publisher.
+Hermes browser work does not replace N6 TinyFish; accepted DSH/N7, V5 choices and
+Pandora remain as already scheduled. Intake closes no implementation, live
+acceptance, activation or rollback requirement.
 
 ### Removed from the active queue
 

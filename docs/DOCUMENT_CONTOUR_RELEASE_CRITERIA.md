@@ -231,10 +231,18 @@ run-id hash, exact worker-report hash and an unpredictable private challenge.
 It then waits boundedly for an atomically published `0600` response proving all
 of the following immediately before worker 2: bridge still stopped and its
 exact operator `ProcessLease` guard still held; backend healthy with exact
-unchanged process identity; durable outbound, inbound and dead-letter counts
-all zero; dispatcher identity unchanged.  The response must echo every binding
-exactly and contains only
-booleans and hashes.  Missing, malformed, stale, substituted, false or timed-out
+unchanged process identity; durable outbound and inbound counts zero; the
+observed dead-letter metadata identity set exactly equals the separately pinned
+protected set (the empty set when no explicit pin was supplied); and dispatcher
+identity unchanged.  `dead_letter_zero` remains a literal observation and is
+true only when the observed count is zero.  A non-empty admitted pin therefore
+requires `dead_letter_zero=false` together with
+`dead_letter_matches_protected_set=true`; it never rewrites non-empty as zero.
+The `observer-request.v2` binds the nullable protected count and set digest;
+the `observer-response.v3` echoes those bindings and adds the observed count,
+set digest, truthful zero flag and exact-match flag.  It contains only bounded
+counts, booleans and hashes, never row identities or bodies.  Missing, malformed, stale,
+substituted, false or timed-out
 observer evidence stops the streak before worker 2.  Neither request nor
 response may contain service environment, messages, prompts, model bodies,
 tokens, document facts or raw diagnostics.  The barrier directory is
@@ -255,10 +263,30 @@ python -B tools/document_contour_release_operator.py \
   --freeze-commit <exact-40-hex-HEAD> \
   --env-file /absolute/path/to/owner-only.env \
   --inter-run-barrier-dir /absolute/private-parent/empty-barrier \
+  --protected-dead-letter-set-file /absolute/private-parent/protected-set.json \
   --backend-unit <exact-backend.service> \
   --bridge-unit <exact-bridge.service> \
   --report /absolute/private-parent/new-operator-report.json
 ```
+
+Omit `--protected-dead-letter-set-file` to retain the historical fail-closed
+global-zero rule.  A future non-empty run supplies an owner-only canonical file
+with schema `friday.document-contour.protected-dead-letter-set.v1`.  Its exact
+fields are `schema`, `row_fingerprint_schema`, `set_fingerprint_schema`,
+`fingerprint_scope`, `dead_letter_count`, `dead_letter_set_sha256`, and a sorted
+unique `dead_letter_identities` array of `{update_id,row_fingerprint}` objects.
+The scope is metadata-only: `update_id`, `status`, `attempts`, `failed_at`,
+`created_at`, and `last_attempt_at`; it explicitly excludes `payload_json`,
+`backend_response_json`, `last_error`, and `ordering_key`.  This proves equality
+of the observed metadata identity set, not unchanged unobserved payload or
+error text.  The identity projection and pin are capped at 4096 rows and fail
+closed above that bound.  Count and set digest are recomputed from the identities rather
+than trusted.  The file is an input attestation, never a count baseline, and is
+pinned by descriptor before any stop or other live effect.  The operator must
+never create it by treating whatever rows are present at run time as baseline.
+The real protected-set pin must be collected and authorized separately under
+the same stopped-bridge, held-lease, descriptor-bound and no-WAL rules; source
+or fixture readiness is not production admission.
 
 The env file is a single-link owner `0600` regular file and remains pinned by
 descriptor and content hash.  The empty barrier and its dedicated, quiescent
@@ -290,12 +318,15 @@ The helper has one fail-closed state sequence:
 2. Arm restoration before issuing the single bridge stop.  Require the unit to
    become exactly inactive/dead with zero main/control PIDs, the old pidfd exited
    and its cgroup recursively unpopulated.
-3. Read the stopped zero-queue backend snapshot, acquire and retain the exact
+3. Read the stopped backend snapshot, require zero inbound and outbound, and
+   require the exact dead-letter metadata identity set to match the explicit
+   protected pin (or the canonical empty set when absent).  Acquire and retain the exact
    bridge `ProcessLease`, then use only the public descriptor-bound
    `collect_document_contour_guarded_bridge_queue_snapshot` projection for
-   inbound/dead-letter counts.  The main DB physical-outbound projection remains
+   inbound counts and the same exact-set comparison.  The main DB physical-outbound projection remains
    the authenticated backend HTTP snapshot, whose bridge queue is intentionally
-   `active_uninspected` while the operator guard is held.
+   `active_uninspected` while the operator guard is held; both dead-letter count
+   and identity fields remain `null` in that held/active projection.
 4. Launch exactly one canonical battery controller through absolute
    `/usr/bin/systemd-run` in one transient user scope, with
    `KillMode=control-group` and `--expand-environment=no`.  Before owner handoff,
@@ -305,8 +336,9 @@ The helper has one fail-closed state sequence:
    unblocks the inherited mask.  Validate the exact run-1 receipt/request,
    repeat the backend, bridge, guarded queue and dispatcher attestations, then
    publish the exact
-   `friday.document-contour-live-battery.observer-response.v2` response with
-   `bridge_operator_guard_held=true`.  The obsolete claim
+   `friday.document-contour-live-battery.observer-response.v3` response with
+   `bridge_operator_guard_held=true`, a truthful `dead_letter_zero`, and
+   `dead_letter_matches_protected_set=true`.  The obsolete claim
    `bridge_lease_free=true` is invalid.
 5. Keep the guard through worker 2, controller exit, whole-scope emptiness, both
    receipts, the canonical battery report and the final repeated attestations.
@@ -372,8 +404,9 @@ not contact live HTTP, model or service interfaces.
 
 ## Deployment gate
 
-- Immediately before the live-model battery, confirm the Telegram queues are
-  empty and stop `friday-bridge` so user traffic cannot contaminate timings or
+- Immediately before the live-model battery, confirm inbound and outbound are
+  empty and dead letters equal the separately authorized exact protected set
+  (the empty set without an explicit pin), then stop `friday-bridge` so user traffic cannot contaminate timings or
   source selection.  Keep it stopped through both required clean runs.  The
   same queue/backend/dispatcher invariants are re-attested at the mandatory
   inter-run barrier; the controller never starts the second worker on an

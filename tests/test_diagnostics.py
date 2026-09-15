@@ -445,6 +445,404 @@ def test_bridge_queue_status_is_absent_when_no_inbox(settings):
     assert status["pending"] == 0 and status["dead_letter"] == 0 and status["healthy"] is True
 
 
+def _write_protected_set_queue(path, rows):
+    """Create a disposable stopped queue with tempting forbidden body columns."""
+
+    import os
+    import sqlite3
+
+    path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    os.chmod(path.parent, 0o700)
+    conn = sqlite3.connect(path)
+    try:
+        conn.execute(
+            """CREATE TABLE updates (
+                   update_id INTEGER PRIMARY KEY,
+                   payload_json TEXT NOT NULL,
+                   status TEXT NOT NULL,
+                   attempts INTEGER NOT NULL,
+                   last_error TEXT NOT NULL,
+                   failed_at REAL,
+                   created_at REAL NOT NULL,
+                   last_attempt_at REAL NOT NULL,
+                   backend_response_json TEXT,
+                   ordering_key TEXT
+               )"""
+        )
+        conn.executemany(
+            """INSERT INTO updates (
+                   update_id, payload_json, status, attempts, last_error,
+                   failed_at, created_at, last_attempt_at,
+                   backend_response_json, ordering_key
+               ) VALUES (
+                   :update_id, :payload_json, :status, :attempts, :last_error,
+                   :failed_at, :created_at, :last_attempt_at,
+                   :backend_response_json, :ordering_key
+               )""",
+            rows,
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    os.chmod(path, 0o600)
+
+
+def _protected_set_rows():
+    common = {
+        "status": "dead_letter",
+        "last_error": "FORBIDDEN_ERROR_SENTINEL",
+        "backend_response_json": '{"secret":"FORBIDDEN_BACKEND_SENTINEL"}',
+        "ordering_key": "FORBIDDEN_ORDERING_SENTINEL",
+    }
+    return [
+        {
+            **common,
+            "update_id": 20,
+            "payload_json": '{"secret":"FORBIDDEN_PAYLOAD_TWENTY"}',
+            "attempts": 3,
+            "failed_at": 1788231845.25,
+            "created_at": 1788220798.5,
+            "last_attempt_at": 1788231845.25,
+        },
+        {
+            **common,
+            "update_id": 10,
+            "payload_json": '{"secret":"FORBIDDEN_PAYLOAD_TEN"}',
+            "attempts": 1,
+            "failed_at": None,
+            "created_at": 1788091200.125,
+            "last_attempt_at": 0.0,
+        },
+        {
+            **common,
+            "update_id": 30,
+            "payload_json": '{"secret":"FORBIDDEN_PENDING_PAYLOAD"}',
+            "status": "pending",
+            "attempts": 0,
+            "failed_at": None,
+            "created_at": 1788235200.0,
+            "last_attempt_at": 0.0,
+        },
+    ]
+
+
+def _collect_protected_set(path):
+    from friday.diagnostics import _bridge_queue_counts_only, _PinnedBridgeQueue
+
+    pinned = _PinnedBridgeQueue(path)
+    try:
+        return _bridge_queue_counts_only(pinned)
+    finally:
+        pinned.close()
+
+
+def test_protected_dead_letter_set_is_stable_exact_and_body_free(tmp_path):
+    import json
+
+    baseline_path = tmp_path / "baseline" / "telegram-inbox.sqlite3"
+    reordered_path = tmp_path / "reordered" / "telegram-inbox.sqlite3"
+    body_changed_path = tmp_path / "body-changed" / "telegram-inbox.sqlite3"
+    empty_path = tmp_path / "empty" / "telegram-inbox.sqlite3"
+    baseline_rows = _protected_set_rows()
+    _write_protected_set_queue(baseline_path, baseline_rows)
+    _write_protected_set_queue(reordered_path, list(reversed(baseline_rows)))
+    body_changed = [dict(row) for row in baseline_rows]
+    for row in body_changed:
+        row["payload_json"] = '{"different":"FORBIDDEN_CHANGED_PAYLOAD"}'
+        row["backend_response_json"] = '{"different":"FORBIDDEN_CHANGED_BACKEND"}'
+        row["last_error"] = "FORBIDDEN_CHANGED_ERROR"
+        row["ordering_key"] = "FORBIDDEN_CHANGED_ORDERING"
+    _write_protected_set_queue(body_changed_path, body_changed)
+    _write_protected_set_queue(
+        empty_path,
+        [row for row in baseline_rows if row["status"] == "pending"],
+    )
+
+    baseline = _collect_protected_set(baseline_path)
+    reordered = _collect_protected_set(reordered_path)
+    body_changed_projection = _collect_protected_set(body_changed_path)
+    empty_projection = _collect_protected_set(empty_path)
+
+    assert baseline == reordered == body_changed_projection
+    assert baseline == {
+        "state": "present",
+        "pending": 1,
+        "dead_letter": 2,
+        "dead_letter_set_sha256": "661de8124d16d9520e8d9aca0c2f5ab4eaa1551806ddbea8f0788fba52d63616",
+        "dead_letter_identities": [
+            {
+                "update_id": 10,
+                "row_fingerprint": "43395d3d367ebb3ea7b0396bd8b25dcef23701bcabbaa913ce4b1101e9983712",
+            },
+            {
+                "update_id": 20,
+                "row_fingerprint": "907dbd41a63a865d938057649dc6e3658625a8030fc8efea31ed43b29e7eca34",
+            },
+        ],
+    }
+    serialized = json.dumps(baseline, sort_keys=True)
+    assert "FORBIDDEN" not in serialized
+    assert empty_projection == {
+        "state": "present",
+        "pending": 1,
+        "dead_letter": 0,
+        "dead_letter_set_sha256": "f0be97144a676e0c1e9b25c932b45a99d01242bab59a4a8edcf0417bcf49f521",
+        "dead_letter_identities": [],
+    }
+
+
+def test_protected_dead_letter_collector_accepts_the_real_inbox_schema(tmp_path):
+    import json
+    import os
+
+    from friday.telegram_bridge import _UpdateInbox
+
+    path = tmp_path / "real-queue" / "telegram-inbox.sqlite3"
+    path.parent.mkdir(mode=0o700)
+    inbox = _UpdateInbox(str(path))
+    try:
+        inbox.store({"update_id": 71, "message": {"text": "REAL_SCHEMA_BODY_SENTINEL"}})
+        inbox.store({"update_id": 72, "message": {"text": "pending"}})
+        inbox.mark_dead_letter(71, "REAL_SCHEMA_ERROR_SENTINEL")
+    finally:
+        inbox.close()
+    os.chmod(path.parent, 0o700)
+    os.chmod(path, 0o600)
+
+    projection = _collect_protected_set(path)
+
+    assert projection["pending"] == 1
+    assert projection["dead_letter"] == 1
+    assert [item["update_id"] for item in projection["dead_letter_identities"]] == [71]
+    assert len(projection["dead_letter_identities"][0]["row_fingerprint"]) == 64
+    assert len(projection["dead_letter_set_sha256"]) == 64
+    assert "SENTINEL" not in json.dumps(projection, sort_keys=True)
+
+
+def test_protected_dead_letter_set_distinguishes_every_exact_set_change(tmp_path):
+    baseline_rows = _protected_set_rows()
+    variants = {
+        "baseline": baseline_rows,
+        "extra": [
+            *baseline_rows,
+            {
+                **baseline_rows[0],
+                "update_id": 40,
+                "created_at": 1788307200.75,
+            },
+        ],
+        "missing": [row for row in baseline_rows if row["update_id"] != 10],
+        "replaced": [{**row, "update_id": 11} if row["update_id"] == 10 else row for row in baseline_rows],
+        "mutated": [{**row, "attempts": 2} if row["update_id"] == 10 else row for row in baseline_rows],
+    }
+    projections = {}
+    for name, rows in variants.items():
+        path = tmp_path / name / "telegram-inbox.sqlite3"
+        _write_protected_set_queue(path, rows)
+        projections[name] = _collect_protected_set(path)
+
+    digests = {item["dead_letter_set_sha256"] for item in projections.values()}
+    assert len(digests) == len(projections)
+    assert projections["extra"]["dead_letter"] == 3
+    assert projections["missing"]["dead_letter"] == 1
+    assert projections["replaced"]["dead_letter"] == projections["baseline"]["dead_letter"] == 2
+    assert projections["mutated"]["dead_letter"] == projections["baseline"]["dead_letter"] == 2
+    assert [item["update_id"] for item in projections["replaced"]["dead_letter_identities"]] == [
+        11,
+        20,
+    ]
+    baseline_ten = projections["baseline"]["dead_letter_identities"][0]
+    mutated_ten = projections["mutated"]["dead_letter_identities"][0]
+    assert baseline_ten["update_id"] == mutated_ten["update_id"] == 10
+    assert baseline_ten["row_fingerprint"] != mutated_ten["row_fingerprint"]
+
+
+def test_protected_dead_letter_collector_never_observes_forbidden_columns(tmp_path, monkeypatch):
+    import sqlite3
+
+    import friday.diagnostics as diagnostics
+
+    path = tmp_path / "queue" / "telegram-inbox.sqlite3"
+    _write_protected_set_queue(path, _protected_set_rows())
+    real_connect = sqlite3.connect
+    observed_update_columns: list[str] = []
+
+    def audited_connect(*args, **kwargs):
+        conn = real_connect(*args, **kwargs)
+
+        def authorize(action, table, column, _database, _trigger):
+            if action == sqlite3.SQLITE_READ and table == "updates" and column:
+                observed_update_columns.append(str(column))
+            return sqlite3.SQLITE_OK
+
+        conn.set_authorizer(authorize)
+        return conn
+
+    monkeypatch.setattr(diagnostics.sqlite3, "connect", audited_connect)
+    projection = _collect_protected_set(path)
+
+    allowed = {
+        "update_id",
+        "status",
+        "attempts",
+        "failed_at",
+        "created_at",
+        "last_attempt_at",
+    }
+    forbidden = {"payload_json", "backend_response_json", "last_error", "ordering_key"}
+    assert set(observed_update_columns) == allowed
+    assert not forbidden & set(observed_update_columns)
+    assert set(projection) == {
+        "state",
+        "pending",
+        "dead_letter",
+        "dead_letter_set_sha256",
+        "dead_letter_identities",
+    }
+
+
+def test_protected_dead_letter_identity_material_is_bounded(tmp_path):
+    import pytest
+
+    path = tmp_path / "queue" / "telegram-inbox.sqlite3"
+    template = _protected_set_rows()[0]
+    rows = [{**template, "update_id": update_id} for update_id in range(4097)]
+    _write_protected_set_queue(path, rows)
+
+    with pytest.raises(RuntimeError, match="identity limit exceeded"):
+        _collect_protected_set(path)
+
+
+def test_protected_dead_letter_collector_rejects_malformed_identity_values(tmp_path):
+    import pytest
+
+    template = _protected_set_rows()[0]
+    malformed = {
+        "negative-update-id": {**template, "update_id": -1},
+        "negative-attempts": {**template, "attempts": -1},
+        "text-created-at": {**template, "created_at": "not-a-real"},
+        "infinite-last-attempt": {**template, "last_attempt_at": float("inf")},
+    }
+    for name, row in malformed.items():
+        path = tmp_path / name / "telegram-inbox.sqlite3"
+        _write_protected_set_queue(path, [row])
+        with pytest.raises(RuntimeError, match="identity is malformed"):
+            _collect_protected_set(path)
+
+
+def test_protected_dead_letter_collector_rejects_sidecar_and_descriptor_replacement(tmp_path):
+    import os
+
+    import pytest
+
+    from friday.diagnostics import _PinnedBridgeQueue
+
+    path = tmp_path / "queue" / "telegram-inbox.sqlite3"
+    replacement = tmp_path / "queue" / "replacement.sqlite3"
+    _write_protected_set_queue(path, _protected_set_rows())
+    _write_protected_set_queue(replacement, _protected_set_rows())
+    wal = path.with_name(f"{path.name}-wal")
+    wal.write_bytes(b"not a real WAL; its presence alone must close the boundary")
+    os.chmod(wal, 0o600)
+    with pytest.raises(RuntimeError, match="checkpointed stopped database"):
+        _PinnedBridgeQueue(path)
+    wal.unlink()
+
+    pinned = _PinnedBridgeQueue(path)
+    try:
+        os.replace(replacement, path)
+        with pytest.raises(RuntimeError, match="observer queue"):
+            pinned.revalidate()
+    finally:
+        pinned.close()
+
+
+def test_guarded_protected_set_requires_and_preserves_the_exact_bridge_lease(settings, tmp_path):
+    from dataclasses import replace
+
+    import pytest
+
+    from friday.diagnostics import collect_document_contour_guarded_bridge_queue_snapshot
+    from friday.diagnostics.runtime_lease import ProcessLease, process_owns_lease
+
+    state_dir = tmp_path / "state"
+    local = replace(settings, state_dir=state_dir)
+    queue = state_dir / "telegram-inbox.sqlite3"
+    _write_protected_set_queue(queue, _protected_set_rows())
+    lease_path = queue.with_name(f"{queue.name}.lock")
+    boundary = ProcessLease(lease_path, protocol="friday.telegram-bridge.v1")
+
+    with pytest.raises(RuntimeError, match="guard is not held"):
+        collect_document_contour_guarded_bridge_queue_snapshot(local, boundary)
+
+    boundary.acquire()
+    try:
+        snapshot = collect_document_contour_guarded_bridge_queue_snapshot(local, boundary)
+        assert snapshot["schema"] == "friday.document-contour-guarded-bridge-queue.v2"
+        assert snapshot["bridge_guard_held"] is True
+        assert snapshot["inbound_pending"] == 1
+        assert snapshot["dead_letter"] == 2
+        assert snapshot["dead_letter_set_sha256"] == (
+            "661de8124d16d9520e8d9aca0c2f5ab4eaa1551806ddbea8f0788fba52d63616"
+        )
+        assert [item["update_id"] for item in snapshot["dead_letter_identities"]] == [10, 20]
+        assert boundary.acquired is True
+        assert process_owns_lease(lease_path, protocol="friday.telegram-bridge.v1") is True
+    finally:
+        boundary.release()
+
+
+def test_observer_protected_set_acquires_releases_and_never_inspects_an_active_bridge(
+    settings,
+    storage,
+    tmp_path,
+):
+    from dataclasses import replace
+
+    from friday.diagnostics import collect_document_contour_observer_snapshot
+    from friday.diagnostics.runtime_lease import ProcessLease, process_owns_lease
+
+    state_dir = tmp_path / "observer-state"
+    local = replace(settings, state_dir=state_dir)
+    queue = state_dir / "telegram-inbox.sqlite3"
+    _write_protected_set_queue(queue, _protected_set_rows())
+    backend_lease = ProcessLease(state_dir / "backend.lock", protocol="friday.backend.v1")
+    bridge_lease_path = queue.with_name(f"{queue.name}.lock")
+    backend_lease.acquire()
+    try:
+        stopped = collect_document_contour_observer_snapshot(local, storage)
+        assert stopped["schema"] == "friday.document-contour-observer-snapshot.v2"
+        assert stopped["backend_lease_owned"] is True
+        assert stopped["physical_outbound_pending"] == 0
+        assert stopped["bridge_queue_state"] == "present"
+        assert stopped["bridge_lease_acquired_for_snapshot"] is True
+        assert stopped["bridge_lease_released"] is True
+        assert stopped["inbound_pending"] == 1
+        assert stopped["dead_letter"] == 2
+        assert stopped["dead_letter_set_sha256"] == (
+            "661de8124d16d9520e8d9aca0c2f5ab4eaa1551806ddbea8f0788fba52d63616"
+        )
+        assert [item["update_id"] for item in stopped["dead_letter_identities"]] == [10, 20]
+        assert process_owns_lease(bridge_lease_path, protocol="friday.telegram-bridge.v1") is False
+
+        live_bridge = ProcessLease(bridge_lease_path, protocol="friday.telegram-bridge.v1")
+        live_bridge.acquire()
+        try:
+            active = collect_document_contour_observer_snapshot(local, storage)
+            assert active["bridge_queue_state"] == "active_uninspected"
+            assert active["bridge_lease_acquired_for_snapshot"] is False
+            assert active["bridge_lease_released"] is False
+            assert active["inbound_pending"] is None
+            assert active["dead_letter"] is None
+            assert active["dead_letter_set_sha256"] is None
+            assert active["dead_letter_identities"] is None
+            assert live_bridge.acquired is True
+        finally:
+            live_bridge.release()
+    finally:
+        backend_lease.release()
+
+
 def test_diagnostics_never_maps_the_queue_owned_by_a_live_bridge(settings, monkeypatch):
     import friday.diagnostics as diagnostics
 

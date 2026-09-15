@@ -1,3 +1,18 @@
+## 0.208.59 — Unreleased
+
+### Preserve protected dead letters during document acceptance
+
+- Compare the exact, separately admitted metadata identity set of protected
+  dead letters before, between, and after the two document battery runs.
+  Without a supplied pin, the queue must still be empty.
+- Keep observed counts and the zero flag truthful, and reject added, missing,
+  replaced or metadata-mutated entries. Do not read message bodies or claim
+  their integrity from metadata equality.
+- Update observer schemas together with their consumers, negative controls,
+  and the complete test classification and resource inventory.
+- Reserve a distinct candidate version. Full gates, immutable activation and
+  live acceptance on this candidate remain required; schema stays at 50.
+
 ## 0.208.58 — Unreleased
 
 ### Preserve grounded output and truthful R10 acceptance evidence

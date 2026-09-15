@@ -2,19 +2,83 @@
 
 from __future__ import annotations
 
+import hashlib
 import inspect
+import json
 import os
+import sqlite3
 from types import SimpleNamespace
 
 import pytest
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
+_DEAD_LETTER_ROW_DOMAIN = b"friday.document-contour.dead-letter-row.v1\0"
+_DEAD_LETTER_SET_DOMAIN = b"friday.document-contour.dead-letter-set.v1\0"
+
+
+def _expected_dead_letter_evidence(queue_path):
+    connection = sqlite3.connect(
+        f"{queue_path.resolve().as_uri()}?mode=ro&immutable=1",
+        uri=True,
+    )
+    try:
+        rows = connection.execute(
+            """SELECT update_id, status, attempts, failed_at, created_at, last_attempt_at
+                 FROM updates
+                WHERE status='dead_letter'
+             ORDER BY update_id"""
+        ).fetchall()
+    finally:
+        connection.close()
+    identities = []
+    for row in rows:
+        material = json.dumps(
+            list(row),
+            ensure_ascii=False,
+            allow_nan=False,
+            separators=(",", ":"),
+        ).encode("utf-8")
+        identities.append(
+            {
+                "update_id": row[0],
+                "row_fingerprint": hashlib.sha256(_DEAD_LETTER_ROW_DOMAIN + material).hexdigest(),
+            }
+        )
+    identities.sort(key=lambda item: (item["update_id"], item["row_fingerprint"]))
+    set_material = json.dumps(
+        [[item["update_id"], item["row_fingerprint"]] for item in identities],
+        ensure_ascii=False,
+        allow_nan=False,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    return hashlib.sha256(_DEAD_LETTER_SET_DOMAIN + set_material).hexdigest(), identities
+
 
 def _backend_lease(settings):
     from friday.diagnostics.runtime_lease import ProcessLease
 
     return ProcessLease(settings.state_dir / "backend.lock", protocol="friday.backend.v1")
+
+
+def _collect_stopped_snapshot(settings, storage):
+    from friday.diagnostics import collect_document_contour_observer_snapshot
+
+    lease = _backend_lease(settings)
+    lease.acquire()
+    try:
+        return collect_document_contour_observer_snapshot(settings, storage)
+    finally:
+        lease.release()
+
+
+def _execute_queue_update(queue_path, statement, parameters=()):
+    connection = sqlite3.connect(queue_path)
+    try:
+        connection.execute(statement, parameters)
+        connection.commit()
+    finally:
+        connection.close()
 
 
 def _stopped_queue(settings, *, pending_update_id: int | None = None):
@@ -75,6 +139,7 @@ def test_observer_counts_physical_outbound_and_only_bridge_aggregates(settings, 
         inbox.mark_dead_letter(2, "SECRET-LAST-ERROR-0bc6")
     finally:
         inbox.close()
+    expected_set_sha256, expected_identities = _expected_dead_letter_evidence(queue_path)
 
     lease = _backend_lease(settings)
     lease.acquire()
@@ -84,7 +149,7 @@ def test_observer_counts_physical_outbound_and_only_bridge_aggregates(settings, 
         lease.release()
 
     assert snapshot == {
-        "schema": "friday.document-contour-observer-snapshot.v1",
+        "schema": "friday.document-contour-observer-snapshot.v2",
         "backend_pid": os.getpid(),
         "backend_lease_owned": True,
         "physical_outbound_pending": 1,
@@ -93,6 +158,8 @@ def test_observer_counts_physical_outbound_and_only_bridge_aggregates(settings, 
         "bridge_lease_released": True,
         "inbound_pending": 1,
         "dead_letter": 1,
+        "dead_letter_set_sha256": expected_set_sha256,
+        "dead_letter_identities": expected_identities,
     }
     public = repr(snapshot)
     for forbidden in (
@@ -105,12 +172,136 @@ def test_observer_counts_physical_outbound_and_only_bridge_aggregates(settings, 
         assert forbidden not in public
 
 
-def test_observer_queue_projection_never_reads_last_error() -> None:
+def test_observer_queue_projection_reads_only_the_declared_metadata_tuple() -> None:
     import friday.diagnostics as diagnostics
 
     source = inspect.getsource(diagnostics._bridge_queue_counts_only)  # noqa: SLF001
     assert "last_error" not in source
     assert "payload_json" not in source
+    assert "backend_response_json" not in source
+    assert "ordering_key" not in source
+    assert "SELECT *" not in source
+    assert "SELECT update_id, status, attempts, failed_at, created_at, last_attempt_at" in source
+
+
+def test_empty_queue_has_the_canonical_zero_set_evidence(settings, storage) -> None:
+    _stopped_queue(settings)
+
+    snapshot = _collect_stopped_snapshot(settings, storage)
+
+    assert snapshot["dead_letter"] == 0
+    assert snapshot["dead_letter_set_sha256"] == (
+        "f0be97144a676e0c1e9b25c932b45a99d01242bab59a4a8edcf0417bcf49f521"
+    )
+    assert snapshot["dead_letter_identities"] == []
+
+
+@pytest.mark.parametrize(
+    ("mutation", "expected_count"),
+    (
+        pytest.param("extra", 2, id="extra-row"),
+        pytest.param("missing", 0, id="missing-row"),
+        pytest.param("replaced", 1, id="replaced-update-id"),
+        pytest.param("mutated", 1, id="mutated-fingerprint"),
+    ),
+)
+def test_exact_metadata_set_evidence_detects_every_set_substitution(
+    settings,
+    storage,
+    mutation,
+    expected_count,
+) -> None:
+    from friday.telegram_bridge import _UpdateInbox
+
+    queue_path = settings.state_dir / "telegram-inbox.sqlite3"
+    inbox = _UpdateInbox(str(queue_path))
+    try:
+        assert inbox.store({"update_id": 2, "message": {"text": "protected-private-body"}})
+        inbox.mark_dead_letter(2, "protected-private-error")
+    finally:
+        inbox.close()
+    baseline = _collect_stopped_snapshot(settings, storage)
+
+    if mutation == "extra":
+        inbox = _UpdateInbox(str(queue_path))
+        try:
+            assert inbox.store({"update_id": 3, "message": {"text": "extra-private-body"}})
+            inbox.mark_dead_letter(3, "extra-private-error")
+        finally:
+            inbox.close()
+    elif mutation == "missing":
+        _execute_queue_update(queue_path, "DELETE FROM updates WHERE update_id=2")
+    elif mutation == "replaced":
+        _execute_queue_update(queue_path, "UPDATE updates SET update_id=3 WHERE update_id=2")
+    else:
+        _execute_queue_update(queue_path, "UPDATE updates SET attempts=attempts+1 WHERE update_id=2")
+
+    observed = _collect_stopped_snapshot(settings, storage)
+
+    assert baseline["dead_letter"] == 1
+    assert observed["dead_letter"] == expected_count
+    assert observed["dead_letter_set_sha256"] != baseline["dead_letter_set_sha256"]
+    assert observed["dead_letter_identities"] != baseline["dead_letter_identities"]
+
+
+def test_metadata_set_evidence_does_not_claim_unobserved_whole_row_immutability(
+    settings,
+    storage,
+) -> None:
+    from friday.telegram_bridge import _UpdateInbox
+
+    queue_path = settings.state_dir / "telegram-inbox.sqlite3"
+    inbox = _UpdateInbox(str(queue_path))
+    try:
+        assert inbox.store({"update_id": 2, "message": {"text": "original-private-body"}})
+        inbox.mark_dead_letter(2, "original-private-error")
+    finally:
+        inbox.close()
+    baseline = _collect_stopped_snapshot(settings, storage)
+
+    _execute_queue_update(
+        queue_path,
+        """UPDATE updates
+              SET payload_json=?, last_error=?, backend_response_json=?, ordering_key=?
+            WHERE update_id=2""",
+        (
+            '{"message":{"text":"replacement-private-body"},"update_id":2}',
+            "replacement-private-error",
+            '{"private":"backend-response"}',
+            "replacement-private-ordering-key",
+        ),
+    )
+    observed = _collect_stopped_snapshot(settings, storage)
+
+    assert observed["dead_letter"] == baseline["dead_letter"] == 1
+    assert observed["dead_letter_set_sha256"] == baseline["dead_letter_set_sha256"]
+    assert observed["dead_letter_identities"] == baseline["dead_letter_identities"]
+    assert "replacement-private" not in repr(observed)
+
+
+@pytest.mark.parametrize(
+    "statement",
+    (
+        "UPDATE updates SET attempts=-1 WHERE update_id=2",
+        "UPDATE updates SET created_at=-1 WHERE update_id=2",
+        "UPDATE updates SET last_attempt_at=-1 WHERE update_id=2",
+        "UPDATE updates SET failed_at=-1 WHERE update_id=2",
+    ),
+)
+def test_malformed_dead_letter_metadata_cannot_be_attested(settings, storage, statement) -> None:
+    from friday.telegram_bridge import _UpdateInbox
+
+    queue_path = settings.state_dir / "telegram-inbox.sqlite3"
+    inbox = _UpdateInbox(str(queue_path))
+    try:
+        assert inbox.store({"update_id": 2, "message": {"text": "private-body"}})
+        inbox.mark_dead_letter(2, "private-error")
+    finally:
+        inbox.close()
+    _execute_queue_update(queue_path, statement)
+
+    with pytest.raises(RuntimeError, match="dead-letter identity is malformed"):
+        _collect_stopped_snapshot(settings, storage)
 
 
 def test_active_bridge_lease_prevents_any_queue_open(settings, storage, monkeypatch):
@@ -139,6 +330,8 @@ def test_active_bridge_lease_prevents_any_queue_open(settings, storage, monkeypa
     assert snapshot["bridge_lease_released"] is False
     assert snapshot["inbound_pending"] is None
     assert snapshot["dead_letter"] is None
+    assert snapshot["dead_letter_set_sha256"] is None
+    assert snapshot["dead_letter_identities"] is None
 
 
 def test_ambiguous_lost_bridge_lease_is_closed_without_queue_open(settings, storage, monkeypatch):
@@ -175,6 +368,8 @@ def test_ambiguous_lost_bridge_lease_is_closed_without_queue_open(settings, stor
     assert snapshot["bridge_lease_released"] is False
     assert snapshot["inbound_pending"] is None
     assert snapshot["dead_letter"] is None
+    assert snapshot["dead_letter_set_sha256"] is None
+    assert snapshot["dead_letter_identities"] is None
 
 
 def test_release_failure_cannot_return_a_successful_snapshot(settings, storage, monkeypatch):
@@ -265,6 +460,7 @@ def test_http_snapshot_is_owner_only_and_numeric_loopback_only(settings):
             inbox.mark_dead_letter(2, "SECRET-LAST-ERROR-0bc6")
         finally:
             inbox.close()
+        expected_set_sha256, expected_identities = _expected_dead_letter_evidence(queue_path)
         delegate = "observer-delegate"
         token = "observer-delegate-secret-" + "D" * 32
         store.ensure_user(delegate, preset_key="admin")
@@ -279,7 +475,7 @@ def test_http_snapshot_is_owner_only_and_numeric_loopback_only(settings):
         assert response.status_code == 200, response.text
         assert response.json()["backend_pid"] == os.getpid()
         expected = {
-            "schema": "friday.document-contour-observer-snapshot.v1",
+            "schema": "friday.document-contour-observer-snapshot.v2",
             "backend_pid": os.getpid(),
             "backend_lease_owned": True,
             "physical_outbound_pending": 1,
@@ -288,6 +484,8 @@ def test_http_snapshot_is_owner_only_and_numeric_loopback_only(settings):
             "bridge_lease_released": True,
             "inbound_pending": 1,
             "dead_letter": 1,
+            "dead_letter_set_sha256": expected_set_sha256,
+            "dead_letter_identities": expected_identities,
         }
         observed = response.json()
         assert observed == expected
@@ -556,6 +754,7 @@ def test_guarded_queue_snapshot_keeps_the_exact_external_lease_held(settings):
         inbox.mark_dead_letter(72, "private diagnostic")
     finally:
         inbox.close()
+    expected_set_sha256, expected_identities = _expected_dead_letter_evidence(queue_path)
 
     lease_path = queue_path.with_name(f"{queue_path.name}.lock")
     boundary = ProcessLease(lease_path, protocol="friday.telegram-bridge.v1")
@@ -563,11 +762,13 @@ def test_guarded_queue_snapshot_keeps_the_exact_external_lease_held(settings):
     try:
         snapshot = collect_document_contour_guarded_bridge_queue_snapshot(settings, boundary)
         assert snapshot == {
-            "schema": "friday.document-contour-guarded-bridge-queue.v1",
+            "schema": "friday.document-contour-guarded-bridge-queue.v2",
             "bridge_guard_held": True,
             "bridge_queue_state": "present",
             "inbound_pending": 1,
             "dead_letter": 1,
+            "dead_letter_set_sha256": expected_set_sha256,
+            "dead_letter_identities": expected_identities,
         }
         assert boundary.acquired is True
         assert process_owns_lease(lease_path, protocol="friday.telegram-bridge.v1") is True

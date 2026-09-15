@@ -32,7 +32,7 @@ import tempfile
 import time
 from collections.abc import Callable, Mapping, Sequence
 from contextlib import suppress
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from types import TracebackType
 from typing import Any, Protocol
@@ -65,20 +65,28 @@ from friday.v12_model_runtime import (  # noqa: E402, PLC2701
 from friday.v12_model_transport import RouterV12MetricsTransport  # noqa: E402
 
 OPERATOR_SCHEMA = "friday.document-contour-release-operator.v1"
-OBSERVER_SNAPSHOT_SCHEMA = "friday.document-contour-observer-snapshot.v1"
-GUARDED_QUEUE_SCHEMA = "friday.document-contour-guarded-bridge-queue.v1"
+OBSERVER_SNAPSHOT_SCHEMA = "friday.document-contour-observer-snapshot.v2"
+GUARDED_QUEUE_SCHEMA = "friday.document-contour-guarded-bridge-queue.v2"
 RUN_RECEIPT_SCHEMA = "friday.document-contour-live-battery.run-receipt.v1"
-OBSERVER_REQUEST_SCHEMA = "friday.document-contour-live-battery.observer-request.v1"
-OBSERVER_RESPONSE_SCHEMA = "friday.document-contour-live-battery.observer-response.v2"
+OBSERVER_REQUEST_SCHEMA = "friday.document-contour-live-battery.observer-request.v2"
+OBSERVER_RESPONSE_SCHEMA = "friday.document-contour-live-battery.observer-response.v3"
 BATTERY_REPORT_SCHEMA = "friday.document-contour-live-battery.report.v1"
 BATTERY_WORKER_SCHEMA = "friday.document-contour-live-battery.worker.v1"
 BATTERY_CASE_IDS = ("D06", "D07", "D08")
+PROTECTED_DEAD_LETTER_SET_SCHEMA = "friday.document-contour.protected-dead-letter-set.v1"
+DEAD_LETTER_ROW_FINGERPRINT_SCHEMA = "friday.document-contour.dead-letter-row.v1"
+DEAD_LETTER_SET_FINGERPRINT_SCHEMA = "friday.document-contour.dead-letter-set.v1"
+DEAD_LETTER_FINGERPRINT_SCOPE = (
+    "metadata_only:update_id,status,attempts,failed_at,created_at,last_attempt_at;"
+    "excludes:payload_json,backend_response_json,last_error,ordering_key"
+)
+EMPTY_DEAD_LETTER_SET_SHA256 = "f0be97144a676e0c1e9b25c932b45a99d01242bab59a4a8edcf0417bcf49f521"
 
 _EXPECTED_DEPENDENCY_HASHES = {
     "tools/document_contour_live_battery.py": (
-        "71cb9e4e3a3e3ccf7efe7291178e750fad1b8eea684b21cc1f7f384d46261d4a"
+        "3749abdbe19080d7f4108809df9508b88306d9ae7d006a0c616aa02190e782a0"
     ),
-    "friday/diagnostics/__init__.py": ("9e8593a74f1ae12d49e17fd873ef508385e0f074fae45169679ba937c0616446"),
+    "friday/diagnostics/__init__.py": ("0add438a16df83036a29e3fa68bf98425f3228d770ba2951bbe25985bdc1383a"),
     "friday/diagnostics/runtime_lease.py": (
         "6986bcef0d21d1754672ad784746fbc205b4822de708c71b16dd93576f3d1926"
     ),
@@ -154,6 +162,7 @@ _HEX40_RE = re.compile(r"[0-9a-f]{40}")
 _HEX64_RE = re.compile(r"[0-9a-f]{64}")
 _ENV_KEY_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
 MAX_PRIVATE_JSON_BYTES = 1 << 20
+MAX_PROTECTED_DEAD_LETTER_IDENTITIES = 4_096
 MAX_ENV_BYTES = 1 << 20
 MAX_HTTP_BYTES = 2 << 20
 MAX_CHILD_OUTPUT_BYTES = 8 << 20
@@ -197,7 +206,7 @@ _OBSERVER_BOOLEAN_FIELDS = (
     "backend_unchanged",
     "outbound_pending_zero",
     "inbound_pending_zero",
-    "dead_letter_zero",
+    "dead_letter_matches_protected_set",
     "dispatcher_unchanged",
 )
 
@@ -223,12 +232,42 @@ class SignalHandlers:
 
 
 @dataclass(frozen=True)
+class ProtectedDeadLetterSet:
+    """Exact metadata-only identity pin; it does not attest queue-row bodies."""
+
+    explicit: bool
+    identities: tuple[tuple[int, str], ...]
+    dead_letter_set_sha256: str
+    source_sha256: str | None = None
+
+    @property
+    def count(self) -> int:
+        return len(self.identities)
+
+
+EMPTY_PROTECTED_DEAD_LETTER_SET = ProtectedDeadLetterSet(
+    explicit=False,
+    identities=(),
+    dead_letter_set_sha256=EMPTY_DEAD_LETTER_SET_SHA256,
+)
+
+
+@dataclass(frozen=True)
+class DeadLetterObservation:
+    count: int
+    dead_letter_set_sha256: str
+    identities: tuple[tuple[int, str], ...]
+
+
+@dataclass(frozen=True)
 class OperatorConfig:
     freeze_commit: str
     env_file: Path
     barrier_dir: Path
     backend_unit: str
     bridge_unit: str
+    protected_dead_letter_set_file: Path | None = None
+    protected_dead_letter_set: ProtectedDeadLetterSet = EMPTY_PROTECTED_DEAD_LETTER_SET
     report: Path | None = None
 
 
@@ -324,6 +363,157 @@ def _canonical_json(payload: Mapping[str, Any]) -> bytes:
 
 def _sha256(payload: bytes) -> str:
     return hashlib.sha256(payload).hexdigest()
+
+
+def _dead_letter_set_sha256(identities: Sequence[tuple[int, str]]) -> str:
+    """Hash the sorted metadata identities using the collector's public contract."""
+
+    projection = [[update_id, fingerprint] for update_id, fingerprint in identities]
+    encoded = json.dumps(
+        projection,
+        ensure_ascii=False,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    return _sha256(DEAD_LETTER_SET_FINGERPRINT_SCHEMA.encode("ascii") + b"\0" + encoded)
+
+
+def _parse_identity_list(value: Any, *, code: str) -> tuple[tuple[int, str], ...]:
+    if not isinstance(value, list) or len(value) > MAX_PROTECTED_DEAD_LETTER_IDENTITIES:
+        raise OperatorFailure(code)
+    parsed: list[tuple[int, str]] = []
+    for item in value:
+        if not isinstance(item, Mapping) or set(item) != {"update_id", "row_fingerprint"}:
+            raise OperatorFailure(code)
+        update_id = item.get("update_id")
+        fingerprint = item.get("row_fingerprint")
+        if (
+            type(update_id) is not int
+            or int(update_id) < 0
+            or not isinstance(fingerprint, str)
+            or _HEX64_RE.fullmatch(fingerprint) is None
+        ):
+            raise OperatorFailure(code)
+        parsed.append((int(update_id), fingerprint))
+    identities = tuple(parsed)
+    if identities != tuple(sorted(identities)) or len({item[0] for item in identities}) != len(identities):
+        raise OperatorFailure(code)
+    return identities
+
+
+def _parse_protected_dead_letter_set(pinned: PinnedPrivateFile) -> ProtectedDeadLetterSet:
+    code = "protected_dead_letter_set_invalid"
+    try:
+        parsed = json.loads(pinned.content.decode("utf-8"))
+    except (UnicodeError, json.JSONDecodeError) as exc:
+        raise OperatorFailure(code) from exc
+    exact_keys = {
+        "schema",
+        "row_fingerprint_schema",
+        "set_fingerprint_schema",
+        "fingerprint_scope",
+        "dead_letter_count",
+        "dead_letter_set_sha256",
+        "dead_letter_identities",
+    }
+    if (
+        not isinstance(parsed, Mapping)
+        or set(parsed) != exact_keys
+        or pinned.content != _canonical_json(parsed) + b"\n"
+        or parsed.get("schema") != PROTECTED_DEAD_LETTER_SET_SCHEMA
+        or parsed.get("row_fingerprint_schema") != DEAD_LETTER_ROW_FINGERPRINT_SCHEMA
+        or parsed.get("set_fingerprint_schema") != DEAD_LETTER_SET_FINGERPRINT_SCHEMA
+        or parsed.get("fingerprint_scope") != DEAD_LETTER_FINGERPRINT_SCOPE
+        or type(parsed.get("dead_letter_count")) is not int
+        or int(parsed["dead_letter_count"]) < 0
+    ):
+        raise OperatorFailure(code)
+    identities = _parse_identity_list(parsed.get("dead_letter_identities"), code=code)
+    digest = _require_hash(parsed.get("dead_letter_set_sha256"), code)
+    if int(parsed["dead_letter_count"]) != len(identities) or digest != _dead_letter_set_sha256(identities):
+        raise OperatorFailure(code)
+    return ProtectedDeadLetterSet(
+        explicit=True,
+        identities=identities,
+        dead_letter_set_sha256=digest,
+        source_sha256=pinned.content_sha256,
+    )
+
+
+def _revalidate_protected_dead_letter_input(
+    config: OperatorConfig,
+    pinned: PinnedPrivateFile | None,
+) -> None:
+    protected = config.protected_dead_letter_set
+    identities = protected.identities
+    if (
+        type(protected.explicit) is not bool
+        or not isinstance(identities, tuple)
+        or len(identities) > MAX_PROTECTED_DEAD_LETTER_IDENTITIES
+        or any(not isinstance(item, tuple) or len(item) != 2 for item in identities)
+    ):
+        raise OperatorFailure("protected_dead_letter_set_input_invalid")
+    if (
+        any(
+            type(update_id) is not int
+            or update_id < 0
+            or not isinstance(fingerprint, str)
+            or _HEX64_RE.fullmatch(fingerprint) is None
+            for update_id, fingerprint in identities
+        )
+        or identities != tuple(sorted(identities))
+        or len({item[0] for item in identities}) != len(identities)
+        or protected.dead_letter_set_sha256 != _dead_letter_set_sha256(identities)
+    ):
+        raise OperatorFailure("protected_dead_letter_set_input_invalid")
+    if not protected.explicit:
+        if (
+            protected != EMPTY_PROTECTED_DEAD_LETTER_SET
+            or config.protected_dead_letter_set_file is not None
+            or pinned is not None
+        ):
+            raise OperatorFailure("protected_dead_letter_set_input_invalid")
+        return
+    if (
+        pinned is None
+        or config.protected_dead_letter_set_file is None
+        or pinned.path != config.protected_dead_letter_set_file
+        or protected.source_sha256 is None
+        or pinned.content_sha256 != protected.source_sha256
+    ):
+        raise OperatorFailure("protected_dead_letter_set_input_invalid")
+    pinned.revalidate()
+
+
+def _dead_letter_observation(payload: Mapping[str, Any], *, code: str) -> DeadLetterObservation:
+    count = _require_nonnegative_int(payload, "dead_letter", code)
+    digest = _require_hash(payload.get("dead_letter_set_sha256"), code)
+    identities = _parse_identity_list(payload.get("dead_letter_identities"), code=code)
+    if count != len(identities) or digest != _dead_letter_set_sha256(identities):
+        raise OperatorFailure(code)
+    return DeadLetterObservation(count, digest, identities)
+
+
+def _validate_dead_letter_observation(
+    payload: Mapping[str, Any],
+    protected: ProtectedDeadLetterSet,
+    *,
+    invalid_code: str,
+    zero_code: str,
+    mismatch_code: str,
+) -> DeadLetterObservation:
+    count = _require_nonnegative_int(payload, "dead_letter", invalid_code)
+    # Preserve the legacy zero-only failure for an absent pin.  Identity fields
+    # cannot turn a nonempty observed queue into an admitted baseline.
+    if not protected.explicit and count != 0:
+        raise OperatorFailure(zero_code)
+    observed = _dead_letter_observation(payload, code=invalid_code)
+    if (
+        observed.count != protected.count
+        or observed.dead_letter_set_sha256 != protected.dead_letter_set_sha256
+        or observed.identities != protected.identities
+    ):
+        raise OperatorFailure(mismatch_code)
+    return observed
 
 
 def _rename_noreplace(
@@ -780,6 +970,7 @@ def _validate_observer_request(
     receipt_bytes: bytes,
     *,
     commit: str,
+    protected_set: ProtectedDeadLetterSet = EMPTY_PROTECTED_DEAD_LETTER_SET,
 ) -> None:
     exact_keys = {
         "schema",
@@ -789,7 +980,11 @@ def _validate_observer_request(
         "run_receipt_sha256",
         "worker_report_sha256",
         "challenge",
+        "protected_dead_letter_count",
+        "protected_dead_letter_set_sha256",
     }
+    expected_protected_count = protected_set.count if protected_set.explicit else None
+    expected_protected_hash = protected_set.dead_letter_set_sha256 if protected_set.explicit else None
     if (
         set(request) != exact_keys
         or request.get("schema") != OBSERVER_REQUEST_SCHEMA
@@ -802,6 +997,12 @@ def _validate_observer_request(
         or _HEX64_RE.fullmatch(str(request.get("run_receipt_sha256") or "")) is None
         or _HEX64_RE.fullmatch(str(request.get("worker_report_sha256") or "")) is None
         or _HEX64_RE.fullmatch(str(request.get("challenge") or "")) is None
+        or request.get("protected_dead_letter_count") != expected_protected_count
+        or request.get("protected_dead_letter_set_sha256") != expected_protected_hash
+        or (
+            expected_protected_count is not None
+            and type(request.get("protected_dead_letter_count")) is not int
+        )
     ):
         raise OperatorFailure("observer_request_invalid")
     distinct = {
@@ -814,7 +1015,11 @@ def _validate_observer_request(
         raise OperatorFailure("observer_request_invalid")
 
 
-def _validate_stopped_snapshot(payload: Mapping[str, Any], backend_pid: int) -> None:
+def _validate_stopped_snapshot(
+    payload: Mapping[str, Any],
+    backend_pid: int,
+    protected_set: ProtectedDeadLetterSet = EMPTY_PROTECTED_DEAD_LETTER_SET,
+) -> DeadLetterObservation:
     exact_keys = {
         "schema",
         "backend_pid",
@@ -825,6 +1030,8 @@ def _validate_stopped_snapshot(payload: Mapping[str, Any], backend_pid: int) -> 
         "bridge_lease_released",
         "inbound_pending",
         "dead_letter",
+        "dead_letter_set_sha256",
+        "dead_letter_identities",
     }
     if set(payload) != exact_keys or payload.get("schema") != OBSERVER_SNAPSHOT_SCHEMA:
         raise OperatorFailure("stopped_snapshot_invalid")
@@ -873,8 +1080,15 @@ def _validate_stopped_snapshot(payload: Mapping[str, Any], backend_pid: int) -> 
         raise OperatorFailure("stopped_snapshot_outbound_not_empty")
     if inbound_pending:
         raise OperatorFailure("stopped_snapshot_inbound_not_empty")
-    if dead_letter:
+    if dead_letter and not protected_set.explicit:
         raise OperatorFailure("stopped_snapshot_dead_letter_not_empty")
+    return _validate_dead_letter_observation(
+        payload,
+        protected_set,
+        invalid_code="stopped_snapshot_invalid",
+        zero_code="stopped_snapshot_dead_letter_not_empty",
+        mismatch_code="stopped_snapshot_protected_dead_letter_set_mismatch",
+    )
 
 
 def _validate_held_snapshot(payload: Mapping[str, Any], backend_pid: int) -> None:
@@ -888,6 +1102,8 @@ def _validate_held_snapshot(payload: Mapping[str, Any], backend_pid: int) -> Non
         "bridge_lease_released",
         "inbound_pending",
         "dead_letter",
+        "dead_letter_set_sha256",
+        "dead_letter_identities",
     }
     if set(payload) != exact_keys or payload.get("schema") != OBSERVER_SNAPSHOT_SCHEMA:
         raise OperatorFailure("held_snapshot_invalid")
@@ -900,6 +1116,8 @@ def _validate_held_snapshot(payload: Mapping[str, Any], backend_pid: int) -> Non
         or _require_bool(payload, "bridge_lease_released", "held_snapshot_invalid") is not False
         or payload.get("inbound_pending") is not None
         or payload.get("dead_letter") is not None
+        or payload.get("dead_letter_set_sha256") is not None
+        or payload.get("dead_letter_identities") is not None
         or _require_nonnegative_int(
             payload,
             "physical_outbound_pending",
@@ -916,13 +1134,18 @@ def _validate_active_snapshot(payload: Mapping[str, Any], backend_pid: int) -> N
     _validate_held_snapshot(payload, backend_pid)
 
 
-def _validate_guarded_queue(payload: Mapping[str, Any]) -> None:
+def _validate_guarded_queue(
+    payload: Mapping[str, Any],
+    protected_set: ProtectedDeadLetterSet = EMPTY_PROTECTED_DEAD_LETTER_SET,
+) -> DeadLetterObservation:
     exact = {
         "schema",
         "bridge_guard_held",
         "bridge_queue_state",
         "inbound_pending",
         "dead_letter",
+        "dead_letter_set_sha256",
+        "dead_letter_identities",
     }
     if (
         set(payload) != exact
@@ -930,9 +1153,20 @@ def _validate_guarded_queue(payload: Mapping[str, Any]) -> None:
         or _require_bool(payload, "bridge_guard_held", "guarded_queue_invalid") is not True
         or payload.get("bridge_queue_state") != "present"
         or _require_nonnegative_int(payload, "inbound_pending", "guarded_queue_invalid") != 0
-        or _require_nonnegative_int(payload, "dead_letter", "guarded_queue_invalid") != 0
     ):
         raise OperatorFailure("guarded_queue_not_clear")
+    if (
+        not protected_set.explicit
+        and _require_nonnegative_int(payload, "dead_letter", "guarded_queue_invalid") != 0
+    ):
+        raise OperatorFailure("guarded_queue_not_clear")
+    return _validate_dead_letter_observation(
+        payload,
+        protected_set,
+        invalid_code="guarded_queue_invalid",
+        zero_code="guarded_queue_not_clear",
+        mismatch_code="guarded_queue_protected_dead_letter_set_mismatch",
+    )
 
 
 def _validate_health(payload: Mapping[str, Any]) -> None:
@@ -940,7 +1174,10 @@ def _validate_health(payload: Mapping[str, Any]) -> None:
         raise OperatorFailure("backend_health_not_clear")
 
 
-def _observer_response(request: Mapping[str, Any]) -> dict[str, Any]:
+def _observer_response(
+    request: Mapping[str, Any],
+    observed: DeadLetterObservation,
+) -> dict[str, Any]:
     return {
         "schema": OBSERVER_RESPONSE_SCHEMA,
         "commit": request["commit"],
@@ -949,8 +1186,13 @@ def _observer_response(request: Mapping[str, Any]) -> dict[str, Any]:
         "run_receipt_sha256": request["run_receipt_sha256"],
         "worker_report_sha256": request["worker_report_sha256"],
         "challenge": request["challenge"],
+        "protected_dead_letter_count": request["protected_dead_letter_count"],
+        "protected_dead_letter_set_sha256": request["protected_dead_letter_set_sha256"],
         "status": "passed",
         **{key: True for key in _OBSERVER_BOOLEAN_FIELDS},
+        "dead_letter_count": observed.count,
+        "dead_letter_set_sha256": observed.dead_letter_set_sha256,
+        "dead_letter_zero": observed.count == 0,
     }
 
 
@@ -1013,6 +1255,7 @@ def _validate_battery_report(
     response_sha256: str,
     receipt_hashes: Mapping[int, str],
     receipt_payloads: Mapping[int, Mapping[str, Any]],
+    protected_set: ProtectedDeadLetterSet = EMPTY_PROTECTED_DEAD_LETTER_SET,
 ) -> None:
     receipts = payload.get("run_receipts")
     observer = payload.get("inter_run_observer")
@@ -1068,8 +1311,16 @@ def _validate_battery_report(
         "run_receipt_sha256",
         "worker_report_sha256",
         "response_sha256",
+        "protected_dead_letter_count",
+        "protected_dead_letter_set_sha256",
+        "dead_letter_count",
+        "dead_letter_set_sha256",
+        "dead_letter_zero",
         *_OBSERVER_BOOLEAN_FIELDS,
     }
+    expected_protected_count = protected_set.count if protected_set.explicit else None
+    expected_protected_hash = protected_set.dead_letter_set_sha256 if protected_set.explicit else None
+    observed_count = observer.get("dead_letter_count")
     if (
         set(observer) != expected_observer_keys
         or observer.get("schema") != OBSERVER_RESPONSE_SCHEMA
@@ -1078,6 +1329,19 @@ def _validate_battery_report(
         or observer.get("run_receipt_sha256") != receipt_hashes.get(1)
         or observer.get("worker_report_sha256") != first_receipt.get("worker_report_sha256")
         or observer.get("response_sha256") != response_sha256
+        or observer.get("protected_dead_letter_count") != expected_protected_count
+        or observer.get("protected_dead_letter_set_sha256") != expected_protected_hash
+        or (
+            expected_protected_count is not None
+            and type(observer.get("protected_dead_letter_count")) is not int
+        )
+        or type(observed_count) is not int
+        or int(observed_count) < 0
+        or observed_count != protected_set.count
+        or observer.get("dead_letter_set_sha256") != protected_set.dead_letter_set_sha256
+        or _HEX64_RE.fullmatch(str(observer.get("dead_letter_set_sha256") or "")) is None
+        or type(observer.get("dead_letter_zero")) is not bool
+        or observer.get("dead_letter_zero") is not (observed_count == 0)
         or any(observer.get(key) is not True for key in _OBSERVER_BOOLEAN_FIELDS)
     ):
         raise OperatorFailure("battery_report_observer_mismatch")
@@ -1956,6 +2220,15 @@ class LiveRuntime:
                 "--inter-run-barrier-dir",
                 str(config.barrier_dir),
             ]
+            if config.protected_dead_letter_set.explicit:
+                battery_command.extend(
+                    [
+                        "--protected-dead-letter-count",
+                        str(config.protected_dead_letter_set.count),
+                        "--protected-dead-letter-set-sha256",
+                        config.protected_dead_letter_set.dead_letter_set_sha256,
+                    ]
+                )
             scope_unit = f"friday-document-contour-{os.getpid()}-{secrets.token_hex(6)}.scope"
             command = [
                 _SYSTEMD_RUN_BINARY,
@@ -2351,7 +2624,8 @@ def _backend_attestation(
     expected: ServiceFingerprint,
     *,
     held: bool,
-) -> None:
+    protected_set: ProtectedDeadLetterSet = EMPTY_PROTECTED_DEAD_LETTER_SET,
+) -> DeadLetterObservation | None:
     if not runtime.backend_identity_alive(expected):
         raise OperatorFailure("backend_identity_changed")
     before = runtime.backend_identity()
@@ -2361,11 +2635,13 @@ def _backend_attestation(
     snapshot = runtime.observer_snapshot()
     if held:
         _validate_held_snapshot(snapshot, expected.main_pid)
+        observation = None
     else:
-        _validate_stopped_snapshot(snapshot, expected.main_pid)
+        observation = _validate_stopped_snapshot(snapshot, expected.main_pid, protected_set)
     after = runtime.backend_identity()
     if after != expected or not runtime.backend_identity_alive(expected):
         raise OperatorFailure("backend_identity_changed")
+    return observation
 
 
 def _held_barrier_attestation(
@@ -2374,13 +2650,14 @@ def _held_barrier_attestation(
     backend: ServiceFingerprint,
     bridge: ServiceFingerprint,
     dispatcher_epoch: str,
-) -> None:
+    protected_set: ProtectedDeadLetterSet = EMPTY_PROTECTED_DEAD_LETTER_SET,
+) -> DeadLetterObservation:
     if state.guard is None or not runtime.guard_held(state.guard):
         raise OperatorFailure("bridge_guard_lost")
     if not runtime.bridge_inactive(bridge):
         raise OperatorFailure("bridge_became_active")
     first_queue = runtime.guarded_queue_snapshot(state.guard)
-    _validate_guarded_queue(first_queue)
+    first_observation = _validate_guarded_queue(first_queue, protected_set)
     if runtime.backend_identity() != backend or not runtime.backend_identity_alive(backend):
         raise OperatorFailure("backend_identity_changed")
     _validate_health(runtime.health())
@@ -2390,11 +2667,14 @@ def _held_barrier_attestation(
     if runtime.backend_identity() != backend or not runtime.backend_identity_alive(backend):
         raise OperatorFailure("backend_identity_changed")
     second_queue = runtime.guarded_queue_snapshot(state.guard)
-    _validate_guarded_queue(second_queue)
+    second_observation = _validate_guarded_queue(second_queue, protected_set)
     if dict(first_queue) != dict(second_queue):
         raise OperatorFailure("guarded_queue_changed")
     if not runtime.guard_held(state.guard) or not runtime.bridge_inactive(bridge):
         raise OperatorFailure("bridge_guard_lost")
+    if first_observation != second_observation:
+        raise OperatorFailure("guarded_queue_changed")
+    return second_observation
 
 
 def _wait_for_request_or_child(
@@ -2455,7 +2735,9 @@ def _workflow(
     runtime: RuntimePort,
     barrier: PinnedBarrier,
     state: ExecutionState,
+    protected_set_file: PinnedPrivateFile | None,
 ) -> None:
+    _revalidate_protected_dead_letter_input(config, protected_set_file)
     runtime.revalidate_environment()
     backend = runtime.backend_identity()
     state.backend = backend
@@ -2478,7 +2760,13 @@ def _workflow(
     if not runtime.bridge_inactive(bridge):
         raise OperatorFailure("bridge_not_inactive")
     runtime.revalidate_environment()
-    _backend_attestation(runtime, backend, held=False)
+    _revalidate_protected_dead_letter_input(config, protected_set_file)
+    _backend_attestation(
+        runtime,
+        backend,
+        held=False,
+        protected_set=config.protected_dead_letter_set,
+    )
     if runtime.dispatcher_epoch() != dispatcher_epoch:
         raise OperatorFailure("dispatcher_epoch_changed")
     state.checks["bridge_stopped_clear"] = True
@@ -2490,7 +2778,15 @@ def _workflow(
         _restore_signal_mask(previous_mask)
     if not runtime.guard_held(state.guard):
         raise OperatorFailure("bridge_guard_not_held")
-    _held_barrier_attestation(runtime, state, backend, bridge, dispatcher_epoch)
+    _revalidate_protected_dead_letter_input(config, protected_set_file)
+    _held_barrier_attestation(
+        runtime,
+        state,
+        backend,
+        bridge,
+        dispatcher_epoch,
+        config.protected_dead_letter_set,
+    )
     state.checks["bridge_guard_clear"] = True
 
     runtime.revalidate_environment()
@@ -2527,12 +2823,21 @@ def _workflow(
         receipt_1,
         receipt_1_bytes,
         commit=config.freeze_commit,
+        protected_set=config.protected_dead_letter_set,
     )
     state.evidence_hashes["run_1_receipt_sha256"] = _sha256(receipt_1_bytes)
     state.evidence_hashes["observer_request_sha256"] = _sha256(request_bytes)
 
     runtime.revalidate_environment()
-    _held_barrier_attestation(runtime, state, backend, bridge, dispatcher_epoch)
+    _revalidate_protected_dead_letter_input(config, protected_set_file)
+    inter_run_observation = _held_barrier_attestation(
+        runtime,
+        state,
+        backend,
+        bridge,
+        dispatcher_epoch,
+        config.protected_dead_letter_set,
+    )
     reread_receipt, reread_receipt_bytes = barrier.read_canonical_json("run-1-receipt.json")
     reread_request, reread_request_bytes = barrier.read_canonical_json("run-1-observer-request.json")
     if (
@@ -2545,7 +2850,8 @@ def _workflow(
     if state.child is None or not runtime.child_contour_alive(state.child):
         raise OperatorFailure("battery_exited_before_observer")
 
-    response = _observer_response(request)
+    _revalidate_protected_dead_letter_input(config, protected_set_file)
+    response = _observer_response(request, inter_run_observation)
     response_bytes = barrier.atomic_write_json("run-1-observer.json", response)
     response_sha256 = _sha256(response_bytes)
     state.evidence_hashes["observer_response_sha256"] = response_sha256
@@ -2591,11 +2897,21 @@ def _workflow(
         response_sha256=response_sha256,
         receipt_hashes={1: _sha256(receipt_1_bytes), 2: _sha256(receipt_2_bytes)},
         receipt_payloads={1: receipt_1, 2: receipt_2},
+        protected_set=config.protected_dead_letter_set,
     )
 
     runtime.revalidate_environment()
-    _held_barrier_attestation(runtime, state, backend, bridge, dispatcher_epoch)
+    _revalidate_protected_dead_letter_input(config, protected_set_file)
+    _held_barrier_attestation(
+        runtime,
+        state,
+        backend,
+        bridge,
+        dispatcher_epoch,
+        config.protected_dead_letter_set,
+    )
     barrier.revalidate()
+    _revalidate_protected_dead_letter_input(config, protected_set_file)
     state.battery_report = battery_report
     state.checks["battery_clear"] = True
     state.checks["backend_unchanged"] = True
@@ -2691,11 +3007,12 @@ def execute_operator(
     barrier: PinnedBarrier,
     *,
     signal_state: SignalHandlers | None = None,
+    protected_set_file: PinnedPrivateFile | None = None,
 ) -> tuple[dict[str, Any], int]:
     state = ExecutionState(started_at=time.monotonic())
     primary: BaseException | None = None
     try:
-        _workflow(config, runtime, barrier, state)
+        _workflow(config, runtime, barrier, state, protected_set_file)
         if signal_state is not None:
             # Close the successful-return/finalizer boundary while this call is
             # still inside the exception contour.  A first signal is therefore
@@ -2714,7 +3031,14 @@ def execute_operator(
     finally:
 
         def cleanup() -> None:
+            nonlocal primary
             _cleanup_and_restart(runtime, state)
+            try:
+                _revalidate_protected_dead_letter_input(config, protected_set_file)
+            except BaseException as exc:
+                if primary is None:
+                    primary = exc
+                state.failure_codes.add(_closed_exception_code(exc))
 
         if signal_state is None:
             cleanup()
@@ -2949,6 +3273,14 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--backend-unit", required=True, help="exact systemd --user backend unit")
     parser.add_argument("--bridge-unit", required=True, help="exact systemd --user bridge unit")
+    parser.add_argument(
+        "--protected-dead-letter-set-file",
+        default="",
+        help=(
+            "optional absolute owner-only canonical metadata-identity pin; "
+            "without it the dead-letter queue must be empty"
+        ),
+    )
     parser.add_argument("--report", default="", help="optional sanitized owner-only JSON report")
     return parser
 
@@ -2959,21 +3291,31 @@ def _config_from_args(args: argparse.Namespace) -> OperatorConfig:
     commit = str(args.freeze_commit or "").strip().casefold()
     env_input = Path(str(args.env_file)).expanduser()
     barrier_input = Path(str(args.inter_run_barrier_dir)).expanduser()
+    protected_value = str(getattr(args, "protected_dead_letter_set_file", "") or "").strip()
+    protected_input = Path(protected_value).expanduser() if protected_value else None
     report_value = str(args.report or "").strip()
     report_input = Path(report_value).expanduser() if report_value else None
     if (
         not env_input.is_absolute()
         or not barrier_input.is_absolute()
+        or (protected_input is not None and not protected_input.is_absolute())
         or (report_input is not None and not report_input.is_absolute())
     ):
         raise OperatorFailure("operator_path_not_absolute")
     env_path = Path(os.path.abspath(env_input))
     barrier_path = Path(os.path.abspath(barrier_input))
+    protected_path = Path(os.path.abspath(protected_input)) if protected_input is not None else None
     report = Path(os.path.abspath(report_input)) if report_input is not None else None
     if report is not None and (report == barrier_path or report.is_relative_to(barrier_path)):
         raise OperatorFailure("report_must_be_outside_barrier")
     if report == env_path:
         raise OperatorFailure("report_conflicts_with_env")
+    if protected_path is not None and (
+        protected_path in (env_path, barrier_path) or protected_path.is_relative_to(barrier_path)
+    ):
+        raise OperatorFailure("protected_dead_letter_set_path_invalid")
+    if protected_path is not None and report == protected_path:
+        raise OperatorFailure("report_conflicts_with_protected_dead_letter_set")
     backend_unit = _validate_unit_name(str(args.backend_unit or ""))
     bridge_unit = _validate_unit_name(str(args.bridge_unit or ""))
     if backend_unit == bridge_unit:
@@ -2984,6 +3326,7 @@ def _config_from_args(args: argparse.Namespace) -> OperatorConfig:
         barrier_dir=barrier_path,
         backend_unit=backend_unit,
         bridge_unit=bridge_unit,
+        protected_dead_letter_set_file=protected_path,
         report=report,
     )
 
@@ -2991,6 +3334,7 @@ def _config_from_args(args: argparse.Namespace) -> OperatorConfig:
 def main(argv: Sequence[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     pinned_env: PinnedPrivateFile | None = None
+    pinned_protected_set: PinnedPrivateFile | None = None
     barrier: PinnedBarrier | None = None
     runtime: LiveRuntime | None = None
     try:
@@ -3001,6 +3345,14 @@ def main(argv: Sequence[str] | None = None) -> int:
             maximum_bytes=MAX_ENV_BYTES,
             invalid_code="env_file_invalid",
         )
+        if config.protected_dead_letter_set_file is not None:
+            pinned_protected_set = PinnedPrivateFile(
+                config.protected_dead_letter_set_file,
+                maximum_bytes=MAX_PRIVATE_JSON_BYTES,
+                invalid_code="protected_dead_letter_set_invalid",
+            )
+            protected_set = _parse_protected_dead_letter_set(pinned_protected_set)
+            config = replace(config, protected_dead_letter_set=protected_set)
         barrier = PinnedBarrier(config.barrier_dir)
         runtime = _build_runtime(config, pinned_env)
     except BaseException as exc:
@@ -3013,6 +3365,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         if pinned_env is not None:
             with suppress(BaseException):
                 pinned_env.close()
+        if pinned_protected_set is not None:
+            with suppress(BaseException):
+                pinned_protected_set.close()
         raw_commit = str(getattr(args, "freeze_commit", "") or "").strip().casefold()
         early_report = {
             "schema": OPERATOR_SCHEMA,
@@ -3038,6 +3393,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             runtime,
             barrier,
             signal_state=signal_state,
+            protected_set_file=pinned_protected_set,
         )
         signal_state = None
     except BaseException as exc:
@@ -3076,6 +3432,8 @@ def main(argv: Sequence[str] | None = None) -> int:
                 runtime.close()
         barrier.close()
         pinned_env.close()
+        if pinned_protected_set is not None:
+            pinned_protected_set.close()
 
     if config.report is not None:
         try:

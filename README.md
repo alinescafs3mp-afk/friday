@@ -2,9 +2,10 @@
 
 **Friday** (по-русски — **Пятница**; ex codename Jericho) — локальная многопользовательская Knowledge Operating System: она принимает текст и документы, сохраняет первоисточник, строит граф знаний, ищет по личной базе и отвечает через Telegram или HTTP API. Веб-панель предназначена для администрирования, разбора Inbox, работы с сущностями, правами, резервными копиями и диагностикой.
 
-Текущая версия: **0.208.58** — неопубликованный release candidate.
-При обновлении с 0.208.57 она же служит совместимым со schema 50 immutable
-fallback; прежняя копия 0.208.56 сохраняется. Выпуск требует полной приёмки.
+Текущая версия исходников: **0.208.59** — неопубликованный release candidate.
+При обновлении с 0.208.58 она служит совместимым со schema 50 immutable
+fallback; прежние копии 0.208.57 и 0.208.56 сохраняются. Выпуск требует полной приёмки.
+Фактическое состояние production указано в [canonical backlog](outer_sol/PROJECT_BACKLOG.md).
 
 Owner-only
 Engineer Mode теперь является автономной консолью Пятницы внутри её основной
@@ -406,7 +407,7 @@ fan-out одной задачи. Иерархическое чтение док�
 `/v1/models`, bounded `/metrics`, `/server_info` и per-process deployment
 witness с code-owned identities и launch graph. Любой drift, неполный
 witness или незамкнутый same-origin proxy оставляют routes в `legacy`.
-Приёмка 0.208.58 должна показать в `/api/health` его точную версию,
+Приёмка 0.208.59 должна показать в `/api/health` его точную версию,
 profile id, `canary_ready`, `live_attestation_clear`,
 `verified_context_tokens=40960` и оба зарегистрированных route; простого HTTP
 `status=ok` недостаточно.

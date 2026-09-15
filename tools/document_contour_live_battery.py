@@ -90,8 +90,10 @@ WORKER_SCHEMA = "friday.document-contour-live-battery.worker.v1"
 REPORT_SCHEMA = "friday.document-contour-live-battery.report.v1"
 RUN_RECEIPT_SCHEMA = "friday.document-contour-live-battery.run-receipt.v1"
 FAILURE_SUMMARY_SCHEMA = "friday.document-contour-live-battery.failure-summary.v1"
-OBSERVER_REQUEST_SCHEMA = "friday.document-contour-live-battery.observer-request.v1"
-OBSERVER_RESPONSE_SCHEMA = "friday.document-contour-live-battery.observer-response.v2"
+OBSERVER_REQUEST_SCHEMA = "friday.document-contour-live-battery.observer-request.v2"
+OBSERVER_RESPONSE_SCHEMA = "friday.document-contour-live-battery.observer-response.v3"
+EMPTY_DEAD_LETTER_SET_SHA256 = "f0be97144a676e0c1e9b25c932b45a99d01242bab59a4a8edcf0417bcf49f521"
+MAX_PROTECTED_DEAD_LETTERS = 4_096
 _RUN_ID_ENV = "FRIDAY_DOCUMENT_BATTERY_RUN_ID"
 _RUN_ID_RE = re.compile(r"[0-9a-f]{64}")
 _RELEASE_PROFILE = "qwen38-27b-nvfp4-sglang"
@@ -3764,6 +3766,23 @@ def _validate_live_gate(freeze_commit: str, bridge_stopped: bool) -> str:
     return head
 
 
+def _protected_dead_letter_pin(args: argparse.Namespace) -> tuple[int | None, str | None]:
+    count = getattr(args, "protected_dead_letter_count", None)
+    digest = getattr(args, "protected_dead_letter_set_sha256", None)
+    if count is None and digest is None:
+        return None, None
+    if (
+        type(count) is not int
+        or count < 0
+        or count > MAX_PROTECTED_DEAD_LETTERS
+        or not isinstance(digest, str)
+        or re.fullmatch(r"[0-9a-f]{64}", digest) is None
+        or (count == 0) != (digest == EMPTY_DEAD_LETTER_SET_SHA256)
+    ):
+        raise BatteryFailure("protected_dead_letter_pin_invalid")
+    return count, digest
+
+
 def _controller_source_env_file(value: str) -> Path | None:
     configured = str(value or os.environ.get("FRIDAY_ENV_FILE") or "").strip()
     if not configured:
@@ -4010,6 +4029,8 @@ def _observer_request(
     receipt_sha256: str,
     worker_report_sha256: str,
     challenge: str,
+    protected_dead_letter_count: int | None,
+    protected_dead_letter_set_sha256: str | None,
 ) -> dict[str, Any]:
     return {
         "schema": OBSERVER_REQUEST_SCHEMA,
@@ -4019,6 +4040,8 @@ def _observer_request(
         "run_receipt_sha256": receipt_sha256,
         "worker_report_sha256": worker_report_sha256,
         "challenge": challenge,
+        "protected_dead_letter_count": protected_dead_letter_count,
+        "protected_dead_letter_set_sha256": protected_dead_letter_set_sha256,
     }
 
 
@@ -4026,14 +4049,14 @@ def _validate_observer_response(
     response: Mapping[str, Any],
     request: Mapping[str, Any],
 ) -> dict[str, Any]:
-    boolean_fields = (
+    required_true_fields = (
         "bridge_stopped",
         "bridge_operator_guard_held",
         "backend_healthy",
         "backend_unchanged",
         "outbound_pending_zero",
         "inbound_pending_zero",
-        "dead_letter_zero",
+        "dead_letter_matches_protected_set",
         "dispatcher_unchanged",
     )
     exact_keys = {
@@ -4045,7 +4068,12 @@ def _validate_observer_response(
         "worker_report_sha256",
         "challenge",
         "status",
-        *boolean_fields,
+        "protected_dead_letter_count",
+        "protected_dead_letter_set_sha256",
+        "dead_letter_count",
+        "dead_letter_set_sha256",
+        "dead_letter_zero",
+        *required_true_fields,
     }
     if set(response) != exact_keys:
         raise BatteryFailure("inter_run_observer_response_invalid")
@@ -4056,21 +4084,64 @@ def _validate_observer_response(
         "run_receipt_sha256",
         "worker_report_sha256",
         "challenge",
+        "protected_dead_letter_count",
+        "protected_dead_letter_set_sha256",
     ):
         if response.get(key) != request.get(key):
             raise BatteryFailure("inter_run_observer_binding_mismatch")
     if response.get("schema") != OBSERVER_RESPONSE_SCHEMA or response.get("status") != "passed":
         raise BatteryFailure("inter_run_observer_not_clear")
-    for key in boolean_fields:
+    for key in required_true_fields:
         if response.get(key) is not True:
             raise BatteryFailure(f"inter_run_observer_{key}_failed")
+    dead_letter_count = response.get("dead_letter_count")
+    dead_letter_set_sha256 = response.get("dead_letter_set_sha256")
+    dead_letter_zero = response.get("dead_letter_zero")
+    if (
+        type(dead_letter_count) is not int
+        or dead_letter_count < 0
+        or dead_letter_count > MAX_PROTECTED_DEAD_LETTERS
+        or not isinstance(dead_letter_set_sha256, str)
+        or re.fullmatch(r"[0-9a-f]{64}", dead_letter_set_sha256) is None
+        or (dead_letter_count == 0) != (dead_letter_set_sha256 == EMPTY_DEAD_LETTER_SET_SHA256)
+        or type(dead_letter_zero) is not bool
+    ):
+        raise BatteryFailure("inter_run_observer_dead_letter_evidence_invalid")
+    if dead_letter_zero is not (dead_letter_count == 0):
+        raise BatteryFailure("inter_run_observer_dead_letter_zero_inconsistent")
+    if not {
+        "protected_dead_letter_count",
+        "protected_dead_letter_set_sha256",
+    }.issubset(request):
+        raise BatteryFailure("inter_run_observer_protected_set_pin_invalid")
+    protected_count = request["protected_dead_letter_count"]
+    protected_sha256 = request["protected_dead_letter_set_sha256"]
+    if protected_count is None and protected_sha256 is None:
+        if dead_letter_count != 0 or dead_letter_set_sha256 != EMPTY_DEAD_LETTER_SET_SHA256:
+            raise BatteryFailure("inter_run_observer_dead_letter_not_zero")
+    elif (
+        type(protected_count) is not int
+        or protected_count < 0
+        or protected_count > MAX_PROTECTED_DEAD_LETTERS
+        or not isinstance(protected_sha256, str)
+        or re.fullmatch(r"[0-9a-f]{64}", protected_sha256) is None
+        or (protected_count == 0) != (protected_sha256 == EMPTY_DEAD_LETTER_SET_SHA256)
+    ):
+        raise BatteryFailure("inter_run_observer_protected_set_pin_invalid")
+    elif dead_letter_count != protected_count or dead_letter_set_sha256 != protected_sha256:
+        raise BatteryFailure("inter_run_observer_protected_set_mismatch")
     return {
         "schema": OBSERVER_RESPONSE_SCHEMA,
         "status": "passed",
         "run_index": 1,
         "run_receipt_sha256": str(request["run_receipt_sha256"]),
         "worker_report_sha256": str(request["worker_report_sha256"]),
-        **{key: True for key in boolean_fields},
+        "protected_dead_letter_count": protected_count,
+        "protected_dead_letter_set_sha256": protected_sha256,
+        "dead_letter_count": dead_letter_count,
+        "dead_letter_set_sha256": dead_letter_set_sha256,
+        "dead_letter_zero": dead_letter_zero,
+        **{key: True for key in required_true_fields},
     }
 
 
@@ -4199,6 +4270,7 @@ def _finalize_controller_signal_handlers(
 
 def run_controller(args: argparse.Namespace) -> dict[str, Any]:
     commit = _validate_live_gate(str(args.freeze_commit or ""), bool(args.bridge_stopped))
+    protected_dead_letter_count, protected_dead_letter_set_sha256 = _protected_dead_letter_pin(args)
     operator_model_env_only = bool(getattr(args, "operator_model_env_only", False))
     explicit_source_env = str(args.source_env_file or "").strip()
     if operator_model_env_only:
@@ -4425,6 +4497,8 @@ def run_controller(args: argparse.Namespace) -> dict[str, Any]:
                     receipt_sha256=receipt_sha256,
                     worker_report_sha256=worker_report_sha256,
                     challenge=challenge,
+                    protected_dead_letter_count=protected_dead_letter_count,
+                    protected_dead_letter_set_sha256=protected_dead_letter_set_sha256,
                 )
                 try:
                     observer_projection, observer_response_sha256 = _await_inter_run_observer(
@@ -4522,6 +4596,17 @@ def build_parser() -> argparse.ArgumentParser:
             "owner-only parent for sanitized run receipts and the external "
             "between-run service/queue attestation"
         ),
+    )
+    parser.add_argument(
+        "--protected-dead-letter-count",
+        type=int,
+        default=None,
+        help=argparse.SUPPRESS,
+    )
+    parser.add_argument(
+        "--protected-dead-letter-set-sha256",
+        default=None,
+        help=argparse.SUPPRESS,
     )
     parser.add_argument("--report", default="", help="optional closed aggregate JSON path")
     parser.add_argument(
