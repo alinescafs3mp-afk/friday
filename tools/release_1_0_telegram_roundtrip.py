@@ -657,7 +657,7 @@ class TelegramEffectLedger:
                     )
         raise RoundtripError("FAIL", code)
 
-    def classify_bridge_url(self, raw_url: str) -> str:
+    def classify_bridge_url(self, raw_url: str, *, verb: str | None = None) -> str:
         try:
             scheme, host, port, path, query, fragment = _effect_url_parts(raw_url)
         except RoundtripError as exc:
@@ -667,7 +667,15 @@ class TelegramEffectLedger:
         if (scheme, host, port) == backend[:3] and (
             path == backend_path or path.startswith(backend_path + "/")
         ):
-            if query or fragment:
+            # The ordinary bridge polls its signed notification endpoint before
+            # any owner input arrives. Admit that exact bounded GET, while
+            # retaining the refusal for arbitrary backend query strings.
+            notification_poll = (
+                verb == "GET"
+                and path == backend_path + "/api/notifications/pending"
+                and query == "limit=20&status_messages=1"
+            )
+            if fragment or (query and not notification_poll):
                 self._violate("telegram_effect_backend_url_invalid")
             return "backend"
         if scheme != "https" or host != "api.telegram.org" or port not in {None, 443}:
@@ -1086,7 +1094,7 @@ def install_bridge_effect_guard(
 
     async def guarded_send(client: Any, request: Any, **kwargs: Any) -> Any:
         try:
-            classified = guard.classify_bridge_url(str(request.url))
+            classified = guard.classify_bridge_url(str(request.url), verb=str(request.method))
             follow = kwargs.get("follow_redirects")
             effective_follow = (
                 follow if isinstance(follow, bool) else bool(getattr(client, "follow_redirects", False))

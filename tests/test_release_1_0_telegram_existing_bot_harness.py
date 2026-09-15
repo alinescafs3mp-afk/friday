@@ -3,12 +3,15 @@
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 import datetime as dt
 import hashlib
 import json
 import subprocess
 import time
+from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
+from threading import Thread
 
 import httpx
 import pytest
@@ -44,6 +47,7 @@ def _policy_access(
     authority_token: str = TOKEN,
     legacy_authority: bool = False,
     extra_authority_allowed: int | None = None,
+    startup_commands: dict | None = None,
 ):
     tmp_path.chmod(0o700)
     candidate_root = tmp_path / "candidate"
@@ -69,7 +73,7 @@ def _policy_access(
             f"FRIDAY_TELEGRAM_OWNER_CHAT_IDS={OWNER_ID}\n"
         ).encode(),
     )
-    commands = {"commands": [{"command": "help", "description": "Help"}]}
+    commands = startup_commands or {"commands": [{"command": "help", "description": "Help"}]}
     commands_path = tmp_path / "startup-commands.json"
     commands_sha = _private_write(commands_path, commands)
     manifest = tmp_path / "candidate-manifest.json"
@@ -722,3 +726,260 @@ def test_installed_bootstrap_has_no_source_injection_and_records_origin(tmp_path
     assert observed["cli_origin"] == str(_RUNTIME["SITE"] / "friday/cli.py")
     assert observed["source_checkout_imported"] is False
     assert observed["wheel_sha256"] == telegram.sha256_file(_RUNTIME["WHEEL"])
+
+
+@pytest.mark.parametrize("with_canary", [False, True], ids=["startup", "one-canary"])
+def test_installed_bridge_startup_polls_signed_loopback_under_owner_effect_guard(tmp_path, with_canary):
+    """Real installed bridge/socket/lease/inbox; Telegram stays an offline fixture."""
+    from friday.security import sign_bridge_request
+    from friday.telegram_bridge import BOT_COMMANDS
+
+    secret = "S" * 48
+    received = []
+
+    class Backend(BaseHTTPRequestHandler):
+        def log_message(self, *_args):
+            pass
+
+        def do_GET(self):  # noqa: N802 - standard library HTTP handler contract
+            if not self.authorized("GET", b""):
+                return
+            received.append(("GET", self.path, dict(self.headers), b""))
+            payload = b'{"items":[],"retired":[]}'
+            self.reply(payload)
+
+        def do_POST(self):  # noqa: N802 - standard library HTTP handler contract
+            size = int(self.headers["Content-Length"])
+            assert 0 < size <= 8192
+            body = self.rfile.read(size)
+            if not self.authorized("POST", body):
+                return
+            received.append(("POST", self.path, dict(self.headers), body))
+            assert self.path == "/api/chat"
+            assert json.loads(body)["message"] == inbound
+            self.reply(
+                json.dumps(
+                    {
+                        "message_id": "offline_backend_answer",
+                        "message": policy.canary,
+                        "message_format": "plain",
+                    }
+                ).encode()
+            )
+
+        def authorized(self, method, body):
+            headers = self.headers
+            expected = sign_bridge_request(
+                secret,
+                timestamp=headers.get("X-Friday-Timestamp", ""),
+                method=method,
+                path=self.path,
+                external_user_id=str(OWNER_ID),
+                chat_id=str(OWNER_ID),
+                nonce=headers.get("X-Friday-Nonce", ""),
+                body=body,
+            )
+            if (
+                headers.get("X-Friday-User") != str(OWNER_ID)
+                or headers.get("X-Friday-Chat") != str(OWNER_ID)
+                or headers.get("X-Friday-Signature") != expected
+            ):
+                self.reply(b"{}", status=403)
+                return False
+            return True
+
+        def reply(self, payload, *, status=200):
+            self.send_response(status)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(payload)))
+            self.end_headers()
+            self.wfile.write(payload)
+
+    server = HTTPServer(("127.0.0.1", 0), Backend)
+    server.timeout = 5
+    worker = Thread(target=server.serve_forever, kwargs={"poll_interval": 0.05})
+    worker.start()
+    try:
+        startup_commands = {
+            "commands": [
+                {"command": name, "description": description}
+                for name, description in BOT_COMMANDS
+                if name not in {"obsidian", "obsidian_alias", "engineer"}
+            ]
+        }
+        policy, access, _document, _commands = _policy_access(tmp_path, startup_commands=startup_commands)
+        inbound = telegram.build_observer_request(
+            policy, access, {"bot_user_id": BOT_ID, "bot_username": "offline_startup"}
+        )["inbound_text"]
+        policy = dataclasses.replace(
+            policy,
+            contour=dataclasses.replace(
+                policy.contour, backend_origin=f"http://127.0.0.1:{server.server_port}"
+            ),
+        )
+        with httpx.Client(trust_env=False, timeout=2) as unauthenticated:
+            assert unauthenticated.get(policy.contour.backend_origin + "/health").status_code == 403
+        evidence_parent = tmp_path / "startup-evidence"
+        evidence_parent.mkdir(mode=0o700)
+        evidence = telegram.EvidenceStore(evidence_parent / "evidence", 1048576)
+        spec_path, _driver = telegram.prepare_effect_ledger(
+            evidence,
+            policy=policy,
+            access=access,
+            token=TOKEN,
+            deadline_monotonic_ns=time.monotonic_ns() + 600_000_000_000,
+        )
+        program = r"""
+import asyncio, importlib.util, json, sys
+from pathlib import Path
+import httpx
+from friday.telegram_bridge import TelegramBridge, TelegramConfig
+import friday.telegram_bridge
+
+source, spec_path, env_file, backend, inbox, token, owner, bot, secret, site, inbound, canary, with_canary = sys.argv[1:]
+with_canary = with_canary == 'True'
+assert Path(friday.telegram_bridge.__file__).is_relative_to(Path(site))
+assert str(Path(source).parents[1]) not in sys.path
+spec = importlib.util.spec_from_file_location('startup_guard', source)
+guard_module = importlib.util.module_from_spec(spec)
+sys.modules[spec.name] = guard_module
+spec.loader.exec_module(guard_module)
+guard, original_send = guard_module.install_bridge_effect_guard(
+    httpx, Path(spec_path), Path(env_file))
+bridge = TelegramBridge(TelegramConfig(
+    bot_token=token, bridge_secret=secret, allowed_chat_ids=[int(owner)],
+    inbox_db_path=inbox, backend_url=backend,
+    obsidian_enabled=False, engineer_mode_enabled=False, outbound_poll_interval_sec=2))
+calls = []
+posts = []
+backend_seen = asyncio.Event()
+reply_seen = asyncio.Event()
+
+async def telegram_fixture(request):
+    method = request.url.path.rsplit('/', 1)[-1]
+    calls.append(method)
+    if method == 'getMe':
+        result = {'id': int(bot), 'username': 'offline_startup'}
+    elif method == 'setMyCommands':
+        result = True
+    elif method == 'getUpdates':
+        await asyncio.wait_for(backend_seen.wait(), timeout=5)
+        if with_canary and calls.count('getUpdates') == 1:
+            result = [{'update_id': 44, 'message': {'message_id': 33,
+                'from': {'id': int(owner), 'is_bot': False, 'first_name': 'Offline'},
+                'chat': {'id': int(owner), 'type': 'private'},
+                'date': 1789444800, 'text': inbound}}]
+        else:
+            if with_canary:
+                await asyncio.wait_for(reply_seen.wait(), timeout=5)
+                await asyncio.wait_for(asyncio.gather(*tuple(bridge._inflight.values())), timeout=5)
+            bridge._running = False
+            result = []
+    elif method in {'sendMessage', 'editMessageText'}:
+        body = json.loads(request.content)
+        identifier = body.get('message_id', 900 + len(posts))
+        posts.append({'method': method, 'body': body, 'message_id': identifier})
+        result = {'message_id': identifier, 'chat': {'id': int(owner), 'type': 'private'}, 'text': body['text']}
+        if body['text'] == canary:
+            reply_seen.set()
+    elif method == 'sendChatAction':
+        result = True
+    else:
+        raise AssertionError('unexpected Telegram fixture dispatch')
+    return httpx.Response(200, json={'ok': True, 'result': result}, request=request)
+
+async def observed_response(response):
+    if str(response.request.url).startswith(backend + '/api/notifications/pending?'):
+        backend_seen.set()
+
+original_init = httpx.AsyncClient.__init__
+def isolated_client(self, *args, **kwargs):
+    assert not kwargs.get('trust_env', True)
+    kwargs['mounts'] = {'https://api.telegram.org': httpx.MockTransport(telegram_fixture)}
+    kwargs['event_hooks'] = {'response': [observed_response]}
+    original_init(self, *args, **kwargs)
+httpx.AsyncClient.__init__ = isolated_client
+try:
+    asyncio.run(asyncio.wait_for(bridge.run(), timeout=22))
+finally:
+    httpx.AsyncClient.__init__ = original_init
+    httpx.AsyncClient.send = original_send
+assert backend_seen.is_set() and guard.latched == ''
+if with_canary:
+    assert calls[:2] == ['getMe', 'setMyCommands'] and calls.count('getUpdates') == 2, calls
+    assert 1 <= calls.count('sendMessage') <= 2 and reply_seen.is_set(), calls
+    assert not bridge._inflight
+else:
+    assert calls == ['getMe', 'setMyCommands', 'getUpdates'], calls
+# The real run() finally must release its lease and close the inbox.
+bridge._lease.acquire()
+bridge._lease.release()
+guard_module.seal_effect_ledger(Path(spec_path).parent, Path(env_file))
+print(json.dumps({'calls': calls, 'backend_seen': True,
+    'installed_origin': friday.telegram_bridge.__file__, 'lease_reacquired': True,
+    'posts': posts, 'inflight_clear': not bridge._inflight}))
+"""
+        completed = subprocess.run(
+            [
+                str(_RUNTIME["INSTALLED"] / "bin/python"),
+                "-I",
+                "-B",
+                "-c",
+                program,
+                str(ROOT / "tools/release_1_0_telegram_roundtrip.py"),
+                str(spec_path),
+                str(policy.contour.env_file),
+                policy.contour.backend_origin,
+                str(tmp_path / "startup-inbox.sqlite3"),
+                TOKEN,
+                str(OWNER_ID),
+                str(BOT_ID),
+                secret,
+                str(_RUNTIME["SITE"]),
+                inbound,
+                policy.canary,
+                str(with_canary),
+            ],
+            check=False,
+            stdin=subprocess.DEVNULL,
+            capture_output=True,
+            timeout=30,
+            env={"HOME": str(tmp_path), "PATH": "/usr/bin:/bin"},
+        )
+        assert completed.returncode == 0, completed.stderr.decode("utf-8", "replace")
+        observed = json.loads(completed.stdout)
+        assert observed["lease_reacquired"] and observed["backend_seen"]
+        assert len(received) == 1 + int(with_canary)
+        assert received[0][1] == "/api/notifications/pending?limit=20&status_messages=1"
+        for method, path, headers, body in received:
+            assert headers["X-Friday-User"] == headers["X-Friday-Chat"] == str(OWNER_ID)
+            assert headers["X-Friday-Signature"] == sign_bridge_request(
+                secret,
+                timestamp=int(headers["X-Friday-Timestamp"]),
+                method=method,
+                path=path,
+                external_user_id=str(OWNER_ID),
+                chat_id=str(OWNER_ID),
+                nonce=headers["X-Friday-Nonce"],
+                body=body,
+            )
+        ledger = telegram.inspect_effect_ledger(
+            spec_path.parent, policy=policy, access=access, require_complete=False
+        )
+        assert ledger["unknown_count"] == 0
+        if with_canary:
+            assert ledger["telegram_update_ids"] == [44]
+            assert ledger["telegram_message_ids"] == [33]
+            assert ledger["send_message_receipt_ids"] == [
+                p["message_id"] for p in observed["posts"] if p["method"] == "sendMessage"
+            ]
+            assert any(p["body"]["text"] == policy.canary for p in observed["posts"])
+            assert observed["inflight_clear"]
+        else:
+            assert ledger["send_message_receipt_ids"] == []
+            assert ledger["counts"]["bridge"] == {"getMe": 1, "setMyCommands": 1, "getUpdates": 1}
+    finally:
+        server.shutdown()
+        server.server_close()
+        worker.join(timeout=5)
+        assert not worker.is_alive()

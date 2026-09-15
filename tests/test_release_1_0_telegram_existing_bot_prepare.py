@@ -4,7 +4,11 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
+import socket
+import subprocess
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -242,6 +246,330 @@ def _source_summary(plan):
             "source_checkout_imported": False,
         },
     }
+
+
+def _synthetic_bus_listener(path: Path) -> socket.socket:
+    listener = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    # Canonical gate fixture roots can exceed sockaddr_un's pathname limit.
+    # Bind through the directory descriptor without changing process cwd;
+    # the actual socket still lives at the exact runtime / "bus" path.
+    descriptor = os.open(path.parent, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    try:
+        listener.bind(f"/proc/self/fd/{descriptor}/{path.name}")
+    except BaseException:
+        listener.close()
+        raise
+    finally:
+        os.close(descriptor)
+    return listener
+
+
+def _synthetic_user_bus(tmp_path: Path) -> tuple[Path, Path, socket.socket]:
+    runtime_root = tmp_path / "run-user"
+    runtime_root.mkdir(mode=0o700)
+    runtime = runtime_root / str(os.getuid())
+    runtime.mkdir(mode=0o700)
+    listener = _synthetic_bus_listener(runtime / "bus")
+    return runtime_root, runtime, listener
+
+
+def test_service_environment_is_owner_derived_exact_and_bounded(tmp_path, monkeypatch):
+    runtime_root, runtime, listener = _synthetic_user_bus(tmp_path)
+    try:
+        monkeypatch.setenv("HOME", "/ambient/home/must-not-pass")
+        monkeypatch.setenv("XDG_RUNTIME_DIR", "/ambient/runtime/must-not-pass")
+        monkeypatch.setenv("DBUS_SESSION_BUS_ADDRESS", "unix:path=/ambient/bus")
+        monkeypatch.setenv("PYTHONPATH", "/ambient/python/must-not-pass")
+        environment = prepare._service_environment(runtime_root=runtime_root)
+        assert environment == {
+            "HOME": prepare.pwd.getpwuid(os.getuid()).pw_dir,
+            "PATH": "/usr/bin:/bin",
+            "XDG_RUNTIME_DIR": str(runtime),
+            "DBUS_SESSION_BUS_ADDRESS": f"unix:path={runtime / 'bus'}",
+        }
+
+        calls = []
+
+        def run(argv, **kwargs):
+            calls.append((argv, kwargs))
+            return subprocess.CompletedProcess(argv, 0, b"active\n", b"")
+
+        monkeypatch.setattr(prepare, "_service_environment", lambda: environment)
+        monkeypatch.setattr(prepare.subprocess, "run", run)
+        completed = prepare._service(
+            Path("/usr/bin/systemctl"),
+            prepare.SERVICE_UNIT,
+            "is-active",
+        )
+        assert completed.returncode == 0
+        assert calls == [
+            (
+                ["/usr/bin/systemctl", "--user", "is-active", "friday-bridge.service"],
+                {
+                    "check": False,
+                    "stdin": subprocess.DEVNULL,
+                    "capture_output": True,
+                    "timeout": 60,
+                    "env": environment,
+                },
+            )
+        ]
+        with pytest.raises(ValueError, match="fixed handoff"):
+            prepare._service(Path("/usr/bin/systemctl"), "foreign.service", "stop")
+        with pytest.raises(ValueError, match="fixed handoff"):
+            prepare._service(Path("/usr/bin/systemctl"), prepare.SERVICE_UNIT, "restart")
+        assert len(calls) == 1
+    finally:
+        listener.close()
+
+
+@pytest.mark.parametrize(
+    ("case", "reason"),
+    (
+        ("uid-mismatch", "uid mismatch"),
+        ("relative-runtime", "runtime directory"),
+        ("open-runtime", "runtime directory"),
+        ("foreign-runtime", "runtime directory"),
+        ("runtime-symlink", "runtime directory"),
+        ("missing-bus", "owner bus"),
+        ("regular-bus", "owner bus"),
+        ("bus-symlink", "owner bus"),
+        ("foreign-bus", "owner bus"),
+        ("account-uid-mismatch", "owner home"),
+        ("relative-home", "owner home"),
+        ("open-home", "owner home"),
+        ("foreign-home", "owner home"),
+        ("home-symlink", "owner home"),
+    ),
+)
+def test_service_environment_rejects_unsafe_identity_paths_bus_or_home(
+    tmp_path,
+    monkeypatch,
+    case,
+    reason,
+):
+    runtime_root, runtime, listener = _synthetic_user_bus(tmp_path)
+    call_root = runtime_root
+    original_lstat = Path.lstat
+    try:
+        if case == "uid-mismatch":
+            monkeypatch.setattr(prepare.os, "geteuid", lambda: os.getuid() + 1)
+        elif case == "relative-runtime":
+            call_root = Path("relative-run-user")
+        elif case == "open-runtime":
+            runtime.chmod(0o755)
+        elif case == "foreign-runtime":
+
+            def foreign_runtime_lstat(path):
+                info = original_lstat(path)
+                if path == runtime:
+                    return SimpleNamespace(st_mode=info.st_mode, st_uid=os.getuid() + 1)
+                return info
+
+            monkeypatch.setattr(Path, "lstat", foreign_runtime_lstat)
+        elif case == "runtime-symlink":
+            listener.close()
+            real_runtime = runtime_root / "actual-runtime"
+            runtime.rename(real_runtime)
+            runtime.symlink_to(real_runtime.name, target_is_directory=True)
+        elif case == "missing-bus":
+            listener.close()
+            (runtime / "bus").unlink()
+        elif case == "regular-bus":
+            listener.close()
+            (runtime / "bus").unlink()
+            (runtime / "bus").write_text("not a socket")
+        elif case == "bus-symlink":
+            listener.close()
+            (runtime / "bus").unlink()
+            listener = _synthetic_bus_listener(runtime / "real-bus")
+            (runtime / "bus").symlink_to("real-bus")
+        elif case == "foreign-bus":
+            bus = runtime / "bus"
+
+            def foreign_bus_lstat(path):
+                info = original_lstat(path)
+                if path == bus:
+                    return SimpleNamespace(st_mode=info.st_mode, st_uid=os.getuid() + 1)
+                return info
+
+            monkeypatch.setattr(Path, "lstat", foreign_bus_lstat)
+        elif case == "account-uid-mismatch":
+            monkeypatch.setattr(
+                prepare.pwd,
+                "getpwuid",
+                lambda uid: SimpleNamespace(pw_uid=uid + 1, pw_dir=str(tmp_path)),
+            )
+        elif case == "relative-home":
+            monkeypatch.setattr(
+                prepare.pwd,
+                "getpwuid",
+                lambda uid: SimpleNamespace(pw_uid=uid, pw_dir="relative-home"),
+            )
+        elif case in {"open-home", "foreign-home"}:
+            unsafe_home = tmp_path / "unsafe-home"
+            unsafe_home.mkdir(mode=0o700)
+            monkeypatch.setattr(
+                prepare.pwd,
+                "getpwuid",
+                lambda uid: SimpleNamespace(pw_uid=uid, pw_dir=str(unsafe_home)),
+            )
+            if case == "open-home":
+                unsafe_home.chmod(0o770)
+            else:
+
+                def foreign_home_lstat(path):
+                    info = original_lstat(path)
+                    if path == unsafe_home:
+                        return SimpleNamespace(st_mode=info.st_mode, st_uid=os.getuid() + 1)
+                    return info
+
+                monkeypatch.setattr(Path, "lstat", foreign_home_lstat)
+        elif case == "home-symlink":
+            real_home = tmp_path / "real-home"
+            real_home.mkdir(mode=0o700)
+            linked_home = tmp_path / "linked-home"
+            linked_home.symlink_to(real_home.name, target_is_directory=True)
+            monkeypatch.setattr(
+                prepare.pwd,
+                "getpwuid",
+                lambda uid: SimpleNamespace(pw_uid=uid, pw_dir=str(linked_home)),
+            )
+        with pytest.raises(ValueError, match=reason):
+            prepare._service_environment(runtime_root=call_root)
+    finally:
+        listener.close()
+
+
+def test_execute_rejects_changed_service_binary_before_any_service_action(
+    tmp_path,
+    monkeypatch,
+):
+    plan_ref, plan = _fixture(tmp_path)
+    systemctl = tmp_path / "synthetic-systemctl"
+    systemctl.write_bytes(b"#!/bin/sh\nexit 0\n")
+    systemctl.chmod(0o700)
+    handoff_path = Path(plan["handoff_plan"]["path"])
+    handoff = json.loads(handoff_path.read_text())
+    handoff["systemctl_path"] = str(systemctl)
+    handoff["systemctl_sha256"] = hashlib.sha256(systemctl.read_bytes()).hexdigest()
+    plan["handoff_plan"] = _write(handoff_path, handoff)
+    plan_ref = _write(Path(plan_ref["path"]), plan)
+    source = _source_summary(plan)
+    monkeypatch.setattr(prepare.telegram, "_verified_source_map", lambda *_args: source)
+    prepared = prepare.prepare(Path(plan_ref["path"]))["preparation"]
+    systemctl.write_bytes(b"#!/bin/sh\nexit 7\n")
+    systemctl.chmod(0o700)
+    monkeypatch.setattr(prepare.telegram, "_validate_contour", lambda *_args: ({}, {}))
+
+    def service_must_not_run(*_args, **_kwargs):
+        raise AssertionError("service action preceded binary validation")
+
+    monkeypatch.setattr(prepare, "_service", service_must_not_run)
+    with pytest.raises(ValueError, match="systemctl identity mismatch"):
+        prepare.execute(
+            Path(prepared["path"]),
+            prepared["sha256"],
+            prepare.EXECUTE_CONFIRMATION,
+        )
+    assert not (Path(plan["outputs"]["output_root"]) / "handoff-receipt.json").exists()
+
+
+def test_isolated_cli_loads_lazy_sibling_receipts_and_keeps_installed_precedence(
+    tmp_path,
+):
+    controller = ROOT / "tools/release_1_0_telegram_existing_bot_prepare.py"
+    installed_python = _RUNTIME["INSTALLED"] / "bin/python"
+    installed_site = _RUNTIME["SITE"]
+    poison = tmp_path / "poison"
+    (poison / "tools").mkdir(parents=True, mode=0o700)
+    (poison / "tools/__init__.py").write_text("")
+    (poison / "tools/release_1_0_acceptance.py").write_text("raise RuntimeError('poison-tools-imported')\n")
+    environment = {
+        "HOME": str(tmp_path),
+        "PATH": "/usr/bin:/bin",
+        "PYTHONPATH": str(poison),
+    }
+    help_result = subprocess.run(
+        [str(installed_python), "-I", "-B", str(controller), "--help"],
+        check=False,
+        stdin=subprocess.DEVNULL,
+        capture_output=True,
+        timeout=30,
+        cwd=tmp_path,
+        env=environment,
+    )
+    assert help_result.returncode == 0, help_result.stderr.decode("utf-8", "replace")
+
+    probe = r"""import importlib.util,json,sys
+from pathlib import Path
+controller=Path(sys.argv[1]).resolve(strict=True)
+source=Path(sys.argv[2]).resolve(strict=True)
+site=Path(sys.argv[3]).resolve(strict=True)
+expected_isolated=int(sys.argv[4])
+if int(bool(sys.flags.isolated)) != expected_isolated or not sys.dont_write_bytecode:
+    raise SystemExit("wrong interpreter flags")
+if str(source) in sys.path:
+    raise SystemExit("consumer injected source path")
+spec=importlib.util.spec_from_file_location("isolated_existing_bot_prepare",controller)
+module=importlib.util.module_from_spec(spec)
+sys.modules[spec.name]=module
+spec.loader.exec_module(module)
+error=module.receipts._acceptance_error("isolated_probe")
+from tools import release_1_0_telegram_roundtrip as sibling
+import friday
+payload={
+    "controller":str(Path(module.__file__).resolve()),
+    "lazy_error_type":type(error).__name__,
+    "sibling":str(Path(sibling.__file__).resolve()),
+    "installed_friday":str(Path(friday.__file__).resolve()),
+    "source_count":sys.path.count(str(source)),
+    "source_after_installed":sys.path.index(str(site)) < sys.path.index(str(source)),
+}
+print(json.dumps(payload,sort_keys=True,separators=(",",":")))
+"""
+    command = [
+        str(installed_python),
+        "-I",
+        "-B",
+        "-c",
+        probe,
+        str(controller),
+        str(ROOT),
+        str(installed_site),
+        "1",
+    ]
+    completed = subprocess.run(
+        command,
+        check=False,
+        stdin=subprocess.DEVNULL,
+        capture_output=True,
+        timeout=30,
+        cwd=tmp_path,
+        env=environment,
+    )
+    assert completed.returncode == 0, completed.stderr.decode("utf-8", "replace")
+    observed = json.loads(completed.stdout)
+    assert observed == {
+        "controller": str(controller.resolve()),
+        "lazy_error_type": "AcceptanceError",
+        "sibling": str((ROOT / "tools/release_1_0_telegram_roundtrip.py").resolve()),
+        "installed_friday": str((installed_site / "friday/__init__.py").resolve()),
+        "source_count": 1,
+        "source_after_installed": True,
+    }
+
+    unsafe = subprocess.run(
+        [command[0], "-B", *command[3:-1], "0"],
+        check=False,
+        stdin=subprocess.DEVNULL,
+        capture_output=True,
+        timeout=30,
+        cwd=tmp_path,
+        env=environment,
+    )
+    assert unsafe.returncode != 0
+    assert b"poison-tools-imported" in unsafe.stderr
 
 
 def test_prepare_emits_bound_v2_shapes_without_raw_owner_ids(tmp_path, monkeypatch):

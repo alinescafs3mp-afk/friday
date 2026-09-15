@@ -1110,6 +1110,60 @@ def _run(coro):
     return asyncio.run(coro)
 
 
+@pytest.mark.parametrize(
+    ("method", "suffix"),
+    [
+        ("POST", "/api/notifications/pending?limit=20&status_messages=1"),
+        ("HEAD", "/api/notifications/pending?limit=20&status_messages=1"),
+        ("GET", "/api/notifications/pending?limit=200&status_messages=1"),
+        ("GET", "/api/notifications/pending?limit=20&status_messages=0"),
+        ("GET", "/api/notifications/pending?limit=20&status_messages=1&limit=200"),
+        ("GET", "/api/notifications/pending?limit=20&status_messages=1&chat_id=999"),
+        ("GET", "/api/notifications/pending?status_messages=1&limit=20"),
+        ("GET", "/api/notifications/pending?limit=20&status_messages=1#fragment"),
+        ("GET", "/api/notifications/pending/extra?limit=20&status_messages=1"),
+        ("GET", "/api/notifications/pending-other?limit=20&status_messages=1"),
+        ("GET", "/api/notifications/%70ending?limit=20&status_messages=1"),
+        ("GET", "/api/other?limit=20&status_messages=1"),
+        ("GET", "/health?limit=20&status_messages=1"),
+    ],
+)
+def test_backend_notification_query_exception_stays_exact_and_latches(tmp_path, method, suffix):
+    import httpx
+
+    policy, access, _evidence, spec_path, _driver = _prepared_effect_guard(tmp_path)
+    calls = []
+
+    async def handler(request):
+        calls.append(str(request.url))
+        return httpx.Response(200, json={"items": [], "retired": []}, request=request)
+
+    guard, original_send = rt.install_bridge_effect_guard(httpx, spec_path, policy.contour.env_file)
+
+    async def scenario():
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler), trust_env=False) as client:
+            origin = policy.contour.backend_origin
+            ordinary = "/api/notifications/pending?limit=20&status_messages=1"
+            await client.get(origin + ordinary)
+            with pytest.raises(rt.TelegramEffectStop, match="telegram_effect_backend_url_invalid"):
+                await client.request(method, origin + suffix)
+            with pytest.raises(rt.TelegramEffectStop):
+                await client.get(origin + ordinary)
+
+    try:
+        _run(scenario())
+    finally:
+        httpx.AsyncClient.send = original_send
+    assert len(calls) == 1
+    assert guard.latched == "telegram_effect_backend_url_invalid"
+    rt.seal_effect_ledger(spec_path.parent, policy.contour.env_file)
+    observed = rt.inspect_effect_ledger(
+        spec_path.parent, policy=policy, access=access, require_complete=False
+    )
+    assert observed["unknown_count"] == 0
+    assert observed["send_message_receipt_ids"] == []
+
+
 def test_driver_urllib_boundary_preserves_real_responses_and_ledgers_both_reads(tmp_path):
     policy, access, _evidence, spec_path, driver = _prepared_effect_guard(tmp_path)
     calls = []

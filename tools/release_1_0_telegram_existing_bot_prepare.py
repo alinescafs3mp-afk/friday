@@ -15,6 +15,7 @@ import hashlib
 import importlib.util
 import json
 import os
+import pwd
 import signal
 import stat
 import subprocess
@@ -30,6 +31,15 @@ PREPARATION_SCHEMA = "friday.telegram-existing-bot-preparation.v1"
 EXECUTE_CONFIRMATION = "OWNER_CONFIRMS_ONE_LIVE_CANARY_AND_BOUNDED_HANDOFF"
 MAX_JSON_BYTES = 2 << 20
 ROOT = Path(__file__).resolve().parents[1]
+SERVICE_UNIT = "friday-bridge.service"
+SERVICE_ACTIONS = frozenset({"is-active", "stop", "start"})
+SERVICE_TIMEOUT_S = 60
+
+# Python -I omits the script's parent package directory. The receipt reader
+# imports sibling tools lazily; append the verified controller's own root,
+# leaving installed-product imports ahead of source code in the search path.
+if str(ROOT) not in sys.path:
+    sys.path.append(str(ROOT))
 
 
 def _load_module(name: str, path: Path) -> Any:
@@ -467,14 +477,71 @@ def prepare(plan_path: Path) -> dict[str, Any]:
     }
 
 
+def _service_environment(*, runtime_root: Path = Path("/run/user")) -> dict[str, str]:
+    owner_uid = os.getuid()
+    if owner_uid != os.geteuid():
+        raise ValueError("service owner uid mismatch")
+    if not runtime_root.is_absolute():
+        raise ValueError("unsafe service owner runtime directory")
+    runtime = runtime_root / str(owner_uid)
+    try:
+        info = runtime.lstat()
+        resolved_runtime = runtime.resolve(strict=True)
+    except OSError as exc:
+        raise ValueError("unsafe service owner runtime directory") from exc
+    if (
+        resolved_runtime != runtime
+        or not stat.S_ISDIR(info.st_mode)
+        or info.st_uid != owner_uid
+        or stat.S_IMODE(info.st_mode) != 0o700
+    ):
+        raise ValueError("unsafe service owner runtime directory")
+    bus = runtime / "bus"
+    try:
+        info = bus.lstat()
+        resolved_bus = bus.resolve(strict=True)
+    except OSError as exc:
+        raise ValueError("unsafe service owner bus") from exc
+    if resolved_bus != bus or not stat.S_ISSOCK(info.st_mode) or info.st_uid != owner_uid:
+        raise ValueError("unsafe service owner bus")
+    try:
+        account = pwd.getpwuid(owner_uid)
+        home = Path(account.pw_dir)
+        account_uid = account.pw_uid
+    except (AttributeError, KeyError, TypeError) as exc:
+        raise ValueError("unsafe service owner home") from exc
+    if account_uid != owner_uid or not home.is_absolute():
+        raise ValueError("unsafe service owner home")
+    try:
+        home_info = home.lstat()
+        resolved_home = home.resolve(strict=True)
+    except OSError as exc:
+        raise ValueError("unsafe service owner home") from exc
+    if (
+        resolved_home != home
+        or not stat.S_ISDIR(home_info.st_mode)
+        or home_info.st_uid != owner_uid
+        or home_info.st_mode & 0o022
+    ):
+        raise ValueError("unsafe service owner home")
+    return {
+        "HOME": str(home),
+        "PATH": "/usr/bin:/bin",
+        "XDG_RUNTIME_DIR": str(runtime),
+        "DBUS_SESSION_BUS_ADDRESS": f"unix:path={bus}",
+    }
+
+
 def _service(systemctl: Path, unit: str, action: str) -> subprocess.CompletedProcess[bytes]:
+    if unit != SERVICE_UNIT or action not in SERVICE_ACTIONS:
+        raise ValueError("service action outside the fixed handoff")
     return subprocess.run(
         [str(systemctl), "--user", action, unit],
         check=False,
         stdin=subprocess.DEVNULL,
         capture_output=True,
-        timeout=60,
-        env={"HOME": str(Path.home()), "PATH": "/usr/bin:/bin"},
+        timeout=SERVICE_TIMEOUT_S,
+        env=_service_environment(),
     )
 
 
