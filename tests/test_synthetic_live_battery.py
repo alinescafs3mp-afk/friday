@@ -3795,6 +3795,11 @@ _A09_06_PURPOSE_PARAPHRASE = (
     "это как проверить, что у дома есть запасной вход — если основной закроется, "
     "дом не станет недоступным."
 )
+_A09_06_ACTUAL160109_FAULT_EXAMPLE = (
+    "Проверять отказоустойчивость нужно, чтобы убедиться, что система не сломается полностью, "
+    "когда что-то пойдёт не так (например, упадёт сервер или закончится место на диске), "
+    "а продолжит работать или корректно восстановится."
+)
 
 
 @pytest.mark.parametrize(
@@ -3840,6 +3845,69 @@ def test_a09_06_purpose_binds_fault_and_containment_paraphrases(message: str) ->
     assert battery._a09_06_task_faithful_purpose(message) is True
     assert battery._a09_06_relation_is_exact(message) is True
     assert battery.evaluate_case(case, record, latency_ms=1)["failure_codes"] == []
+
+
+@pytest.mark.parametrize(
+    "message",
+    [
+        _A09_06_ACTUAL160109_FAULT_EXAMPLE,
+        _A09_06_ACTUAL160109_FAULT_EXAMPLE.replace("например, упадёт", "например упадет").replace(
+            "пойдёт", "пойдет"
+        ),
+        _A09_06_ACTUAL160109_FAULT_EXAMPLE.replace(
+            "например, упадёт сервер или закончится место на диске",
+            "упадёт сервер или закончится место на диске",
+        ),
+        _A09_06_ACTUAL160109_FAULT_EXAMPLE.replace(
+            "упадёт сервер или закончится место на диске",
+            "оборвётся сеть или закончится память",
+        ),
+        _A09_06_ACTUAL160109_FAULT_EXAMPLE.replace(
+            "упадёт сервер или закончится место на диске",
+            "закончится место на диске или упадет сервер",
+        ),
+    ],
+)
+def test_a09_06_purpose_accepts_bounded_parenthetical_fault_examples(message: str) -> None:
+    case = _cases("A", 9)[5]
+    record = _satisfying_record(case)
+    record["response"]["message"] = message
+
+    assert battery._a09_06_task_faithful_purpose(message) is True
+    assert battery._a09_06_relation_is_exact(message) is True
+    assert battery.evaluate_case(case, record, latency_ms=1)["failure_codes"] == []
+
+
+@pytest.mark.parametrize(
+    "message",
+    [
+        _A09_06_ACTUAL160109_FAULT_EXAMPLE.replace("упадёт сервер", "не упадёт сервер"),
+        _A09_06_ACTUAL160109_FAULT_EXAMPLE.replace("упадёт сервер", "упадёт пользователь"),
+        _A09_06_ACTUAL160109_FAULT_EXAMPLE.replace("место на диске", "место на столе"),
+        _A09_06_ACTUAL160109_FAULT_EXAMPLE.replace(
+            "например, упадёт сервер или закончится место на диске",
+            "например, сервер или отчёт",
+        ),
+        _A09_06_ACTUAL160109_FAULT_EXAMPLE.replace("упадёт сервер", "«упадёт сервер»"),
+        _A09_06_ACTUAL160109_FAULT_EXAMPLE.replace("система не сломается", "отчёт не сломается"),
+        _A09_06_ACTUAL160109_FAULT_EXAMPLE.replace(
+            "Проверять отказоустойчивость нужно", "Проверять отказоустойчивость не нужно"
+        ),
+        _A09_06_ACTUAL160109_FAULT_EXAMPLE + " Однако затем она перестанет работать.",
+    ],
+)
+def test_a09_06_parenthetical_fault_examples_preserve_owned_negative_controls(
+    message: str,
+) -> None:
+    case = _cases("A", 9)[5]
+    record = _satisfying_record(case)
+    record["response"]["message"] = message
+
+    assert battery._a09_06_task_faithful_purpose(message) is False
+    assert battery._a09_06_relation_is_exact(message) is False
+    assert (
+        "content_semantic_group_missing" in battery.evaluate_case(case, record, latency_ms=1)["failure_codes"]
+    )
 
 
 @pytest.mark.parametrize(

@@ -20,7 +20,12 @@ from typing import Any
 
 CASE_ID = "R10-LIVE-TELEGRAM-ROUNDTRIP"
 CONTEXT_SCHEMA = "friday.telegram-roundtrip-expected-context.v1"
+CONTEXT_SCHEMA_V2 = "friday.telegram-roundtrip-expected-context.v2"
 RECEIPT_SCHEMA = "friday.telegram-roundtrip-owned-attempt.v1"
+RECEIPT_SCHEMA_V2 = "friday.telegram-roundtrip-owned-attempt.v2"
+HANDOFF_PLAN_SCHEMA = "friday.telegram-existing-bot-handoff-plan.v1"
+HANDOFF_RECEIPT_SCHEMA = "friday.telegram-existing-bot-handoff-receipt.v1"
+EFFECT_ADMISSION_SCHEMA = "friday.release-1-0-telegram-existing-bot-effect-admission.v1"
 ROOT = Path(__file__).resolve().parents[1]
 SHA256_RE = re.compile(r"[0-9a-f]{64}")
 GIT_SHA_RE = re.compile(r"[0-9a-f]{40}")
@@ -146,6 +151,19 @@ def _path(raw: object, code: str) -> Path:
     return path
 
 
+def _future_or_existing_path(raw: object, code: str) -> Path:
+    _require(isinstance(raw, str) and Path(raw).is_absolute(), code)
+    path = Path(str(raw))
+    try:
+        parent = path.parent.resolve(strict=True)
+        _require(parent == path.parent and not path.is_symlink(), code)
+        if path.exists():
+            _require(path.resolve(strict=True) == path, code)
+    except OSError as exc:
+        raise _acceptance_error(code) from exc
+    return path
+
+
 def _source_digest(path: Path, expected: str, maximum: int) -> None:
     """Bind non-secret source/controller bytes without requiring mode 0600."""
     _require(SHA256_RE.fullmatch(expected) is not None, "source_digest_invalid")
@@ -238,6 +256,8 @@ def _parse_time(value: object, code: str) -> dt.datetime:
 
 def read_context(path: Path, digest: str) -> dict[str, Any]:
     context = _read_json(path, digest, maximum=MAX_CONTEXT_BYTES, code="context_json_invalid")
+    schema = context.get("schema")
+    _require(schema in {CONTEXT_SCHEMA, CONTEXT_SCHEMA_V2}, "context_schema")
     context = _exact(
         context,
         {
@@ -253,11 +273,14 @@ def read_context(path: Path, digest: str) -> dict[str, Any]:
             "driver",
             "expected",
             "budgets",
-        },
+        }
+        | (
+            {"harness_identity", "effect_admission", "handoff_plan"} if schema == CONTEXT_SCHEMA_V2 else set()
+        ),
         "context_shape_invalid",
     )
     _require(
-        context["schema"] == CONTEXT_SCHEMA and context["case_id"] == CASE_ID,
+        context["case_id"] == CASE_ID,
         "context_schema",
     )
     _require(
@@ -265,7 +288,7 @@ def read_context(path: Path, digest: str) -> dict[str, Any]:
         "context_attempt",
     )
     output_root = _path(context["output_root"], "context_output_root")
-    evidence_root = _path(context["evidence_root"], "context_evidence_root")
+    evidence_root = _future_or_existing_path(context["evidence_root"], "context_evidence_root")
     _require(evidence_root == output_root / "evidence", "context_evidence_scope")
     _require(not path.resolve().is_relative_to(output_root), "context_not_independent")
 
@@ -295,14 +318,45 @@ def read_context(path: Path, digest: str) -> dict[str, Any]:
         )
     source_root = _path(identity["source_root"], "context_source_root")
     _require(
-        source_root == ROOT
-        and not source_root.is_relative_to(output_root)
+        not source_root.is_relative_to(output_root)
         and isinstance(identity["suite_revision"], str)
         and bool(identity["suite_revision"]),
         "context_candidate",
     )
+    if schema == CONTEXT_SCHEMA:
+        _require(source_root == ROOT, "context_candidate")
+    else:
+        harness = _exact(
+            context["harness_identity"],
+            {
+                "manifest_path",
+                "manifest_sha256",
+                "source_root",
+                "source_map_sha256",
+                "source_file_count",
+                "driver_sha256",
+            },
+            "context_harness_shape",
+        )
+        for key in ("manifest_sha256", "source_map_sha256", "driver_sha256"):
+            _require(
+                isinstance(harness[key], str) and SHA256_RE.fullmatch(harness[key]) is not None,
+                "context_harness_identity",
+            )
+        _require(
+            type(harness["source_file_count"]) is int and harness["source_file_count"] == 5,
+            "context_harness_identity",
+        )
+        _require(
+            _path(harness["source_root"], "context_harness_source_root") == ROOT
+            and _path(harness["manifest_path"], "context_harness_manifest_path").parent != output_root,
+            "context_harness_identity",
+        )
 
-    for name in ("policy", "access", "controller", "driver"):
+    reference_names = ["policy", "access", "controller", "driver"]
+    if schema == CONTEXT_SCHEMA_V2:
+        reference_names.extend(("effect_admission", "handoff_plan"))
+    for name in reference_names:
         context[name] = _reference(context[name], f"context_{name}_ref", sized=False)
         ref_path = _path(context[name]["path"], f"context_{name}_path")
         _require(not ref_path.is_relative_to(output_root), f"context_{name}_independence")
@@ -311,21 +365,31 @@ def read_context(path: Path, digest: str) -> dict[str, Any]:
         "context_driver_path",
     )
     _require(
-        len({context[name]["path"] for name in ("policy", "access", "controller", "driver")}) == 4,
+        len({context[name]["path"] for name in reference_names}) == len(reference_names),
         "context_reference_alias",
     )
 
+    expected_keys = {
+        "contour_id",
+        "bot_user_id",
+        "observer_mode",
+        "bot_token_sha256",
+        "env_sha256",
+    }
+    if schema == CONTEXT_SCHEMA:
+        expected_keys |= {"chat_id", "user_id"}
+    else:
+        expected_keys |= {
+            "access_route",
+            "owner_private_chat_hmac_sha256",
+            "owner_authority_sha256",
+            "startup_commands_sha256",
+            "effect_admission_sha256",
+            "installed_wheel_sha256",
+        }
     expected = _exact(
         context["expected"],
-        {
-            "contour_id",
-            "bot_user_id",
-            "chat_id",
-            "user_id",
-            "observer_mode",
-            "bot_token_sha256",
-            "env_sha256",
-        },
+        expected_keys,
         "context_expected_shape",
     )
     _require(
@@ -334,18 +398,210 @@ def read_context(path: Path, digest: str) -> dict[str, Any]:
         and expected["observer_mode"] in {"owner_manual_readback", "external_user_adapter"},
         "context_expected_identity",
     )
-    for key in ("bot_user_id", "chat_id", "user_id"):
+    for key in ("bot_user_id", "chat_id", "user_id") if schema == CONTEXT_SCHEMA else ("bot_user_id",):
         _require(
             type(expected[key]) is int and 0 < expected[key] < 10**20,
             "context_expected_identity",
         )
-    _require(expected["chat_id"] == expected["user_id"], "context_expected_private_chat")
+    if schema == CONTEXT_SCHEMA:
+        _require(expected["chat_id"] == expected["user_id"], "context_expected_private_chat")
+    else:
+        _require(
+            expected["access_route"] == "existing_friday_bot_one_canary"
+            and SHA256_RE.fullmatch(str(expected["owner_private_chat_hmac_sha256"])) is not None
+            and SHA256_RE.fullmatch(str(expected["owner_authority_sha256"])) is not None
+            and SHA256_RE.fullmatch(str(expected["startup_commands_sha256"])) is not None
+            and SHA256_RE.fullmatch(str(expected["effect_admission_sha256"])) is not None
+            and SHA256_RE.fullmatch(str(expected["installed_wheel_sha256"])) is not None,
+            "context_expected_owner_binding",
+        )
     _require(
         all(SHA256_RE.fullmatch(str(expected[key])) for key in ("bot_token_sha256", "env_sha256")),
         "context_expected_digest",
     )
     _require(context["budgets"] == FROZEN_BUDGETS, "context_budget_mismatch")
+    if schema == CONTEXT_SCHEMA_V2:
+        _validate_effect_admission(
+            _read_json(
+                Path(context["effect_admission"]["path"]),
+                context["effect_admission"]["sha256"],
+                maximum=MAX_CONTEXT_BYTES,
+                code="effect_admission_json_invalid",
+            ),
+            identity=identity,
+            harness=context["harness_identity"],
+        )
+        _require(
+            context["effect_admission"]["sha256"] == expected["effect_admission_sha256"],
+            "effect_admission_expected_mismatch",
+        )
+        _validate_handoff_plan(
+            _read_json(
+                Path(context["handoff_plan"]["path"]),
+                context["handoff_plan"]["sha256"],
+                maximum=MAX_CONTEXT_BYTES,
+                code="handoff_plan_json_invalid",
+            ),
+            identity=identity,
+        )
+    context["_context_version"] = 2 if schema == CONTEXT_SCHEMA_V2 else 1
     return context
+
+
+def _validate_handoff_plan(document: object, *, identity: Mapping[str, Any]) -> dict[str, Any]:
+    plan = _exact(
+        document,
+        {
+            "schema",
+            "candidate_sha",
+            "candidate_tree",
+            "wheel_sha256",
+            "systemctl_path",
+            "systemctl_sha256",
+            "unit_name",
+            "production_lease_path",
+            "exclusive_slot_lock",
+            "max_stop_calls",
+            "max_restore_calls",
+            "required_initial_state",
+            "required_final_state",
+            "no_second_consumer",
+            "production_home_as_scratch",
+            "history_policy",
+            "GO",
+        },
+        "handoff_plan_shape_invalid",
+    )
+    _require(
+        plan["schema"] == HANDOFF_PLAN_SCHEMA
+        and plan["candidate_sha"] == identity["candidate_sha"]
+        and plan["candidate_tree"] == identity["candidate_tree"]
+        and plan["wheel_sha256"] == identity["wheel_sha256"]
+        and isinstance(plan["systemctl_path"], str)
+        and Path(plan["systemctl_path"]).is_absolute()
+        and isinstance(plan["systemctl_sha256"], str)
+        and SHA256_RE.fullmatch(plan["systemctl_sha256"]) is not None
+        and plan["unit_name"] == "friday-bridge.service"
+        and isinstance(plan["production_lease_path"], str)
+        and Path(plan["production_lease_path"]).is_absolute()
+        and isinstance(plan["exclusive_slot_lock"], str)
+        and Path(plan["exclusive_slot_lock"]).is_absolute()
+        and plan["max_stop_calls"] == 1
+        and plan["max_restore_calls"] == 1
+        and plan["required_initial_state"] == "active"
+        and plan["required_final_state"] == "active"
+        and plan["no_second_consumer"] is True
+        and plan["production_home_as_scratch"] is False
+        and plan["history_policy"] == "do_not_read_replay_delete_or_drain"
+        and plan["GO"] is False,
+        "handoff_plan_binding_invalid",
+    )
+    return plan
+
+
+def _validate_effect_admission(
+    document: object,
+    *,
+    identity: Mapping[str, Any],
+    harness: Mapping[str, Any],
+) -> dict[str, Any]:
+    admission = _exact(
+        document,
+        {
+            "schema",
+            "route_id",
+            "candidate_sha",
+            "candidate_tree",
+            "wheel_sha256",
+            "harness_manifest_sha256",
+            "base_effect_scope",
+            "owner_directive",
+            "existing_friday_bot_one_canary",
+            "same_bot_production_consumer_stopped",
+            "isolated_non_production_home",
+            "installed_wheel_origin",
+            "owner_private_recipient_only",
+            "startup_effect",
+            "frozen_limits",
+            "unknown_effect_policy",
+            "nonowner_ingress_policy",
+            "GO",
+        },
+        "effect_admission_shape_invalid",
+    )
+    base = _reference(admission["base_effect_scope"], "effect_admission_base_ref", sized=False)
+    owner = _reference(admission["owner_directive"], "effect_admission_owner_ref", sized=False)
+    startup = _exact(
+        admission["startup_effect"],
+        {
+            "method",
+            "max_attempts",
+            "target",
+            "canonical_payload_digest_required",
+            "restoration_claimed",
+        },
+        "effect_admission_startup_shape_invalid",
+    )
+    expected_limits = {
+        "duration_s": FROZEN_BUDGETS["duration_s"],
+        "genuine_inbound": FROZEN_BUDGETS["max_inbound_user_messages"],
+        "bot_posts": FROZEN_BUDGETS["method_caps"]["bridge"]["sendMessage"],
+        "total_attempts": FROZEN_BUDGETS["total_attempt_cap"],
+        "method_caps": FROZEN_BUDGETS["method_caps"],
+    }
+    _require(
+        admission["schema"] == EFFECT_ADMISSION_SCHEMA
+        and admission["route_id"] == "existing-friday-bot-sole-consumer-handoff-installed-final"
+        and admission["candidate_sha"] == identity["candidate_sha"]
+        and admission["candidate_tree"] == identity["candidate_tree"]
+        and admission["wheel_sha256"] == identity["wheel_sha256"]
+        and admission["harness_manifest_sha256"] == harness["manifest_sha256"]
+        and all(
+            admission[key] is True
+            for key in (
+                "existing_friday_bot_one_canary",
+                "same_bot_production_consumer_stopped",
+                "isolated_non_production_home",
+                "installed_wheel_origin",
+                "owner_private_recipient_only",
+            )
+        )
+        and startup
+        == {
+            "method": "setMyCommands",
+            "max_attempts": 1,
+            "target": "existing_friday_bot",
+            "canonical_payload_digest_required": True,
+            "restoration_claimed": False,
+        }
+        and admission["frozen_limits"] == expected_limits
+        and admission["unknown_effect_policy"] == "latch_and_never_retry"
+        and admission["nonowner_ingress_policy"] == "fail_before_bridge_observation_no_reply_no_drain"
+        and admission["GO"] is False,
+        "effect_admission_binding_invalid",
+    )
+    base_document = _read_json(
+        Path(base["path"]),
+        base["sha256"],
+        maximum=MAX_CONTEXT_BYTES,
+        code="effect_admission_base_invalid",
+    )
+    owner_document = _read_json(
+        Path(owner["path"]),
+        owner["sha256"],
+        maximum=MAX_CONTEXT_BYTES,
+        code="effect_admission_owner_invalid",
+    )
+    _require(
+        base_document.get("schema") == "friday.astra-telegram-effect-scope.v1"
+        and base_document.get("GO") is False
+        and owner_document.get("schema") == "friday.owner-telegram-recipient-restriction.v1"
+        and owner_document.get("GO") is False
+        and isinstance(owner_document.get("recipient_scope"), dict)
+        and owner_document["recipient_scope"].get("only_owner_private_chat") is True,
+        "effect_admission_authority_invalid",
+    )
+    return admission
 
 
 def _secure_tree(
@@ -468,32 +724,53 @@ def _origin(
     spec_sha256: str,
     driver_sha256: str,
 ) -> dict[str, Any]:
+    installed = getattr(policy.candidate, "installed_wheel", None)
+    origin_keys = {
+        "schema",
+        "role",
+        "pid",
+        "candidate_sha",
+        "cli_origin",
+        "effect_guard_origin",
+        "effect_guard_sha256",
+        "effect_spec_sha256",
+        "argv",
+        "observed_at_ns",
+    }
+    if installed is None:
+        origin_keys.add("source_root")
+    else:
+        origin_keys |= {
+            "installed_site_root",
+            "wheel_sha256",
+            "source_checkout_imported",
+        }
     row = _exact(
         document,
-        {
-            "schema",
-            "role",
-            "pid",
-            "candidate_sha",
-            "source_root",
-            "cli_origin",
-            "effect_guard_origin",
-            "effect_guard_sha256",
-            "effect_spec_sha256",
-            "argv",
-            "observed_at_ns",
-        },
+        origin_keys,
         "origin_shape_invalid",
     )
     guard_path = str(ROOT / "tools/release_1_0_telegram_roundtrip.py") if role == "telegram-bridge" else ""
+    if installed is None:
+        origin_binding = (
+            row["schema"] == "friday.release-1-0-child-origin.v1"
+            and row["source_root"] == str(ROOT)
+            and row["cli_origin"] == str(ROOT / "friday/cli.py")
+        )
+    else:
+        origin_binding = (
+            row["schema"] == "friday.release-1-0-installed-wheel-child-origin.v1"
+            and row["installed_site_root"] == str(installed.site_root.resolve())
+            and row["wheel_sha256"] == installed.wheel_sha256
+            and row["cli_origin"] == str((installed.site_root / "friday/cli.py").resolve())
+            and row["source_checkout_imported"] is False
+        )
     _require(
-        row["schema"] == "friday.release-1-0-child-origin.v1"
+        origin_binding
         and row["role"] == role
         and type(row["pid"]) is int
         and row["pid"] > 1
         and row["candidate_sha"] == policy.candidate.candidate_sha
-        and row["source_root"] == str(ROOT)
-        and row["cli_origin"] == str(ROOT / "friday/cli.py")
         and row["effect_guard_origin"] == guard_path
         and row["effect_guard_sha256"] == (driver_sha256 if role == "telegram-bridge" else "")
         and row["effect_spec_sha256"] == (spec_sha256 if role == "telegram-bridge" else "")
@@ -551,6 +828,70 @@ def _status(status: str, failure: str | None, **facts: object) -> dict[str, Any]
     }
 
 
+def _validate_handoff_receipt(document: object, *, plan_reference: Mapping[str, Any]) -> dict[str, Any]:
+    plan = _read_json(
+        Path(str(plan_reference["path"])),
+        str(plan_reference["sha256"]),
+        maximum=MAX_CONTEXT_BYTES,
+        code="handoff_plan_json_invalid",
+    )
+    row = _exact(
+        document,
+        {
+            "schema",
+            "plan",
+            "unit_name",
+            "systemctl_sha256",
+            "initial_state",
+            "stop_count",
+            "stop_returncode",
+            "post_stop_state",
+            "production_lease_inactive",
+            "driver_started_after_stop",
+            "isolated_process_group_clear_before_restore",
+            "restore_count",
+            "restore_returncode",
+            "post_restore_state",
+            "production_lease_active",
+            "no_second_consumer",
+            "production_home_as_scratch",
+            "history_touched",
+            "started_at",
+            "stopped_at",
+            "restored_at",
+            "GO",
+        },
+        "handoff_receipt_shape_invalid",
+    )
+    started = _parse_time(row["started_at"], "handoff_receipt_time_invalid")
+    stopped = _parse_time(row["stopped_at"], "handoff_receipt_time_invalid")
+    restored = _parse_time(row["restored_at"], "handoff_receipt_time_invalid")
+    _require(
+        row["schema"] == HANDOFF_RECEIPT_SCHEMA
+        and row["plan"] == dict(plan_reference)
+        and row["unit_name"] == plan.get("unit_name") == "friday-bridge.service"
+        and row["systemctl_sha256"] == plan.get("systemctl_sha256")
+        and row["initial_state"] == "active"
+        and row["stop_count"] == 1
+        and row["stop_returncode"] == 0
+        and row["post_stop_state"] == "inactive"
+        and row["production_lease_inactive"] is True
+        and row["driver_started_after_stop"] is True
+        and row["isolated_process_group_clear_before_restore"] is True
+        and row["restore_count"] == 1
+        and row["restore_returncode"] == 0
+        and row["post_restore_state"] == "active"
+        and row["production_lease_active"] is True
+        and row["no_second_consumer"] is True
+        and row["production_home_as_scratch"] is False
+        and row["history_touched"] is False
+        and started <= stopped <= restored
+        and row["GO"] is False,
+        "handoff_receipt_binding_invalid",
+    )
+    return row
+
+
 def audit_telegram_execution(
     *,
     receipt_path: Path,
@@ -582,28 +923,32 @@ def audit_telegram_execution(
             maximum=MAX_RECEIPT_BYTES,
             code="receipt_json_invalid",
         )
+        receipt_keys = {
+            "schema",
+            "case_id",
+            "attempt_id",
+            "attempt",
+            "expected_context",
+            "policy",
+            "access",
+            "evidence",
+            "observer_result",
+            "databases",
+            "controller",
+            "GO",
+            "release_ready",
+            "full_gate_credit",
+        }
+        if context["_context_version"] == 2:
+            receipt_keys.add("handoff_receipt")
         receipt = _exact(
             receipt,
-            {
-                "schema",
-                "case_id",
-                "attempt_id",
-                "attempt",
-                "expected_context",
-                "policy",
-                "access",
-                "evidence",
-                "observer_result",
-                "databases",
-                "controller",
-                "GO",
-                "release_ready",
-                "full_gate_credit",
-            },
+            receipt_keys,
             "receipt_shape_invalid",
         )
+        expected_receipt_schema = RECEIPT_SCHEMA_V2 if context["_context_version"] == 2 else RECEIPT_SCHEMA
         _require(
-            receipt["schema"] == RECEIPT_SCHEMA
+            receipt["schema"] == expected_receipt_schema
             and receipt["case_id"] == CASE_ID
             and receipt["attempt_id"] == context["attempt_id"]
             and type(receipt["attempt"]) is int
@@ -620,6 +965,26 @@ def audit_telegram_execution(
             and receipt["access"] == context["access"],
             "receipt_input_binding_mismatch",
         )
+        if context["_context_version"] == 2:
+            handoff_ref = _reference(
+                receipt["handoff_receipt"],
+                "handoff_receipt_ref",
+                sized=True,
+            )
+            handoff_path = Path(handoff_ref["path"])
+            _require(
+                handoff_path.parent == Path(context["output_root"]),
+                "handoff_receipt_scope_invalid",
+            )
+            _validate_handoff_receipt(
+                _read_json(
+                    handoff_path,
+                    handoff_ref["sha256"],
+                    maximum=MAX_CONTEXT_BYTES,
+                    code="handoff_receipt_json_invalid",
+                ),
+                plan_reference=context["handoff_plan"],
+            )
 
         controller = _exact(
             receipt["controller"],
@@ -712,7 +1077,8 @@ def audit_telegram_execution(
         _read_bytes(policy_path, context["policy"]["sha256"], maximum=2 << 20)
         _require(
             policy.attempt_id == context["attempt_id"]
-            and policy.candidate.source_root.resolve() == ROOT
+            and policy.candidate.source_root.resolve()
+            == Path(context["candidate_identity"]["source_root"]).resolve()
             and policy.candidate.candidate_sha == identity["candidate_sha"]
             and policy.candidate.candidate_tree == identity["candidate_tree"]
             and policy.candidate.suite_revision == expected_suite
@@ -723,6 +1089,21 @@ def audit_telegram_execution(
             and policy.observer.mode == context["expected"]["observer_mode"],
             "policy_binding_mismatch",
         )
+        if context["_context_version"] == 2:
+            harness_identity = context["harness_identity"]
+            _require(
+                policy.harness is not None
+                and policy.harness.source_root.resolve() == ROOT
+                and str(policy.harness.manifest_path) == harness_identity["manifest_path"]
+                and policy.harness.manifest_sha256 == harness_identity["manifest_sha256"]
+                and policy.candidate.installed_wheel is not None
+                and policy.candidate.installed_wheel.wheel_sha256
+                == context["expected"]["installed_wheel_sha256"]
+                and policy.effect_admission is not None
+                and str(policy.effect_admission.manifest_path) == context["effect_admission"]["path"]
+                and policy.effect_admission.manifest_sha256 == context["expected"]["effect_admission_sha256"],
+                "policy_harness_binding_mismatch",
+            )
         _require(
             controller["argv"]
             == [
@@ -800,11 +1181,24 @@ def audit_telegram_execution(
         _require(
             access.contour_id == context["expected"]["contour_id"]
             and access.bot_user_id == context["expected"]["bot_user_id"]
-            and access.chat_id == context["expected"]["chat_id"]
-            and access.user_id == context["expected"]["user_id"]
             and access.observer_mode == context["expected"]["observer_mode"],
             "access_binding_mismatch",
         )
+        if context["_context_version"] == 1:
+            _require(
+                access.chat_id == context["expected"]["chat_id"]
+                and access.user_id == context["expected"]["user_id"],
+                "access_binding_mismatch",
+            )
+        else:
+            _require(
+                access.route == context["expected"]["access_route"]
+                and access.owner_private_chat_hmac_sha256
+                == context["expected"]["owner_private_chat_hmac_sha256"]
+                and access.owner_authority_sha256 == context["expected"]["owner_authority_sha256"]
+                and access.startup_commands_sha256 == context["expected"]["startup_commands_sha256"],
+                "access_owner_binding_mismatch",
+            )
 
         env_raw = _read_bytes(
             policy.contour.env_file,
@@ -830,7 +1224,11 @@ def audit_telegram_execution(
         )
 
         try:
-            source_before = telegram._verified_source_map(policy.candidate)
+            source_before = (
+                telegram._verified_source_map(policy.candidate, policy.harness)
+                if getattr(policy, "harness", None) is not None
+                else telegram._verified_source_map(policy.candidate)
+            )
         except (OSError, ValueError, telegram.RoundtripError) as exc:
             raise _acceptance_error("candidate_source_invalid") from exc
         _require(
@@ -838,6 +1236,21 @@ def audit_telegram_execution(
             and source_before["module_sha256"] == context["driver"]["sha256"],
             "candidate_source_binding_mismatch",
         )
+        if context["_context_version"] == 2:
+            harness_identity = context["harness_identity"]
+            _require(
+                source_before.get("harness")
+                == {
+                    "manifest_sha256": harness_identity["manifest_sha256"],
+                    "source_map_sha256": harness_identity["source_map_sha256"],
+                    "source_file_count": harness_identity["source_file_count"],
+                    "driver_sha256": harness_identity["driver_sha256"],
+                }
+                and source_before.get("installed_wheel", {}).get("wheel_sha256")
+                == context["expected"]["installed_wheel_sha256"]
+                and source_before.get("installed_wheel", {}).get("source_checkout_imported") is False,
+                "harness_source_binding_mismatch",
+            )
 
         evidence = _exact(
             receipt["evidence"],
@@ -906,14 +1319,23 @@ def audit_telegram_execution(
             "observer_size_mismatch",
         )
         request = _inventory_json(payloads, "observer-request.json")
-        _require(
+        access_route = getattr(access, "route", "dedicated_test_bot")
+        request_identity_ok = (
             request.get("schema") == telegram.OBSERVER_REQUEST_SCHEMA
+            and request.get("chat_id") == access.chat_id
+            and request.get("user_id") == access.user_id
+            if access_route == "dedicated_test_bot"
+            else request.get("schema") == telegram.OBSERVER_REQUEST_SCHEMA_V2
+            and request.get("owner_private_chat_hmac_sha256") == access.owner_private_chat_hmac_sha256
+            and "chat_id" not in request
+            and "user_id" not in request
+        )
+        _require(
+            request_identity_ok
             and request.get("attempt_id") == context["attempt_id"]
             and request.get("candidate_sha") == identity["candidate_sha"]
             and request.get("candidate_manifest_sha256") == policy.candidate.manifest_sha256
             and request.get("contour_id") == access.contour_id
-            and request.get("chat_id") == access.chat_id
-            and request.get("user_id") == access.user_id
             and request.get("bot_user_id") == access.bot_user_id
             and request.get("observer_mode") == access.observer_mode
             and request.get("result_path") == str(observer_path)
@@ -1061,21 +1483,24 @@ def audit_telegram_execution(
             }
             for role in ("telegram-bridge", "server")
         ]
-        report_origins_expected = [
-            {
-                key: origins[role][key]
-                for key in (
-                    "role",
-                    "pid",
-                    "candidate_sha",
-                    "cli_origin",
-                    "effect_guard_origin",
-                    "effect_guard_sha256",
-                    "effect_spec_sha256",
-                    "argv",
-                )
+        report_origin_keys = {
+            "role",
+            "pid",
+            "candidate_sha",
+            "cli_origin",
+            "effect_guard_origin",
+            "effect_guard_sha256",
+            "effect_spec_sha256",
+            "argv",
+        }
+        if getattr(policy.candidate, "installed_wheel", None) is not None:
+            report_origin_keys |= {
+                "installed_site_root",
+                "wheel_sha256",
+                "source_checkout_imported",
             }
-            for role in ("server", "telegram-bridge")
+        report_origins_expected = [
+            {key: origins[role][key] for key in report_origin_keys} for role in ("server", "telegram-bridge")
         ]
         _require(
             report.get("schema") == telegram.REPORT_SCHEMA
@@ -1116,7 +1541,11 @@ def audit_telegram_execution(
         )
 
         try:
-            source_after = telegram._verified_source_map(policy.candidate)
+            source_after = (
+                telegram._verified_source_map(policy.candidate, policy.harness)
+                if getattr(policy, "harness", None) is not None
+                else telegram._verified_source_map(policy.candidate)
+            )
         except (OSError, ValueError, telegram.RoundtripError) as exc:
             raise _acceptance_error("candidate_source_changed") from exc
         _require(source_after == source_before, "candidate_source_changed")

@@ -148,10 +148,10 @@
     },
     {
       "id": "CAP-TELEGRAM-LIVE",
-      "promise": "Real Telegram round-trip to a test bot",
+      "promise": "Real Telegram round-trip in an owner-admitted isolated test contour",
       "risk": "high",
       "obligation": "required",
-      "evidence_note": "Live recipient blocked without dedicated test contour"
+      "evidence_note": "Live recipient blocked without either a dedicated test bot or the bounded existing-bot sole-consumer handoff contour"
     },
     {
       "id": "CAP-WEB-RESEARCH",
@@ -4325,7 +4325,7 @@
       "executable": true,
       "release_required": true,
       "timeout_s": 600,
-      "scenario": "Real Telegram round-trip on a dedicated test bot, never the live singleton",
+      "scenario": "Real Telegram round-trip on either a dedicated test bot or the owner-admitted existing Friday bot after a sole-consumer handoff, always in an isolated non-production HOME from the pinned installed wheel and never in the production/live singleton",
       "evidence": "transport receipt + user-visible message",
       "covered_surfaces": [],
       "handler": "tools/release_1_0_telegram_roundtrip.py:run_roundtrip",
@@ -10667,7 +10667,7 @@
       "capability_id": "CAP-TELEGRAM-LIVE",
       "kind": "missing_safe_contour",
       "blocks_1_0": true,
-      "close_with": "Dedicated test bot token and chat, never the production bridge singleton"
+      "close_with": "Either a dedicated test bot, or the owner-admitted existing Friday bot with one-canary sole-consumer handoff, stopped production consumer, isolated non-production HOME, installed-wheel origin, exact owner private-chat guard and declared one-time setMyCommands effect; never the production/live singleton or a second consumer"
     },
     {
       "id": "GAP-ANDROID-PHYSICAL",

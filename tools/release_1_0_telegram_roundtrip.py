@@ -30,18 +30,25 @@ import urllib.error
 import urllib.parse
 import urllib.request
 import uuid
+import zipfile
 from collections.abc import Iterable, Mapping, Sequence
 from contextlib import suppress
 from pathlib import Path
 from typing import Any
 
 POLICY_SCHEMA = "friday.release-1-0-telegram-roundtrip-policy.v1"
+POLICY_SCHEMA_V2 = "friday.release-1-0-telegram-roundtrip-policy.v2"
+EFFECT_ADMISSION_SCHEMA = "friday.release-1-0-telegram-existing-bot-effect-admission.v1"
 ACCESS_SCHEMA = "friday.release-1-0-telegram-dedicated-access.v1"
+EXISTING_BOT_ACCESS_SCHEMA = "friday.release-1-0-telegram-existing-bot-access.v1"
 OBSERVER_REQUEST_SCHEMA = "friday.release-1-0-telegram-observer-request.v1"
+OBSERVER_REQUEST_SCHEMA_V2 = "friday.release-1-0-telegram-observer-request.v2"
 OBSERVER_RESULT_SCHEMA = "friday.release-1-0-telegram-observer-result.v1"
+OBSERVER_RESULT_SCHEMA_V2 = "friday.release-1-0-telegram-observer-result.v2"
 REPORT_SCHEMA = "friday.release-1-0-telegram-roundtrip-report.v1"
 EVENT_SCHEMA = "friday.release-1-0-telegram-roundtrip-event.v1"
 MODULE_RELATIVE_PATH = "tools/release_1_0_telegram_roundtrip.py"
+PREPARER_RELATIVE_PATH = "tools/release_1_0_telegram_existing_bot_prepare.py"
 CLI_RELATIVE_PATH = "friday/cli.py"
 BRIDGE_BASE_RELATIVE_PATH = "friday/telegram_bridge/_base.py"
 SHA256_RE = re.compile(r"[0-9a-f]{64}")
@@ -49,6 +56,7 @@ GIT_SHA_RE = re.compile(r"(?:[0-9a-f]{40}|[0-9a-f]{64})")
 ATTEMPT_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]{15,79}")
 CANARY_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9:_-]{23,119}")
 SAFE_CONTOUR_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{7,79}")
+VERSION_RE = re.compile(r"[0-9]+(?:\.[0-9]+){2}(?:[A-Za-z0-9._+-]*)?")
 OWNER_USER_ID = str(uuid.uuid5(uuid.NAMESPACE_URL, "jericho://owner"))
 BOT_API_ROOT = "https://api.telegram.org"
 MAX_JSON_BYTES = 2 * 1024 * 1024
@@ -74,6 +82,20 @@ EFFECT_METHOD_CAPS: dict[str, dict[str, int]] = {
 EFFECT_CHAT_METHODS = frozenset({"sendMessage", "sendChatAction", "editMessageText"})
 EFFECT_WRITE_METHODS = frozenset({"setMyCommands", "sendMessage", "sendChatAction", "editMessageText"})
 EFFECT_PROVEN_REJECTION_STATUSES = frozenset({400, 401, 403, 404, 409, 413, 422, 429})
+GETUPDATES_ALLOWED_UPDATES = ["message", "edited_message", "callback_query"]
+FORBIDDEN_TELEGRAM_ROUTE_KEYS = frozenset(
+    {
+        "business_connection_id",
+        "channel_id",
+        "direct_messages_topic_id",
+        "from_chat_id",
+        "inline_message_id",
+        "message_thread_id",
+        "target_chat_id",
+        "user_id",
+        "user_ids",
+    }
+)
 
 
 class RoundtripError(RuntimeError):
@@ -240,6 +262,44 @@ def _json_bytes(value: object) -> bytes:
     )
 
 
+def canonical_startup_commands_sha256(value: object) -> str:
+    """Digest the semantic setMyCommands body independently of HTTP encoding."""
+    return _sha256_bytes(_json_bytes(value))
+
+
+def _validated_startup_commands_payload(value: object) -> dict[str, Any]:
+    payload = _mapping(value, "setMyCommands payload")
+    commands = payload.get("commands")
+    if (
+        set(payload) != {"commands"}
+        or not isinstance(commands, list)
+        or not 1 <= len(commands) <= 100
+        or any(
+            not isinstance(item, dict)
+            or set(item) != {"command", "description"}
+            or not isinstance(item.get("command"), str)
+            or re.fullmatch(r"[a-z0-9_]{1,32}", item["command"]) is None
+            or not isinstance(item.get("description"), str)
+            or not 1 <= len(item["description"]) <= 256
+            for item in commands
+        )
+    ):
+        raise ValueError("setMyCommands payload is outside the admitted shape")
+    return payload
+
+
+def _has_nested_or_forbidden_route(value: object, *, top_level: bool = True) -> bool:
+    if isinstance(value, dict):
+        for key, item in value.items():
+            if key in FORBIDDEN_TELEGRAM_ROUTE_KEYS or (key == "chat_id" and not top_level):
+                return True
+            if _has_nested_or_forbidden_route(item, top_level=False):
+                return True
+    elif isinstance(value, list):
+        return any(_has_nested_or_forbidden_route(item, top_level=False) for item in value)
+    return False
+
+
 def _write_new_private(path: Path, value: object) -> int:
     payload = _json_bytes(value)
     flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
@@ -338,6 +398,12 @@ def _validated_effect_spec(document: Mapping[str, Any]) -> dict[str, Any]:
         "method_attempt_caps",
         "max_total_attempts",
         "expected_inbound_sha256",
+        "access_route",
+        "owner_private_chat_hmac_sha256",
+        "owner_authority_sha256",
+        "startup_commands_sha256",
+        "effect_admission_sha256",
+        "startup_effect_policy",
         "unknown_effect_policy",
         "spec_hmac_sha256",
     }
@@ -353,6 +419,32 @@ def _validated_effect_spec(document: Mapping[str, Any]) -> dict[str, Any]:
         or result["inbound_unique_messages"] != 1
         or result["telegram_origin"] != BOT_API_ROOT
         or result["unknown_effect_policy"] != "latch_and_never_retry"
+        or result["access_route"]
+        not in {
+            "dedicated_test_bot",
+            "existing_friday_bot_one_canary",
+        }
+        or result["startup_effect_policy"]
+        not in {
+            "dedicated_test_bot_menu_once",
+            "existing_friday_bot_menu_once_digest_recorded_no_restore",
+        }
+        or (
+            result["access_route"] == "existing_friday_bot_one_canary"
+            and result["startup_effect_policy"] != "existing_friday_bot_menu_once_digest_recorded_no_restore"
+        )
+        or (
+            result["access_route"] == "existing_friday_bot_one_canary"
+            and SHA256_RE.fullmatch(str(result["owner_private_chat_hmac_sha256"])) is None
+        )
+        or (
+            result["access_route"] == "existing_friday_bot_one_canary"
+            and (
+                SHA256_RE.fullmatch(str(result["owner_authority_sha256"])) is None
+                or SHA256_RE.fullmatch(str(result["startup_commands_sha256"])) is None
+                or SHA256_RE.fullmatch(str(result["effect_admission_sha256"])) is None
+            )
+        )
         or SHA256_RE.fullmatch(str(result["token_sha256"])) is None
         or SHA256_RE.fullmatch(str(result["expected_inbound_sha256"])) is None
         or SHA256_RE.fullmatch(str(result["spec_hmac_sha256"])) is None
@@ -377,6 +469,9 @@ def _effect_spec_document(
     token: str,
     deadline_monotonic_ns: int,
 ) -> dict[str, Any]:
+    admission = (
+        _verified_effect_admission(policy) if access.route == "existing_friday_bot_one_canary" else None
+    )
     inbound_text = (
         f"Friday roundtrip {policy.canary}. Reply with exactly this marker and nothing else: {policy.canary}"
     )
@@ -401,6 +496,16 @@ def _effect_spec_document(
         "method_attempt_caps": EFFECT_METHOD_CAPS,
         "max_total_attempts": EFFECT_TOTAL_ATTEMPT_CAP,
         "expected_inbound_sha256": _sha256_bytes(inbound_text.encode("utf-8")),
+        "access_route": access.route,
+        "owner_private_chat_hmac_sha256": access.owner_private_chat_hmac_sha256,
+        "owner_authority_sha256": access.owner_authority_sha256,
+        "startup_commands_sha256": access.startup_commands_sha256,
+        "effect_admission_sha256": (admission["manifest_sha256"] if admission is not None else ""),
+        "startup_effect_policy": (
+            "existing_friday_bot_menu_once_digest_recorded_no_restore"
+            if access.route == "existing_friday_bot_one_canary"
+            else "dedicated_test_bot_menu_once"
+        ),
         "unknown_effect_policy": "latch_and_never_retry",
     }
     document["spec_hmac_sha256"] = hmac.new(
@@ -517,6 +622,7 @@ class TelegramEffectLedger:
         self._active: dict[int, dict[str, Any]] = {}
         self._receipt_ids: set[int] = set()
         self._update_ids: set[int] = set()
+        self._next_getupdates_offset = 0
         spec = _load_json(root / "spec.json", "Telegram effect spec", maximum=16384, private=True)
         self.spec = _validated_effect_spec(spec)
         if self.spec["token_sha256"] != _sha256_bytes(token.encode("utf-8")):
@@ -615,19 +721,108 @@ class TelegramEffectLedger:
                 self._violate("telegram_effect_request_json_invalid")
             if not isinstance(payload, dict):
                 self._violate("telegram_effect_request_shape_invalid")
+            semantic_sha256 = canonical_startup_commands_sha256(payload)
+            if method in {"getMe", "getWebhookInfo"} and payload:
+                self._violate("telegram_effect_request_shape_invalid")
+            if method == "setMyCommands":
+                try:
+                    _validated_startup_commands_payload(payload)
+                except ValueError:
+                    self._violate("telegram_effect_startup_menu_invalid")
+                expected_policy = (
+                    "existing_friday_bot_menu_once_digest_recorded_no_restore"
+                    if self.spec["access_route"] == "existing_friday_bot_one_canary"
+                    else "dedicated_test_bot_menu_once"
+                )
+                if self.spec["startup_effect_policy"] != expected_policy:
+                    self._violate("telegram_effect_startup_menu_not_admitted")
+                if (
+                    self.spec["access_route"] == "existing_friday_bot_one_canary"
+                    and semantic_sha256 != self.spec["startup_commands_sha256"]
+                ):
+                    self._violate("telegram_effect_startup_menu_digest_mismatch")
+            if (
+                method == "getUpdates"
+                and self.spec["access_route"] == "existing_friday_bot_one_canary"
+                and (
+                    set(payload) != {"offset", "timeout", "allowed_updates"}
+                    or isinstance(payload.get("offset"), bool)
+                    or payload.get("offset") != self._next_getupdates_offset
+                    or payload.get("timeout") != 30
+                    or payload.get("allowed_updates") != GETUPDATES_ALLOWED_UPDATES
+                    or any(item.get("method") == "getUpdates" for item in self._active.values())
+                )
+            ):
+                self._violate("telegram_effect_getupdates_request_invalid")
             chat_id: int | None = None
             message_id: int | None = None
+            if _has_nested_or_forbidden_route(payload):
+                self._violate("telegram_effect_recipient_scope_refused")
             if method in EFFECT_CHAT_METHODS:
                 raw_chat = payload.get("chat_id")
-                try:
-                    chat_id = int(raw_chat)
-                except (TypeError, ValueError):
+                if isinstance(raw_chat, bool) or not isinstance(raw_chat, int):
                     self._violate("telegram_effect_chat_invalid")
-                if isinstance(raw_chat, bool) or chat_id != int(self.spec["chat_id"]):
+                chat_id = raw_chat
+                if chat_id != int(self.spec["chat_id"]):
                     self._violate("telegram_effect_chat_mismatch")
+            if method == "sendChatAction" and (
+                set(payload) != {"chat_id", "action"} or payload.get("action") != "typing"
+            ):
+                self._violate("telegram_effect_chat_action_invalid")
+            if method == "sendMessage":
+                allowed_send_keys = {
+                    "chat_id",
+                    "text",
+                    "parse_mode",
+                    "disable_web_page_preview",
+                    "reply_parameters",
+                    "reply_markup",
+                }
+                reply_parameters = payload.get("reply_parameters")
+                if (
+                    not {"chat_id", "text"}.issubset(payload)
+                    or not set(payload).issubset(allowed_send_keys)
+                    or not isinstance(payload.get("text"), str)
+                    or not payload["text"]
+                    or ("parse_mode" in payload and payload.get("parse_mode") != "HTML")
+                    or (
+                        "disable_web_page_preview" in payload
+                        and payload.get("disable_web_page_preview") is not True
+                    )
+                    or (
+                        reply_parameters is not None
+                        and (
+                            not isinstance(reply_parameters, dict)
+                            or set(reply_parameters) != {"message_id", "allow_sending_without_reply"}
+                            or isinstance(reply_parameters.get("message_id"), bool)
+                            or not isinstance(reply_parameters.get("message_id"), int)
+                            or reply_parameters["message_id"] <= 0
+                            or reply_parameters.get("allow_sending_without_reply") is not True
+                        )
+                    )
+                ):
+                    self._violate("telegram_effect_send_message_invalid")
             if method == "editMessageText":
                 raw_message = payload.get("message_id")
-                if isinstance(raw_message, bool) or not isinstance(raw_message, int):
+                if (
+                    isinstance(raw_message, bool)
+                    or not isinstance(raw_message, int)
+                    or (
+                        self.spec["access_route"] == "existing_friday_bot_one_canary"
+                        and (
+                            set(payload)
+                            != {
+                                "chat_id",
+                                "message_id",
+                                "text",
+                                "disable_web_page_preview",
+                            }
+                            or not isinstance(payload.get("text"), str)
+                            or not payload["text"]
+                            or payload.get("disable_web_page_preview") is not True
+                        )
+                    )
+                ):
                     self._violate("telegram_effect_edit_receipt_missing")
                 message_id = raw_message
                 if message_id not in self._receipt_ids:
@@ -646,6 +841,7 @@ class TelegramEffectLedger:
                 "method": method,
                 "request_bytes": len(body),
                 "request_sha256": _sha256_bytes(body),
+                "request_semantic_sha256": semantic_sha256,
                 "origin_sha256": _sha256_bytes(origin.encode("utf-8")),
                 "token_sha256": self.spec["token_sha256"],
                 "chat_id": chat_id,
@@ -664,7 +860,8 @@ class TelegramEffectLedger:
             if sequence not in self._active:
                 return
             record = self._active.pop(sequence)
-            self._latched = "telegram_effect_unknown"
+            if not self._latched:
+                self._latched = "telegram_effect_unknown"
             facts: dict[str, Any] = {}
             if body is not None:
                 facts = {
@@ -746,6 +943,10 @@ class TelegramEffectLedger:
                 or isinstance(returned_chat, bool)
                 or not isinstance(returned_chat, int)
                 or returned_chat != int(self.spec["chat_id"])
+                or (
+                    self.spec["access_route"] == "existing_friday_bot_one_canary"
+                    and chat.get("type") != "private"
+                )
                 or message_id in self._receipt_ids
             ):
                 self._violate("telegram_effect_send_receipt_invalid")
@@ -758,22 +959,27 @@ class TelegramEffectLedger:
                 or result.get("message_id") not in self._receipt_ids
                 or not isinstance(returned_chat, dict)
                 or returned_chat.get("id") != int(self.spec["chat_id"])
+                or (
+                    self.spec["access_route"] == "existing_friday_bot_one_canary"
+                    and returned_chat.get("type") != "private"
+                )
             ):
                 self._violate("telegram_effect_edit_receipt_invalid")
             summary["receipt_message_id"] = int(result["message_id"])
         elif method == "getUpdates":
-            if not isinstance(result, list):
+            if not isinstance(result, list) or len(result) > int(self.spec["inbound_unique_messages"]):
                 self._violate("telegram_effect_updates_shape_invalid")
             update_ids: list[int] = []
             message_ids: list[int] = []
             for update in result:
-                if not isinstance(update, dict):
+                if not isinstance(update, dict) or set(update) != {"update_id", "message"}:
                     self._violate("telegram_effect_update_unclassified")
                 update_id = update.get("update_id")
                 message = update.get("message")
                 if (
                     isinstance(update_id, bool)
                     or not isinstance(update_id, int)
+                    or update_id < self._next_getupdates_offset
                     or update_id in self._update_ids
                     or not isinstance(message, dict)
                 ):
@@ -787,17 +993,35 @@ class TelegramEffectLedger:
                     or sender.get("id") != int(self.spec["user_id"])
                     or not isinstance(chat, dict)
                     or chat.get("id") != int(self.spec["chat_id"])
+                    or (
+                        self.spec["access_route"] == "existing_friday_bot_one_canary"
+                        and (
+                            chat.get("type") != "private"
+                            or "is_forum" in chat
+                            or "sender_chat" in message
+                            or "message_thread_id" in message
+                            or "direct_messages_topic" in message
+                            or "direct_messages_topic_id" in message
+                            or "is_topic_message" in message
+                            or "is_automatic_forward" in message
+                            or "forward_origin" in message
+                            or "via_bot" in message
+                            or sender.get("is_bot") is not False
+                        )
+                    )
                     or isinstance(message_id, bool)
                     or not isinstance(message_id, int)
                     or not isinstance(text, str)
                     or _sha256_bytes(text.encode("utf-8")) != self.spec["expected_inbound_sha256"]
                 ):
                     self._violate("telegram_effect_update_unclassified")
-                self._update_ids.add(update_id)
                 update_ids.append(update_id)
                 message_ids.append(message_id)
-            if len(self._update_ids) > int(self.spec["inbound_unique_messages"]):
+            if len(self._update_ids) + len(update_ids) > int(self.spec["inbound_unique_messages"]):
                 self._violate("telegram_effect_inbound_cap_exceeded")
+            self._update_ids.update(update_ids)
+            if update_ids:
+                self._next_getupdates_offset = update_ids[0] + 1
             summary["update_ids"] = update_ids
             summary["message_ids"] = message_ids
         return summary
@@ -946,6 +1170,20 @@ def inspect_effect_ledger(
         "token_sha256": _sha256_bytes(token.encode("utf-8")),
         "backend_origin": policy.contour.backend_origin,
         "expected_inbound_sha256": _sha256_bytes(expected_inbound.encode("utf-8")),
+        "access_route": access.route,
+        "owner_private_chat_hmac_sha256": access.owner_private_chat_hmac_sha256,
+        "owner_authority_sha256": access.owner_authority_sha256,
+        "startup_commands_sha256": access.startup_commands_sha256,
+        "effect_admission_sha256": (
+            _verified_effect_admission(policy)["manifest_sha256"]
+            if access.route == "existing_friday_bot_one_canary"
+            else ""
+        ),
+        "startup_effect_policy": (
+            "existing_friday_bot_menu_once_digest_recorded_no_restore"
+            if access.route == "existing_friday_bot_one_canary"
+            else "dedicated_test_bot_menu_once"
+        ),
     }
     if any(spec.get(key) != value for key, value in expected.items()):
         raise RoundtripError("FAIL", "telegram_effect_spec_binding_mismatch")
@@ -1051,6 +1289,12 @@ def inspect_effect_ledger(
                     or document.get("token_sha256") != spec["token_sha256"]
                 ):
                     raise RoundtripError("FAIL", "telegram_effect_start_invalid")
+                if (
+                    method == "setMyCommands"
+                    and spec["access_route"] == "existing_friday_bot_one_canary"
+                    and document.get("request_semantic_sha256") != spec["startup_commands_sha256"]
+                ):
+                    raise RoundtripError("FAIL", "telegram_effect_startup_menu_digest_mismatch")
                 if method in EFFECT_CHAT_METHODS and document.get("chat_id") != access.chat_id:
                     raise RoundtripError("FAIL", "telegram_effect_chat_mismatch")
                 starts[key] = document
@@ -1164,6 +1408,15 @@ def inspect_effect_ledger(
     return {
         "schema": EFFECT_LEDGER_SCHEMA,
         "source": "independent_parent_reader",
+        "access_route": access.route,
+        "effect_admission_sha256": spec["effect_admission_sha256"],
+        "startup_effect": {
+            "method": "setMyCommands",
+            "policy": spec["startup_effect_policy"],
+            "request_sha256": request_digests["bridge"].get("setMyCommands", []),
+            "semantic_sha256": spec["startup_commands_sha256"],
+            "restoration_claimed": False,
+        },
         "attempts": total_attempts,
         "counts": counts,
         "successful_counts": successful,
@@ -1189,6 +1442,28 @@ class CandidatePolicy:
     suite_revision: str
     python_executable: Path
     python_sha256: str
+    installed_wheel: InstalledWheelPolicy | None = None
+
+
+@dataclasses.dataclass(frozen=True)
+class InstalledWheelPolicy:
+    wheel_path: Path
+    wheel_sha256: str
+    site_root: Path
+    distribution_version: str
+
+
+@dataclasses.dataclass(frozen=True)
+class HarnessPolicy:
+    manifest_path: Path
+    manifest_sha256: str
+    source_root: Path
+
+
+@dataclasses.dataclass(frozen=True)
+class EffectAdmissionPolicy:
+    manifest_path: Path
+    manifest_sha256: str
 
 
 @dataclasses.dataclass(frozen=True)
@@ -1246,9 +1521,14 @@ class Policy:
     access: AccessPolicy
     observer: ObserverPolicy
     budgets: Budgets
+    harness: HarnessPolicy | None = None
+    effect_admission: EffectAdmissionPolicy | None = None
 
     @classmethod
     def from_document(cls, document: Mapping[str, Any]) -> Policy:
+        schema = document.get("schema")
+        if schema not in {POLICY_SCHEMA, POLICY_SCHEMA_V2}:
+            raise ValueError("policy schema mismatch")
         _exact_keys(
             document,
             required={
@@ -1261,10 +1541,11 @@ class Policy:
                 "observer",
                 "budgets",
             },
+            optional={"harness", "effect_admission"} if schema == POLICY_SCHEMA_V2 else set(),
             where="policy",
         )
-        if document["schema"] != POLICY_SCHEMA:
-            raise ValueError("policy schema mismatch")
+        if schema == POLICY_SCHEMA_V2 and not {"harness", "effect_admission"}.issubset(document):
+            raise ValueError("policy v2 requires harness and effect-admission bindings")
         attempt_id = _string(document["attempt_id"], "attempt_id", minimum=16, maximum=80)
         if ATTEMPT_RE.fullmatch(attempt_id) is None:
             raise ValueError("attempt_id is not canonical")
@@ -1273,18 +1554,20 @@ class Policy:
             raise ValueError("canary must be canonical and bind attempt_id")
 
         candidate_raw = _mapping(document["candidate"], "candidate")
+        candidate_required = {
+            "manifest_path",
+            "manifest_sha256",
+            "source_root",
+            "candidate_sha",
+            "candidate_tree",
+            "suite_revision",
+            "python_executable",
+            "python_sha256",
+        }
         _exact_keys(
             candidate_raw,
-            required={
-                "manifest_path",
-                "manifest_sha256",
-                "source_root",
-                "candidate_sha",
-                "candidate_tree",
-                "suite_revision",
-                "python_executable",
-                "python_sha256",
-            },
+            required=candidate_required,
+            optional={"installed_wheel"} if schema == POLICY_SCHEMA_V2 else set(),
             where="candidate",
         )
         manifest_sha = _string(candidate_raw["manifest_sha256"], "candidate.manifest_sha256")
@@ -1295,6 +1578,30 @@ class Policy:
             raise ValueError("candidate SHA-256 pins are invalid")
         if GIT_SHA_RE.fullmatch(candidate_sha) is None or GIT_SHA_RE.fullmatch(candidate_tree) is None:
             raise ValueError("candidate identity pins are invalid")
+        installed_wheel: InstalledWheelPolicy | None = None
+        if schema == POLICY_SCHEMA_V2:
+            installed_raw = _mapping(candidate_raw.get("installed_wheel"), "candidate.installed_wheel")
+            _exact_keys(
+                installed_raw,
+                required={"wheel_path", "wheel_sha256", "site_root", "distribution_version"},
+                where="candidate.installed_wheel",
+            )
+            wheel_sha = _string(installed_raw["wheel_sha256"], "candidate.installed_wheel.wheel_sha256")
+            version = _string(
+                installed_raw["distribution_version"],
+                "candidate.installed_wheel.distribution_version",
+                maximum=64,
+            )
+            if SHA256_RE.fullmatch(wheel_sha) is None or VERSION_RE.fullmatch(version) is None:
+                raise ValueError("installed wheel identity is invalid")
+            installed_wheel = InstalledWheelPolicy(
+                wheel_path=_absolute_path(
+                    installed_raw["wheel_path"], "candidate.installed_wheel.wheel_path"
+                ),
+                wheel_sha256=wheel_sha,
+                site_root=_absolute_path(installed_raw["site_root"], "candidate.installed_wheel.site_root"),
+                distribution_version=version,
+            )
         candidate = CandidatePolicy(
             manifest_path=_absolute_path(candidate_raw["manifest_path"], "candidate.manifest_path"),
             manifest_sha256=manifest_sha,
@@ -1306,7 +1613,45 @@ class Policy:
                 candidate_raw["python_executable"], "candidate.python_executable"
             ),
             python_sha256=python_sha,
+            installed_wheel=installed_wheel,
         )
+
+        harness: HarnessPolicy | None = None
+        effect_admission: EffectAdmissionPolicy | None = None
+        if schema == POLICY_SCHEMA_V2:
+            harness_raw = _mapping(document["harness"], "harness")
+            _exact_keys(
+                harness_raw,
+                required={"manifest_path", "manifest_sha256", "source_root"},
+                where="harness",
+            )
+            harness_sha = _string(harness_raw["manifest_sha256"], "harness.manifest_sha256")
+            if SHA256_RE.fullmatch(harness_sha) is None:
+                raise ValueError("harness manifest SHA-256 is invalid")
+            harness = HarnessPolicy(
+                manifest_path=_absolute_path(harness_raw["manifest_path"], "harness.manifest_path"),
+                manifest_sha256=harness_sha,
+                source_root=_absolute_path(harness_raw["source_root"], "harness.source_root"),
+            )
+            admission_raw = _mapping(document["effect_admission"], "effect_admission")
+            _exact_keys(
+                admission_raw,
+                required={"manifest_path", "manifest_sha256"},
+                where="effect_admission",
+            )
+            admission_sha = _string(
+                admission_raw["manifest_sha256"],
+                "effect_admission.manifest_sha256",
+            )
+            if SHA256_RE.fullmatch(admission_sha) is None:
+                raise ValueError("effect-admission manifest SHA-256 is invalid")
+            effect_admission = EffectAdmissionPolicy(
+                manifest_path=_absolute_path(
+                    admission_raw["manifest_path"],
+                    "effect_admission.manifest_path",
+                ),
+                manifest_sha256=admission_sha,
+            )
 
         contour_raw = _mapping(document["contour"], "contour")
         _exact_keys(
@@ -1495,11 +1840,149 @@ class Policy:
             access=access,
             observer=observer,
             budgets=budgets,
+            harness=harness,
+            effect_admission=effect_admission,
         )
+
+
+def _verified_effect_admission(policy: Policy) -> dict[str, Any]:
+    admission = policy.effect_admission
+    if admission is None or policy.harness is None or policy.candidate.installed_wheel is None:
+        raise RoundtripError("NOT_RUN", "existing_bot_effect_admission_missing")
+    path = admission.manifest_path.resolve(strict=True)
+    if (
+        _is_within(path, policy.contour.isolation_root)
+        or _is_within(path, policy.candidate.source_root.resolve())
+        or _is_within(path, policy.harness.source_root.resolve())
+    ):
+        raise RoundtripError("NOT_RUN", "existing_bot_effect_admission_not_independent")
+    document = _load_json(
+        path,
+        "existing-bot effect admission",
+        maximum=128 << 10,
+        private=True,
+    )
+    if sha256_file(path, maximum=128 << 10) != admission.manifest_sha256:
+        raise RoundtripError("NOT_RUN", "existing_bot_effect_admission_digest_mismatch")
+    _exact_keys(
+        document,
+        required={
+            "schema",
+            "route_id",
+            "candidate_sha",
+            "candidate_tree",
+            "wheel_sha256",
+            "harness_manifest_sha256",
+            "base_effect_scope",
+            "owner_directive",
+            "existing_friday_bot_one_canary",
+            "same_bot_production_consumer_stopped",
+            "isolated_non_production_home",
+            "installed_wheel_origin",
+            "owner_private_recipient_only",
+            "startup_effect",
+            "frozen_limits",
+            "unknown_effect_policy",
+            "nonowner_ingress_policy",
+            "GO",
+        },
+        where="existing-bot effect admission",
+    )
+    base = _mapping(document["base_effect_scope"], "effect_admission.base_effect_scope")
+    owner = _mapping(document["owner_directive"], "effect_admission.owner_directive")
+    startup = _mapping(document["startup_effect"], "effect_admission.startup_effect")
+    for reference, where in ((base, "base_effect_scope"), (owner, "owner_directive")):
+        _exact_keys(reference, required={"path", "sha256"}, where=where)
+        reference_path = _absolute_path(reference["path"], f"{where}.path").resolve(strict=True)
+        reference_sha = _string(reference["sha256"], f"{where}.sha256")
+        if (
+            SHA256_RE.fullmatch(reference_sha) is None
+            or sha256_file(reference_path, maximum=256 << 10) != reference_sha
+        ):
+            raise RoundtripError("NOT_RUN", "existing_bot_effect_authority_digest_mismatch", where)
+    _exact_keys(
+        startup,
+        required={
+            "method",
+            "max_attempts",
+            "target",
+            "canonical_payload_digest_required",
+            "restoration_claimed",
+        },
+        where="effect_admission.startup_effect",
+    )
+    expected_limits = {
+        "duration_s": EFFECT_DURATION_LIMIT_S,
+        "genuine_inbound": 1,
+        "bot_posts": EFFECT_METHOD_CAPS["bridge"]["sendMessage"],
+        "total_attempts": EFFECT_TOTAL_ATTEMPT_CAP,
+        "method_caps": EFFECT_METHOD_CAPS,
+    }
+    if (
+        document["schema"] != EFFECT_ADMISSION_SCHEMA
+        or document["route_id"] != "existing-friday-bot-sole-consumer-handoff-installed-final"
+        or document["candidate_sha"] != policy.candidate.candidate_sha
+        or document["candidate_tree"] != policy.candidate.candidate_tree
+        or document["wheel_sha256"] != policy.candidate.installed_wheel.wheel_sha256
+        or document["harness_manifest_sha256"] != policy.harness.manifest_sha256
+        or any(
+            document[key] is not True
+            for key in (
+                "existing_friday_bot_one_canary",
+                "same_bot_production_consumer_stopped",
+                "isolated_non_production_home",
+                "installed_wheel_origin",
+                "owner_private_recipient_only",
+            )
+        )
+        or startup
+        != {
+            "method": "setMyCommands",
+            "max_attempts": 1,
+            "target": "existing_friday_bot",
+            "canonical_payload_digest_required": True,
+            "restoration_claimed": False,
+        }
+        or document["frozen_limits"] != expected_limits
+        or document["unknown_effect_policy"] != "latch_and_never_retry"
+        or document["nonowner_ingress_policy"] != "fail_before_bridge_observation_no_reply_no_drain"
+        or document["GO"] is not False
+    ):
+        raise RoundtripError("NOT_RUN", "existing_bot_effect_admission_invalid")
+    base_document = _load_json(
+        Path(str(base["path"])),
+        "base Telegram effect scope",
+        maximum=256 << 10,
+        private=True,
+    )
+    owner_document = _load_json(
+        Path(str(owner["path"])),
+        "owner Telegram directive",
+        maximum=256 << 10,
+        private=True,
+    )
+    if (
+        base_document.get("schema") != "friday.astra-telegram-effect-scope.v1"
+        or base_document.get("GO") is not False
+        or owner_document.get("schema") != "friday.owner-telegram-recipient-restriction.v1"
+        or owner_document.get("GO") is not False
+        or not isinstance(owner_document.get("recipient_scope"), dict)
+        or owner_document["recipient_scope"].get("only_owner_private_chat") is not True
+    ):
+        raise RoundtripError("NOT_RUN", "existing_bot_effect_authority_invalid")
+    return {
+        "manifest_sha256": admission.manifest_sha256,
+        "route_id": document["route_id"],
+        "base_effect_scope_sha256": base["sha256"],
+        "owner_directive_sha256": owner["sha256"],
+        "startup_effect": startup,
+        "frozen_limits": expected_limits,
+    }
 
 
 @dataclasses.dataclass(frozen=True)
 class AccessManifest:
+    route: str
     contour_id: str
     attempt_id: str
     candidate_sha: str
@@ -1511,6 +1994,11 @@ class AccessManifest:
     issued_at: dt.datetime
     expires_at: dt.datetime
     nonce: str
+    owner_private_chat_hmac_sha256: str
+    owner_authority_path: Path | None
+    owner_authority_sha256: str
+    startup_commands_path: Path | None
+    startup_commands_sha256: str
 
     @classmethod
     def from_document(
@@ -1520,34 +2008,125 @@ class AccessManifest:
         policy: Policy,
         now: dt.datetime,
     ) -> AccessManifest:
-        _exact_keys(
-            document,
-            required={
-                "schema",
-                "contour_id",
-                "attempt_id",
-                "candidate_sha",
-                "candidate_manifest_sha256",
-                "dedicated_for_release_test",
-                "same_bot_production_consumer_stopped",
-                "clean_backlog_expected",
-                "bot_user_id",
-                "chat_id",
-                "user_id",
-                "observer_mode",
-                "issued_at",
-                "expires_at",
-                "nonce",
-            },
-            where="access_manifest",
-        )
-        if document["schema"] != ACCESS_SCHEMA:
+        schema = document.get("schema")
+        common = {
+            "schema",
+            "contour_id",
+            "attempt_id",
+            "candidate_sha",
+            "candidate_manifest_sha256",
+            "same_bot_production_consumer_stopped",
+            "clean_backlog_expected",
+            "bot_user_id",
+            "observer_mode",
+            "issued_at",
+            "expires_at",
+            "nonce",
+        }
+        if schema == ACCESS_SCHEMA:
+            _exact_keys(
+                document,
+                required=common | {"dedicated_for_release_test", "chat_id", "user_id"},
+                where="access_manifest",
+            )
+        elif schema == EXISTING_BOT_ACCESS_SCHEMA:
+            _exact_keys(
+                document,
+                required=common
+                | {
+                    "existing_friday_bot_one_canary",
+                    "isolated_non_production_home",
+                    "installed_wheel_origin",
+                    "owner_identity_source",
+                    "owner_authority_path",
+                    "owner_authority_sha256",
+                    "owner_private_chat_hmac_sha256",
+                    "startup_commands_path",
+                    "startup_commands_sha256",
+                },
+                where="access_manifest",
+            )
+        else:
             raise ValueError("access manifest schema mismatch")
-        if (
-            _boolean(document["dedicated_for_release_test"], "access_manifest.dedicated_for_release_test")
-            is not True
-        ):
-            raise ValueError("access is not dedicated")
+        route = "dedicated_test_bot"
+        owner_binding = ""
+        owner_authority_path: Path | None = None
+        owner_authority_sha256 = ""
+        startup_commands_path: Path | None = None
+        startup_commands_sha256 = ""
+        if schema == ACCESS_SCHEMA:
+            if (
+                _boolean(
+                    document["dedicated_for_release_test"],
+                    "access_manifest.dedicated_for_release_test",
+                )
+                is not True
+            ):
+                raise ValueError("access is not dedicated")
+        else:
+            route = "existing_friday_bot_one_canary"
+            for key in (
+                "existing_friday_bot_one_canary",
+                "isolated_non_production_home",
+                "installed_wheel_origin",
+            ):
+                if _boolean(document[key], f"access_manifest.{key}") is not True:
+                    raise ValueError(f"access admission missing: {key}")
+            if document["owner_identity_source"] != "pinned_existing_friday_configuration":
+                raise ValueError("owner identity source is not authoritative")
+            if (
+                policy.harness is None
+                or policy.candidate.installed_wheel is None
+                or policy.effect_admission is None
+            ):
+                raise ValueError(
+                    "existing bot access requires dual-root installed-wheel and effect-admission policy v2"
+                )
+            _verified_effect_admission(policy)
+            owner_binding = _string(
+                document["owner_private_chat_hmac_sha256"],
+                "access_manifest.owner_private_chat_hmac_sha256",
+                maximum=64,
+            )
+            if SHA256_RE.fullmatch(owner_binding) is None:
+                raise ValueError("owner private chat binding is invalid")
+            owner_authority_path = _absolute_path(
+                document["owner_authority_path"], "access_manifest.owner_authority_path"
+            )
+            owner_authority_sha256 = _string(
+                document["owner_authority_sha256"],
+                "access_manifest.owner_authority_sha256",
+                maximum=64,
+            )
+            startup_commands_sha256 = _string(
+                document["startup_commands_sha256"],
+                "access_manifest.startup_commands_sha256",
+                maximum=64,
+            )
+            startup_commands_path = _absolute_path(
+                document["startup_commands_path"],
+                "access_manifest.startup_commands_path",
+            )
+            if (
+                SHA256_RE.fullmatch(owner_authority_sha256) is None
+                or SHA256_RE.fullmatch(startup_commands_sha256) is None
+            ):
+                raise ValueError("existing bot admission digest is invalid")
+            if (
+                _is_within(startup_commands_path, policy.contour.isolation_root)
+                or _is_within(startup_commands_path, policy.candidate.source_root.resolve())
+                or _is_within(startup_commands_path, policy.harness.source_root.resolve())
+            ):
+                raise ValueError("startup commands authority must be outside runtime and sources")
+            startup_document = _load_json(
+                startup_commands_path,
+                "startup commands authority",
+                maximum=65536,
+                private=True,
+            )
+            _validated_startup_commands_payload(startup_document)
+            if canonical_startup_commands_sha256(startup_document) != startup_commands_sha256:
+                raise ValueError("startup commands authority digest mismatch")
         if (
             _boolean(
                 document["same_bot_production_consumer_stopped"],
@@ -1569,8 +2148,19 @@ class AccessManifest:
         bot_user_id = _integer(
             document["bot_user_id"], "access_manifest.bot_user_id", minimum=1, maximum=10**20 - 1
         )
-        chat_id = _integer(document["chat_id"], "access_manifest.chat_id", minimum=1, maximum=10**20 - 1)
-        user_id = _integer(document["user_id"], "access_manifest.user_id", minimum=1, maximum=10**20 - 1)
+        if schema == ACCESS_SCHEMA:
+            chat_id = _integer(document["chat_id"], "access_manifest.chat_id", minimum=1, maximum=10**20 - 1)
+            user_id = _integer(document["user_id"], "access_manifest.user_id", minimum=1, maximum=10**20 - 1)
+        else:
+            assert owner_authority_path is not None
+            chat_id, expected_binding = _resolved_owner_private_chat(
+                policy,
+                authority_path=owner_authority_path,
+                authority_sha256=owner_authority_sha256,
+            )
+            user_id = chat_id
+            if not hmac.compare_digest(owner_binding, expected_binding):
+                raise ValueError("owner private chat binding mismatch")
         observer_mode = _string(document["observer_mode"], "access_manifest.observer_mode", maximum=64)
         issued_at = _parse_utc(document["issued_at"], "access_manifest.issued_at")
         expires_at = _parse_utc(document["expires_at"], "access_manifest.expires_at")
@@ -1597,6 +2187,7 @@ class AccessManifest:
         if expires_at < now + required_validity:
             raise ValueError("access manifest expires before the finite run can finish")
         return cls(
+            route=route,
             contour_id=contour_id,
             attempt_id=attempt_id,
             candidate_sha=candidate_sha,
@@ -1608,6 +2199,11 @@ class AccessManifest:
             issued_at=issued_at,
             expires_at=expires_at,
             nonce=nonce,
+            owner_private_chat_hmac_sha256=owner_binding,
+            owner_authority_path=owner_authority_path,
+            owner_authority_sha256=owner_authority_sha256,
+            startup_commands_path=startup_commands_path,
+            startup_commands_sha256=startup_commands_sha256,
         )
 
 
@@ -1722,7 +2318,116 @@ def load_policy(path: Path) -> Policy:
     return Policy.from_document(document)
 
 
-def _verified_source_map(candidate: CandidatePolicy) -> dict[str, Any]:
+def _verified_harness_map(candidate: CandidatePolicy, harness: HarnessPolicy) -> dict[str, Any]:
+    manifest = _load_json(
+        harness.manifest_path,
+        "Telegram harness manifest",
+        maximum=MAX_JSON_BYTES,
+        private=True,
+    )
+    if sha256_file(harness.manifest_path, maximum=MAX_JSON_BYTES) != harness.manifest_sha256:
+        raise RoundtripError("NOT_RUN", "harness_manifest_digest_mismatch")
+    _exact_keys(
+        manifest,
+        required={
+            "schema",
+            "base_candidate_sha",
+            "base_candidate_tree",
+            "source_root",
+            "source_sha256",
+            "GO",
+        },
+        where="Telegram harness manifest",
+    )
+    source_root = harness.source_root.resolve(strict=True)
+    if (
+        manifest["schema"] != "friday.release-1-0-telegram-harness-manifest.v1"
+        or manifest["base_candidate_sha"] != candidate.candidate_sha
+        or manifest["base_candidate_tree"] != candidate.candidate_tree
+        or Path(str(manifest["source_root"])).resolve() != source_root
+        or manifest["GO"] is not False
+    ):
+        raise RoundtripError("NOT_RUN", "harness_manifest_binding_mismatch")
+    raw_hashes = _mapping(manifest["source_sha256"], "Telegram harness source hashes")
+    required = {
+        MODULE_RELATIVE_PATH,
+        PREPARER_RELATIVE_PATH,
+        "tools/release_1_0_telegram_receipts.py",
+        "tools/release_1_0_capability_matrix.json",
+        "tools/release_1_0_acceptance.py",
+    }
+    if set(raw_hashes) != required:
+        raise RoundtripError("NOT_RUN", "harness_source_scope_mismatch")
+    observed: dict[str, str] = {}
+    for relative, digest in raw_hashes.items():
+        if not isinstance(digest, str) or SHA256_RE.fullmatch(digest) is None:
+            raise RoundtripError("NOT_RUN", "harness_source_digest_invalid", relative)
+        path = source_root / relative
+        info = path.lstat()
+        if not stat.S_ISREG(info.st_mode) or path.is_symlink() or sha256_file(path) != digest:
+            raise RoundtripError("NOT_RUN", "harness_source_file_mismatch", relative)
+        observed[relative] = digest
+    if Path(__file__).resolve() != (source_root / MODULE_RELATIVE_PATH).resolve():
+        raise RoundtripError("NOT_RUN", "driver_not_executed_from_pinned_harness")
+    return {
+        "manifest_sha256": harness.manifest_sha256,
+        "source_map_sha256": _sha256_bytes(_json_bytes(observed)),
+        "source_file_count": len(observed),
+        "driver_sha256": observed[MODULE_RELATIVE_PATH],
+    }
+
+
+def _verified_installed_wheel(candidate: CandidatePolicy, harness: HarnessPolicy) -> dict[str, Any]:
+    installed = candidate.installed_wheel
+    if installed is None:
+        raise RoundtripError("NOT_RUN", "installed_wheel_policy_missing")
+    wheel_path = installed.wheel_path.resolve(strict=True)
+    info = wheel_path.lstat()
+    if not stat.S_ISREG(info.st_mode) or installed.wheel_path.is_symlink():
+        raise RoundtripError("NOT_RUN", "installed_wheel_invalid")
+    if sha256_file(wheel_path) != installed.wheel_sha256:
+        raise RoundtripError("NOT_RUN", "installed_wheel_digest_mismatch")
+    site_root = installed.site_root.resolve(strict=True)
+    if (
+        not site_root.is_dir()
+        or installed.site_root.is_symlink()
+        or _is_within(site_root, candidate.source_root.resolve())
+        or _is_within(site_root, harness.source_root.resolve())
+    ):
+        raise RoundtripError("NOT_RUN", "installed_site_root_not_clean")
+    expected_cli = site_root / CLI_RELATIVE_PATH
+    expected_init = site_root / "friday/__init__.py"
+    for path in (expected_cli, expected_init):
+        file_info = path.lstat()
+        if not stat.S_ISREG(file_info.st_mode) or path.is_symlink():
+            raise RoundtripError("NOT_RUN", "installed_package_file_invalid")
+    try:
+        with zipfile.ZipFile(wheel_path) as archive:
+            names = set(archive.namelist())
+            required = {CLI_RELATIVE_PATH, "friday/__init__.py"}
+            if not required.issubset(names):
+                raise RoundtripError("NOT_RUN", "installed_wheel_required_file_missing")
+            for relative in required:
+                if _sha256_bytes(archive.read(relative)) != sha256_file(site_root / relative):
+                    raise RoundtripError("NOT_RUN", "installed_wheel_file_mismatch", relative)
+            metadata_name = f"friday-{installed.distribution_version}.dist-info/METADATA"
+            if metadata_name not in names:
+                raise RoundtripError("NOT_RUN", "installed_wheel_version_mismatch")
+            metadata_digest = _sha256_bytes(archive.read(metadata_name))
+    except (OSError, zipfile.BadZipFile, KeyError) as exc:
+        raise RoundtripError("NOT_RUN", "installed_wheel_unreadable") from exc
+    return {
+        "wheel_sha256": installed.wheel_sha256,
+        "distribution_version": installed.distribution_version,
+        "site_root_sha256": _sha256_bytes(str(site_root).encode("utf-8")),
+        "cli_origin_sha256": _sha256_bytes(str(expected_cli).encode("utf-8")),
+        "cli_sha256": sha256_file(expected_cli),
+        "metadata_sha256": metadata_digest,
+        "source_checkout_imported": False,
+    }
+
+
+def _verified_source_map(candidate: CandidatePolicy, harness: HarnessPolicy | None = None) -> dict[str, Any]:
     manifest = _load_json(
         candidate.manifest_path,
         "candidate manifest",
@@ -1779,25 +2484,37 @@ def _verified_source_map(candidate: CandidatePolicy) -> dict[str, Any]:
             actual_names.add(relative)
     if actual_names != set(declared):
         raise RoundtripError("NOT_RUN", "candidate_source_inventory_mismatch")
-    for required in (MODULE_RELATIVE_PATH, CLI_RELATIVE_PATH, BRIDGE_BASE_RELATIVE_PATH):
+    for required in (CLI_RELATIVE_PATH, BRIDGE_BASE_RELATIVE_PATH):
         if required not in declared:
             raise RoundtripError("NOT_RUN", "candidate_required_source_missing", required)
-    current_module = Path(__file__).resolve()
-    expected_module = (source_root / MODULE_RELATIVE_PATH).resolve()
-    if current_module != expected_module:
-        raise RoundtripError("NOT_RUN", "driver_not_executed_from_pinned_candidate")
+    harness_summary = _verified_harness_map(candidate, harness) if harness is not None else None
+    if harness_summary is None:
+        if MODULE_RELATIVE_PATH not in declared:
+            raise RoundtripError("NOT_RUN", "candidate_required_source_missing", MODULE_RELATIVE_PATH)
+        current_module = Path(__file__).resolve()
+        expected_module = (source_root / MODULE_RELATIVE_PATH).resolve()
+        if current_module != expected_module:
+            raise RoundtripError("NOT_RUN", "driver_not_executed_from_pinned_candidate")
     map_digest = _sha256_bytes(_json_bytes(observed))
-    return {
+    result = {
         "candidate_sha": candidate.candidate_sha,
         "candidate_tree": candidate.candidate_tree,
         "suite_revision": candidate.suite_revision,
         "manifest_sha256": candidate.manifest_sha256,
         "source_map_sha256": map_digest,
         "source_file_count": len(observed),
-        "module_sha256": observed[MODULE_RELATIVE_PATH],
+        "module_sha256": (
+            harness_summary["driver_sha256"]
+            if harness_summary is not None
+            else observed[MODULE_RELATIVE_PATH]
+        ),
         "cli_sha256": observed[CLI_RELATIVE_PATH],
         "bridge_base_sha256": observed[BRIDGE_BASE_RELATIVE_PATH],
     }
+    if harness_summary is not None:
+        result["harness"] = harness_summary
+        result["installed_wheel"] = _verified_installed_wheel(candidate, harness)
+    return result
 
 
 def _parse_env_file(path: Path) -> dict[str, str]:
@@ -1836,6 +2553,119 @@ def _parse_id_list(raw: str, where: str) -> set[int]:
             raise ValueError(f"{where} contains an invalid id")
         result.add(int(item))
     return result
+
+
+def _consistent_id_aliases(
+    env: Mapping[str, str],
+    names: Sequence[str],
+    where: str,
+) -> set[int]:
+    declared = [_parse_id_list(env[name], f"{where} ({name})") for name in names if env.get(name, "").strip()]
+    if not declared:
+        return set()
+    if any(value != declared[0] for value in declared[1:]):
+        raise ValueError(f"{where} aliases disagree")
+    return declared[0]
+
+
+def _declared_id_union(
+    env: Mapping[str, str],
+    names: Sequence[str],
+    where: str,
+) -> set[int]:
+    result: set[int] = set()
+    for name in names:
+        if env.get(name, "").strip():
+            result |= _parse_id_list(env[name], f"{where} ({name})")
+    return result
+
+
+def _consistent_secret_aliases(
+    env: Mapping[str, str],
+    names: Sequence[str],
+    where: str,
+) -> str:
+    declared = [env[name].strip() for name in names if env.get(name, "").strip()]
+    if not declared:
+        return ""
+    if any(not hmac.compare_digest(value, declared[0]) for value in declared[1:]):
+        raise ValueError(f"{where} aliases disagree")
+    return declared[0]
+
+
+def _owner_private_chat_hmac(policy: Policy, owner_id: int, *, authority_sha256: str) -> str:
+    """Bind the in-memory owner id without serialising it into public harness inputs."""
+    env = _parse_env_file(policy.contour.env_file)
+    token = env.get("FRIDAY_TELEGRAM_BOT_TOKEN", "").strip()
+    if not token:
+        raise ValueError("owner binding requires the pinned Bot API credential")
+    payload = _json_bytes(
+        {
+            "v": 1,
+            "purpose": "dest-owner-private-chat",
+            "attempt_id": policy.attempt_id,
+            "candidate_sha": policy.candidate.candidate_sha,
+            "contour_id": policy.contour.contour_id,
+            "owner_authority_sha256": authority_sha256,
+            "owner_private_chat_id": owner_id,
+        }
+    )
+    return hmac.new(token.encode("utf-8"), payload, hashlib.sha256).hexdigest()
+
+
+def _resolved_owner_private_chat(
+    policy: Policy,
+    *,
+    authority_path: Path,
+    authority_sha256: str,
+) -> tuple[int, str]:
+    """Resolve exactly one authoritative private owner chat from the pinned contour env."""
+    if sha256_file(policy.contour.env_file, maximum=256 * 1024) != policy.contour.env_file_sha256:
+        raise ValueError("contour env changed before owner resolution")
+    authority_path = authority_path.resolve(strict=True)
+    if (
+        _is_within(authority_path, policy.contour.isolation_root)
+        or _is_within(authority_path, policy.candidate.source_root.resolve())
+        or (policy.harness is not None and _is_within(authority_path, policy.harness.source_root.resolve()))
+    ):
+        raise ValueError("owner authority must pre-exist outside the test contour and sources")
+    _secure_regular_file(authority_path, "owner authority", maximum=256 * 1024)
+    if sha256_file(authority_path, maximum=256 * 1024) != authority_sha256:
+        raise ValueError("owner authority digest mismatch")
+    env = _parse_env_file(policy.contour.env_file)
+    authority = _parse_env_file(authority_path)
+    allowed = _parse_id_list(env.get("FRIDAY_TELEGRAM_ALLOWED_CHAT_IDS", ""), "isolated allowed chats")
+    owners = _parse_id_list(env.get("FRIDAY_TELEGRAM_OWNER_CHAT_IDS", ""), "isolated owner chats")
+    authoritative_allowed = _declared_id_union(
+        authority,
+        ("FRIDAY_TELEGRAM_ALLOWED_CHAT_IDS", "JERICHO_TELEGRAM_ALLOWED_CHAT_IDS"),
+        "authoritative allowed chats",
+    )
+    authoritative_owners = _consistent_id_aliases(
+        authority,
+        ("FRIDAY_TELEGRAM_OWNER_CHAT_IDS", "JERICHO_TELEGRAM_OWNER_CHAT_IDS"),
+        "authoritative owner chats",
+    )
+    authoritative_token = _consistent_secret_aliases(
+        authority,
+        ("FRIDAY_TELEGRAM_BOT_TOKEN", "JERICHO_TELEGRAM_BOT_TOKEN"),
+        "authoritative bot credential",
+    )
+    isolated_token = env.get("FRIDAY_TELEGRAM_BOT_TOKEN", "").strip()
+    if (
+        len(allowed) != 1
+        or owners != allowed
+        or authoritative_owners != owners
+        or not owners.issubset(authoritative_allowed)
+        or not authoritative_token
+        or not isolated_token
+        or not hmac.compare_digest(authoritative_token, isolated_token)
+    ):
+        raise ValueError("authoritative owner allowlist and bot credential must match the isolated contour")
+    owner_id = next(iter(owners))
+    if owner_id <= 0:
+        raise ValueError("authoritative owner private chat id must be positive")
+    return owner_id, _owner_private_chat_hmac(policy, owner_id, authority_sha256=authority_sha256)
 
 
 def _require_env_value(env: Mapping[str, str], key: str, expected: str) -> None:
@@ -1931,7 +2761,28 @@ def _validate_contour(policy: Policy, access: AccessManifest) -> tuple[dict[str,
     allowed = _parse_id_list(env.get("FRIDAY_TELEGRAM_ALLOWED_CHAT_IDS", ""), "allowed chats")
     owners = _parse_id_list(env.get("FRIDAY_TELEGRAM_OWNER_CHAT_IDS", ""), "owner chats")
     if owners != {access.chat_id} or allowed | owners != {access.chat_id}:
-        raise RoundtripError("NOT_RUN", "dedicated_chat_allowlist_mismatch")
+        raise RoundtripError(
+            "NOT_RUN",
+            (
+                "owner_private_chat_allowlist_mismatch"
+                if access.route == "existing_friday_bot_one_canary"
+                else "dedicated_chat_allowlist_mismatch"
+            ),
+        )
+    if access.route == "existing_friday_bot_one_canary":
+        if access.owner_authority_path is None:
+            raise RoundtripError("NOT_RUN", "owner_authority_missing")
+        owner_id, owner_binding = _resolved_owner_private_chat(
+            policy,
+            authority_path=access.owner_authority_path,
+            authority_sha256=access.owner_authority_sha256,
+        )
+        if owner_id != access.chat_id or not hmac.compare_digest(
+            owner_binding, access.owner_private_chat_hmac_sha256
+        ):
+            raise RoundtripError("NOT_RUN", "owner_private_chat_binding_mismatch")
+        if policy.harness is None or policy.candidate.installed_wheel is None:
+            raise RoundtripError("NOT_RUN", "existing_bot_installed_harness_binding_missing")
 
     python = policy.candidate.python_executable
     info = python.lstat()
@@ -1957,17 +2808,25 @@ def _validate_contour(policy: Policy, access: AccessManifest) -> tuple[dict[str,
     if policy.observer.result_path.exists() or policy.observer.result_path.is_symlink():
         raise RoundtripError("NOT_RUN", "observer_result_must_be_new")
 
-    return env, {
+    summary = {
         "home": str(contour.friday_home),
         "data_dir": str(contour.data_dir),
         "state_dir": str(contour.state_dir),
         "database_path": str(contour.database_path),
         "inbox_db_path": str(contour.inbox_db_path),
         "backend_origin": contour.backend_origin,
-        "chat_id": access.chat_id,
-        "user_id": access.user_id,
         "observer": adapter_summary,
     }
+    if access.route == "existing_friday_bot_one_canary":
+        summary.update(
+            {
+                "access_route": access.route,
+                "owner_private_chat_hmac_sha256": access.owner_private_chat_hmac_sha256,
+            }
+        )
+    else:
+        summary.update({"chat_id": access.chat_id, "user_id": access.user_id})
+    return env, summary
 
 
 def _lease_is_active(path: Path) -> bool:
@@ -2135,7 +2994,7 @@ class OwnedProcess:
     origin_receipt: Path
 
 
-_BOOTSTRAP = r"""
+_BOOTSTRAP_LEGACY = r"""
 import importlib.util
 import hashlib
 import json
@@ -2201,15 +3060,118 @@ runpy.run_module("friday.cli", run_name="__main__")
 """.strip()
 
 
+_BOOTSTRAP = r"""
+import importlib.util
+import hashlib
+import json
+import os
+from pathlib import Path
+import runpy
+import sys
+import time
+
+installed_site = Path(sys.argv[1]).resolve(strict=True)
+harness_source = Path(sys.argv[2]).resolve(strict=True)
+receipt = Path(sys.argv[3])
+role = sys.argv[4]
+candidate_sha = sys.argv[5]
+wheel_sha256 = sys.argv[6]
+guard_spec = Path(sys.argv[7]).resolve(strict=True)
+env_file = sys.argv[8]
+command = sys.argv[9]
+expected = (installed_site / "friday" / "cli.py").resolve(strict=True)
+resolved_sys_path = []
+for item in sys.path:
+    if not item:
+        continue
+    try:
+        resolved_sys_path.append(Path(item).resolve(strict=True))
+    except (OSError, RuntimeError):
+        continue
+if harness_source in resolved_sys_path or any(
+    path == harness_source or harness_source in path.parents for path in resolved_sys_path
+):
+    raise RuntimeError("harness source present on child import path")
+if installed_site not in resolved_sys_path:
+    raise RuntimeError("installed wheel site is not active")
+spec = importlib.util.find_spec("friday.cli")
+origin = Path(spec.origin or "").resolve(strict=True) if spec is not None else Path()
+if origin != expected:
+    raise RuntimeError("installed friday.cli origin mismatch")
+guard_origin = ""
+guard_sha256 = ""
+guard_spec_sha256 = ""
+if role == "telegram-bridge":
+    guard_path = (harness_source / "tools" / "release_1_0_telegram_roundtrip.py").resolve(strict=True)
+    guard_name = "friday_release_1_0_effect_guard"
+    guard_specification = importlib.util.spec_from_file_location(guard_name, guard_path)
+    if guard_specification is None or guard_specification.loader is None:
+        raise RuntimeError("pinned Telegram effect guard loader missing")
+    guard_module = importlib.util.module_from_spec(guard_specification)
+    sys.modules[guard_name] = guard_module
+    guard_specification.loader.exec_module(guard_module)
+    guard_module.install_bridge_effect_guard(__import__("httpx"), guard_spec, Path(env_file))
+    guard_origin = str(guard_path)
+    guard_sha256 = hashlib.sha256(guard_path.read_bytes()).hexdigest()
+    guard_spec_sha256 = hashlib.sha256(guard_spec.read_bytes()).hexdigest()
+document = {
+    "schema": "friday.release-1-0-installed-wheel-child-origin.v1",
+    "role": role,
+    "pid": os.getpid(),
+    "candidate_sha": candidate_sha,
+    "installed_site_root": str(installed_site),
+    "wheel_sha256": wheel_sha256,
+    "cli_origin": str(origin),
+    "effect_guard_origin": guard_origin,
+    "effect_guard_sha256": guard_sha256,
+    "effect_spec_sha256": guard_spec_sha256,
+    "source_checkout_imported": False,
+    "argv": ["friday.cli", "--env-file", str(Path(env_file).resolve()), command],
+    "observed_at_ns": time.time_ns(),
+}
+payload = (json.dumps(document, sort_keys=True, separators=(",", ":")) + "\n").encode()
+fd = os.open(receipt, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+try:
+    os.write(fd, payload)
+    os.fsync(fd)
+finally:
+    os.close(fd)
+if command == "__effect-guard-probe__":
+    raise SystemExit(0)
+sys.argv = document["argv"]
+runpy.run_module("friday.cli", run_name="__main__")
+""".strip()
+
+
 def build_cli_argv(policy: Policy, role: str, origin_receipt: Path, effect_spec_path: Path) -> list[str]:
     if role not in {"server", "telegram-bridge"}:
         raise ValueError("invalid Friday service role")
+    installed = policy.candidate.installed_wheel
+    if installed is not None:
+        if policy.harness is None:
+            raise ValueError("installed wheel launch requires a pinned harness")
+        return [
+            str(policy.candidate.python_executable),
+            "-I",
+            "-B",
+            "-c",
+            _BOOTSTRAP,
+            str(installed.site_root),
+            str(policy.harness.source_root),
+            str(origin_receipt),
+            role,
+            policy.candidate.candidate_sha,
+            installed.wheel_sha256,
+            str(effect_spec_path),
+            str(policy.contour.env_file),
+            role,
+        ]
     return [
         str(policy.candidate.python_executable),
         "-I",
         "-B",
         "-c",
-        _BOOTSTRAP,
+        _BOOTSTRAP_LEGACY,
         str(policy.candidate.source_root),
         str(origin_receipt),
         role,
@@ -2313,58 +3275,89 @@ def _read_origin_receipt(process: OwnedProcess, policy: Policy) -> dict[str, Any
         )
     except ValueError as exc:
         raise RoundtripError("FAIL", "child_origin_receipt_missing", process.role) from exc
-    _exact_keys(
-        document,
-        required={
-            "schema",
-            "role",
-            "pid",
-            "candidate_sha",
-            "source_root",
-            "cli_origin",
-            "effect_guard_origin",
-            "effect_guard_sha256",
-            "effect_spec_sha256",
-            "argv",
-            "observed_at_ns",
-        },
-        where="child origin receipt",
-    )
+    installed = policy.candidate.installed_wheel
+    if installed is not None:
+        _exact_keys(
+            document,
+            required={
+                "schema",
+                "role",
+                "pid",
+                "candidate_sha",
+                "installed_site_root",
+                "wheel_sha256",
+                "cli_origin",
+                "effect_guard_origin",
+                "effect_guard_sha256",
+                "effect_spec_sha256",
+                "source_checkout_imported",
+                "argv",
+                "observed_at_ns",
+            },
+            where="child origin receipt",
+        )
+    else:
+        _exact_keys(
+            document,
+            required={
+                "schema",
+                "role",
+                "pid",
+                "candidate_sha",
+                "source_root",
+                "cli_origin",
+                "effect_guard_origin",
+                "effect_guard_sha256",
+                "effect_spec_sha256",
+                "argv",
+                "observed_at_ns",
+            },
+            where="child origin receipt",
+        )
     expected_argv = [
         "friday.cli",
         "--env-file",
         str(policy.contour.env_file.resolve()),
         process.role,
     ]
+    guard_root = policy.harness.source_root if policy.harness is not None else policy.candidate.source_root
     expected_guard_origin = (
-        str((policy.candidate.source_root / MODULE_RELATIVE_PATH).resolve())
-        if process.role == "telegram-bridge"
-        else ""
+        str((guard_root / MODULE_RELATIVE_PATH).resolve()) if process.role == "telegram-bridge" else ""
     )
     expected_guard_sha256 = (
-        sha256_file(policy.candidate.source_root / MODULE_RELATIVE_PATH)
-        if process.role == "telegram-bridge"
-        else ""
+        sha256_file(guard_root / MODULE_RELATIVE_PATH) if process.role == "telegram-bridge" else ""
     )
     expected_spec_sha256 = (
         sha256_file(process.origin_receipt.parent / "telegram-effects" / "spec.json")
         if process.role == "telegram-bridge"
         else ""
     )
-    if (
-        document.get("schema") != "friday.release-1-0-child-origin.v1"
-        or document.get("role") != process.role
+    common_invalid = (
+        document.get("role") != process.role
         or document.get("pid") != process.process.pid
         or document.get("candidate_sha") != policy.candidate.candidate_sha
-        or document.get("source_root") != str(policy.candidate.source_root.resolve())
-        or document.get("cli_origin") != str((policy.candidate.source_root / CLI_RELATIVE_PATH).resolve())
         or document.get("argv") != expected_argv
         or document.get("effect_guard_origin") != expected_guard_origin
         or document.get("effect_guard_sha256") != expected_guard_sha256
         or document.get("effect_spec_sha256") != expected_spec_sha256
-    ):
+    )
+    if installed is not None:
+        origin_invalid = (
+            document.get("schema") != "friday.release-1-0-installed-wheel-child-origin.v1"
+            or document.get("installed_site_root") != str(installed.site_root.resolve())
+            or document.get("wheel_sha256") != installed.wheel_sha256
+            or document.get("cli_origin") != str((installed.site_root / CLI_RELATIVE_PATH).resolve())
+            or document.get("source_checkout_imported") is not False
+        )
+    else:
+        origin_invalid = (
+            document.get("schema") != "friday.release-1-0-child-origin.v1"
+            or document.get("source_root") != str(policy.candidate.source_root.resolve())
+            or document.get("cli_origin") != str((policy.candidate.source_root / CLI_RELATIVE_PATH).resolve())
+        )
+    if common_invalid or origin_invalid:
         raise RoundtripError("FAIL", "child_origin_binding_mismatch", process.role)
-    return {
+    result = {
         "role": process.role,
         "pid": process.process.pid,
         "candidate_sha": policy.candidate.candidate_sha,
@@ -2374,6 +3367,15 @@ def _read_origin_receipt(process: OwnedProcess, policy: Policy) -> dict[str, Any
         "effect_spec_sha256": document["effect_spec_sha256"],
         "argv": expected_argv,
     }
+    if installed is not None:
+        result.update(
+            {
+                "installed_site_root": str(installed.site_root.resolve()),
+                "wheel_sha256": installed.wheel_sha256,
+                "source_checkout_imported": False,
+            }
+        )
+    return result
 
 
 def _process_group_alive(process_group: int) -> bool:
@@ -2484,26 +3486,37 @@ def build_observer_request(policy: Policy, access: AccessManifest, bot: Mapping[
     inbound_text = (
         f"Friday roundtrip {policy.canary}. Reply with exactly this marker and nothing else: {policy.canary}"
     )
-    return {
-        "schema": OBSERVER_REQUEST_SCHEMA,
+    document = {
+        "schema": (
+            OBSERVER_REQUEST_SCHEMA_V2
+            if access.route == "existing_friday_bot_one_canary"
+            else OBSERVER_REQUEST_SCHEMA
+        ),
         "attempt_id": policy.attempt_id,
         "candidate_sha": policy.candidate.candidate_sha,
         "candidate_manifest_sha256": policy.candidate.manifest_sha256,
         "contour_id": access.contour_id,
         "canary": policy.canary,
-        "chat_id": access.chat_id,
-        "user_id": access.user_id,
         "bot_user_id": bot["bot_user_id"],
         "bot_username": bot.get("bot_username", ""),
         "observer_mode": policy.observer.mode,
         "inbound_text": inbound_text,
         "result_path": str(policy.observer.result_path),
-        "result_schema": OBSERVER_RESULT_SCHEMA,
+        "result_schema": (
+            OBSERVER_RESULT_SCHEMA_V2
+            if access.route == "existing_friday_bot_one_canary"
+            else OBSERVER_RESULT_SCHEMA
+        ),
         "max_inbound_user_messages": policy.budgets.max_inbound_user_messages,
         "max_outbound_bot_posts": policy.budgets.max_outbound_bot_posts,
         "unknown_effect_policy": "do_not_resend",
         "issued_at": _utc_now(),
     }
+    if access.route == "existing_friday_bot_one_canary":
+        document["owner_private_chat_hmac_sha256"] = access.owner_private_chat_hmac_sha256
+    else:
+        document.update({"chat_id": access.chat_id, "user_id": access.user_id})
+    return document
 
 
 def _run_adapter_once(
@@ -2557,39 +3570,49 @@ def validate_observer_result(
     inbound_text: str,
     request_issued_at: dt.datetime,
 ) -> dict[str, Any]:
+    result_schema = (
+        OBSERVER_RESULT_SCHEMA_V2
+        if access.route == "existing_friday_bot_one_canary"
+        else OBSERVER_RESULT_SCHEMA
+    )
+    result_keys = {
+        "schema",
+        "attempt_id",
+        "candidate_sha",
+        "candidate_manifest_sha256",
+        "contour_id",
+        "canary",
+        "bot_user_id",
+        "observer_mode",
+        "window_complete",
+        "inbound_message",
+        "outbound_messages",
+        "observed_at",
+    }
+    if access.route == "existing_friday_bot_one_canary":
+        result_keys.add("owner_private_chat_hmac_sha256")
+    else:
+        result_keys |= {"chat_id", "user_id"}
     _exact_keys(
         document,
-        required={
-            "schema",
-            "attempt_id",
-            "candidate_sha",
-            "candidate_manifest_sha256",
-            "contour_id",
-            "canary",
-            "chat_id",
-            "user_id",
-            "bot_user_id",
-            "observer_mode",
-            "window_complete",
-            "inbound_message",
-            "outbound_messages",
-            "observed_at",
-        },
+        required=result_keys,
         where="observer result",
     )
     expected = {
-        "schema": OBSERVER_RESULT_SCHEMA,
+        "schema": result_schema,
         "attempt_id": policy.attempt_id,
         "candidate_sha": policy.candidate.candidate_sha,
         "candidate_manifest_sha256": policy.candidate.manifest_sha256,
         "contour_id": access.contour_id,
         "canary": policy.canary,
-        "chat_id": access.chat_id,
-        "user_id": access.user_id,
         "bot_user_id": bot["bot_user_id"],
         "observer_mode": policy.observer.mode,
         "window_complete": True,
     }
+    if access.route == "existing_friday_bot_one_canary":
+        expected["owner_private_chat_hmac_sha256"] = access.owner_private_chat_hmac_sha256
+    else:
+        expected.update({"chat_id": access.chat_id, "user_id": access.user_id})
     for key, value in expected.items():
         if document.get(key) != value:
             raise RoundtripError("FAIL", "observer_binding_mismatch", key)
@@ -2850,23 +3873,26 @@ def evaluate_bound_roundtrip(
         reasons.append("owned_process_cleanup_incomplete")
     if not source_unchanged:
         reasons.append("candidate_source_changed")
+    binding = {
+        "attempt_id": policy.attempt_id,
+        "canary_sha256": _sha256_bytes(policy.canary.encode("utf-8")),
+        "candidate_sha": policy.candidate.candidate_sha,
+        "candidate_manifest_sha256": policy.candidate.manifest_sha256,
+        "contour_id": access.contour_id,
+        "bot_user_id": access.bot_user_id,
+        "telegram_update_id": durable.get("telegram_update_id"),
+        "inbound_message_id": durable.get("telegram_message_id"),
+        "outbound_message_id": durable.get("visible_destination_message_id"),
+    }
+    if access.route == "existing_friday_bot_one_canary":
+        binding["owner_private_chat_hmac_sha256"] = access.owner_private_chat_hmac_sha256
+    else:
+        binding.update({"chat_id": access.chat_id, "user_id": access.user_id})
     return {
         "case_outcome": ("LIVE_TELEGRAM_ROUNDTRIP_OBSERVED" if not reasons else "FAIL"),
         "case_pass": not reasons,
         "reasons": reasons,
-        "binding": {
-            "attempt_id": policy.attempt_id,
-            "canary_sha256": _sha256_bytes(policy.canary.encode("utf-8")),
-            "candidate_sha": policy.candidate.candidate_sha,
-            "candidate_manifest_sha256": policy.candidate.manifest_sha256,
-            "contour_id": access.contour_id,
-            "bot_user_id": access.bot_user_id,
-            "chat_id": access.chat_id,
-            "user_id": access.user_id,
-            "telegram_update_id": durable.get("telegram_update_id"),
-            "inbound_message_id": durable.get("telegram_message_id"),
-            "outbound_message_id": durable.get("visible_destination_message_id"),
-        },
+        "binding": binding,
         "four_legs": {
             "real_user_inbound": inbound_verified,
             "friday_signed_admission_and_processing": processing_verified,
@@ -2932,7 +3958,7 @@ def run_roundtrip(policy: Policy, evidence: EvidenceStore) -> dict[str, Any]:
         if _is_within(policy.observer.result_path, evidence.root):
             raise RoundtripError("NOT_RUN", "observer_result_inside_driver_evidence")
         evidence.event("preflight", "STARTED")
-        candidate_summary = _verified_source_map(policy.candidate)
+        candidate_summary = _verified_source_map(policy.candidate, policy.harness)
         evidence.event("candidate", "VERIFIED", **candidate_summary)
 
         access_document = _load_json(
@@ -3126,7 +4152,7 @@ def run_roundtrip(policy: Policy, evidence: EvidenceStore) -> dict[str, Any]:
         )
         if candidate_summary is not None:
             try:
-                after = _verified_source_map(policy.candidate)
+                after = _verified_source_map(policy.candidate, policy.harness)
                 source_unchanged = after == candidate_summary
             except (OSError, ValueError, RoundtripError):
                 source_unchanged = False

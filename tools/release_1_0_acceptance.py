@@ -5587,6 +5587,8 @@ def plan_commands(mode: str) -> dict[str, Any]:
             "tests/test_release_1_0_soak_client.py tests/test_release_1_0_app_soak.py "
             "tests/test_release_1_0_app_soak_observed_controls.py tests/test_release_1_0_soak_receipts.py "
             "tests/test_release_1_0_telegram_roundtrip.py tests/test_release_1_0_telegram_receipts.py "
+            "tests/test_release_1_0_telegram_existing_bot_harness.py "
+            "tests/test_release_1_0_telegram_existing_bot_prepare.py "
             "tests/test_release_1_0_live_cases.py tests/test_release_1_0_native.py tests/test_release_1_0_native_assets.py "
             "tests/test_release_1_0_native_process.py tests/test_release_1_0_remaining_oracles.py tests/test_release_1_0_graph_oracles.py tests/test_release_1_0_conversation_oracles.py tests/test_release_1_0_self_conversation_oracles.py tests/test_release_1_0_token_oracles.py tests/test_release_1_0_reminder_oracles.py tests/test_release_1_0_user_oracles.py tests/test_release_1_0_account_oracles.py tests/test_release_1_0_identity_oracles.py tests/test_release_1_0_profile_oracles.py tests/test_release_1_0_chronicle_oracles.py tests/test_release_1_0_knowledge_read_oracles.py tests/test_release_1_0_knowledge_mutation_oracles.py tests/test_release_1_0_entity_queue_oracles.py tests/test_release_1_0_ui_oracles.py tests/test_release_1_0_ui_sources_chats_oracles.py tests/test_release_1_0_ui_three_oracles.py tests/test_release_1_0_data_source_oracles.py tests/test_release_1_0_audit_oracles.py tests/test_release_1_0_lifecycle_conflict_oracles.py tests/test_release_1_0_ops_settings_oracles.py tests/test_release_1_0_ops_diagnostics_oracles.py tests/test_release_1_0_ops_quality_oracles.py tests/test_release_1_0_api_metadata_oracles.py tests/test_release_1_0_inbox_read_oracles.py tests/test_release_1_0_public_health_oracles.py tests/test_release_1_0_preset_oracles.py tests/test_quality_gate_deadlines.py tests/test_quality_gate_phase.py tests/test_quality_gate_bootstrap.py tests/test_quality_gate_process.py "
             "tests/test_release_1_0_secondary_relay.py tests/test_release_1_0_surface_discovery.py "
@@ -5794,15 +5796,19 @@ def plan_commands(mode: str) -> dict[str, Any]:
     # executor; immediate TASK construction prevents a red pair reaching the lab.
     live = [*b09_preflight, b09_closed_run, b09_task, *additional_live]
     telegram_deployment_device = [
-        'test -n "${R10_TELEGRAM_POLICY:-}"',
-        'test -n "${R10_TELEGRAM_EVIDENCE_DIR:-}"',
+        'test -n "${R10_TELEGRAM_PREPARATION:-}"',
+        'test -n "${R10_TELEGRAM_PREPARATION_SHA256:-}"',
+        'test -n "${R10_TELEGRAM_CONFIRMATION:-}"',
+        'test "$R10_TELEGRAM_CONFIRMATION" = "OWNER_CONFIRMS_ONE_LIVE_CANARY_AND_BOUNDED_HANDOFF"',
         'test -n "${R10_TELEGRAM_CONTEXT:-}"',
         'test -n "${R10_TELEGRAM_CONTEXT_SHA256:-}"',
         'test -n "${R10_TELEGRAM_RECEIPT:-}"',
         'test -n "${R10_TELEGRAM_RECEIPT_SHA256:-}"',
         "PYTHONDONTWRITEBYTECODE=1 .venv/bin/python -I -B "
-        'tools/release_1_0_telegram_roundtrip.py --policy "$R10_TELEGRAM_POLICY" '
-        '--evidence-dir "$R10_TELEGRAM_EVIDENCE_DIR"',
+        "tools/release_1_0_telegram_existing_bot_prepare.py execute "
+        '--preparation "$R10_TELEGRAM_PREPARATION" '
+        '--preparation-sha256 "$R10_TELEGRAM_PREPARATION_SHA256" '
+        '--confirmation "$R10_TELEGRAM_CONFIRMATION"',
         ".venv/bin/python -I -B tools/release_1_0_acceptance.py --audit-only "
         '--collection "$r10_collection" --telegram-receipt "$R10_TELEGRAM_RECEIPT" '
         '--telegram-receipt-sha256 "$R10_TELEGRAM_RECEIPT_SHA256" '
@@ -5825,7 +5831,7 @@ def plan_commands(mode: str) -> dict[str, Any]:
             "canonical 160-case live acceptance and additional R10 journeys on the frozen candidate",
             "actual preregistered lab review remains mandatory and externally pending",
             "root issues plan-required receipts, binds the final pair, and requires verifier exit 0",
-            "dedicated test-bot deployment-device attempt only when its independent context exists",
+            "owner-admitted Telegram deployment-device attempt (dedicated bot or bounded existing-bot handoff) only when its independent context exists",
         ],
         "commands": {
             "harness": common,

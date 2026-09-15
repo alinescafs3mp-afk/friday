@@ -468,7 +468,7 @@ def test_isolated_bootstrap_probe_loads_pinned_guard_and_config_without_running_
         "-I",
         "-B",
         "-c",
-        rt._BOOTSTRAP,
+        rt._BOOTSTRAP_LEGACY,
         str(source),
         str(receipt),
         "telegram-bridge",

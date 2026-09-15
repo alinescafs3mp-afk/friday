@@ -514,8 +514,11 @@ def test_plan_contains_both_telegram_harness_modules():
     command = next(item for item in plan["commands"]["harness"] if "-m pytest" in item)
     assert "tests/test_release_1_0_telegram_roundtrip.py" in command
     assert "tests/test_release_1_0_telegram_receipts.py" in command
+    assert "tests/test_release_1_0_telegram_existing_bot_harness.py" in command
+    assert "tests/test_release_1_0_telegram_existing_bot_prepare.py" in command
     deployment = " ".join(plan["commands"]["telegram_deployment_device"])
-    assert "tools/release_1_0_telegram_roundtrip.py" in deployment
+    assert "tools/release_1_0_telegram_existing_bot_prepare.py execute" in deployment
+    assert "OWNER_CONFIRMS_ONE_LIVE_CANARY_AND_BOUNDED_HANDOFF" in deployment
     assert "--telegram-context-sha256" in deployment and "--telegram-receipt-sha256" in deployment
 
 

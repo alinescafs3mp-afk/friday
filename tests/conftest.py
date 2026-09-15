@@ -1,9 +1,58 @@
 from __future__ import annotations
 
+import hashlib
 import sqlite3
+import sysconfig
+import tomllib
+import venv
+import zipfile
 from pathlib import Path
 
 import pytest
+
+
+@pytest.fixture(scope="session")
+def telegram_offline_runtime(tmp_path_factory: pytest.TempPathFactory) -> dict[str, object]:
+    """Exercise installed import mechanics with checkout bytes, without release credit."""
+    source = Path(__file__).resolve().parents[1]
+    root = tmp_path_factory.mktemp("telegram-offline-runtime")
+    version = tomllib.loads((source / "pyproject.toml").read_text())["project"]["version"]
+    wheel = root / f"friday-{version}-py3-none-any.whl"
+    metadata_root = f"friday-{version}.dist-info"
+    with zipfile.ZipFile(wheel, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+        for namespace in ("friday", "friday_host_agent", "friday_package_broker"):
+            for path in sorted((source / namespace).rglob("*")):
+                if path.is_file() and "__pycache__" not in path.parts and path.suffix != ".pyc":
+                    archive.write(path, str(path.relative_to(source)))
+        archive.writestr(
+            f"{metadata_root}/METADATA",
+            f"Metadata-Version: 2.3\nName: friday\nVersion: {version}\n",
+        )
+        archive.writestr(
+            f"{metadata_root}/WHEEL",
+            "Wheel-Version: 1.0\nGenerator: offline-fixture\nRoot-Is-Purelib: true\nTag: py3-none-any\n",
+        )
+    installed = root / "venv"
+    venv.EnvBuilder(with_pip=False, symlinks=False).create(installed)
+    site = Path(sysconfig.get_path("purelib", vars={"base": str(installed), "platbase": str(installed)}))
+    with zipfile.ZipFile(wheel) as archive:
+        archive.extractall(site)
+    # Only dependency directories are inherited, not their editable-install .pth files.
+    dependencies = sorted({sysconfig.get_path("purelib"), sysconfig.get_path("platlib")})
+    (site / "offline-test-dependencies.pth").write_text("\n".join(dependencies) + "\n")
+    for path in root.rglob("*"):
+        if path.is_symlink():
+            continue
+        executable = path.parent == installed / "bin" and path.name.startswith("python")
+        path.chmod(0o700 if path.is_dir() or executable else 0o600)
+    return {
+        "WHEEL": wheel,
+        "WHEEL_SHA": hashlib.sha256(wheel.read_bytes()).hexdigest(),
+        "INSTALLED": installed,
+        "SITE": site,
+        "VERSION": version,
+    }
+
 
 _RELATION_HISTORY_TRIGGERS = (
     "relations_revision_ai",
