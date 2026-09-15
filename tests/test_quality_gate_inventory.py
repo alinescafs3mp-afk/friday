@@ -54,7 +54,8 @@ def test_checked_in_inventory_closes_semantics_tiers_parameters_and_host_boundar
     # Owner Telegram declares224 MiB (160 unit +64 real bootstrap); A09 adds0.
     # Preserve every existing function budget and the exact aggregate check.
     # Telegram startup repairs add160 MiB across six explicit declarations.
-    assert sum(rule.scratch_mb for rule in value.rules if rule.tier != "nightly") == 50_823
+    # SQLite lifetime controls add256 MiB; producer retention adds92 MiB.
+    assert sum(rule.scratch_mb for rule in value.rules if rule.tier != "nightly") == 51_171
     assert nightly == {"tests/retrieval_benchmark/test_conversation_harness.py::test_manifest_is_one_closed_six_by_four_conversation_matrix", "tests/retrieval_benchmark/test_conversation_harness.py::test_second_offline_run_is_byte_identical_and_never_uses_network", "tests/retrieval_benchmark/test_document_harness.py::test_document_manifest_is_one_closed_five_class_corpus", "tests/retrieval_benchmark/test_document_harness.py::test_second_offline_document_run_is_byte_identical_and_network_forbidden", "tests/retrieval_benchmark/test_harness.py::test_ephemeral_manifest_has_at_least_twenty_cases_and_all_ten_classes", "tests/retrieval_benchmark/test_harness.py::test_two_offline_real_path_runs_are_byte_identical", "tests/test_obsidian_syncthing_live.py::test_pinned_syncthing_generates_and_accepts_the_managed_rest_contract", "tests/test_schema_migration_chain.py::test_every_real_backup_migrates_and_opens", "tests/test_windows_gateway_publish_recovery.py::test_native_powershell_projection_passes"}
     # Three A10 symbol-shape controls retain this family's change tier.
     # Six explicit text-shape and two outside-deed functions join the previous 35.

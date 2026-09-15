@@ -100,6 +100,8 @@ _LEGACY_COMPARISON_BUILD_PROFILE = "legacy-git-archive-umask-0002-v1"
 _MAX_COLLECTION_BYTES = 64 << 20
 _MAX_COLLECTION_NODES = 100_000
 _MAX_COLLECTION_NODE_BYTES = 256 << 10
+_MAX_RETAINED_WHEEL_BYTES = 64 << 20
+_RETAINED_WHEEL_RECEIPT = "quality-gate-wheel.json"
 _TIER_PHASE_TIMEOUT_SECONDS = {
     ("change", "non-UI"): 7_200,
     ("change", "UI"): 1_800,
@@ -1672,7 +1674,7 @@ def _require_evidence_directory(path: Path, descriptor: int, names: tuple[str, .
         raise RuntimeError("evidence directory identity or contents changed")
 
 
-def _write_private_json(directory_fd: int, name: str, value: object) -> None:
+def _write_private_json(directory_fd: int, name: str, value: object) -> str:
     payload = json.dumps(
         value, ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False
     ).encode()
@@ -1694,6 +1696,163 @@ def _write_private_json(directory_fd: int, name: str, value: object) -> None:
         os.fsync(descriptor)
     finally:
         os.close(descriptor)
+    return hashlib.sha256(payload).hexdigest()
+
+
+@contextmanager
+def _held_retained_file(
+    directory_fd: int, name: str, maximum: int
+) -> Iterator[tuple[str, os.stat_result, int]]:
+    """Keep the observed inode open across authentication of the entire pair."""
+    flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0)
+    flags |= getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0)
+    descriptor = os.open(name, flags, dir_fd=directory_fd)
+    try:
+        before = os.fstat(descriptor)
+        if (
+            not stat.S_ISREG(before.st_mode)
+            or before.st_nlink != 1
+            or stat.S_IMODE(before.st_mode) != 0o600
+            or (hasattr(os, "getuid") and before.st_uid != os.getuid())
+            or not 0 < before.st_size <= maximum
+        ):
+            raise RuntimeError("retained wheel evidence has unsafe metadata")
+        digest = hashlib.sha256()
+        size = 0
+        while chunk := os.read(descriptor, min(1 << 20, maximum + 1 - size)):
+            size += len(chunk)
+            if size > maximum:
+                raise RuntimeError("retained wheel evidence exceeded its bound")
+            digest.update(chunk)
+        if (
+            size != before.st_size
+            or _stat_identity(before) != _stat_identity(os.fstat(descriptor))
+            or _stat_identity(before)
+            != _stat_identity(os.stat(name, dir_fd=directory_fd, follow_symlinks=False))
+        ):
+            raise RuntimeError("retained wheel evidence changed during read")
+        yield digest.hexdigest(), before, descriptor
+    finally:
+        os.close(descriptor)
+
+
+def _retained_file_digest(directory_fd: int, name: str, maximum: int) -> str:
+    with _held_retained_file(directory_fd, name, maximum) as (digest, _before, _descriptor):
+        return digest
+
+
+def _require_retained_wheel(
+    evidence_dir: Path,
+    evidence_fd: int,
+    retained: Mapping[str, str] | None,
+    *,
+    summary_written: bool = False,
+) -> None:
+    names = [] if retained is None else [retained["filename"], _RETAINED_WHEEL_RECEIPT]
+    if summary_written:
+        names.append("quality-gate-summary.json")
+    _require_evidence_directory(evidence_dir, evidence_fd, tuple(sorted(names)))
+    if retained is not None:
+        with (
+            _held_retained_file(evidence_fd, retained["filename"], _MAX_RETAINED_WHEEL_BYTES) as wheel,
+            _held_retained_file(evidence_fd, _RETAINED_WHEEL_RECEIPT, 4096) as receipt,
+        ):
+            if wheel[0] != retained["sha256"] or receipt[0] != retained["receipt_sha256"]:
+                raise RuntimeError("retained wheel evidence digest changed")
+            _require_evidence_directory(evidence_dir, evidence_fd, tuple(sorted(names)))
+            for name, (_digest, before, descriptor) in (
+                (retained["filename"], wheel),
+                (_RETAINED_WHEEL_RECEIPT, receipt),
+            ):
+                if _stat_identity(before) != _stat_identity(os.fstat(descriptor)) or _stat_identity(
+                    before
+                ) != _stat_identity(os.stat(name, dir_fd=evidence_fd, follow_symlinks=False)):
+                    raise RuntimeError("retained wheel evidence changed during pair authentication")
+
+
+def _retain_candidate_wheel(
+    wheel: Path,
+    wheel_sha256: str,
+    evidence_dir: Path,
+    evidence_fd: int,
+    *,
+    candidate_sha: str,
+    candidate_tree: str,
+) -> dict[str, str]:
+    """Preserve verified build bytes before scratch cleanup, without gate credit.
+
+    The producer supplies its actual wheel directly. Build intermediates and
+    clone metadata are not mistaken for changes to the tracked source. The
+    normal candidate projection checks and final gate verdict remain required.
+    """
+    _require_evidence_directory(evidence_dir, evidence_fd, ())
+    if (
+        not wheel.is_absolute()
+        or re.fullmatch(r"friday-[A-Za-z0-9_.+-]+\.whl", wheel.name) is None
+        or re.fullmatch(r"[0-9a-f]{64}", wheel_sha256) is None
+        or any(re.fullmatch(r"[0-9a-f]{40}", value) is None for value in (candidate_sha, candidate_tree))
+    ):
+        raise RuntimeError("candidate wheel retention identity is invalid")
+    before = wheel.lstat()
+    if (
+        not stat.S_ISREG(before.st_mode)
+        or before.st_nlink != 1
+        or stat.S_IMODE(before.st_mode) != 0o600
+        or (hasattr(os, "getuid") and before.st_uid != os.getuid())
+        or not 0 < before.st_size <= _MAX_RETAINED_WHEEL_BYTES
+    ):
+        raise RuntimeError("candidate wheel retention source is unsafe")
+    flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0)
+    flags |= getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0)
+    source_fd = os.open(wheel, flags)
+    try:
+        if _stat_identity(before) != _stat_identity(os.fstat(source_fd)):
+            raise RuntimeError("candidate wheel changed before retention")
+        target_flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_CLOEXEC", 0)
+        target_flags |= getattr(os, "O_NOFOLLOW", 0)
+        target_fd = os.open(wheel.name, target_flags, 0o600, dir_fd=evidence_fd)
+        try:
+            digest = hashlib.sha256()
+            size = 0
+            while chunk := os.read(source_fd, min(1 << 20, _MAX_RETAINED_WHEEL_BYTES + 1 - size)):
+                size += len(chunk)
+                if size > _MAX_RETAINED_WHEEL_BYTES:
+                    raise RuntimeError("candidate wheel exceeded retention bound")
+                digest.update(chunk)
+                remaining = memoryview(chunk)
+                while remaining:
+                    written = os.write(target_fd, remaining)
+                    if written < 1:
+                        raise OSError("short write while retaining candidate wheel")
+                    remaining = remaining[written:]
+            if (
+                size != before.st_size
+                or digest.hexdigest() != wheel_sha256
+                or _stat_identity(before) != _stat_identity(os.fstat(source_fd))
+                or _stat_identity(before) != _stat_identity(wheel.lstat())
+            ):
+                raise RuntimeError("candidate wheel changed during retention")
+            os.fsync(target_fd)
+        finally:
+            os.close(target_fd)
+    finally:
+        os.close(source_fd)
+    receipt_sha256 = _write_private_json(
+        evidence_fd,
+        _RETAINED_WHEEL_RECEIPT,
+        {
+            "schema": "friday.quality-gate-wheel.v1",
+            "status": "retained_without_gate_verdict",
+            "certification_eligible": False,
+            "candidate_sha": candidate_sha,
+            "candidate_tree": candidate_tree,
+            "wheel": {"filename": wheel.name, "sha256": wheel_sha256, "bytes": size},
+        },
+    )
+    os.fsync(evidence_fd)
+    retained = {"filename": wheel.name, "sha256": wheel_sha256, "receipt_sha256": receipt_sha256}
+    _require_retained_wheel(evidence_dir, evidence_fd, retained)
+    return retained
 
 
 _PYTEST_BOOTSTRAP = (
@@ -2525,6 +2684,7 @@ def _execute_tier_impl(
     classified: tuple[Any, ...] = ()
     durations: dict[str, int] = {}
     wheel_sha256: str | None = None
+    retained_wheel: dict[str, str] | None = None
     comparison_observed_sha256: str | None = None
     candidate_tree = ""
     scratch_groups: list[dict[str, int | str]] = []
@@ -2649,6 +2809,14 @@ def _execute_tier_impl(
                             comparison_epoch_sha=comparison_wheel_epoch_sha,
                             comparison_sha256=comparison_wheel_sha256,
                             comparison_build_profile=comparison_build_profile,
+                        )
+                        retained_wheel = _retain_candidate_wheel(
+                            _wheel,
+                            wheel_sha256,
+                            evidence_dir,
+                            evidence_fd,
+                            candidate_sha=candidate_sha,
+                            candidate_tree=candidate_tree,
                         )
                         environment.update(
                             {
@@ -2876,7 +3044,7 @@ def _execute_tier_impl(
         if process_owner is not None:
             process_owner.check()
         _require_candidate_launcher(candidate_sha)
-        _require_evidence_directory(evidence_dir, evidence_fd, ())
+        _require_retained_wheel(evidence_dir, evidence_fd, retained_wheel)
         schema, result, certification_eligible = _tier_result_identity(args.tier, measurement_only)
         summary = {
             "schema": schema,
@@ -2930,7 +3098,7 @@ def _execute_tier_impl(
             summary["r10_deterministic"] = journey_evidence
         _write_tier_summary(evidence_fd, summary)
         os.fsync(evidence_fd)
-        _require_evidence_directory(evidence_dir, evidence_fd, ("quality-gate-summary.json",))
+        _require_retained_wheel(evidence_dir, evidence_fd, retained_wheel, summary_written=True)
     except (OSError, RuntimeError, ValueError, subprocess.TimeoutExpired, KeyboardInterrupt) as exc:
         if process_owner is not None:
             if deadline_ledger is not None and deadline_evidence is None:

@@ -13,6 +13,7 @@ import re
 import secrets
 import stat
 import unicodedata
+import weakref
 import zlib
 from collections.abc import Callable
 from contextvars import ContextVar
@@ -247,10 +248,15 @@ def _require_held_main_file_provenance(
         raise sqlite3.OperationalError("Friday database changed during open")
 
 
+def _close_main_file_provenance(descriptor: int) -> None:
+    with suppress(OSError):
+        os.close(descriptor)
+
+
 class _MainFileProvenanceToken:
     """Process-private open-handle identity for one thread-local connection."""
 
-    __slots__ = ("_closed", "_connection", "_device", "_fd", "_inode")
+    __slots__ = ("__weakref__", "_closed", "_connection", "_device", "_fd", "_finalizer", "_inode")
 
     def __init__(
         self,
@@ -275,6 +281,10 @@ class _MainFileProvenanceToken:
         self._fd = fd
         self._device = device
         self._inode = inode
+        # Retain only the descriptor in the cleanup registry: retaining self or
+        # the connection would keep abandoned/cyclic owners alive. Ownership is
+        # transferred only after validation; _open_once owns failed construction.
+        self._finalizer = weakref.finalize(self, _close_main_file_provenance, fd)
 
     def __repr__(self) -> str:
         return "_MainFileProvenanceToken(private=True)"
@@ -289,11 +299,10 @@ class _MainFileProvenanceToken:
         if self._closed:
             return
         self._closed = True
-        descriptor = self._fd
         self._fd = -1
-        if descriptor >= 0:
-            with suppress(OSError):
-                os.close(descriptor)
+        # Explicit close consumes the same one-shot cleanup as GC, so later
+        # collection cannot close an unrelated file that reused this fd number.
+        self._finalizer()
 
     def validate(self, conn: sqlite3.Connection) -> None:
         if self._closed or not self.bound_to(conn) or self._fd < 0:
