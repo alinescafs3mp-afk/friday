@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import hashlib
-import json
 import os
 import stat
 import sys
@@ -190,20 +189,21 @@ def test_skipped_local_and_mirrored_backups_repair_legacy_modes(
 
         backups = tmp_path / "database-backups"
         mirror = tmp_path / "mirror"
-        database = backups / "jericho-test.sqlite3"
-        manifest = backups / "jericho-test.manifest.json"
-        _legacy_file(database, b"synthetic sqlite backup")
-        _legacy_file(
-            manifest,
-            json.dumps(
-                {"database": database.name, "sha256": hashlib.sha256(database.read_bytes()).hexdigest()}
-            ).encode(),
-        )
+        mirrored = replace(settings, backups_dir=backups, backup_mirror_dir=mirror)
+        backup_storage = init_storage(mirrored)
+        try:
+            backup_storage.ensure_user("legacy-mode-owner")
+            backup = backup_storage.create_backup(label="legacy-mode")
+        finally:
+            backup_storage.close()
+        database = Path(backup["path"])
+        manifest = Path(backup["manifest_path"])
+        database.chmod(0o644)
+        manifest.chmod(0o644)
         mirrored_database = mirror / database.name
         mirrored_manifest = mirror / manifest.name
         _legacy_file(mirrored_database, database.read_bytes())
         _legacy_file(mirrored_manifest, manifest.read_bytes())
-        mirrored = replace(settings, backups_dir=backups, backup_mirror_dir=mirror)
 
         mirror_report = mirror_backups(mirrored)
         assert mirror_report["skipped_existing"] == 1

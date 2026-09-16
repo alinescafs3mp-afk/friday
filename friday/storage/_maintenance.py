@@ -78,6 +78,10 @@ from friday.storage._restore_barrier import (
     database_restore_intent_lstat,
     database_restore_intent_path,
 )
+from friday.storage.backup_contract import (
+    BACKUP_SCOPE,
+    validate_backup_manifest,
+)
 
 
 def _engineer_command_backup_authority_required(settings: Any) -> bool:
@@ -119,15 +123,6 @@ _ENGINEER_BACKUP_AUTHORITY_FIELDS = frozenset(
         "store_id",
     }
 )
-_BACKUP_SCOPE = {
-    "sqlite_database": "included",
-    "raw_files": "external",
-    "memory_vault": "external",
-    "obsidian_profiles_and_vaults": "external",
-    "engineer_command_ledger": "external",
-    "model_weights": "external",
-    "configuration_and_secrets": "external",
-}
 _RESTORE_INTENT_SCHEMA = "friday.database-restore-intent.v1"
 _RESTORE_INTENT_FIELDS = frozenset(
     {
@@ -2330,9 +2325,16 @@ class MaintenanceMixin(StorageShared):
                 # authority ledger.  This closed scope is verified byte-for-
                 # meaning on restore; a manifest may not relabel the ordinary
                 # main-DB image as a complete effect backup.
-                "scope": dict(_BACKUP_SCOPE),
+                "scope": dict(BACKUP_SCOPE),
             }
             manifest_path = destination.with_suffix(".manifest.json")
+            validate_backup_manifest(
+                manifest,
+                manifest_name=manifest_path.name,
+                actual_size_bytes=destination.stat().st_size,
+                actual_sha256=digest,
+                actual_schema_version=backup_schema_version,
+            )
             _write_json_atomic(manifest_path, manifest)
             return {**manifest, "path": str(destination), "manifest_path": str(manifest_path)}
         finally:
@@ -2579,7 +2581,7 @@ class MaintenanceMixin(StorageShared):
                     validation_errors.append("schema_version is unsupported")
                 elif not manifest_schema_matches_database:
                     validation_errors.append("schema_version does not match the database")
-                manifest_scope_matches = manifest.get("scope") == _BACKUP_SCOPE
+                manifest_scope_matches = manifest.get("scope") == BACKUP_SCOPE
                 if not manifest_scope_matches:
                     validation_errors.append("backup scope is missing or invalid")
                 authority_evidence = manifest.get("engineer_command_ledger_authority")
