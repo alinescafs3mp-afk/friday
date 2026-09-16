@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import json
 import os
+import socket
 import sys
+import tempfile
 from pathlib import Path
 
 import pytest
@@ -223,6 +225,76 @@ def test_fenced_cleanup_removes_owned_sealed_tree_without_following_symlink(tmp_
     assert not root.exists()
     assert marker.read_bytes() == b"outside"
     assert marker.stat().st_mode & 0o777 == 0o400
+
+
+@pytest.mark.skipif(not sys.platform.startswith("linux"), reason="Linux AF_UNIX path boundary")
+def test_exact_release_scratch_fits_nested_unix_socket_and_cleans_up(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("QUALITY_GATE_SCRATCH_PARENT", "/var/tmp")
+    scratch: Path | None = None
+    socket_path: Path | None = None
+
+    with gate._exact_release_scratch() as raw:  # noqa: SLF001 - exact gate harness control
+        scratch = Path(raw)
+        assert scratch.name.startswith(gate._EXACT_RELEASE_SCRATCH_PREFIX)  # noqa: SLF001
+        assert scratch.stat().st_mode & 0o777 == 0o700
+        group = scratch / "run-non-ui"
+        group.mkdir(mode=0o700)
+        with (
+            gate._isolated_test_environment(  # noqa: SLF001 - exact gate harness control
+                group,
+                prepare_schema_backups=False,
+            ) as environment,
+            tempfile.TemporaryDirectory(
+                prefix="friday-live-relays-", dir=environment["TMPDIR"]
+            ) as relay_root,
+        ):
+            socket_path = Path(relay_root) / "secondary.sock"
+            assert len(os.fsencode(socket_path)) == gate._LINUX_AF_UNIX_PATH_MAX_BYTES  # noqa: SLF001
+            with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as listener:
+                listener.bind(str(socket_path))
+                socket_path.chmod(0o600)
+                listener.listen(1)
+                assert socket_path.stat().st_mode & 0o777 == 0o600
+
+    assert scratch is not None and not scratch.exists()
+    assert socket_path is not None and not socket_path.exists()
+
+
+@pytest.mark.skipif(not sys.platform.startswith("linux"), reason="Linux AF_UNIX path boundary")
+def test_exact_release_scratch_rejects_overlong_parent_and_cleans_created_root(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    parent = tmp_path / "long-exact-release-scratch-parent"
+    parent.mkdir(mode=0o700)
+    monkeypatch.setenv("QUALITY_GATE_SCRATCH_PARENT", str(parent))
+
+    with (
+        pytest.raises(
+            RuntimeError,
+            match="^quality_gate_scratch_exceeds_unix_socket_path_budget$",
+        ),
+        gate._exact_release_scratch(),  # noqa: SLF001 - exact gate harness control
+    ):
+        pytest.fail("overlong scratch unexpectedly entered its execution body")
+
+    assert list(parent.iterdir()) == []
+
+
+@pytest.mark.skipif(not sys.platform.startswith("linux"), reason="Linux AF_UNIX path boundary")
+def test_former_diagnostic_prefix_exceeds_shared_socket_path_budget() -> None:
+    former = Path("/var/tmp/fq-diagnostic-12345678")
+    projected = os.fsencode(former) + os.fsencode(  # noqa: SLF001
+        gate._EXACT_RELEASE_SOCKET_PATH_SUFFIX
+    )
+    assert len(projected) > gate._LINUX_AF_UNIX_PATH_MAX_BYTES  # noqa: SLF001
+    with pytest.raises(
+        RuntimeError,
+        match="^quality_gate_scratch_exceeds_unix_socket_path_budget$",
+    ):
+        gate._require_exact_release_socket_path_budget(former)  # noqa: SLF001
 
 
 def test_fenced_cleanup_retains_scratch_until_cleanup_is_confirmed(

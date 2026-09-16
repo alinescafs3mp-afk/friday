@@ -658,6 +658,14 @@ def _scratch_parent() -> str | None:
 
 _SCRATCH_CLEANUP_MAX_INODES = 500_000
 _SCRATCH_CLEANUP_MAX_DEPTH = 128
+_EXACT_RELEASE_SCRATCH_PREFIX = "fq-"
+_LINUX_AF_UNIX_PATH_MAX_BYTES = 107
+# The exact-release non-UI environment is the longest gate path leading to a
+# host relay.  ``tempfile`` currently contributes eight-character names at
+# each level; keep the complete pathname within Linux sockaddr_un.sun_path.
+_EXACT_RELEASE_SOCKET_PATH_SUFFIX = (
+    "/run-non-ui/friday-quality-home-12345678/tmp/friday-live-relays-12345678/secondary.sock"
+)
 
 
 @dataclass(frozen=True)
@@ -969,6 +977,29 @@ def _fenced_temporary_directory(
             print(f"FAILED: {note}; private scratch retained at {raw}", file=sys.stderr)
         finally:
             _close_scratch_root_authority(authority)
+
+
+def _require_exact_release_socket_path_budget(scratch: Path) -> None:
+    if not sys.platform.startswith("linux"):
+        return
+    longest_socket_path = os.fsencode(scratch) + os.fsencode(_EXACT_RELEASE_SOCKET_PATH_SUFFIX)
+    if len(longest_socket_path) > _LINUX_AF_UNIX_PATH_MAX_BYTES:
+        raise RuntimeError("quality_gate_scratch_exceeds_unix_socket_path_budget")
+
+
+@contextmanager
+def _exact_release_scratch(*, cleanup_allowed: Callable[[], bool] | None = None) -> Iterator[str]:
+    """Own one short scratch root that is safe for nested AF_UNIX fixtures."""
+
+    with _fenced_temporary_directory(
+        prefix=_EXACT_RELEASE_SCRATCH_PREFIX,
+        dir=_scratch_parent(),
+        cleanup_allowed=cleanup_allowed,
+    ) as raw:
+        scratch = Path(raw)
+        scratch.chmod(0o700)
+        _require_exact_release_socket_path_budget(scratch)
+        yield raw
 
 
 @contextmanager
@@ -2902,11 +2933,8 @@ def _execute_diagnostic_exact_release(
         return process_owner.cleanup_safe
 
     try:
-        with _fenced_temporary_directory(
-            prefix="fq-diagnostic-", dir=_scratch_parent(), cleanup_allowed=cleanup_allowed
-        ) as raw_scratch:
+        with _exact_release_scratch(cleanup_allowed=cleanup_allowed) as raw_scratch:
             scratch = Path(raw_scratch)
-            scratch.chmod(0o700)
             command_output = scratch / "diagnostic-command-output"
             command_output.mkdir(mode=0o700)
 
@@ -3874,12 +3902,9 @@ def _execute_tier_impl(
 
     try:
         with (
-            _fenced_temporary_directory(
-                prefix="fq-", dir=_scratch_parent(), cleanup_allowed=cleanup_allowed
-            ) as raw_scratch,
+            _exact_release_scratch(cleanup_allowed=cleanup_allowed) as raw_scratch,
         ):
             scratch = Path(raw_scratch)
-            scratch.chmod(0o700)
 
             def measured(
                 command: GateCommand,
