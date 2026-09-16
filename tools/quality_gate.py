@@ -299,6 +299,48 @@ def _diagnostic_command_batch(
     return rows, stopped_by
 
 
+def _diagnostic_toolchain_blocker(rows: Sequence[Mapping[str, Any]]) -> str | None:
+    """Require one successful root prerequisite for diagnostic execution."""
+
+    toolchain = tuple(row for row in rows if row.get("name") == "quality toolchain")
+    if len(toolchain) != 1:
+        return (
+            "required exact quality toolchain prerequisite must have exactly one row; "
+            f"observed {len(toolchain)}"
+        )
+    status = toolchain[0].get("status")
+    if status != "PASS":
+        return f"required exact quality toolchain prerequisite is not PASS: {status!r}"
+    return None
+
+
+def _diagnostic_runtime_projection(
+    deterministic: Any,
+    installed_site: Path,
+    source: Path,
+) -> dict[str, Any]:
+    """Bind installed product bytes and the executable candidate tool suite."""
+
+    projection = deterministic._identity(installed_site, source)
+    if not isinstance(projection, dict):
+        raise RuntimeError("R10 diagnostic runtime projection is invalid")
+    return projection
+
+
+def _require_diagnostic_runtime_projection(
+    deterministic: Any,
+    installed_site: Path,
+    source: Path,
+    baseline: Mapping[str, Any] | None,
+) -> None:
+    """Fence the next independent phase if either runtime projection changed."""
+
+    if baseline is None:
+        raise RuntimeError("R10 diagnostic runtime projection baseline is missing")
+    if _diagnostic_runtime_projection(deterministic, installed_site, source) != baseline:
+        raise RuntimeError("R10 runtime projection changed during diagnostic execution")
+
+
 def _strict_json_object(pairs: Sequence[tuple[str, Any]]) -> dict[str, Any]:
     result: dict[str, Any] = {}
     for name, value in pairs:
@@ -2813,6 +2855,7 @@ def _execute_diagnostic_exact_release(
     wheel_sha256: str | None = None
     comparison_observed_sha256: str | None = None
     retained_wheel: dict[str, str] | None = None
+    runtime_projection_baseline: dict[str, Any] | None = None
     journey_evidence: dict[str, Any] | None = None
     journey_context: dict[str, Any] | None = None
     journey_matrix: dict[str, Any] | None = None
@@ -2974,6 +3017,7 @@ def _execute_diagnostic_exact_release(
                     for row, command in zip(static_rows, static_commands, strict=True):
                         row["name"] = command.name
                         record(row)
+                    toolchain_blocker = _diagnostic_toolchain_blocker(static_rows)
                     if static_stop is not None:
                         safety_stop = {"stage": "static", "reason": static_stop}
                         not_run(
@@ -2986,6 +3030,18 @@ def _execute_diagnostic_exact_release(
                                 "deterministic-journeys",
                             ),
                             f"execution contour stopped by {static_stop}",
+                        )
+                    elif toolchain_blocker is not None:
+                        not_run(
+                            (
+                                "wheel",
+                                "collection",
+                                "phase:non-UI",
+                                "phase:UI",
+                                "deadline-evidence",
+                                "deterministic-journeys",
+                            ),
+                            f"{toolchain_blocker}; independent static findings retained",
                         )
                     else:
                         with _isolated_test_environment(
@@ -3028,6 +3084,11 @@ def _execute_diagnostic_exact_release(
                                         _INSTALLED_SITE_ENV: str(installed_site),
                                         "PYTHONPATH": _wheel_worker_pythonpath(installed_site, source),
                                     }
+                                )
+                                runtime_projection_baseline = _diagnostic_runtime_projection(
+                                    deterministic,
+                                    installed_site,
+                                    source,
                                 )
                                 record(
                                     {
@@ -3106,6 +3167,12 @@ def _execute_diagnostic_exact_release(
                                 )
                                 try:
                                     collection_rc = measured(collect)
+                                    _require_diagnostic_runtime_projection(
+                                        deterministic,
+                                        installed_site,
+                                        source,
+                                        runtime_projection_baseline,
+                                    )
                                     if collection_rc != 0:
                                         raise RuntimeError(
                                             f"authoritative collection returned {collection_rc}"
@@ -3172,6 +3239,10 @@ def _execute_diagnostic_exact_release(
                                             installed_site,
                                             source,
                                         )
+                                        if journey_context["runtime"] != runtime_projection_baseline:
+                                            raise RuntimeError(
+                                                "R10 diagnostic journey context differs from runtime baseline"
+                                            )
                                         journey_evidence = {
                                             "context": journey_context,
                                             "records": [],
@@ -3202,6 +3273,17 @@ def _execute_diagnostic_exact_release(
                                             (stage_id,),
                                             f"execution contour stopped by {safety_stop['stage']}",
                                         )
+                                        continue
+                                    try:
+                                        _require_diagnostic_runtime_projection(
+                                            deterministic,
+                                            installed_site,
+                                            source,
+                                            runtime_projection_baseline,
+                                        )
+                                    except (OSError, RuntimeError, ValueError) as exc:
+                                        stop(stage_id, exc, kind="pytest")
+                                        journey_blockers.append(stage_id)
                                         continue
                                     if not nodes:
                                         record(
@@ -3297,23 +3379,23 @@ def _execute_diagnostic_exact_release(
                                                 )
                                                 journey_blockers.append(stage_id)
                                             record(row)
-                                            if journey_evidence is not None and row["status"] == "PASS":
+                                            _require_diagnostic_runtime_projection(
+                                                deterministic,
+                                                installed_site,
+                                                source,
+                                                runtime_projection_baseline,
+                                            )
+                                            if journey_evidence is not None:
                                                 assert journey_context is not None
-                                                if (
-                                                    deterministic._identity(installed_site, source)
-                                                    != journey_context["runtime"]
-                                                ):
-                                                    raise RuntimeError(
-                                                        "R10 runtime projection changed during diagnostic execution"
+                                                if row["status"] == "PASS":
+                                                    journey_evidence["records"].extend(
+                                                        deterministic.collect_gate_journeys(
+                                                            report_path,
+                                                            expected,
+                                                            journey_context,
+                                                            journey_matrix,
+                                                        )
                                                     )
-                                                journey_evidence["records"].extend(
-                                                    deterministic.collect_gate_journeys(
-                                                        report_path,
-                                                        expected,
-                                                        journey_context,
-                                                        journey_matrix,
-                                                    )
-                                                )
                                             peak_total = observed_by_step[command.name]
                                             observed_bytes = max(0, peak_total - scratch_baseline)
                                             scratch_groups.append(

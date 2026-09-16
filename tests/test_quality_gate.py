@@ -749,6 +749,124 @@ def test_diagnostic_batch_continues_after_real_failure_and_fences_controller_fai
     assert not fenced.exists()
 
 
+@pytest.mark.parametrize(
+    ("toolchain_statuses", "ordinary_static_red", "blocked"),
+    (
+        ((), False, True),
+        (("PASS", "PASS"), False, True),
+        (("FAIL",), False, True),
+        (("STOPPED",), False, True),
+        (("PASS",), False, False),
+        (("PASS",), True, False),
+    ),
+)
+def test_diagnostic_runtime_requires_exactly_one_pass_toolchain_without_hiding_static_findings(
+    toolchain_statuses: tuple[str, ...],
+    ordinary_static_red: bool,
+    blocked: bool,
+) -> None:
+    rows = [
+        {"id": f"static:{index:02d}", "name": "quality toolchain", "status": status}
+        for index, status in enumerate(toolchain_statuses, start=1)
+    ]
+    if ordinary_static_red:
+        rows.append({"id": "static:99", "name": "ruff lint", "status": "FAIL"})
+
+    blocker = quality_gate._diagnostic_toolchain_blocker(rows)
+
+    assert (blocker is not None) is blocked
+    assert ordinary_static_red is any(row["name"] == "ruff lint" and row["status"] == "FAIL" for row in rows)
+
+
+@pytest.mark.parametrize("journey_applicable", (False, True), ids=("no-journey", "journey"))
+@pytest.mark.parametrize(
+    "transition",
+    (
+        "clean",
+        "collection-runtime-change",
+        "collection-source-change",
+        "phase-runtime-change",
+        "phase-source-change",
+    ),
+)
+def test_diagnostic_runtime_projection_fences_each_transition_independent_of_journeys(
+    tmp_path: Path,
+    journey_applicable: bool,
+    transition: str,
+) -> None:
+    from tools import release_1_0_deterministic as deterministic
+
+    installed_site = tmp_path / "installed"
+    for namespace in quality_gate._WHEEL_NAMESPACES:
+        marker = installed_site / namespace / "projection.py"
+        marker.parent.mkdir(parents=True)
+        marker.write_text(f"{namespace}:baseline\n", encoding="utf-8")
+    source = tmp_path / "source"
+    for relative in deterministic.SUITE_PATHS:
+        path = source / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(f"{relative}:baseline\n", encoding="utf-8")
+
+    baseline = quality_gate._diagnostic_runtime_projection(
+        deterministic,
+        installed_site,
+        source,
+    )
+    journey_evidence: dict[str, list[object]] | None = {"records": []} if journey_applicable else None
+    safety_stop: dict[str, str] | None = None
+    non_ui_status: str | None = None
+    ui_executed = False
+
+    def mutate_projection(target: str) -> None:
+        path = (
+            installed_site / "friday" / "projection.py"
+            if target == "runtime"
+            else source / deterministic.SUITE_PATHS[0]
+        )
+        path.write_text(f"{target}:changed\n", encoding="utf-8")
+
+    if transition.startswith("collection-"):
+        mutate_projection(transition.removeprefix("collection-").removesuffix("-change"))
+    try:
+        quality_gate._require_diagnostic_runtime_projection(
+            deterministic,
+            installed_site,
+            source,
+            baseline,
+        )
+    except RuntimeError as exc:
+        safety_stop = {"stage": "collection", "reason": str(exc)}
+
+    if safety_stop is None:
+        # This represents a complete, ordinary red non-UI phase. Its FAIL row
+        # survives an integrity fence raised immediately after the phase.
+        non_ui_status = "FAIL"
+        if transition.startswith("phase-"):
+            mutate_projection(transition.removeprefix("phase-").removesuffix("-change"))
+        try:
+            quality_gate._require_diagnostic_runtime_projection(
+                deterministic,
+                installed_site,
+                source,
+                baseline,
+            )
+        except RuntimeError as exc:
+            safety_stop = {"stage": "phase:non-UI", "reason": str(exc)}
+    if safety_stop is None:
+        ui_executed = True
+
+    # Journey receipts remain optional; the runtime/source fence is not.
+    assert (journey_evidence is not None) is journey_applicable
+    if transition == "clean":
+        assert non_ui_status == "FAIL" and ui_executed and safety_stop is None
+    elif transition.startswith("collection-"):
+        assert non_ui_status is None and not ui_executed
+        assert safety_stop is not None and safety_stop["stage"] == "collection"
+    else:
+        assert non_ui_status == "FAIL" and not ui_executed
+        assert safety_stop is not None and safety_stop["stage"] == "phase:non-UI"
+
+
 def test_diagnostic_phase_requires_complete_evidence_and_strict_gate_stays_red(
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],
