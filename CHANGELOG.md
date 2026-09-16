@@ -1,3 +1,14 @@
+## 0.208.60 — Unreleased
+
+### Verify backup recovery pairs before reuse
+
+- Validate plain and encrypted file and SQLite mirrors against their manifest,
+  source digest and decoded size before reusing an existing recovery pair.
+- Reject links and nonregular payloads without waiting on named pipes; refuse
+  conflicting immutable names before replacing either member of a valid pair.
+- Keep schema 50 and reserve this candidate for complete gates, immutable
+  installation and live acceptance. Production remains on the accepted release.
+
 ## 0.208.59 — Unreleased
 
 ### Preserve protected dead letters during document acceptance

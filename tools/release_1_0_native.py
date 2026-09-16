@@ -666,7 +666,9 @@ def _record_worker_thread_ownership():
             raise NativeError("native_worker_thread_owner_changed")
 
 
-def _owned_retired_tasks(task_ids: frozenset[int], records: Sequence[_WorkerThreadRecord]) -> bool:
+def _owned_retired_records(
+    task_ids: frozenset[int], records: Sequence[_WorkerThreadRecord]
+) -> dict[int, _WorkerThreadRecord] | None:
     by_id: dict[int, _WorkerThreadRecord] = {}
     for record in records:
         if (
@@ -675,12 +677,11 @@ def _owned_retired_tasks(task_ids: frozenset[int], records: Sequence[_WorkerThre
             or record.thread.native_id != record.native_id
             or record.thread.is_alive()
         ):
-            return False
+            return None
         by_id[record.native_id] = record
-    return all(
-        task_id in by_id and _worker_task_start_time(task_id) == by_id[task_id].start_time
-        for task_id in task_ids
-    )
+    if not task_ids.issubset(by_id):
+        return None
+    return by_id
 
 
 def _require_worker_task_ids(
@@ -690,17 +691,45 @@ def _require_worker_task_ids(
     if observed == expected:
         return
     extras = observed - expected
-    if not expected.issubset(observed) or not extras or not _owned_retired_tasks(extras, retired_threads):
+    owned = _owned_retired_records(extras, retired_threads)
+    if not expected.issubset(observed) or not extras or owned is None:
+        raise NativeError("native_unowned_worker_thread")
+    observed_start_times = {task_id: _worker_task_start_time(task_id) for task_id in extras}
+    verified = frozenset(
+        task_id for task_id in extras if observed_start_times[task_id] == owned[task_id].start_time
+    )
+    mismatched = frozenset(
+        task_id for task_id in extras - verified if observed_start_times[task_id] is not None
+    )
+    if mismatched:
         raise NativeError("native_unowned_worker_thread")
     # A successful join can precede removal of that exact owned task from
-    # /proc. One no-wait consistency read permits only monotone retirement;
-    # missing, unknown, live, reused or newly appearing task IDs still fail.
+    # /proc between a directory census and its stat read. Immediate no-wait
+    # confirmation must be monotone and reprove every surviving TID identity.
+    # If a TID disappears during that reproof, one final no-wait census is
+    # accepted only after every extra has retired; it never authorizes another
+    # numeric TID and therefore cannot reopen the list/stat identity race.
+    # Missing, unknown, live, reused or newly appearing task IDs still fail.
     confirmed = _worker_task_ids()
-    if (
-        expected.issubset(confirmed)
-        and confirmed.issubset(observed)
-        and _owned_retired_tasks(confirmed - expected, retired_threads)
+    confirmed_extras = confirmed - expected
+    if not (
+        expected.issubset(confirmed) and confirmed.issubset(observed) and confirmed_extras.issubset(verified)
     ):
+        raise NativeError("native_unowned_worker_thread")
+    confirmed_start_times = {task_id: _worker_task_start_time(task_id) for task_id in confirmed_extras}
+    confirmed_verified = frozenset(
+        task_id for task_id in confirmed_extras if confirmed_start_times[task_id] == owned[task_id].start_time
+    )
+    confirmed_mismatched = frozenset(
+        task_id
+        for task_id in confirmed_extras - confirmed_verified
+        if confirmed_start_times[task_id] is not None
+    )
+    if confirmed_mismatched:
+        raise NativeError("native_unowned_worker_thread")
+    if confirmed_verified == confirmed_extras:
+        return
+    if _worker_task_ids() == expected:
         return
     raise NativeError("native_unowned_worker_thread")
 
