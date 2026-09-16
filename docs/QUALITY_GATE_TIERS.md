@@ -79,6 +79,19 @@ evidence_dir="$(mktemp -d -p /var/tmp friday-exact-evidence.XXXXXXXX)"
   --evidence-dir "$evidence_dir"
 ```
 
+For one pre-fix failure census, add `--diagnostic-only` to that exact command.
+This keeps the same source admission, inventory, installed wheel, 20/4 topology,
+deadline ledger and exclusive cleanup owner. A complete ordinary red non-UI
+phase is retained and the independent UI phase still runs; an unavailable
+wheel/corpus marks its descendants `NOT_RUN`, while invalid evidence or uncertain
+cleanup stops the execution contour. Before scratch cleanup the controller writes
+private raw command/JUnit/collection artifacts and
+`quality-gate-diagnostics.json`. Consumers read `stages[].status` (`PASS`, `FAIL`,
+`NOT_RUN`, or `STOPPED`), `dependency_reason`, `failures`, and `safety_stop`.
+The report always has `certification_eligible: false` and `GO: false`, never creates
+`quality-gate-summary.json`, and never replaces the later clean canonical command.
+Exit 0 means the census itself found no red stage; it is still non-certifying.
+
 `GOLDEN_JOURNEY_RELEASE_ROOT` is the immutable runtime identity pinned by the
 canonical sanitized receipts. Never substitute the mutable `current-release`
 symlink: a newer production runtime is not evidence for those receipts.

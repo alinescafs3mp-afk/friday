@@ -11,6 +11,7 @@ import pytest
 
 from tools import document_contour_live_battery as lifecycle
 from tools import quality_gate as gate
+from tools import quality_gate_phase as phase
 
 _SAMPLE = r"""
 import os, signal, subprocess, sys, time
@@ -28,6 +29,7 @@ def interval():
 
 def test_a(request):
     if MODE in {'parallel', 'uncertain'}: time.sleep(30)
+    if MODE == 'diagnostic-red': assert False, 'bounded ordinary product failure'
     if MODE == 'missing':
         from tools.quality_gate_deadlines import EventWriter
         EventWriter.finish = lambda *args: None
@@ -79,7 +81,7 @@ root = Path(sys.argv[2]); mode = sys.argv[3]
 signal.pthread_sigmask(signal.SIG_UNBLOCK, {signal.SIGINT, signal.SIGTERM})
 nodes = ('test_sample.py::test_a', 'test_sample.py::test_b')
 second = 'test_second.py::test_c'
-cross = mode == 'clean'
+cross = mode in {'clean', 'diagnostic-red'}
 limit = 1 if mode in {'parallel', 'setup', 'teardown', 'uncertain'} else 10
 sealed = d.seal_plan(run_id='actual-phase-probe', phases=('non-UI','UI') if cross else ('non-UI',),
     nodes=tuple(d.NodeDeadline(node,'non-UI',10) for node in nodes) + ((d.NodeDeadline(second,'UI',10),) if cross else ()),
@@ -99,6 +101,7 @@ if mode == 'start_cancel':
     process.OwnedCommandScope.start = cancel_after_start
 owner = phase.GateProcessRunner()
 error = None
+phase_results = []
 started = time.monotonic_ns()
 prior = process._subreaper()
 with owner:
@@ -112,9 +115,17 @@ with owner:
                     environment=env, report=group/'results.xml', collection=group/'collection.json',
                     modules=(str(module),), workers=2 if index == 0 else 1, distribution='load', basetemp=group/'pytest')
                 command = dataclasses.replace(command, argv=tuple('--rootdir='+str(root) if a.startswith('--rootdir=') else a for a in command.argv), cwd=root, timeout_s=1 if mode == 'controller' else 10)
-                owner(command, ledger=ledger, phase=label, fifo=group/'events.pipe')
+                returncode = owner(command, ledger=ledger, phase=label, fifo=group/'events.pipe',
+                    allow_nonzero=mode == 'diagnostic-red')
                 expected = nodes if index == 0 else (second,)
-                assert gate._junit_phase_is_clean(group/'results.xml',phase=label,expected_nodeids=expected)
+                if mode == 'diagnostic-red' and index == 0:
+                    evidence = gate._diagnostic_phase_evidence(group/'results.xml',group/'collection.json',expected,returncode)
+                    assert evidence['status'] == 'FAIL' and evidence['outcomes']['failures'] == [nodes[0]]
+                else:
+                    assert returncode == 0
+                    assert gate._junit_phase_is_clean(group/'results.xml',phase=label,expected_nodeids=expected)
+                    evidence = {'status': 'PASS'}
+                phase_results.append(evidence['status'])
             observed = ledger.complete(time.monotonic_ns(), succeeded=True)
             phase.validate_deadline_evidence(observed, sealed)
     except BaseException as exc:
@@ -124,7 +135,7 @@ with owner:
         try: owner.check()
         except RuntimeError: fenced = True
 result = dict(mode=mode, error=error, elapsed_ns=time.monotonic_ns()-started,
-    commands=owner.commands, cleanup_safe=owner.cleanup_safe, fenced=fenced,
+    commands=owner.commands, cleanup_safe=owner.cleanup_safe, fenced=fenced, phase_results=phase_results,
     ledger=ledger.evidence(), scratch_homes=len(list(root.glob('friday-quality-home-*'))), restored=process._subreaper()==prior,
     kernel_echild=process._kernel_has_no_children(), gate_source_root=str(source), installed_site=str(installed) if installed else None,
     gate_origins=gate_origins, product_origins=product_origins)
@@ -229,6 +240,45 @@ def test_fenced_cleanup_retains_scratch_until_cleanup_is_confirmed(
     assert sealed.stat().st_mode & 0o777 == 0o500
     assert "uncertain child cleanup" in capsys.readouterr().err
     gate._remove_owned_scratch_tree(str(root))  # noqa: SLF001 - clean the retained test fixture
+
+
+def test_diagnostic_owner_retains_nonzero_verdict_and_runs_next_owned_command(
+    tmp_path: Path,
+) -> None:
+    sentinel = tmp_path / "second-ran"
+    failing = gate.GateCommand(
+        "diagnostic ordinary failure",
+        (sys.executable, "-I", "-B", "-c", "raise SystemExit(1)"),
+        cwd=tmp_path,
+        timeout_s=10,
+    )
+    following = gate.GateCommand(
+        "diagnostic following stage",
+        (
+            sys.executable,
+            "-I",
+            "-B",
+            "-c",
+            f"from pathlib import Path; Path({str(sentinel)!r}).write_text('ran')",
+        ),
+        cwd=tmp_path,
+        timeout_s=10,
+    )
+
+    owner = phase.GateProcessRunner()
+    with owner:
+        assert owner(failing, allow_nonzero=True) == 1
+        assert owner.cleanup_safe
+        assert owner(following, allow_nonzero=True) == 0
+
+    assert sentinel.read_text() == "ran"
+    assert [row["status"] for row in owner.commands] == ["failed", "passed"]
+    assert all(not row["cleanup"]["failure_codes"] for row in owner.commands)
+
+    strict = phase.GateProcessRunner()
+    with strict, pytest.raises(RuntimeError, match="gate_command_not_clean"):
+        strict(failing)
+    assert strict.cleanup_safe
 
 
 def test_fenced_cleanup_refuses_a_different_directory_at_the_original_path(tmp_path: Path) -> None:
@@ -342,6 +392,20 @@ def test_real_xdist_hooks_complete_once_and_carry_shared_totals_between_phases(t
     assert all(node["start_events"] == 1 and node["finish_ns"] is not None for node in ledger["attempts"])
     assert ledger["cases"][0]["used_ns"] == sum(node["duration_ns"] for node in ledger["attempts"])
     assert ledger["cases"][1]["used_ns"] == ledger["attempts"][0]["duration_ns"]
+
+
+def test_complete_red_phase_keeps_deadline_evidence_and_runs_independent_ui(tmp_path: Path) -> None:
+    result = _probe(tmp_path, "diagnostic-red")
+
+    assert result["error"] is None
+    assert result["phase_results"] == ["FAIL", "PASS"]
+    assert [row["status"] for row in result["commands"]] == ["failed", "passed"]
+    assert result["cleanup_safe"] and result["kernel_echild"] and result["restored"]
+    assert result["ledger"]["credit_eligible"]
+    assert result["ledger"]["event_count"] == 6
+    assert all(
+        node["start_events"] == 1 and node["finish_ns"] is not None for node in result["ledger"]["attempts"]
+    )
 
 
 @pytest.mark.parametrize("mode", ["parallel", "setup", "teardown"])

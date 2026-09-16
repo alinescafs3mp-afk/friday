@@ -161,6 +161,16 @@ def test_plan_final_keeps_red_a_from_starting_b(monkeypatch, capsys) -> None:
         ]
     assert plan["b09_final"]["mode_purpose"] == "final_evidence_only_root_owns_go"
     assert diagnostic["b09_final"]["mode_purpose"] == "diagnostic_only_no_release_go"
+    assert "diagnostic_policy" not in plan
+    assert diagnostic["diagnostic_policy"] == {
+        "certification_eligible": False,
+        "ordinary_complete_failure": "record_and_continue_independent_stages",
+        "failed_prerequisite": "descendants_not_run_with_dependency_reason",
+        "unsafe_or_invalid_evidence": "stop_affected_execution_contour",
+        "report": "quality-gate-diagnostics.json",
+    }
+    assert "--diagnostic-only" not in " ".join(plan["commands"]["exact_release"])
+    assert "--diagnostic-only" in " ".join(diagnostic["commands"]["exact_release"])
     live = plan["commands"]["live"]
     for relative in ("tools/synthetic_live_b09_evidence.py", "tools/synthetic_live_b09_lab.py"):
         assert relative in _acceptance().CANONICAL_TOOLS

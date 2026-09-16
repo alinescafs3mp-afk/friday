@@ -101,6 +101,8 @@ _MAX_COLLECTION_BYTES = 64 << 20
 _MAX_COLLECTION_NODES = 100_000
 _MAX_COLLECTION_NODE_BYTES = 256 << 10
 _MAX_RETAINED_WHEEL_BYTES = 64 << 20
+_MAX_DIAGNOSTIC_ARTIFACT_BYTES = 64 << 20
+_MAX_DIAGNOSTIC_COMMAND_OUTPUT_BYTES = 16 << 20
 _RETAINED_WHEEL_RECEIPT = "quality-gate-wheel.json"
 _TIER_PHASE_TIMEOUT_SECONDS = {
     ("change", "non-UI"): 7_200,
@@ -225,6 +227,76 @@ class JUnitSummary:
     skipped: int
     testcases: int
     nodeids: tuple[str, ...]
+
+
+def _diagnostic_command_batch(
+    stages: Sequence[tuple[str, str, GateCommand]],
+    invoke: Callable[[GateCommand], int],
+    *,
+    cleanup_safe: Callable[[], bool] = lambda: True,
+) -> tuple[list[dict[str, Any]], str | None]:
+    """Run independent diagnostic commands until ownership becomes uncertain.
+
+    Ordinary non-zero tool verdicts remain findings and do not hide later
+    independent checks.  Controller/cleanup return codes and exceptions fence
+    the rest of the contour.  The exact-release certification path never calls
+    this helper.
+    """
+
+    rows: list[dict[str, Any]] = []
+    stopped_by: str | None = None
+    for stage_id, kind, command in stages:
+        if stopped_by is not None:
+            rows.append(
+                {
+                    "id": stage_id,
+                    "kind": kind,
+                    "status": "NOT_RUN",
+                    "dependency_reason": f"execution contour stopped by {stopped_by}",
+                }
+            )
+            continue
+        try:
+            returncode = invoke(command)
+        except (OSError, RuntimeError, ValueError, subprocess.TimeoutExpired, KeyboardInterrupt) as exc:
+            reason = str(exc) or type(exc).__name__
+            rows.append(
+                {
+                    "id": stage_id,
+                    "kind": kind,
+                    "status": "STOPPED",
+                    "reason": reason,
+                }
+            )
+            stopped_by = f"{stage_id}: {reason}"
+            continue
+        if not cleanup_safe() or returncode < 0 or returncode in {124, 125, 126}:
+            reason = (
+                "exclusive child cleanup is uncertain"
+                if not cleanup_safe()
+                else f"uncontrolled/controller return code {returncode}"
+            )
+            rows.append(
+                {
+                    "id": stage_id,
+                    "kind": kind,
+                    "status": "STOPPED",
+                    "returncode": returncode,
+                    "reason": reason,
+                }
+            )
+            stopped_by = f"{stage_id}: {reason}"
+            continue
+        rows.append(
+            {
+                "id": stage_id,
+                "kind": kind,
+                "status": "PASS" if returncode == 0 else "FAIL",
+                "returncode": returncode,
+                **({} if returncode == 0 else {"reason": "command returned non-zero"}),
+            }
+        )
+    return rows, stopped_by
 
 
 def _strict_json_object(pairs: Sequence[tuple[str, Any]]) -> dict[str, Any]:
@@ -1699,6 +1771,71 @@ def _write_private_json(directory_fd: int, name: str, value: object) -> str:
     return hashlib.sha256(payload).hexdigest()
 
 
+def _retain_diagnostic_file(
+    directory_fd: int,
+    source: Path,
+    target_name: str,
+    *,
+    maximum: int = _MAX_DIAGNOSTIC_ARTIFACT_BYTES,
+) -> dict[str, Any]:
+    """Copy one stable private scratch artifact before scratch cleanup."""
+
+    if (
+        not source.is_absolute()
+        or re.fullmatch(r"diagnostic-[0-9]{3}-[a-z0-9_.-]+", target_name) is None
+        or type(maximum) is not int
+        or not 0 < maximum <= _MAX_DIAGNOSTIC_ARTIFACT_BYTES
+    ):
+        raise RuntimeError("diagnostic artifact retention request is invalid")
+    before = source.lstat()
+    if (
+        not stat.S_ISREG(before.st_mode)
+        or before.st_nlink != 1
+        or (hasattr(os, "getuid") and before.st_uid != os.getuid())
+        or before.st_size > maximum
+    ):
+        raise RuntimeError("diagnostic artifact source is unsafe or oversized")
+    read_flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0)
+    source_fd = os.open(source, read_flags)
+    target_flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_CLOEXEC", 0)
+    target_flags |= getattr(os, "O_NOFOLLOW", 0)
+    target_fd = -1
+    published = False
+    try:
+        if _stat_identity(before) != _stat_identity(os.fstat(source_fd)):
+            raise RuntimeError("diagnostic artifact changed before retention")
+        target_fd = os.open(target_name, target_flags, 0o600, dir_fd=directory_fd)
+        digest = hashlib.sha256()
+        size = 0
+        while chunk := os.read(source_fd, min(1 << 20, maximum + 1 - size)):
+            size += len(chunk)
+            if size > maximum:
+                raise RuntimeError("diagnostic artifact exceeded its bound")
+            digest.update(chunk)
+            remaining = memoryview(chunk)
+            while remaining:
+                written = os.write(target_fd, remaining)
+                if written < 1:
+                    raise OSError("short write while retaining diagnostic evidence")
+                remaining = remaining[written:]
+        if (
+            size != before.st_size
+            or _stat_identity(before) != _stat_identity(os.fstat(source_fd))
+            or _stat_identity(before) != _stat_identity(source.lstat())
+        ):
+            raise RuntimeError("diagnostic artifact changed during retention")
+        os.fsync(target_fd)
+        published = True
+        return {"filename": target_name, "sha256": digest.hexdigest(), "bytes": size}
+    finally:
+        if target_fd >= 0:
+            os.close(target_fd)
+        if target_fd >= 0 and not published:
+            with suppress(OSError):
+                os.unlink(target_name, dir_fd=directory_fd)
+        os.close(source_fd)
+
+
 @contextmanager
 def _held_retained_file(
     directory_fd: int, name: str, maximum: int
@@ -1960,6 +2097,60 @@ def _junit_durations(report_path: Path) -> dict[str, int]:
     if Counter(tuple(durations)) != Counter(summary.nodeids):
         raise ValueError("JUnit durations do not cover the exact completed selection")
     return durations
+
+
+def _diagnostic_phase_evidence(
+    report_path: Path,
+    collection_path: Path,
+    expected_nodeids: tuple[str, ...],
+    returncode: int,
+) -> dict[str, Any]:
+    """Validate one complete pytest phase without converting red into credit."""
+
+    if type(returncode) is not int or returncode not in {0, 1}:
+        raise ValueError(f"diagnostic pytest returned unsupported code {returncode!r}")
+    observed = collection_nodeids(collection_path)
+    if Counter(observed) != Counter(expected_nodeids):
+        raise ValueError("diagnostic pytest collection differs from its exact selection")
+    summary = junit_summary(report_path)
+    if Counter(summary.nodeids) != Counter(expected_nodeids):
+        raise ValueError("diagnostic JUnit does not cover the exact selection")
+
+    outcomes: dict[str, list[str]] = {"failures": [], "errors": [], "skipped": []}
+    root = ET.parse(report_path).getroot()
+    for testcase in (element for element in root.iter() if _xml_local_name(element.tag) == "testcase"):
+        nodeids = [
+            prop.attrib.get("value")
+            for prop in testcase.iter()
+            if _xml_local_name(prop.tag) == "property" and prop.attrib.get("name") == _NODEID_PROPERTY
+        ]
+        if len(nodeids) != 1 or nodeids[0] is None:
+            raise ValueError("diagnostic JUnit node identity changed during outcome read")
+        for child in testcase:
+            outcome = _xml_local_name(child.tag)
+            if outcome == "failure":
+                outcomes["failures"].append(nodeids[0])
+            elif outcome == "error":
+                outcomes["errors"].append(nodeids[0])
+            elif outcome == "skipped":
+                outcomes["skipped"].append(nodeids[0])
+
+    red = bool(summary.failures or summary.errors or summary.skipped)
+    if (returncode == 0 and (summary.failures or summary.errors)) or (returncode == 1 and not red):
+        raise ValueError("diagnostic pytest return code contradicts its complete JUnit")
+    return {
+        "status": "FAIL" if red else "PASS",
+        "returncode": returncode,
+        "nodeids": list(summary.nodeids),
+        "outcomes": outcomes,
+        "counts": {
+            "tests": summary.tests,
+            "failures": summary.failures,
+            "errors": summary.errors,
+            "skipped": summary.skipped,
+        },
+        "durations_ns": _junit_durations(report_path),
+    }
 
 
 def _whitespace_argv(source: Path, base_sha: str, candidate_sha: str) -> tuple[str, ...]:
@@ -2455,6 +2646,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--comparison-wheel-sha256", help="comparison wheel SHA-256")
     parser.add_argument("--comparison-wheel-epoch-sha", help="comparison wheel commit")
     parser.add_argument(
+        "--diagnostic-only",
+        action="store_true",
+        help="collect independent exact-release findings without producing a certificate",
+    )
+    parser.add_argument(
         "--inventory-collection",
         type=Path,
         help="write one retained isolated serial collection for inventory maintenance",
@@ -2518,6 +2714,7 @@ def execute_inventory_collection(
         args.evidence_dir,
         args.comparison_wheel_sha256,
         args.comparison_wheel_epoch_sha,
+        args.diagnostic_only,
         args.phase,
         args.dry_run,
     )
@@ -2578,6 +2775,874 @@ def execute_tier(
         return 2
 
 
+def _execute_diagnostic_exact_release(
+    args: argparse.Namespace,
+    *,
+    started_ns: int,
+    candidate_sha: str,
+    base_sha: str,
+    comparison_wheel_sha256: str | None,
+    comparison_wheel_epoch_sha: str | None,
+    comparison_build_profile: str | None,
+    host_capacity: Mapping[str, Any] | None,
+    golden_journey_release_root: Path | None,
+    evidence_dir: Path,
+    evidence_fd: int,
+    load_inventory: Callable[[Path], Any],
+) -> int:
+    """Run exact-release as a red-preserving, explicitly non-certifying census."""
+
+    process_owner: Any = _ACTIVE_PROCESS_OWNER
+    if process_owner is None:
+        print("FAILED: diagnostic exact-release requires the exclusive process owner", file=sys.stderr)
+        return 2
+
+    stages: list[dict[str, Any]] = []
+    artifacts: list[tuple[str, Path]] = []
+    completed_steps: list[str] = []
+    measured_processes: list[dict[str, Any]] = []
+    observed_by_step: dict[str, int] = {}
+    scratch_groups: list[dict[str, int | str]] = []
+    effective_workers = {"non_ui": 0, "ui": 0}
+    full_nodeids: tuple[str, ...] = ()
+    classified: tuple[Any, ...] = ()
+    selected: tuple[Any, ...] = ()
+    durations: dict[str, int] = {}
+    candidate_tree = ""
+    inventory_digest = ""
+    wheel_sha256: str | None = None
+    comparison_observed_sha256: str | None = None
+    retained_wheel: dict[str, str] | None = None
+    journey_evidence: dict[str, Any] | None = None
+    journey_context: dict[str, Any] | None = None
+    journey_matrix: dict[str, Any] | None = None
+    deadline_ledger: Any = None
+    deadline_plan: Any = None
+    deadline_evidence: dict[str, Any] | None = None
+    phase_module: Any = None
+    peak_scratch_bytes = 0
+    safety_stop: dict[str, str] | None = None
+    raw_scratch = ""
+
+    def has_stage(stage_id: str) -> bool:
+        return any(row["id"] == stage_id for row in stages)
+
+    def record(row: dict[str, Any]) -> None:
+        if has_stage(str(row["id"])):
+            raise RuntimeError(f"diagnostic stage recorded twice: {row['id']}")
+        stages.append(row)
+
+    def stop(stage_id: str, reason: object, *, kind: str = "integrity") -> None:
+        nonlocal safety_stop
+        text = str(reason) or type(reason).__name__
+        if not has_stage(stage_id):
+            record({"id": stage_id, "kind": kind, "status": "STOPPED", "reason": text})
+        if safety_stop is None:
+            safety_stop = {"stage": stage_id, "reason": text}
+
+    def not_run(stage_ids: Sequence[str], reason: str) -> None:
+        for stage_id in stage_ids:
+            if not has_stage(stage_id):
+                record(
+                    {
+                        "id": stage_id,
+                        "kind": "pytest" if stage_id.startswith("phase:") else "gate",
+                        "status": "NOT_RUN",
+                        "dependency_reason": reason,
+                    }
+                )
+
+    def register(logical_name: str, path: Path) -> None:
+        artifacts.append((logical_name, path))
+
+    def cleanup_allowed() -> bool:
+        return process_owner.cleanup_safe
+
+    try:
+        with _fenced_temporary_directory(
+            prefix="fq-diagnostic-", dir=_scratch_parent(), cleanup_allowed=cleanup_allowed
+        ) as raw_scratch:
+            scratch = Path(raw_scratch)
+            scratch.chmod(0o700)
+            command_output = scratch / "diagnostic-command-output"
+            command_output.mkdir(mode=0o700)
+
+            def measured(
+                command: GateCommand,
+                *,
+                observation_root: Path | None = None,
+                phase: str | None = None,
+                fifo: Path | None = None,
+            ) -> int:
+                nonlocal peak_scratch_bytes
+                number = len(completed_steps) + 1
+                stdout_path = command_output / f"{number:03d}.stdout"
+                stderr_path = command_output / f"{number:03d}.stderr"
+                register(f"command-{number:03d}-stdout", stdout_path)
+                register(f"command-{number:03d}-stderr", stderr_path)
+                with stdout_path.open("xb") as stdout, stderr_path.open("xb") as stderr:
+                    stdout_path.chmod(0o600)
+                    stderr_path.chmod(0o600)
+
+                    def invoke() -> int:
+                        kwargs: dict[str, Any] = {
+                            "allow_nonzero": True,
+                            "_capture": (
+                                stdout,
+                                stderr,
+                                _MAX_DIAGNOSTIC_COMMAND_OUTPUT_BYTES,
+                            ),
+                        }
+                        if phase is not None:
+                            kwargs.update(ledger=deadline_ledger, phase=phase, fifo=fifo)
+                        return process_owner(command, **kwargs)
+
+                    if observation_root is None:
+                        returncode = invoke()
+                        observed_bytes = _directory_bytes(scratch)
+                    else:
+                        root = observation_root
+                        outside_bytes = (
+                            0
+                            if root == scratch
+                            else max(0, _directory_bytes(scratch) - _directory_bytes(root))
+                        )
+                        with _scratch_peak_sampler(root, 0.5) as observed_peak:
+                            returncode = invoke()
+                        observed_bytes = observed_peak[0]
+                        peak_scratch_bytes = max(peak_scratch_bytes, outside_bytes + observed_bytes)
+                observed_by_step[command.name] = observed_bytes
+                completed_steps.append(command.name)
+                measured_processes.append(process_owner.commands[-1])
+                peak_scratch_bytes = max(peak_scratch_bytes, observed_bytes)
+                return returncode
+
+            try:
+                with (
+                    _scratch_peak_sampler(scratch, 5.0) as aggregate_scratch_peak,
+                    _candidate_projection(candidate_sha, scratch) as source,
+                ):
+                    peak_scratch_bytes = _directory_bytes(scratch)
+                    candidate_tree = _git_output(source, "rev-parse", f"{candidate_sha}^{{tree}}")
+                    inventory = load_inventory(source / "tools" / "quality_gate_inventory.tsv")
+                    inventory.validate_candidate_modules(
+                        source,
+                        candidate_sha,
+                        git_output=_inventory_git_output,
+                    )
+                    inventory_digest = inventory.digest
+                    acceptance, deterministic = _candidate_r10_modules(source)
+                    phase_module = importlib.import_module("tools.quality_gate_phase")
+                    record(
+                        {
+                            "id": "source-admission",
+                            "kind": "integrity",
+                            "status": "PASS",
+                            "candidate_tree": candidate_tree,
+                            "inventory_sha256": inventory_digest,
+                        }
+                    )
+
+                    static_environment = _git_environment()
+                    static_environment.pop("PYTHONPATH", None)
+                    static_environment.pop("PYTEST_ADDOPTS", None)
+                    static_environment.update(
+                        {
+                            "PYTHONDONTWRITEBYTECODE": "1",
+                            "PYTHONPYCACHEPREFIX": str(scratch / "static-cache"),
+                            "MYPY_CACHE_DIR": str(scratch / "mypy-cache"),
+                            "RUFF_CACHE_DIR": str(scratch / "ruff-cache"),
+                        }
+                    )
+                    static_commands = _tier_static_commands(
+                        source,
+                        python=sys.executable,
+                        tier="exact-release",
+                        base_sha=base_sha,
+                        candidate_sha=candidate_sha,
+                        environment=static_environment,
+                    )
+                    static_plan = tuple(
+                        (f"static:{index:02d}", "static", command)
+                        for index, command in enumerate(static_commands, start=1)
+                    )
+                    static_rows, static_stop = _diagnostic_command_batch(
+                        static_plan,
+                        measured,
+                        cleanup_safe=cleanup_allowed,
+                    )
+                    for row, command in zip(static_rows, static_commands, strict=True):
+                        row["name"] = command.name
+                        record(row)
+                    if static_stop is not None:
+                        safety_stop = {"stage": "static", "reason": static_stop}
+                        not_run(
+                            (
+                                "wheel",
+                                "collection",
+                                "phase:non-UI",
+                                "phase:UI",
+                                "deadline-evidence",
+                                "deterministic-journeys",
+                            ),
+                            f"execution contour stopped by {static_stop}",
+                        )
+                    else:
+                        with _isolated_test_environment(
+                            scratch,
+                            prepare_schema_backups=False,
+                            source_root=source,
+                            golden_journey_release_root=golden_journey_release_root,
+                            cleanup_allowed=cleanup_allowed,
+                        ) as raw_environment:
+                            environment = dict(raw_environment)
+                            test_python = sys.executable
+                            try:
+                                (
+                                    wheel,
+                                    wheel_sha256,
+                                    comparison_observed_sha256,
+                                    installed_site,
+                                    test_python,
+                                ) = _build_reusable_wheel(
+                                    source,
+                                    scratch,
+                                    candidate_sha=candidate_sha,
+                                    python=sys.executable,
+                                    environment=environment,
+                                    runner=measured,
+                                    comparison_epoch_sha=comparison_wheel_epoch_sha,
+                                    comparison_sha256=comparison_wheel_sha256,
+                                    comparison_build_profile=comparison_build_profile,
+                                )
+                                retained_wheel = _retain_candidate_wheel(
+                                    wheel,
+                                    wheel_sha256,
+                                    evidence_dir,
+                                    evidence_fd,
+                                    candidate_sha=candidate_sha,
+                                    candidate_tree=candidate_tree,
+                                )
+                                environment.update(
+                                    {
+                                        _INSTALLED_SITE_ENV: str(installed_site),
+                                        "PYTHONPATH": _wheel_worker_pythonpath(installed_site, source),
+                                    }
+                                )
+                                record(
+                                    {
+                                        "id": "wheel",
+                                        "kind": "artifact",
+                                        "status": "PASS",
+                                        "wheel_sha256": wheel_sha256,
+                                        "test_runtime_wheel_sha256": (
+                                            comparison_observed_sha256 or wheel_sha256
+                                        ),
+                                    }
+                                )
+                            except (
+                                OSError,
+                                RuntimeError,
+                                ValueError,
+                                subprocess.TimeoutExpired,
+                                KeyboardInterrupt,
+                            ) as exc:
+                                reason = str(exc) or type(exc).__name__
+                                ordinary_missing_wheel = bool(
+                                    re.fullmatch(
+                                        r"(?:candidate|comparison) wheel (?:build failed|build did not produce exactly one wheel|verifier failed|clean install failed)",
+                                        reason,
+                                    )
+                                )
+                                last_returncode = (
+                                    process_owner.commands[-1].get("cleanup", {}).get("leader_returncode")
+                                )
+                                controlled_returncode = (
+                                    type(last_returncode) is int
+                                    and last_returncode >= 0
+                                    and last_returncode not in {124, 125, 126}
+                                )
+                                if ordinary_missing_wheel and cleanup_allowed() and controlled_returncode:
+                                    record(
+                                        {
+                                            "id": "wheel",
+                                            "kind": "artifact",
+                                            "status": "FAIL",
+                                            "reason": reason,
+                                        }
+                                    )
+                                else:
+                                    stop("wheel", reason, kind="artifact")
+                                not_run(
+                                    (
+                                        "collection",
+                                        "phase:non-UI",
+                                        "phase:UI",
+                                        "deadline-evidence",
+                                        "deterministic-journeys",
+                                    ),
+                                    f"verified installed wheel unavailable: {reason}",
+                                )
+
+                            if (
+                                has_stage("wheel")
+                                and next(row for row in stages if row["id"] == "wheel")["status"] == "PASS"
+                            ):
+                                full_collection = scratch / "all-tests.json"
+                                register("authoritative-collection", full_collection)
+                                collect = _tier_pytest_command(
+                                    name="one authoritative candidate collection",
+                                    python=test_python,
+                                    source=source,
+                                    environment=environment,
+                                    report=None,
+                                    collection=full_collection,
+                                    selection=None,
+                                    modules=("tests",),
+                                    workers=1,
+                                    distribution="load",
+                                    basetemp=scratch / "collect",
+                                    collect_only=True,
+                                )
+                                try:
+                                    collection_rc = measured(collect)
+                                    if collection_rc != 0:
+                                        raise RuntimeError(
+                                            f"authoritative collection returned {collection_rc}"
+                                        )
+                                    full_nodeids = collection_nodeids(full_collection)
+                                    classified = inventory.classify(full_nodeids)
+                                    selected = tuple(
+                                        node
+                                        for node in classified
+                                        if node.tier in {"change", "exact-release"}
+                                    )
+                                    if not selected:
+                                        raise RuntimeError("selected tier is empty")
+                                    record(
+                                        {
+                                            "id": "collection",
+                                            "kind": "corpus",
+                                            "status": "PASS",
+                                            "collected_node_count": len(full_nodeids),
+                                            "selected_node_count": len(selected),
+                                        }
+                                    )
+                                except (
+                                    OSError,
+                                    RuntimeError,
+                                    ValueError,
+                                    subprocess.TimeoutExpired,
+                                    KeyboardInterrupt,
+                                ) as exc:
+                                    stop("collection", exc, kind="corpus")
+                                    not_run(
+                                        (
+                                            "phase:non-UI",
+                                            "phase:UI",
+                                            "deadline-evidence",
+                                            "deterministic-journeys",
+                                        ),
+                                        f"exact runnable corpus unavailable: {exc}",
+                                    )
+
+                            if (
+                                has_stage("collection")
+                                and next(row for row in stages if row["id"] == "collection")["status"]
+                                == "PASS"
+                            ):
+                                if (source / "tools/release_1_0_capability_matrix.json").is_file():
+                                    journey_matrix = acceptance.load_matrix(
+                                        source / "tools/release_1_0_capability_matrix.json"
+                                    )
+                                    if deterministic._journey_bindings(
+                                        journey_matrix, (node.nodeid for node in selected)
+                                    ):
+                                        runtime_wheel = comparison_observed_sha256 or wheel_sha256
+                                        if not isinstance(runtime_wheel, str):
+                                            raise RuntimeError("R10 runtime wheel identity is missing")
+                                        journey_context = deterministic.make_gate_context(
+                                            {
+                                                "base_sha": base_sha,
+                                                "candidate_sha": candidate_sha,
+                                                "candidate_tree": candidate_tree,
+                                                "wheel_sha256": runtime_wheel,
+                                                "inventory_sha256": inventory.digest,
+                                            },
+                                            installed_site,
+                                            source,
+                                        )
+                                        journey_evidence = {
+                                            "context": journey_context,
+                                            "records": [],
+                                        }
+
+                                groups = (
+                                    (
+                                        "non-UI",
+                                        tuple(node for node in selected if node.execution_kind != "browser"),
+                                    ),
+                                    (
+                                        "UI",
+                                        tuple(node for node in selected if node.execution_kind == "browser"),
+                                    ),
+                                )
+                                deadline_matrix = acceptance.load_matrix(
+                                    source / "tools/release_1_0_capability_matrix.json"
+                                )
+                                deadline_plan = phase_module.gate_plan(
+                                    selected, deadline_matrix, os.urandom(16).hex()
+                                )
+                                deadline_ledger = phase_module.ParentDeadlineLedger(deadline_plan)
+                                journey_blockers: list[str] = []
+                                for label, nodes in groups:
+                                    stage_id = f"phase:{label}"
+                                    if safety_stop is not None:
+                                        not_run(
+                                            (stage_id,),
+                                            f"execution contour stopped by {safety_stop['stage']}",
+                                        )
+                                        continue
+                                    if not nodes:
+                                        record(
+                                            {
+                                                "id": stage_id,
+                                                "kind": "pytest",
+                                                "status": "PASS",
+                                                "nodeids": [],
+                                                "counts": {
+                                                    "tests": 0,
+                                                    "failures": 0,
+                                                    "errors": 0,
+                                                    "skipped": 0,
+                                                },
+                                            }
+                                        )
+                                        continue
+                                    group_root = scratch / f"run-{label.lower()}"
+                                    group_root.mkdir(mode=0o700)
+                                    with _isolated_test_environment(
+                                        group_root,
+                                        prepare_schema_backups=False,
+                                        source_root=source,
+                                        golden_journey_release_root=golden_journey_release_root,
+                                        cleanup_allowed=cleanup_allowed,
+                                    ) as group_environment:
+                                        group_environment[_INSTALLED_SITE_ENV] = environment[
+                                            _INSTALLED_SITE_ENV
+                                        ]
+                                        group_environment["PYTHONPATH"] = environment["PYTHONPATH"]
+                                        if journey_evidence is not None:
+                                            assert journey_context is not None
+                                            group_environment[deterministic.GATE_CONTEXT_ENV] = (
+                                                deterministic._bytes(journey_context).decode()
+                                            )
+                                        expected = tuple(node.nodeid for node in nodes)
+                                        selection_path = group_root / "selection.json"
+                                        collection_path = group_root / "collection.json"
+                                        report_path = group_root / "results.xml"
+                                        _write_collection_manifest(str(selection_path), expected)
+                                        for logical, path in (
+                                            (f"{label}-selection", selection_path),
+                                            (f"{label}-collection", collection_path),
+                                            (f"{label}-junit", report_path),
+                                        ):
+                                            register(logical, path)
+                                        modules = tuple(dict.fromkeys(node.module_path for node in nodes))
+                                        requested_workers = args.ui_workers if label == "UI" else args.workers
+                                        workers = min(requested_workers, len(modules))
+                                        effective_workers["ui" if label == "UI" else "non_ui"] = workers
+                                        command = _tier_pytest_command(
+                                            name=f"exact-release {label} tests",
+                                            python=test_python,
+                                            source=source,
+                                            environment=group_environment,
+                                            report=report_path,
+                                            collection=collection_path,
+                                            selection=selection_path,
+                                            modules=modules,
+                                            workers=workers,
+                                            distribution=("loadscope" if label == "UI" else "load"),
+                                            basetemp=group_root / "pytest",
+                                            timeout_s=_TIER_PHASE_TIMEOUT_SECONDS.get(
+                                                ("exact-release", label), 3600
+                                            ),
+                                        )
+                                        scratch_baseline = _directory_bytes(scratch)
+                                        budget_mb = sum(node.scratch_mb for node in nodes)
+                                        try:
+                                            returncode = measured(
+                                                command,
+                                                observation_root=scratch,
+                                                phase=label,
+                                                fifo=group_root / "deadline.pipe",
+                                            )
+                                            phase_evidence = _diagnostic_phase_evidence(
+                                                report_path,
+                                                collection_path,
+                                                expected,
+                                                returncode,
+                                            )
+                                            phase_durations = phase_evidence.pop("durations_ns")
+                                            durations.update(phase_durations)
+                                            row = {
+                                                "id": stage_id,
+                                                "kind": "pytest",
+                                                **phase_evidence,
+                                                "dependencies": ["wheel", "collection"],
+                                            }
+                                            if row["status"] == "FAIL":
+                                                row["reason"] = (
+                                                    "complete JUnit contains failed, errored, or skipped nodes"
+                                                )
+                                                journey_blockers.append(stage_id)
+                                            record(row)
+                                            if journey_evidence is not None and row["status"] == "PASS":
+                                                assert journey_context is not None
+                                                if (
+                                                    deterministic._identity(installed_site, source)
+                                                    != journey_context["runtime"]
+                                                ):
+                                                    raise RuntimeError(
+                                                        "R10 runtime projection changed during diagnostic execution"
+                                                    )
+                                                journey_evidence["records"].extend(
+                                                    deterministic.collect_gate_journeys(
+                                                        report_path,
+                                                        expected,
+                                                        journey_context,
+                                                        journey_matrix,
+                                                    )
+                                                )
+                                            peak_total = observed_by_step[command.name]
+                                            observed_bytes = max(0, peak_total - scratch_baseline)
+                                            scratch_groups.append(
+                                                {
+                                                    "group": label,
+                                                    "node_count": len(nodes),
+                                                    "declared_budget_bytes": budget_mb * 1024 * 1024,
+                                                    "baseline_bytes": scratch_baseline,
+                                                    "peak_total_bytes": peak_total,
+                                                    "incremental_peak_bytes": observed_bytes,
+                                                    "enforced": False,
+                                                    "method": "sampled regular-file peak minus fixed baseline",
+                                                }
+                                            )
+                                        except (
+                                            OSError,
+                                            RuntimeError,
+                                            ValueError,
+                                            subprocess.TimeoutExpired,
+                                            KeyboardInterrupt,
+                                        ) as exc:
+                                            stop(stage_id, exc, kind="pytest")
+                                            journey_blockers.append(stage_id)
+
+                                expected_executed = {
+                                    node.nodeid
+                                    for node in selected
+                                    if has_stage(
+                                        "phase:UI" if node.execution_kind == "browser" else "phase:non-UI"
+                                    )
+                                    and next(
+                                        row
+                                        for row in stages
+                                        if row["id"]
+                                        == (
+                                            "phase:UI" if node.execution_kind == "browser" else "phase:non-UI"
+                                        )
+                                    )["status"]
+                                    in {"PASS", "FAIL"}
+                                }
+                                if set(durations) != expected_executed:
+                                    stop(
+                                        "duration-evidence",
+                                        "completed durations do not equal executed diagnostic phases",
+                                    )
+                                else:
+                                    by_nodeid = {node.nodeid: node for node in classified}
+                                    exceeded = sorted(
+                                        nodeid
+                                        for nodeid, duration in durations.items()
+                                        if duration > by_nodeid[nodeid].max_runtime_s * 1_000_000_000
+                                    )
+                                    if exceeded:
+                                        stop(
+                                            "duration-evidence",
+                                            f"nodes exceeded declared maximum runtime: {exceeded}",
+                                        )
+                                    else:
+                                        record(
+                                            {
+                                                "id": "duration-evidence",
+                                                "kind": "resource",
+                                                "status": "PASS",
+                                                "node_count": len(durations),
+                                            }
+                                        )
+
+                                phase_rows = [
+                                    row for row in stages if row["id"] in {"phase:non-UI", "phase:UI"}
+                                ]
+                                if all(row["status"] in {"PASS", "FAIL"} for row in phase_rows):
+                                    try:
+                                        process_owner.check()
+                                        deadline_evidence = deadline_ledger.complete(
+                                            time.monotonic_ns(), succeeded=True
+                                        )
+                                        phase_module.validate_deadline_evidence(
+                                            deadline_evidence, deadline_plan
+                                        )
+                                        phase_module.validate_diagnostic_process_evidence(
+                                            measured_processes,
+                                            completed_steps,
+                                            deadline_evidence,
+                                        )
+                                        record(
+                                            {
+                                                "id": "deadline-evidence",
+                                                "kind": "resource",
+                                                "status": "PASS",
+                                            }
+                                        )
+                                    except (
+                                        OSError,
+                                        RuntimeError,
+                                        ValueError,
+                                    ) as exc:
+                                        stop("deadline-evidence", exc, kind="resource")
+                                else:
+                                    not_run(
+                                        ("deadline-evidence",),
+                                        "one or more pytest phases lack complete evidence",
+                                    )
+
+                                if journey_evidence is None:
+                                    record(
+                                        {
+                                            "id": "deterministic-journeys",
+                                            "kind": "acceptance-evidence",
+                                            "status": "PASS",
+                                            "applicable": False,
+                                        }
+                                    )
+                                elif journey_blockers:
+                                    not_run(
+                                        ("deterministic-journeys",),
+                                        "dependent pytest phases are red: "
+                                        + ", ".join(sorted(set(journey_blockers))),
+                                    )
+                                else:
+                                    try:
+                                        assert journey_context is not None
+                                        deterministic.validate_gate_journeys(
+                                            journey_evidence,
+                                            journey_context["release"],
+                                            journey_matrix,
+                                            durations,
+                                        )
+                                        record(
+                                            {
+                                                "id": "deterministic-journeys",
+                                                "kind": "acceptance-evidence",
+                                                "status": "PASS",
+                                                "record_count": len(journey_evidence["records"]),
+                                            }
+                                        )
+                                    except (RuntimeError, ValueError) as exc:
+                                        stop(
+                                            "deterministic-journeys",
+                                            exc,
+                                            kind="acceptance-evidence",
+                                        )
+
+                    peak_scratch_bytes = max(
+                        peak_scratch_bytes,
+                        aggregate_scratch_peak[0],
+                        _directory_bytes(scratch),
+                    )
+            except (
+                OSError,
+                RuntimeError,
+                ValueError,
+                subprocess.TimeoutExpired,
+                KeyboardInterrupt,
+            ) as exc:
+                stop("execution-contour", exc)
+
+            if deadline_ledger is not None and deadline_evidence is None:
+                with suppress(RuntimeError, ValueError):
+                    deadline_ledger.abort("diagnostic_incomplete")
+
+            if cleanup_allowed():
+                try:
+                    _require_candidate_launcher(candidate_sha)
+                    record(
+                        {
+                            "id": "final-source-identity",
+                            "kind": "integrity",
+                            "status": "PASS",
+                        }
+                    )
+                except (OSError, RuntimeError, ValueError, subprocess.TimeoutExpired) as exc:
+                    stop("final-source-identity", exc)
+            else:
+                not_run(
+                    ("final-source-identity",),
+                    "exclusive cleanup is uncertain; no later process may start",
+                )
+
+            # The diagnostic namespace is authenticated before adding raw
+            # evidence, then every available artifact and the report are
+            # persisted while the scratch tree still exists.
+            try:
+                _require_retained_wheel(evidence_dir, evidence_fd, retained_wheel)
+            except (OSError, RuntimeError, ValueError) as exc:
+                stop("retained-wheel-integrity", exc, kind="artifact")
+
+            expected_evidence_names = (
+                [] if retained_wheel is None else [retained_wheel["filename"], _RETAINED_WHEEL_RECEIPT]
+            )
+            retained_artifacts: list[dict[str, Any]] = []
+            missing_artifacts: list[str] = []
+            seen_sources: set[str] = set()
+            for logical_name, path in artifacts:
+                source_key = str(path)
+                if source_key in seen_sources:
+                    continue
+                seen_sources.add(source_key)
+                if not path.is_file():
+                    missing_artifacts.append(logical_name)
+                    continue
+                slug = re.sub(r"[^a-z0-9_.-]+", "-", logical_name.lower()).strip("-.")
+                slug = (slug or "artifact")[:80]
+                target_name = f"diagnostic-{len(retained_artifacts) + 1:03d}-{slug}"
+                try:
+                    _require_evidence_directory(
+                        evidence_dir,
+                        evidence_fd,
+                        tuple(sorted(expected_evidence_names)),
+                    )
+                    retained = _retain_diagnostic_file(evidence_fd, path, target_name)
+                    expected_evidence_names.append(target_name)
+                    _require_evidence_directory(
+                        evidence_dir,
+                        evidence_fd,
+                        tuple(sorted(expected_evidence_names)),
+                    )
+                    retained["logical_name"] = logical_name
+                    retained_artifacts.append(retained)
+                except (OSError, RuntimeError, ValueError) as exc:
+                    stop("diagnostic-retention", exc, kind="artifact")
+                    break
+
+            fixed_tail = (
+                "wheel",
+                "collection",
+                "phase:non-UI",
+                "phase:UI",
+                "duration-evidence",
+                "deadline-evidence",
+                "deterministic-journeys",
+                "final-source-identity",
+            )
+            not_run(
+                fixed_tail,
+                "prerequisite was not reached before diagnostic finalization",
+            )
+            failures = [row for row in stages if row["status"] == "FAIL"]
+            result = (
+                "failed"
+                if safety_stop is not None or any(row["status"] != "PASS" for row in stages)
+                else "passed"
+            )
+            report = {
+                "schema": "friday.quality-gate-diagnostics.v1",
+                "mode": "diagnostic-only",
+                "result": result,
+                "certification_eligible": False,
+                "GO": False,
+                "candidate_sha": candidate_sha,
+                "candidate_tree": candidate_tree or None,
+                "base_sha": base_sha,
+                "tier": "exact-release",
+                "inventory_sha256": inventory_digest or None,
+                "invariant_identity": "semantic-function+exact-parameter-set",
+                "wheel_sha256": wheel_sha256,
+                "test_runtime_wheel_sha256": (comparison_observed_sha256 or wheel_sha256),
+                "comparison_wheel": {
+                    "epoch_commit": comparison_wheel_epoch_sha,
+                    "expected_sha256": comparison_wheel_sha256,
+                    "observed_sha256": comparison_observed_sha256,
+                    "build_profile": comparison_build_profile,
+                },
+                "source_manifest": {
+                    "candidate_sha": candidate_sha,
+                    "candidate_tree": candidate_tree or None,
+                    "inventory_sha256": inventory_digest or None,
+                    "bootstrap_sources": dict(sorted(_BOOTSTRAP_SOURCES.items())),
+                },
+                "topology": {
+                    "requested_non_ui_workers": args.workers,
+                    "requested_ui_workers": args.ui_workers,
+                    "effective_non_ui_workers": effective_workers["non_ui"],
+                    "effective_ui_workers": effective_workers["ui"],
+                },
+                "release_host_capacity": host_capacity,
+                "stages": stages,
+                "failures": failures,
+                "safety_stop": safety_stop,
+                "completed_steps": completed_steps,
+                "partition": _partition_evidence(classified) if classified else [],
+                "selected_nodeids": [node.nodeid for node in selected],
+                "executed": [
+                    {"nodeid": nodeid, "duration_ns": durations[nodeid]}
+                    for nodeid in full_nodeids
+                    if nodeid in durations
+                ],
+                "scratch_groups": scratch_groups,
+                "peak_scratch_bytes_before_cleanup": peak_scratch_bytes,
+                "owned_commands": process_owner.commands,
+                "active_deadlines": (
+                    deadline_evidence
+                    if deadline_evidence is not None
+                    else deadline_ledger.evidence()
+                    if deadline_ledger is not None
+                    else None
+                ),
+                "retained_artifacts": retained_artifacts,
+                "missing_registered_artifacts": missing_artifacts,
+                "scratch_retained": raw_scratch if not cleanup_allowed() else None,
+                "elapsed_ns_before_report": time.monotonic_ns() - started_ns,
+            }
+            if journey_evidence is not None:
+                report["r10_deterministic_partial"] = journey_evidence
+            _require_evidence_directory(
+                evidence_dir,
+                evidence_fd,
+                tuple(sorted(expected_evidence_names)),
+            )
+            _write_private_json(
+                evidence_fd,
+                "quality-gate-diagnostics.json",
+                report,
+            )
+            expected_evidence_names.append("quality-gate-diagnostics.json")
+            os.fsync(evidence_fd)
+            _require_evidence_directory(
+                evidence_dir,
+                evidence_fd,
+                tuple(sorted(expected_evidence_names)),
+            )
+    except (OSError, RuntimeError, ValueError, subprocess.TimeoutExpired, KeyboardInterrupt) as exc:
+        print(f"FAILED: diagnostic evidence could not be finalized: {exc}", file=sys.stderr)
+        return 1
+
+    outcome = "PASS (NON-CERTIFYING)" if result == "passed" else "FAIL (NON-CERTIFYING)"
+    print(f"\nQuality gate (exact-release diagnostic): {outcome}")
+    return 0 if result == "passed" else 1
+
+
 def _execute_tier_impl(
     args: argparse.Namespace,
     *,
@@ -2599,6 +3664,10 @@ def _execute_tier_impl(
     host_capacity: dict[str, Any] | None = None
     golden_journey_release_root: Path | None = None
     evidence_fd = -1
+    diagnostic_only = bool(getattr(args, "diagnostic_only", False))
+    if diagnostic_only and args.tier != "exact-release":
+        print("FAILED: --diagnostic-only requires --tier exact-release", file=sys.stderr)
+        return 2
     if args.phase or args.dry_run:
         print("FAILED: closed tiers do not accept legacy phase or dry-run modes", file=sys.stderr)
         return 2
@@ -2677,6 +3746,27 @@ def _execute_tier_impl(
             os.close(evidence_fd)
         print(f"FAILED: {exc}", file=sys.stderr)
         return 2
+
+    if diagnostic_only:
+        assert isinstance(candidate_sha, str)
+        assert isinstance(base_sha, str)
+        try:
+            return _execute_diagnostic_exact_release(
+                args,
+                started_ns=started_ns,
+                candidate_sha=candidate_sha,
+                base_sha=base_sha,
+                comparison_wheel_sha256=comparison_wheel_sha256,
+                comparison_wheel_epoch_sha=comparison_wheel_epoch_sha,
+                comparison_build_profile=comparison_build_profile,
+                host_capacity=host_capacity,
+                golden_journey_release_root=golden_journey_release_root,
+                evidence_dir=evidence_dir,
+                evidence_fd=evidence_fd,
+                load_inventory=load_inventory,
+            )
+        finally:
+            os.close(evidence_fd)
 
     peak_scratch_bytes = 0
     completed_steps: list[str] = []
@@ -3208,6 +4298,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     # explicit 0700 roots and are written with explicit 0600 modes.
     previous_umask = os.umask(0o022)
     try:
+        if args.diagnostic_only and args.tier != "exact-release":
+            print("FAILED: --diagnostic-only requires --tier exact-release", file=sys.stderr)
+            return 2
         if args.inventory_collection is not None:
             return execute_inventory_collection(args)
         return execute_tier(args) if args.tier else execute(args)

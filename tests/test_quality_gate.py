@@ -32,6 +32,7 @@ def _args(**overrides: object) -> argparse.Namespace:
         "evidence_dir": None,
         "comparison_wheel_sha256": None,
         "comparison_wheel_epoch_sha": None,
+        "diagnostic_only": False,
         "phase": None,
         "workers": 12,
         "ui_workers": len(quality_gate.UI_TEST_MODULES),
@@ -670,6 +671,129 @@ def test_closed_gate_defaults_use_bounded_ui_parallelism(
     monkeypatch.setattr(quality_gate.os, "process_cpu_count", lambda: 23)
     with pytest.raises(RuntimeError, match="lacks the required CPU"):
         quality_gate._exact_host_capacity()
+
+
+def test_diagnostic_batch_continues_after_real_failure_and_fences_controller_failure(
+    tmp_path: Path,
+) -> None:
+    continued = tmp_path / "ui-ran"
+    commands = (
+        (
+            "phase:non-UI",
+            "pytest",
+            quality_gate.GateCommand(
+                "bounded failing non-UI phase",
+                (sys.executable, "-I", "-B", "-c", "raise SystemExit(1)"),
+                cwd=tmp_path,
+                timeout_s=10,
+            ),
+        ),
+        (
+            "phase:UI",
+            "pytest",
+            quality_gate.GateCommand(
+                "actual UI sentinel phase",
+                (
+                    sys.executable,
+                    "-I",
+                    "-B",
+                    "-c",
+                    f"from pathlib import Path; Path({str(continued)!r}).write_text('ran')",
+                ),
+                cwd=tmp_path,
+                timeout_s=10,
+            ),
+        ),
+    )
+
+    rows, stopped = quality_gate._diagnostic_command_batch(commands, quality_gate.run_command)
+
+    assert stopped is None
+    assert [row["status"] for row in rows] == ["FAIL", "PASS"]
+    assert continued.read_text() == "ran"
+
+    fenced = tmp_path / "must-not-run"
+    fatal_commands = (
+        (
+            "phase:non-UI",
+            "pytest",
+            quality_gate.GateCommand(
+                "controller cleanup failure sentinel",
+                (sys.executable, "-I", "-B", "-c", "raise SystemExit(125)"),
+                cwd=tmp_path,
+                timeout_s=10,
+            ),
+        ),
+        (
+            "phase:UI",
+            "pytest",
+            quality_gate.GateCommand(
+                "forbidden post-fatal UI phase",
+                (
+                    sys.executable,
+                    "-I",
+                    "-B",
+                    "-c",
+                    f"from pathlib import Path; Path({str(fenced)!r}).write_text('bad')",
+                ),
+                cwd=tmp_path,
+                timeout_s=10,
+            ),
+        ),
+    )
+
+    rows, stopped = quality_gate._diagnostic_command_batch(fatal_commands, quality_gate.run_command)
+
+    assert stopped is not None and "controller return code 125" in stopped
+    assert [row["status"] for row in rows] == ["STOPPED", "NOT_RUN"]
+    assert not fenced.exists()
+
+
+def test_diagnostic_phase_requires_complete_evidence_and_strict_gate_stays_red(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    nodeid = "tests/test_probe.py::test_red"
+    collection = tmp_path / "collection.json"
+    report = tmp_path / "results.xml"
+    _write_collection(collection, (nodeid,))
+    report.write_text(
+        '<testsuite tests="1" failures="1" errors="0" skipped="0">'
+        '<testcase name="red" time="0.125"><properties>'
+        f'<property name="{quality_gate._NODEID_PROPERTY}" value="{nodeid}"/>'
+        '</properties><failure message="bounded"/></testcase></testsuite>',
+        encoding="utf-8",
+    )
+
+    evidence = quality_gate._diagnostic_phase_evidence(report, collection, (nodeid,), returncode=1)
+
+    assert evidence["status"] == "FAIL"
+    assert evidence["outcomes"] == {"failures": [nodeid], "errors": [], "skipped": []}
+    assert evidence["durations_ns"] == {nodeid: 125_000_000}
+    assert not quality_gate._junit_phase_is_clean(report, phase="non-UI", expected_nodeids=(nodeid,))
+    assert "failures=1" in capsys.readouterr().err
+
+    with pytest.raises(ValueError, match="did not create"):
+        quality_gate._diagnostic_phase_evidence(tmp_path / "missing.xml", collection, (nodeid,), returncode=1)
+    evidence_dir = tmp_path / "evidence"
+    evidence_dir.mkdir(mode=0o700)
+    evidence_fd = quality_gate._open_evidence_directory(evidence_dir)
+    try:
+        retained = quality_gate._retain_diagnostic_file(
+            evidence_fd, report.resolve(), "diagnostic-001-non-ui-junit"
+        )
+    finally:
+        os.close(evidence_fd)
+    retained_path = evidence_dir / retained["filename"]
+    assert retained["sha256"] == hashlib.sha256(report.read_bytes()).hexdigest()
+    assert retained_path.read_bytes() == report.read_bytes()
+    assert stat.S_IMODE(retained_path.stat().st_mode) == 0o600
+    assert quality_gate._tier_result_identity("exact-release", False) == (
+        "friday.quality-gate-summary.v2",
+        "passed",
+        True,
+    )
+    assert quality_gate.execute_tier(_args(tier="change", diagnostic_only=True, candidate_sha="0" * 40)) == 2
 
 
 def test_pytest_bootstrap_preloads_runner_authority_before_candidate_root(tmp_path: Path) -> None:

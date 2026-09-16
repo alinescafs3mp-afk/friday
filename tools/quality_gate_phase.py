@@ -168,6 +168,71 @@ def validate_process_evidence(value: Any, names: Any, deadline: Any) -> None:
         )
 
 
+def validate_diagnostic_process_evidence(value: Any, names: Any, deadline: Any) -> None:
+    """Validate controlled cleanup while retaining ordinary non-zero verdicts.
+
+    Unlike :func:`validate_process_evidence`, this is never certifying.  It
+    accepts a reaped command's non-zero product/tool result, but accepts no
+    forced or uncertain cleanup and still binds phase timing to the deadline
+    ledger.
+    """
+
+    def require(condition: bool) -> None:
+        if not condition:
+            raise ValueError("gate_diagnostic_process_receipt_invalid")
+
+    require(isinstance(value, list) and len(value) == len(names))
+    previous = 0
+    phases = {row["phase"]: row for row in deadline["phases"]}
+    for row, name in zip(value, names, strict=True):
+        require(
+            isinstance(row, dict)
+            and set(row) == {"name", "start_ns", "finish_ns", "phase", "cleanup", "status"}
+        )
+        proof = row["cleanup"]
+        require(
+            row["name"] == name
+            and row["status"] in {"passed", "failed"}
+            and type(row["start_ns"]) is int
+            and type(row["finish_ns"]) is int
+            and previous <= row["start_ns"] <= row["finish_ns"] < 2**63
+            and isinstance(proof, dict)
+            and set(proof)
+            == {
+                "schema",
+                "leader_returncode",
+                "leader_reaped",
+                "reaped_descendants",
+                "forced_leader",
+                "forced_descendants",
+                "kernel_echild",
+                "subreaper_restored",
+                "failure_codes",
+            }
+        )
+        previous = row["finish_ns"]
+        require(
+            proof["schema"] == "friday.quality-gate-child-cleanup.v1"
+            and type(proof["leader_returncode"]) is int
+            and type(proof["reaped_descendants"]) is int
+            and proof["reaped_descendants"] >= 0
+            and proof["leader_reaped"] is True
+            and proof["kernel_echild"] is True
+            and proof["subreaper_restored"] is True
+            and proof["forced_leader"] is False
+            and proof["forced_descendants"] is False
+            and proof["failure_codes"] == []
+            and row["status"] == ("passed" if proof["leader_returncode"] == 0 else "failed")
+        )
+        label = next((label for label in phases if name == f"exact-release {label} tests"), None)
+        require(row["phase"] == label)
+        if label is not None:
+            require(
+                row["start_ns"] == phases[label]["launch_ns"]
+                and row["finish_ns"] <= phases[label]["finish_ns"]
+            )
+
+
 def validate_auxiliary_evidence(
     value: Any, measured: Any, deadline: Any, *, expected_clones: int = 1
 ) -> None:
@@ -323,8 +388,11 @@ class GateProcessRunner:
         ledger: ParentDeadlineLedger | None = None,
         phase: str | None = None,
         fifo: Path | None = None,
+        allow_nonzero: bool = False,
         _capture: tuple[Any, Any, int] | None = None,
     ) -> int:
+        if type(allow_nonzero) is not bool:
+            raise ValueError("gate_allow_nonzero_invalid")
         self.check()
         if not self._handlers:
             raise RuntimeError("gate_signal_scope_missing")
@@ -384,7 +452,14 @@ class GateProcessRunner:
                         self.cleanup_safe = proof.cleanup_clear
                         row["cleanup"] = asdict(proof)
                         row["cleanup"]["failure_codes"] = list(proof.failure_codes)
-                        if failure is None and not proof.clean_exit:
+                        controlled_exit = (
+                            proof.cleanup_clear
+                            and proof.leader_reaped
+                            and type(proof.leader_returncode) is int
+                            and not proof.forced_leader
+                            and not proof.forced_descendants
+                        )
+                        if failure is None and not (proof.clean_exit or (allow_nonzero and controlled_exit)):
                             failure = RuntimeError("gate_command_not_clean")
                     except BaseException as exc:
                         failure = failure or exc
@@ -405,10 +480,18 @@ class GateProcessRunner:
                         raise RuntimeError("gate_event_writer_outside_owned_scope")
                     self.check()
                     assert phase is not None
+                    # Diagnostic collection may preserve a complete, deadline-
+                    # bounded phase whose pytest verdict is red.  The ledger's
+                    # succeeded bit means that its event stream is complete;
+                    # product success remains in the caller's JUnit verdict.
                     ledger.close_phase(phase, time.monotonic_ns(), succeeded=True)
                 except BaseException:
                     row["status"] = "failed"
                     ledger.abort("gate_event_close_failed")
                     raise
-            row["status"] = "passed"
-            return 0
+            returncode = scope.proof.leader_returncode if scope.proof is not None else None
+            if type(returncode) is not int:
+                row["status"] = "failed"
+                raise RuntimeError("gate_command_returncode_missing")
+            row["status"] = "passed" if returncode == 0 else "failed"
+            return returncode

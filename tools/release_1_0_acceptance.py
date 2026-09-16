@@ -5737,6 +5737,8 @@ def plan_commands(mode: str) -> dict[str, Any]:
         ".venv/bin/python -I -B tools/quality_gate.py --tier exact-release "
         '--candidate-sha "$candidate_sha" --base-sha "$base_sha" --evidence-dir "$evidence_dir"',
     ]
+    if mode == "diagnostic-baseline":
+        exact[-1] += " --diagnostic-only"
     additional_live = [
         "PYTHONDONTWRITEBYTECODE=1 .venv/bin/python -B tools/synthetic_live_acceptance.py "
         '--env-file "$FRIDAY_ENV_FILE" --suite all --concurrency 4',
@@ -5824,7 +5826,11 @@ def plan_commands(mode: str) -> dict[str, Any]:
         ),
         "order": [
             "harness and matrix audit",
-            "exact-release quality_gate (canonical, no imported receipt)",
+            (
+                "exact-release quality_gate (diagnostic collect-all, non-certifying)"
+                if mode == "diagnostic-baseline"
+                else "exact-release quality_gate (canonical, no imported receipt)"
+            ),
             "preflight the signed review plan, root key path and fixed absent pair root",
             "complete official 400-case A then B; B only if A is green; closed green exits 4",
             "sealed review TASK from the closed B03 and B09 evidence; red fails before lab delivery",
@@ -5840,6 +5846,19 @@ def plan_commands(mode: str) -> dict[str, Any]:
             "b09_post_review": b09_post_review,
             "telegram_deployment_device": telegram_deployment_device,
         },
+        **(
+            {
+                "diagnostic_policy": {
+                    "certification_eligible": False,
+                    "ordinary_complete_failure": "record_and_continue_independent_stages",
+                    "failed_prerequisite": "descendants_not_run_with_dependency_reason",
+                    "unsafe_or_invalid_evidence": "stop_affected_execution_contour",
+                    "report": "quality-gate-diagnostics.json",
+                }
+            }
+            if mode == "diagnostic-baseline"
+            else {}
+        ),
         "stages": [
             {"id": "harness", "kind": "commands", "command_group": "harness", "required": True},
             {
