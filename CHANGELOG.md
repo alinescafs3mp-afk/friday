@@ -1,3 +1,16 @@
+## 0.208.61 — Unreleased
+
+### Preserve filename privacy and current acceptance evidence
+
+- Keep private attachment filenames out of mixed-query web requests while
+  preserving an explicitly admitted public topic.
+- Tighten A09 semantic observations and synchronize the mandatory test
+  inventory with the complete candidate source.
+- Refresh the current offline dense-recall measurement against the actual
+  source bytes; preserve the historical benchmark and its quality thresholds.
+- Keep schema 50. Full release gates, immutable installation and live
+  acceptance remain required before production activation.
+
 ## 0.208.60 — Unreleased
 
 ### Verify backup recovery pairs before reuse
