@@ -841,7 +841,7 @@ _A09_06_RESILIENCE_RELATION = (
 )
 _A09_18_FAIL_CLOSED_STATE_RELATION = (
     r"\A\s*fail-closed\s*[—–:-]\s*это\s+"
-    r"(?:поведение|принцип|режим)\s+системы,\s+"
+    r"(?:поведение|принцип|режим)\s+(?:работы\s+)?системы,\s+"
     r"при\s+котор(?:ом|ой)\s+при\s+(?:"
     r"сбое(?:\s+(?:и|или)\s+потере\s+питания)?|"
     r"ошибке(?:\s+(?:и|или)\s+потере\s+питания)?|"
@@ -5778,9 +5778,22 @@ _A09_06_FAULT_EXAMPLE = (
     r"(?:упад[её]т\s+сервер|оборв[её]тся\s+сеть|"
     r"закончится\s+(?:диск|память|место\s+на\s+диске))"
 )
+_A09_06_FAULT_EXAMPLE_PART = r"(?:сервер|диск|сеть|база\s+данных|хранилище|процесс)"
+_A09_06_FAULT_EVENT_EXAMPLES = (
+    rf"{_A09_06_FAULT_EXAMPLE}"
+    rf"(?:(?:,\s*|\s+(?:и|или)\s+){_A09_06_FAULT_EXAMPLE}){{0,3}}"
+)
+_A09_06_BARE_PART_EXAMPLES = (
+    rf"{_A09_06_FAULT_EXAMPLE_PART}"
+    rf"(?:(?:,\s*|\s+(?:и|или)\s+){_A09_06_FAULT_EXAMPLE_PART}){{0,4}}"
+)
+_A09_06_FAULT_TYPO_EXAMPLES = (
+    rf"отвалит\s+{_A09_06_FAULT_EXAMPLE_PART}"
+    rf"(?:(?:,\s*|\s+(?:и|или)\s+){_A09_06_FAULT_EXAMPLE_PART}){{0,4}}"
+)
 _A09_06_FAULT_EXAMPLES = (
-    rf"(?:\s+\((?:например,?\s+)?{_A09_06_FAULT_EXAMPLE}"
-    rf"(?:(?:,\s*|\s+или\s+){_A09_06_FAULT_EXAMPLE}){{0,3}}\))?"
+    rf"(?:\s+\((?:например,?\s+)?(?:{_A09_06_FAULT_EVENT_EXAMPLES}|"
+    rf"{_A09_06_FAULT_TYPO_EXAMPLES}|{_A09_06_BARE_PART_EXAMPLES})\))?"
 )
 _A09_06_OWNED_FAULT = (
     rf"(?:(?:если|когда)\s+(?:"
@@ -5811,7 +5824,8 @@ _A09_06_OPERATION_PREDICATE = (
 )
 _A09_06_OPERATION_ALTERNATIVE = (
     r"(?:\s+(?:или|и)\s+(?:корректно\s+(?:завершится|восстановится|восстановиться)|"
-    r"продолжит\s+работать)|\s+\(или\s+корректно\s+завершится\))?"
+    r"быстро\s+восстановиться|продолжит\s+работать)|"
+    r"\s+\(или\s+корректно\s+завершится\))?"
 )
 _A09_06_BENIGN_OUTCOME_ASIDE = (
     r"(?:\s+\((?:для\s+пользователей|без\s+потери\s+данных|"
@@ -6522,19 +6536,46 @@ def _a09_14_relation_is_exact(message: str) -> bool:
     return not _a09_14_leftover_still_influences(remainder)
 
 
+def _a09_18_has_open_state_relation(message: str) -> bool:
+    """Detect an affirmative retained open state inside its own short clause."""
+
+    for clause in re.split(r"[.!?;\n()]", message.casefold()):
+        words = _p09_words(clause)
+        for index, word in enumerate(words):
+            if not word.startswith(("оста", "сохраня")):
+                continue
+            if index and words[index - 1] in {"не", "ни"}:
+                continue
+            for state in range(index + 1, min(len(words), index + 8)):
+                if not words[state].startswith(("открыт", "небезопасн")):
+                    continue
+                between = words[index + 1 : state]
+                if all(
+                    token in {"в", "все", "всё", "еще", "ещё", "полностью", "по", "прежнему"}
+                    or token.startswith(("доступ", "систем", "операц", "соединени", "механизм"))
+                    for token in between
+                ):
+                    return True
+    return False
+
+
 def _a09_18_relation_is_exact(message: str) -> bool:
     folded = message.casefold()
     if re.search(_A09_18_FAIL_CLOSED_STATE_RELATION, folded, re.IGNORECASE):
         return True
     if not re.search(r"\A\s*fail-closed\s*[—–:-]\s*это\b", folded, re.IGNORECASE):
         return False
+    if _a09_18_has_open_state_relation(folded):
+        return False
     if re.search(_A09_AFFIRMATIVE_CLAIM_BLOCKER, folded, re.IGNORECASE) or re.search(
         r"\bfail-open\b|\b(?:возмож|вероят|может|могут|якобы)\w*\b|"
-        r"\bповедени\w*\s+внешн\w*\s+систем\w*|\bвс[её]\s+равно\b|"
+        r"\b(?:поведени|принцип|режим)\w*(?:\s+работы)?\s+внешн\w*\s+систем\w*|"
+        r"\bвс[её]\s+равно\b|"
         r"\b(?:друг|отдельн)\w*\s+систем\w*|"
         r"\b(?:не|ни)\s+(?:переход|возвраща|блокир|останавл|закрыва|отключа|"
         r"запреща|отказыва)\w*|"
         r"\b(?:открыт|небезопасн)\w*\s+состояни\w*|"
+        r"\([^()]{0,96}\bвнешн\w*\s+систем\w*[^()]{0,96}\)|"
         r"\b(?:разреша|продолжа|выполня)\w*[^.!?\n]{0,32}"
         r"\b(?:опасн|действ|операц|доступ|процесс)\w*",
         folded,
@@ -6543,10 +6584,10 @@ def _a09_18_relation_is_exact(message: str) -> bool:
         return False
     trigger_relation = re.search(
         r"\A\s*fail-closed\s*[—–:-]\s*это\s+"
-        r"(?:поведени|принцип|режим)\w*\s+систем\w*,"
+        r"(?:поведени|принцип|режим)\w*\s+(?:работы\s+)?систем\w*,"
         r"[^.!?\n]{0,80}\b(?:сбо|ошиб|отказ|неопредел)\w*|"
         r"\A\s*fail-closed\s*[—–:-]\s*это\s+"
-        r"(?:поведени|принцип|режим)\w*\s+систем\w*,"
+        r"(?:поведени|принцип|режим)\w*\s+(?:работы\s+)?систем\w*,"
         r"[^.!?\n]{0,80}\bпотер\w*\s+(?:питани|связ)\w*",
         folded,
         re.IGNORECASE,

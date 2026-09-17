@@ -71,3 +71,29 @@ def test_archive_prefix_does_not_consume_the_basename_of_an_english_file_selecto
     query = extract_mixed_file_archive_public_web_query(message)
     assert query
     assert "file.txt" not in query and "archive" not in query
+
+
+@pytest.mark.parametrize(
+    "carrier",
+    [
+        "other.txt.",
+        "other.txt..",
+        "other.txt...",
+        "other.txt.?!",
+        "other.txt!",
+        "other.txt?",
+        "other.txt;",
+        "@other.txt.",
+        "секретный.txt.",
+        "other．txt．",
+    ],
+)
+def test_second_filename_never_enters_public_query_after_sentence_punctuation(carrier: str) -> None:
+    message = (
+        f"Сравни текущий файл с архивом contract.txt и {carrier} Найди в интернете требования JSON RFC 8259."
+    )
+    assert mixed_file_archive_web_cues_present(message)
+    assert extract_authorized_archive_filename(message) == ""
+    assert extract_authorized_archive_raw_id(message) == ""
+    assert extract_mixed_file_archive_public_web_query(message) == ""
+    assert not mixed_file_archive_web_turn_is_admitted(message, attachments=_ATTACHMENTS)

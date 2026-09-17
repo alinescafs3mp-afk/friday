@@ -35,7 +35,9 @@ _ARCHIVE_PREFIX_RE = re.compile(
     _ARCHIVE_REFERENCE_PATTERN + r"(?:\s*:\s*|\s+)",
     re.IGNORECASE,
 )
-_FILENAME_RE = re.compile(r"(?<![\w@])@?(?P<name>[0-9A-Za-zА-ЯЁа-яё_.-]{1,247}\.[0-9A-Za-z]{1,12})(?![\w.])")
+# Recognition of extra private carriers also covers trailing sentence dots.
+# A dot after an extension must not hide a second filename from this guard.
+_FILENAME_RE = re.compile(r"(?<![\w@])@?(?P<name>[0-9A-Za-zА-ЯЁа-яё_.-]{1,247}\.[0-9A-Za-z]{1,12})(?!\w)")
 _EXACT_FILENAME_RE = re.compile(r"[\w ()-][\w .()-]*\.[A-Za-z0-9]{1,12}\Z")
 _RAW_ID_RE = re.compile(r"raw_[0-9a-f]{16}\Z")
 _SELECTOR_END_RE = re.compile(r"(?:\s*(?:$|[,;.!?]|\b(?:и|а|and|with|against|с|со)\b))", re.IGNORECASE)
