@@ -99,7 +99,7 @@ def test_the_owner_sees_who_wrote_and_can_answer(live_admin):
         assert rows.count() >= 2, f"в ленте {rows.count()} человек, ожидалось минимум двое"
         feed_text = page.locator(".chat-list").inner_text()
         assert "Петров" in feed_text
-        assert "смету на поверку весов" in feed_text, "превью последнего сообщения не видно"
+        assert "Принял, записала в архив" in feed_text, "превью последнего сообщения не видно"
         assert "нет чата" in feed_text, "не помечен человек, которому нельзя ответить"
 
         # Клик открывает переписку этого человека.

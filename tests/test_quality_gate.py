@@ -673,6 +673,75 @@ def test_closed_gate_defaults_use_bounded_ui_parallelism(
         quality_gate._exact_host_capacity()
 
 
+def test_xdist_crash_report_preserves_exact_selected_identity_once(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    nodeid = "tests/test_probe.py::test_worker_crash"
+    fspath = nodeid.split("::", 1)[0]
+    report = SimpleNamespace(
+        failed=True,
+        nodeid=nodeid,
+        when="???",
+        outcome="failed",
+        location=(fspath, None, fspath),
+        longrepr=f"worker 'gw7' crashed while running {nodeid!r}",
+        node=SimpleNamespace(gateway=SimpleNamespace(id="gw7")),
+    )
+    with monkeypatch.context() as state:
+        state.setattr(quality_gate, "_REPORT_PARTIAL_FAILURES", True)
+        state.setattr(quality_gate, "_TIER_SELECTION", frozenset((nodeid,)))
+        state.setattr(quality_gate, "_PARTIAL_FAILURES", set())
+        quality_gate.pytest_runtest_logreport(report)
+        quality_gate.pytest_runtest_logreport(report)
+    assert capsys.readouterr().out.splitlines() == [
+        "",
+        (
+            'FRIDAY_GATE_PARTIAL_FAILURE {"kind":"worker_crash",'
+            f'"nodeid":"{nodeid}","when":"???","worker":"gw7"}}'
+        ),
+    ]
+
+
+@pytest.mark.parametrize(
+    ("mutation", "message"),
+    (
+        ({"when": "collect"}, "escaped the sealed selection"),
+        ({"nodeid": "tests/test_other.py::test_other"}, "escaped the sealed selection"),
+        ({"node": None}, "xdist crash report identity is invalid"),
+        (
+            {"node": SimpleNamespace(gateway=SimpleNamespace(id="../../private"))},
+            "xdist crash report identity is invalid",
+        ),
+        ({"location": ("foreign.py", None, "foreign.py")}, "xdist crash report identity is invalid"),
+        ({"longrepr": "forged crash body"}, "xdist crash report identity is invalid"),
+    ),
+)
+def test_xdist_crash_report_rejects_unknown_or_forged_identity(
+    mutation: dict[str, object],
+    message: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    nodeid = "tests/test_probe.py::test_worker_crash"
+    fspath = nodeid.split("::", 1)[0]
+    values: dict[str, object] = {
+        "failed": True,
+        "nodeid": nodeid,
+        "when": "???",
+        "outcome": "failed",
+        "location": (fspath, None, fspath),
+        "longrepr": f"worker 'gw0' crashed while running {nodeid!r}",
+        "node": SimpleNamespace(gateway=SimpleNamespace(id="gw0")),
+    }
+    values.update(mutation)
+    with monkeypatch.context() as state:
+        state.setattr(quality_gate, "_REPORT_PARTIAL_FAILURES", True)
+        state.setattr(quality_gate, "_TIER_SELECTION", frozenset((nodeid,)))
+        state.setattr(quality_gate, "_PARTIAL_FAILURES", set())
+        with pytest.raises(RuntimeError, match=message):
+            quality_gate.pytest_runtest_logreport(SimpleNamespace(**values))
+
+
 def test_diagnostic_batch_continues_after_real_failure_and_fences_controller_failure(
     tmp_path: Path,
 ) -> None:

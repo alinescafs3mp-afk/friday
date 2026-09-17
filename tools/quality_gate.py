@@ -109,6 +109,9 @@ _TIER_PHASE_TIMEOUT_SECONDS = {
     ("change", "UI"): 1_800,
 }
 _PARTIAL_FAILURE_PREFIX = "FRIDAY_GATE_PARTIAL_FAILURE "
+_XDIST_CRASH_WHEN = "???"
+_XDIST_CRASH_KIND = "worker_crash"
+_XDIST_WORKER_ID = re.compile(r"gw[0-9]{1,6}\Z")
 _OBSERVATION_TEST_ENV = (
     "FRIDAY_TEST_BACKUPS_DIR",
     "FRIDAY_REAL_SYNCTHING_BINARY",
@@ -125,7 +128,7 @@ _COLLECTION_INVALID_ATTESTATIONS: set[str] = set()
 _COLLECTION_ORIGIN_ERRORS_BY_WORKER: dict[str, str] = {}
 _SERIAL_COLLECTION: tuple[str, ...] | None = None
 _TIER_SELECTION: frozenset[str] | None = None
-_PARTIAL_FAILURES: set[tuple[str, str]] = set()
+_PARTIAL_FAILURES: set[tuple[str, str, str]] = set()
 _REPORT_PARTIAL_FAILURES = False
 _ACTIVE_PROCESS_OWNER: Any = None
 _BOOTSTRAP_SOURCES: dict[str, str] = {}
@@ -461,21 +464,60 @@ def pytest_collection_modifyitems(items: list[Any]) -> None:
         properties.append((_NODEID_PROPERTY, item.nodeid))
 
 
+def _xdist_crash_worker(report: Any, nodeid: str) -> str:
+    """Validate xdist's exact synthetic crash report without exposing its body."""
+
+    node = getattr(report, "node", None)
+    gateway = getattr(node, "gateway", None)
+    worker = getattr(gateway, "id", None)
+    if not isinstance(worker, str) or not 3 <= len(worker) <= 8 or _XDIST_WORKER_ID.fullmatch(worker) is None:
+        raise RuntimeError("xdist crash report identity is invalid")
+    fspath = nodeid.split("::", 1)[0]
+    expected_longrepr = f"worker {worker!r} crashed while running {nodeid!r}"
+    if (
+        getattr(report, "outcome", None) != "failed"
+        or getattr(report, "location", None) != (fspath, None, fspath)
+        or getattr(report, "longrepr", None) != expected_longrepr
+    ):
+        raise RuntimeError("xdist crash report identity is invalid")
+    return worker
+
+
 def pytest_runtest_logreport(report: Any) -> None:
     """Stream bounded failure identity before a timeout can discard JUnit."""
 
-    if not _REPORT_PARTIAL_FAILURES or not report.failed:
+    failed = getattr(report, "failed", None)
+    if not _REPORT_PARTIAL_FAILURES or failed is False:
         return
-    nodeid = report.nodeid
-    when = report.when
-    if _TIER_SELECTION is None or nodeid not in _TIER_SELECTION or when not in {"setup", "call", "teardown"}:
+    if failed is not True:
+        raise RuntimeError("partial failure report is invalid")
+    nodeid = getattr(report, "nodeid", None)
+    when = getattr(report, "when", None)
+    if (
+        not isinstance(nodeid, str)
+        or not isinstance(when, str)
+        or _TIER_SELECTION is None
+        or nodeid not in _TIER_SELECTION
+    ):
         raise RuntimeError("partial failure report escaped the sealed selection")
-    key = (nodeid, when)
+    worker = ""
+    payload = {"nodeid": nodeid, "when": when}
+    if when == _XDIST_CRASH_WHEN:
+        worker = _xdist_crash_worker(report, nodeid)
+        payload = {
+            "kind": _XDIST_CRASH_KIND,
+            "nodeid": nodeid,
+            "when": when,
+            "worker": worker,
+        }
+    elif when not in {"setup", "call", "teardown"}:
+        raise RuntimeError("partial failure report escaped the sealed selection")
+    key = (nodeid, when, worker)
     if key in _PARTIAL_FAILURES:
         return
     _PARTIAL_FAILURES.add(key)
     payload = json.dumps(
-        {"nodeid": nodeid, "when": when},
+        payload,
         ensure_ascii=False,
         sort_keys=True,
         separators=(",", ":"),

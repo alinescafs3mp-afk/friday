@@ -926,7 +926,7 @@ class ConversationsMixin(StorageShared):
                        m.role,
                        m.created_at,
                        m.conversation_id,
-                       ROW_NUMBER() OVER (PARTITION BY m.user_id ORDER BY m.created_at DESC) AS rn
+                       ROW_NUMBER() OVER (PARTITION BY m.user_id ORDER BY m.created_at DESC, m.rowid DESC) AS rn
                 FROM messages m
             ),
             last_message AS (

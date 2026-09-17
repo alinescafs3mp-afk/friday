@@ -126,6 +126,52 @@ def test_one_bounded_thread_spans_conversations_and_reports_the_full_total(feed)
     assert all("_thread_total" not in item and "_message_rowid" not in item for item in page["items"])
 
 
+@pytest.mark.parametrize("latest_role", ("user", "assistant"))
+def test_feed_preview_matches_thread_tail_when_message_times_are_equal(storage, latest_role):
+    storage.ensure_user("person-a", preset_key="user")
+    storage.ensure_user("person-b", preset_key="user")
+    first = storage.create_conversation("person-a", title="first")
+    second = storage.create_conversation("person-a", title="second")
+    other = storage.create_conversation("person-b", title="other person")
+    storage.store_message(first["id"], "person-a", "user", "earlier message")
+    storage.store_message(second["id"], "person-a", latest_role, "latest message")
+    storage.store_message(other["id"], "person-b", "user", "another person's message")
+    storage.execute("UPDATE messages SET created_at=?", ("2026-09-17T08:00:00+00:00",))
+    storage.commit()
+
+    previews = {row["user_id"]: row for row in storage.list_chat_feed()}
+    thread = storage.list_chat_thread("person-a", limit=1)
+    tail = thread["items"][-1]
+
+    assert tail["content"] == "latest message"
+    assert tail["role"] == latest_role
+    assert tail["conversation_id"] == second["id"]
+    assert previews["person-a"]["last_content"] == tail["content"]
+    assert previews["person-a"]["last_role"] == tail["role"]
+    assert previews["person-a"]["last_conversation_id"] == tail["conversation_id"]
+    assert previews["person-a"]["message_count"] == thread["total"] == 2
+    assert previews["person-b"]["last_content"] == "another person's message"
+
+
+def test_feed_preview_keeps_message_time_ahead_of_insertion_order(storage):
+    storage.ensure_user("person-a", preset_key="user")
+    conversation = storage.create_conversation("person-a", title="history")
+    newest = storage.store_message(conversation["id"], "person-a", "assistant", "current reply")
+    imported = storage.store_message(conversation["id"], "person-a", "user", "older imported message")
+    for message, timestamp in (
+        (newest, "2026-09-17T08:00:00+00:00"),
+        (imported, "2026-09-16T08:00:00+00:00"),
+    ):
+        storage.execute("UPDATE messages SET created_at=? WHERE id=?", (timestamp, message["id"]))
+    storage.commit()
+
+    preview = storage.list_chat_feed()[0]
+    tail = storage.list_chat_thread("person-a", limit=1)["items"][-1]
+
+    assert preview["last_content"] == tail["content"] == "current reply"
+    assert preview["last_role"] == tail["role"] == "assistant"
+
+
 @pytest.mark.asyncio
 async def test_the_route_hands_both_numbers_to_the_page(feed, settings):
     """Потребитель — СТРАНИЦА админки: проверяется ответ маршрута, а не запрос.
