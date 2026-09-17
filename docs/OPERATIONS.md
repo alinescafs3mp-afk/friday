@@ -918,7 +918,7 @@ previous и сохраняет `0.207.90/schema50` immutable fallback.
 previous и сохраняет `0.207.90/schema50` immutable fallback.
 `0.208.57/schema50` DDL не меняет, принимает exact `0.208.56/schema50` как
 previous и сохраняет `0.207.90/schema50` immutable fallback.
-Кандидат `0.208.60/schema50` DDL не меняет. Для его предстоящей активации
+Кандидат `0.208.61/schema50` DDL не меняет. Для его предстоящей активации
 `0.208.58/schema50` используется как previous и совместимый immutable fallback;
 копии `0.208.57/schema50` и `0.208.56/schema50` сохраняются. Эта схема перехода
 не подтверждает выполнение приёмки или активации кандидата; фактический
@@ -1196,7 +1196,7 @@ process-owned result. Acquire одноразовый: отказ, timeout, drift
 attestation не разрешают повторный acquire на меньшем или новом tier.
 
 Во время probe `/api/health` ещё недоступен. Ждите до 420 секунд и дополнительно
-требуйте `status=ok` и `version=0.208.60`.
+требуйте `status=ok` и `version=0.208.61`.
 
 HTTP `status=ok` при `installed_mode=legacy` означает безопасную деградацию, но
 не успешный canary. В `canary`/`v12` Sentinel не реже раза в минуту
