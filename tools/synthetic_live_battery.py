@@ -5774,11 +5774,14 @@ _A09_06_FAULT_EXPLANATION = (
     r"(?:(?:,\s*|\s+или\s+)(?:упад[её]т\s+сервис|закончится\s+память|"
     r"пропад[её]т\s+сеть|прид[её]т\s+кривой\s+ввод)){0,4})?"
 )
+_A09_06_FAULT_EXAMPLE_PART = r"(?:сервер|диск|сеть|база\s+данных|хранилище|процесс)"
 _A09_06_FAULT_EXAMPLE = (
-    r"(?:упад[её]т\s+сервер|оборв[её]тся\s+сеть|"
+    # An example list may mix event forms, including the already accepted
+    # colloquial typo. Keep every item bound to a concrete failing component.
+    rf"(?:упад[её]т\s+сервер|отвалит\s+{_A09_06_FAULT_EXAMPLE_PART}|"
+    r"(?:оборв[её]тся|прерв[её]тся|пропад[её]т)\s+сеть|"
     r"закончится\s+(?:диск|память|место\s+на\s+диске))"
 )
-_A09_06_FAULT_EXAMPLE_PART = r"(?:сервер|диск|сеть|база\s+данных|хранилище|процесс)"
 _A09_06_FAULT_EVENT_EXAMPLES = (
     rf"{_A09_06_FAULT_EXAMPLE}"
     rf"(?:(?:,\s*|\s+(?:и|или)\s+){_A09_06_FAULT_EXAMPLE}){{0,3}}"

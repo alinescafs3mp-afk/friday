@@ -1471,12 +1471,6 @@ def _parse_env(content: bytes) -> dict[str, str]:
         if len(value) >= 2 and value[0] == value[-1] and value[0] in {"'", '"'}:
             value = value[1:-1]
         values[key] = value
-    for key, value in values.items():
-        if not key.startswith("FRIDAY_"):
-            continue
-        legacy = f"JERICHO_{key.removeprefix('FRIDAY_')}"
-        if legacy in values and values[legacy] != value:
-            raise OperatorFailure("env_alias_conflict")
     return values
 
 

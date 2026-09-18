@@ -2023,8 +2023,45 @@ def test_env_parser_rejects_duplicates_and_does_not_expand_values() -> None:
     }
     with pytest.raises(operator.OperatorFailure, match="env_file_invalid"):
         operator._parse_env(b"FRIDAY_API_TOKEN=a\nFRIDAY_API_TOKEN=b\n")
-    with pytest.raises(operator.OperatorFailure, match="env_alias_conflict"):
-        operator._parse_env(b"FRIDAY_API_TOKEN=a\nJERICHO_API_TOKEN=b\n")
+
+
+@pytest.mark.parametrize(
+    ("content", "expected"),
+    [
+        (b"FRIDAY_API_TOKEN=primary\nJERICHO_API_TOKEN=legacy\n", "primary"),
+        (b"JERICHO_API_TOKEN=legacy\nFRIDAY_API_TOKEN=primary\n", "primary"),
+        (b"FRIDAY_API_TOKEN=\nJERICHO_API_TOKEN=legacy\n", ""),
+        (b"JERICHO_API_TOKEN=legacy\n", "legacy"),
+        (b"FRIDAY_API_TOKEN=same\nJERICHO_API_TOKEN=same\n", "same"),
+        (b"export FRIDAY_API_TOKEN='$literal value'\n", "$literal value"),
+    ],
+    ids=["primary", "reversed-order", "empty-primary", "legacy", "equal", "literal"],
+)
+def test_env_parser_preserves_product_alias_precedence(monkeypatch, content, expected) -> None:
+    from friday.config import env
+
+    values = operator._parse_env(content)
+    for name in ("FRIDAY_API_TOKEN", "JERICHO_API_TOKEN"):
+        monkeypatch.delenv(name, raising=False)
+    for name, value in values.items():
+        monkeypatch.setenv(name, value)
+    assert env("FRIDAY_API_TOKEN") == expected
+
+
+@pytest.mark.parametrize(
+    "content",
+    [
+        b"FRIDAY_API_TOKEN=a\nFRIDAY_API_TOKEN=b\n",
+        b"JERICHO_API_TOKEN=a\nJERICHO_API_TOKEN=b\n",
+        b"NOT-A-KEY=value\n",
+        b"FRIDAY_API_TOKEN\n",
+        b"\xff\n",
+    ],
+    ids=["duplicate-primary", "duplicate-legacy", "invalid-key", "missing-equals", "utf8"],
+)
+def test_env_parser_keeps_invalid_syntax_closed(content) -> None:
+    with pytest.raises(operator.OperatorFailure, match="^env_file_invalid$"):
+        operator._parse_env(content)
 
 
 def test_barrier_is_empty_private_and_descriptor_pinned(tmp_path) -> None:
