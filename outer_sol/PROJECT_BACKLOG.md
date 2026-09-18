@@ -1,6 +1,6 @@
 # Friday: canonical project backlog
 
-Updated: 2026-09-15 (verified production `0.208.58`; canonical DR restoration, rollback and generation publication completed in Astra358; final R10/F.0–F.11 acceptance incomplete. N9 Hermes, N8 upstream adoption V5, N7 and N6 TinyFish remain after current R10 acceptance; historical S3 witness preserved; Pandora unchanged.)
+Updated: 2026-09-18 (last verified production `0.208.58`; canonical DR restoration, rollback and generation publication completed in Astra358; final R10/F.0–F.11 acceptance incomplete. N6 TinyFish is the first work after release 1.0, ahead of N7, N8 upstream adoption V5 and N9 Hermes; historical S3 witness preserved; Pandora unchanged.)
 
 This is the project's only backlog and mutable status register. It owns the
 current production identity, execution order, acceptance gaps and owner actions.
@@ -15,6 +15,1227 @@ The 2026-09-03 post-backlog audit snapshot (`main` `43a16c8b`, source
 `0.208.4`, recorded production `0.208.1`) is expired. The later repository record below supersedes it. C1 has not re-probed the
 live host, the laptop or Telegram. Do not copy historical release claims
 forward or treat a source correction as a deployed release.
+
+## Ближайшая очередь: релиз 1.0 → N6 TinyFish (владелец, 2026-09-17)
+
+1. Завершить выпуск 1.0 с согласованным ниже исключением для внешнего веб-поиска.
+2. **Сразу после 1.0 первым взять N6 TinyFish Search**, чтобы восстановить внешний
+   поиск. N6 стоит перед N7, N8, N9 и остальными задачами 1.0+.
+3. Затем продолжать остальной бэклог 1.0+ с его существующими зависимостями.
+
+Этот порядок задан владельцем и сохраняется после compact, resume и перезапуска.
+Подробный scope и обязательная приёмка остаются в единственном пункте N6 ниже.
+Приоритет не означает готовность TinyFish или уже работающий поиск; реализация
+и live-проверки N6 ещё NOT_RUN. TinyFish не становится блокером выпуска 1.0.
+
+## Исключение для релиза 1.0: внешний веб-поиск (владелец, 2026-09-17)
+
+По прямому поручению владельца внешний веб-поиск и зависящие от него проверки
+не блокируют выпуск 1.0. При затыке на поиске пропускать эту ветвь во всех
+релизных этапах; переделку поиска и незавершённую Research-приёмку перенести
+в бэклог после 1.0. Не требовать ради выпуска баланс Yandex или публичный
+тестовый сервер. Статус таких ветвей — OWNER_DEFERRED_POST_1_0, а не PASS.
+
+Исключение относится к внешнему веб-поиску, не к поиску по файлам, архиву и
+документам. Остальная приёмка F.0–F.11/H, изоляция, приватность, авторизация,
+честный ответ при недоступности функции и обычные обязательные offline-gates
+сохраняются. Не удалять тесты по совпадению названия с «search» и не превращать
+старые FAIL/NOT_RUN в успешные результаты. Модели и конфигурация не меняются.
+
+Это уточнение имеет приоритет над историческими записями ниже, где whole
+Research11 или публичные поисковые fixtures названы блокером 1.0. Исходная
+директива: `/home/jericho/.jericho/grok-takeover/ASTRA-561-owner-web-search-deferral.json`.
+Отложенная работа после 1.0: переделка веб-поиска, реальные провайдеры/fallback,
+недостающие входы и полноценная независимая Research-приёмка. Она не завершена.
+
+## Постоянное правило: диагностика целым пакетом (владелец, 2026-09-16)
+
+Правило сохраняется после compact, resume, перезапуска и смены учётки.
+Перед очередным циклом исправлений собирать все доступные отказы на одном
+неизменном кандидате, затем исправлять связный пакет причин и повторять
+проверку исправленного снимка. Не возвращаться к циклу «одна мелкая правка —
+тяжёлый прогон» при уже известных непроверенных независимых областях.
+
+Обычный FAIL не останавливает независимые проверки. Если нет необходимого
+артефакта или предусловия, зависимые проверки получают NOT_RUN с точной причиной,
+а доступные независимые ветви продолжаются. Потеря контроля над процессами,
+нарушение изоляции/ресурсов/приватности или недостоверные доказательства
+останавливают затронутый контур. Нельзя подменять недостающие входы заглушками.
+
+Один общий диагностический отчёт перечисляет все обязательные этапы, их фактическое
+покрытие, ошибки, причины блокировки и непроверенные зависимости. Полные сценарии,
+отрицательные контроли, модели, ресурсы и окончательная независимая приёмка
+сохраняются. Диагностика не выдаёт сертификат релиза; после исправлений нужен
+полный обязательный gate и installed/live проверки финального артефакта.
+
+Реализация: Sol276 — collect-all режим существующего quality_gate и настоящий
+diagnostic-baseline в existing acceptance wrapper; Astra — единый пакет этапов
+релиза и их реальных зависимостей. Подробное сохранённое поручение:
+`/home/jericho/.jericho/grok-takeover/ASTRA-465-owner-batch-diagnostics.json`.
+
+Текущий срез Astra656 (2026-09-18 МСК): новый блок main поверх d80c87dd,
+версия.61/schema50; production.58 прежняя. Четыре файла A09/inventory — точные
+байты Sol367, принятые Астрой и независимой Lab632 (481/0, received/ACK).
+
+Единственный отказ full160 (159PASS/1FAIL) Астра и Сол разобрали как ложный
+отказ oracle: правильное объяснение не проходило из-за формы списка примеров.
+Общий ограниченный разбор пунктуации/связи исправлен; смысловые отрицательные
+контроли сохранены. +20тестов, collection32427/безудалений/дубликатов;
+41целевой/2145затронутых+callers/3inventory PASS. Старый full160 остаётся RED,
+native3PASS и старые gate/build не переносятся автоматически на новый снимок.
+Новый полный gate ещё NOT_RUN. До его запуска фактический inventory согласован
+с коллекцией автора:32427/32418release/94UI/9nightly,14077functions,1133modules,
+54710МиБ scratch. Подготовлены6шаблонов преемника исполнителя:22изменённых файла
+от release121,19новых function rules. Точная новая коллекция и whole review
+исполнителя обязательны после фиксации candidate; старого execution credit нет.
+
+Lab631 принял весь AB/hour653:528/0, received/ACK и currentconsumerABI PASS.
+Пакет21файл/35целевых+7групп принят по реализации, operational admission нет.
+
+F7: дополнительно закрыты несовместимые вложенные пути и старый HOME в private
+конфиге;13проверок PASS5.539с, включая реальные installed Settings. Собран
+автоматический ограниченный запуск materialize→bind→prepare→admit→caller→cleanup,
+16проверок PASS0.730с/unforcedECHILD. Model/provider/credentials и60+120+30 сохранены.
+Реальные unit/model/live эффекты NOT_RUN. Sol368 независимо принял весь пакет655
+без блокеров, включая окончательную дельту metadata; received/closed/consumed.
+Точная привязка после стабильного кандидата и отдельный root-start обязательны.
+Root365/637 и исходные входы сохранены.
+
+Checkpoint /home/jericho/.jericho/grok-takeover/ASTRA-656-current-checkpoint.json.
+Goal ACTIVE_INCOMPLETE. Все обязательные live/AB400/hour/F7/Coding/DR/rollback/
+activation/наблюдение сохранены. WebsearchResearch после1.0,TinyFish первым.
+Coding608 receipt отсутствует; вопрос владельцу не повторять.
+
+Предыдущая диагностика Astra628:006c1cce7a233823dae12a5b8459b2e967c0269a/treee1428fb1/.61.
+Production.58 не менялась. Новый exactgate/build/live NOT_RUN; старые результаты
+d893 не переносятся на новые байты. Релиз и весь baseline ещё не приняты.
+
+Пять файлов общего source-пакета закрывают две причины ложного отказа:
+A09 mixed fault examples и несоответствие document parser каноническому
+FRIDAY-over-JERICHO приоритету. Конфигурация/модели/секреты не менялись.
+A09 принятLab607/2125tests; parser независимо принятroot615/11controls.
+Actual218PASS (197document+21A09),0FAIL/0SKIP3.77с/unforcedECHILD,ruff PASS.
+Новый файл и функции внесены в канонический inventory; все прежние32375nodes
+и14068rules сохранены, добавлены32nodes/6functions/1module, без сокращения scope.
+Полная реальная serialcollection:32407nodes, release32398=32304nonUI+94UI,
+9nightlyexcluded;14074functions/1133modules. Sourcechecksums до/после совпали,
+collection29.46s/owner103/handoff179/sharedlease/unforcedECHILD. Canonical case
+bindings248 PASS, deadlineplan32398nodes PASS, commitmodulecheck1133 PASS.
+Доступно24CPU, безCPU/memoryquota, scratch123.2GB при требовании58.74GB;
+топология20+4 сохраняется, ёмкость обновить непосредственно перед gate.
+Актуальные product/archive и instrument SHA совпали с существующим dense
+receipt: ненужное повторное измерение не выполнялось, обязательный gate-test
+остаётся. Артефакт /var/tmp/astra616-source-readiness/final.json.
+
+Astra617: создан отдельный чистый clone006c без hardlinks, зафиксированы
+все4781files (2084tracked+2697Git) и365private directories/modes. Свежая
+canonicalcollection32407 прошла за30.21с с owner103/handoff179/lease/unforcedECHILD.
+Source/executor зафиксированы; реальные31positive/negativecontrols PASS6.78с,
+всеsource/Gitbytes/modes неизменны. Purepostgate metadata21files/16functions
+иparent5files проверены. Astra621 восстановила actual postgate/caller на принятых
+337/597mechanics с текущим006c и поздней привязкой настоящих доказательств.
+Sol350 завершил TASK; root620 проверил131refs/106members после actual completed
+native turn. Root review REVISE: genuine provider всегда отказывает, а generated
+caller consumers поддерживают только synthetic preparation; это не готовая
+операционная связка. Четыре чистых negative controls также обнаружили пропуск
+forced cleanup/cancellation/deadline; ECHILD и unknown returncode отказываются.
+Пакет621 /var/tmp/astra621-source006c-postgate-restoration/final.json содержит
+реальные prepare_dispatch/certify/prepare и23consumer templates. Сохранена
+проверка captured pre-effect после выполнения без повторной проверки пустоты
+выходов; все006c pins/21files16functions/32407nodes и20+4 согласованы. Actual
+inert author27PASS0FAIL1.91с под owner103/handoff179/sharedlease/unforcedECHILD:
+все23файла сформированы/связаны, опасные terminal mutations отвергнуты,
+full-write/fsync/private/create-only/owned-replace проверены. Это подготовка,
+не независимая приёмка или runtime credit. Sol352 завершил независимое review617+621 с REVISE: в строковом контракте
+сборки остались старые32375/32366, а emitted source-delta описывал18files/10functions.
+Astra623 исправила обе причины в новом /var/tmp/astra623-source006c-postgate-repair:
+actual recipe/consumer32407/32398 и operational constructor с проверкой21/16/5.
+Все зависимые SHA пересчитаны; frozen617/621 сохранены. Actual36PASS0FAIL1.90с
+под owner103/handoff179/sharedlease/unforcedECHILD, включая реальные23render,
+точные pure consumer validators и отказы на каждое старое значение. Полный
+импорт ещё не связанного template корректно отказал producer_code_hash;
+в контроле проверены отдельные чистые функции, operational authority не создана.
+LAB613 завершил независимую whole review617+623 с ACCEPT,134checks/0fail.
+Root627 проверил36refs/4published review members и обе точные проекции, записал
+received и ACK. 25 raw render fixtures дополнительно наблюдались отдельно от
+manifest; они не объявлены запечатанными review members. Фактический launcher617
+требует grok-lab: подготовленный Sol354 никогда не отправлялся, больше не отправлять.
+Root627 выполнил source receipt/acceptance, неизменный canonical preparer,
+execution receipt, свежую проверку ресурсов и root admission. Canonical pre-effect
+проверка прошла. Новый помощник transition.py проверяет фактические cgroup ancestors,
+process rlimits,24CPU, scratch/inodes, дополнительный dispatch reserve16GiB/256PID.
+Четыре реальных negative/inspect checks PASS0.334с/unforcedECHILD; без настоящего
+received допуска не создаются. Артефакт: /var/tmp/astra627-gate-transition/final.json.
+Полный canonical19step exact-release gate006c завершён07:58:53Z:17предыдущих
+этапов PASS, nonUI32303PASS/1FAIL, UI NOT_RUN из-за strictcertifyingstop.
+Причина — test_quality_gate_inventory: ожидаемые54701MiB против фактических54707,
+шесть новых A09functions по1MiB. Workingassert исправлен;3focused inventoryPASS,
+Ruff/checkformat/diffcheckPASS. Supplemental UI:31legacy+63inventory remaining,
+в сумме точные94 без пропусков/дублей, всеPASS; owner103/handoff179/sharedlease,
+чистое unforcedECHILD и frozen source неизменен. Первая parent-origin ошибка
+harness доUI и затем31vs94 selection mismatch сохранены как отдельные попытки,
+не выданы за продуктовые отказы. Общая диагностика32398:32397PASS/1FAIL.
+Артефакт /var/tmp/astra628-gate-remediation/final.json. Исходный gateFAILED,
+сертификата/producer006c нет. Для исправленного кандидата полный gate заново;
+старые исполнения не переносятся. Все root-owned процессы628 завершены.
+Source/executor stage: /var/tmp/astra617-006c-whole-preparer/source-executor-stage.json.
+
+
+Lab609 RESULT получен, проверены24persistent refs, ACK_RESULT сохранён.
+Root619 review REVISE: реальный безвредный exit4 под owner103/handoff179/lease
+закрылся unforcedECHILD, но classifier ошибочно требует outcome=completed
+вместо фактического child_failed, поэтому canonical RED evidence не разбирается.
+Также RED branch не требует EVIDENCE_COMPLETE и пропускает resource/identity
+ошибки; чистая проверка шести реальных canonical resource codes это подтвердила.
+Mode-specific hour dependencies исправлены; actual bwrap/prlimit добавлены.
+До допуска остаются нормализация/проверка private HOME, цельный materializer
+policy/environment/principals и действительная late binding006c вместо старых
+жёстких d893 pins. Четыре группы собраны в один repair-contract, без live допуска.
+Root controls11PASS/5DEFECTS плюс6canonical resource refusals missing и2path
+preflight defects; source/package неизменны. Никаких operational approvals.
+Lab608269PASS сохраняет значение для неизменных613mechanics, не приёмки609.
+Старые613/608 неизменны; hour3600/15/c4/981..1024/alllimits и fullrelease
+conjunction/B-only-after-green-A сохраняются. AB/hour live NOT_RUN.
+
+Sol349 завершил пакет33members; root618 получил назначенный artifact после
+подтверждённого completed native turn. Native RESULT не наблюдался, очередь
+пуста: никакой queue item не удалялся и wake ради копии не выполнялся.
+Root review REVISE: пять negative controls обнаружили ложный PASS для
+неполных/противоречивых evidence и обычного каталога вместо kernel cgroup.
+Также остались полный configured F7 golden scope, actual local-code custody,
+полная terminal cleanup, trusted authority, fsync созданных корней и latebinding
+нового кандидата. Полезные9controls/162deterministic nodes сохранены; ни запуск,
+ни все пять исходных причин не объявлены закрытыми. Все замечания объединены
+в один LAB610 implementation TASK. Его RESULT проверен37refs/34members,
+ACK_RESULT записан; author23controls+12quality PASS, независимая приёмка pending.
+Лаборатория честно оставила whole configured journeys CONTRACTS_PRESENT_GAPS_EXPLICIT.
+LAB611 вернул исполняемый F7 пакет; проверены42refs/39members, ACK_RESULT записан.
+Author29controls+15qualityPASS не являются независимой приёмкой. Root622
+preflight выявил, что journeys.execute иf7_entries.execute_entry завершаются
+безусловным отказом даже при готовых входах; dedicated reducer не имеетPASS.
+Это привязки API и заглушки. Astra623 создала новый компонент9 actual flows:
+документы/current/remembered/restart/dates/duplicates/Office/OCR/legacy,
+message recall, reviewed graph/edit/merge/unmerge и private exclusions.
+Настоящие product API и прозрачное наблюдение configured LLM, без подмены ответов.
+Валидные непустыеODT/XLSX проверены реальным source DocumentExtractor:
+31offline controlsPASS0.55с/unforcedECHILD; обычный поддержанный merge заменён
+на действительно неподдержанный overlapping fixture. Это не installed/live credit.
+В старой обвязке дополнительно найдены ранние импорты до проверки, dict-in-set
+TypeError, неполная authority lineage, выдуманный ECHILD worker, слабый reducer
+и custody старого source. Связная интеграция actual flows+162+Source2 и исправление
+всех mechanics назначены Sol353: actual native turn inProgress07:25Z, /goal null.
+Компонент /var/tmp/astra623-installed-f7-actual-executor/package.json зафиксирован;
+после реализации нужна целая независимая проверка, потом настоящий допуск.
+Source2 D06-D08 и162unit nodes не заменяют весьF7.
+Sol351 завершил AB/hour repair: проверены60refs/55members после actual completed
+turn06:05Z, author45PASS/realexit4unforcedECHILD; root622 whole review REVISE. Native
+RESULT не наблюдался; пустая очередь не удалялась, wake ради копии не было.
+351 lifecycle закрыт в обоих профилях. Root622 выявил пять связанных групп:
+жёсткая привязка к отвергнутому350 вместо актуального621; реальный policy-parent
+ro-mount скрывает writable HOME (безвредный bwrap запуск подтвердил errno30);
+противоречивый exit4+productPASS получает credit; issuer-label не доказывает
+authority, unsigned AB judgments и разныеA/B runtimes проходят; изменение
+вложенного pinned artifact не меняет custody snapshot. 18independent checksPASS,
+12DEFECT, два фактических harmlesschild/unforcedECHILD; исходники неизменны,
+никаких product/model/DB/rootkey/approval эффектов. Положительные351materializer,
+canonicalRED/incomplete-evidence/resource checks сохраняются.
+Полный repair-contract /var/tmp/astra622-sol351-whole-review/repair-contract.json
+передан LAB612 в одно назначение, RUN submitted06:22Z,2400s; будущие genuine
+artifacts остаютсяpending, без новой authority-подмены. Первый draft3600s CLI
+отклонил по profilecap до созданияjob; назначен только request-r2 на2400s.
+LAB612 завершён: проверены92refs/73members, RESULT получен и ACK записан.
+Root625 independent whole review — REVISE, четыре группы: жёсткий старый621
+вместо исправленного623; неподдерживаемая команда canonical AB; PENDING-chain
+вместо настоящего допуска и произвольный текст вместо проверки подписей;
+KeyError вложенной custody, пропуск ignored bytes и ранние импорты без сверки SHA.
+Исправленные mount order и строгие outcome/RED/resource проверки подтверждены.
+33 содержательных независимых контроля:23PASS/10DEFECT, два реальных безвредных
+namespace запуска/unforcedECHILD. Один прежний crypto negative не доходил до
+подписей и заменён адресным контролем; старый ложный PASS не засчитан.
+Все четыре группы собраны в /var/tmp/astra625-lab612-whole-review/repair-contract.json.
+Sol353 завершён: root628 проверил31refs/28members, recordedreceived, lifecycle
+закрыт в обоих профилях без ACKwake/несуществующего consume. Author43offlinePASS —
+не независимая приёмка или live. LAB614 получил genuine353final/manifest иcontracts
+в ANSWERmsg_76c73671eea448578f82003e7fe3d073 того же job; заранее раскрыты failed006c
+и необходимость настоящей successor binding. Whole независимое review pending.
+Sol355 отправлен08:19:48Z eventASTRA628-SOL355-T1; новый task-r2 до отправки заменил
+заведомо меняющиеся006c/623 operationalbindings на подлинную позднюю привязку.
+Все четыре группы AB/hour вместе: actualcanonicalAB, authority/crypto, nestedcustody,
+producer compatibility; accepted617/623 остаются reference механикой. ENQUEUED
+означает только доставку в очередь. Gate006cFAILED; build/AB/hour/live006cNOT_RUN.
+Sol348 metadata/preflight/sourcepatch принят; его operationalinvoker НЕ допущен
+из-за durablepublication/trustedreceived. Для нового кандидата использовать
+canonical исправленный source и свежие genuine review/admission, а не отдельную
+runtime-подмену parser. Оригинальный613 FAIL и использованный610claim сохранены.
+Source2document и installedwholeF7 отдельные обязательные контуры.
+
+Для d893 сохранены: gate32366PASS/build603, native3/Lab605 PASS,
+Browser4+Obsidian14 PASS, full160159PASS/1FAIL/Lab607 honestdiagnostic.
+Это поддерживающие старые данные, не runtimecredit006c. Coding608 rootreceipt
+по-прежнему отсутствует; команда владельцу уже дана, запрос не повторять.
+Следующее у Astra: один исправленный source candidate после полной диагностики,
+цельный source/executor/postgate пакет на принятых механизмах334/337/103/179;
+проверить реальные counts/delta/SHA/schema всех потребителей до полного gate.
+Изменённые точные bindings нуждаются в проверке, неизменная механика повторно
+не ревьюится без причины. Обязательный финальный gate и все live контуры сохранены.
+Текущий checkpoint: /home/jericho/.jericho/grok-takeover/ASTRA-628-current-checkpoint.json.
+
+Source538 — независимо принятый локальный пакет исправлений;
+коллекция554:32375 узлов/14068 функций,32366 release/9 nightly. Gate587 на source06e завершился:32271PASS/1FAIL nonUI, UI94NOT_RUN.
+Отказ — устаревшая привязка текущего document-dense измерения; SQLite не падал
+в этом прогоне. Gate RED; это не доказанное исправление прежнего SQLite-crash.
+
+Новый фактический результат568:192 существующих unit/change-проверки хранилища
+прошли за126.832с,0FAIL/0ERROR/0SKIP, включая исходный chronicle[refusal_write].
+Проверены точное соответствие всех JUnit-узлов запросу,17 входных файлов,
+импорт source538, отсутствие изменений и завершение дочерних процессов ECHILD
+без принудительной очистки. Запуск был последовательным, на собственных
+временных данных, через действующий GateProcessRunner,2CPU/4GiB/600с wall.
+Это диагностический baseline, не доказанное исправление и не финальная приёмка.
+Candidate-artifact import-closure тест уже выполнен ровно один раз в gate600
+на текущем wheel d893. Дополнительно607 все3absolute entrypoint настоящего
+sealed target (DR lifecycle, retention, observation) успешно выполнили --help
+под его Python с unforcedECHILD, без операций и source/target изменений.
+Это закрывает import-closure проверку; реальные DR/retention/activation ещё
+не получают зачёт. Ссылка: /var/tmp/astra607-installed-readiness/candidate-artifact-coverage.json.
+Артефакт: /var/tmp/astra568-existing-storage-regression/verified-final.json.
+
+Lab582 завершена, RESULT проверен/ACK568. Astra независимо сравнила официальные
+пакеты0.2/0.3 и установленную библиотеку:61 различающийся байт целиком находится
+в трёх секциях метаданных; код, данные и остальные байты одинаковы. Утверждение
+об одинаковых всех PT_LOAD-байтах было бы неверным: заметки попадают в readonly
+сегменты. Обновление пакета не даёт основания менять библиотеку ради исправления.
+Sol326 ранее подтвердил по сохранённому стеку разворачивание представления и
+копирование выражений при подготовке SQL; конкретная причина остаётся UNKNOWN.
+Sol327 получил разбор порядка тестов и состояния fixtures; Lab583 получила
+сравнение сохранённых условий полного и короткого запусков. Новые задачи
+read-only, раздельные; повторного полного gate и нового native-эксперимента нет.
+
+В двух старых остановленных ходах был cyberPolicy ответа модели, без найденного
+отказа на конкретную команду. Защита, модели и настройки сохранены. Остановленный
+custom/native-эксперимент не повторяется и не передаётся для обхода; обычные
+существующие unit-тесты568 выполнены Астрой в рамках разрешённой работы.
+libsqlite3-dev для текущей работы не требуется. Черновик feedback563 не отправлен.
+
+Проверка системного журнала569 не дала записи самого SIGSEGV или coredump.
+Найденные OOM относятся к cgroup с лимитом32МиБ; по времени, типу служебного
+процесса и лимиту они совпадают с отдельным отрицательным Coding-контролем
+на gw10, за318с до начала упавшего chronicle-сценария на gw1. Это не основание
+объявлять нехватку памяти всей машины или менять параллелизм; отсутствие
+записи в журнале не исключает процессную ошибку выделения памяти.
+Lab583 завершена16:18:22Z, RESULT принят с уточнениями/ACK572:339 заявленных
+проверок,19 прямых ссылок проверены Astra. Оба полных gate использовали20 nonUI
+воркеров, установленный wheel и одинаковый quality_gate.py с явными плагинами;
+короткий568 — исходники и только asyncio-плагин. Нельзя переносить его PASS на
+полный контекст. Записанный /usr/bin/python3.14 — executable контроллера,
+не отдельное измерение каждого pytest-воркера. Параметры/RSS/stack самих воркеров
+в момент падения неизвестны. Канонический driver ограничивает воркеры числом
+модулей: набор из9 модулей не даст20 при неизменном driver. Источник:
+/var/tmp/astra572-lab583-root-review/final.json. Lab584 также завершена ниже.
+Sol327#2 завершён после одного штатного продолжения; RESULT проверен и точный
+native-item consumed573. Принят полный порядок1329 тестов из упавшего воркера:
+1328 finish-событий означают завершение протокола, не доказанный PASS. Короткий
+568 покрывал лишь15 из них; общий с успешным121 хвост36 тестов уже проходил.
+Astra независимо сверила23 прямые ссылки,152 хеша файлов двух снимков,
+сам порядок и каноническую классификацию по полной коллекции:1136change units,
+188exact-release units,4hosttool,1candidate-artifact;587функций/1633МиБ scratch.
+Все76 тестовых модулей совпадают, но продуктовый _conversations изменён:
+новый запуск нельзя назвать побайтным повтором старого. Конкретной утечки нет.
+
+Sol328 готовит один обычный диагностический запуск этих1329 тестов в точном
+порядке в одном настоящем xdist-воркере, по частному установленному wheel и
+со штатными плагинами. Перед фильтрацией сохраняется импорт/коллекция всех1116
+nonUI-модулей. Это проверка накопленного состояния одного воркера; финальный
+gate20/4 остаётся обязательным. Пять специальных кейсов работают на собственных
+временных файлах и синтетическом пакете, без развёртывания production.
+Sol328 завершил пакет; ход остановился с serverOverloaded после записи final.
+Astra проверила назначенный артефакт и закрыла подготовку без повторного
+исполнения, отдельно отметив отсутствие native RESULT. Владелец затем сам
+восстановил TUI; второе пробуждение не выполнялось. Lab584 завершена16:54:01Z,
+RESULT рассмотрен/ACK575:211 заявленных
+проверок/0FAIL; Astra проверила15 прямых хешей, точный состав и предусловия.
+Выбранные классы покрыты существующими границами; исполнимый пакет Sol328
+ещё не принят. Нужны non-root, PyYAML, исключение nightly-live Syncthing из1116
+модулей и отсутствие переменных реального Syncthing; сохраняются все1329 кейсов.
+Текущие PyYAML6.0.3/euid1000/shell проверены, но не выданы за будущего воркера.
+Источник: /var/tmp/astra575-lab584-root-review/final.json.
+Продукт, библиотека и настройки моделей не менялись.
+
+Astra574 подготовила независимую проверку результатов будущего1329-прогона:
+штатный JUnit-парсер плюс точный порядок deadline-событий, один xdist-worker,
+отсутствие повторов, сохранённые лимиты и полнота.17 проверок данных прошли:
+16 синтетических контролей и сохранённый неполный журнал исходного сбоя.
+Перестановка тестов, другой воркер, пропавшее завершение, просроченный лимит,
+неполный/противоречивый отчёт не дают зелёного результата. Это проверка
+наблюдений, не новый продуктовый прогон; PID/пакет/исходники/очистка проверяются
+отдельно. Источник: /var/tmp/astra574-ordered-result-verifier/final.json.
+
+Astra576 реально завершила весь1329-набор в одном xdist-воркере:1326PASS,
+3FAIL,0ERROR/0SKIP за273.814с. Все1329 запущены и завершены в точном порядке,
+лимиты соблюдены; проверены фактические PID/starttime/import origins,
+неизменность2083 файлов исходников и561 установленного файла, wheel и ECHILD
+без принудительной очистки. SQLite не упала, исходный chronicle-кейс прошёл;
+это не доказанное исправление и не финальный gate.
+Все3 отказа собраны в один пакет условий запуска: слишком длинный путь
+Unix socket, скопированные скрипты0600 вместо канонических Git0755, childumask077
+вместо штатного022, меняющий отрицательный fixture. Продуктовые тесты и
+исходники не исправляются ради этих отказов. Sol329 получил цельное исправление
+подготовки и короткую настоящую проверку всех3 кейсов; полный исправленный1329
+запуск — только после рассмотрения пакета. Lab585 параллельно проверяет уже
+полученные наблюдения и классификацию отказов, без нового runtime.
+Результат: /var/tmp/astra576-package-preflight/verified-execution.json;
+причины: /var/tmp/astra576-package-preflight/failure-batch.json.
+Владелец17.09 поручил штатно восстанавливать Сола также после перегрузки
+сервиса, не дожидаясь его присутствия: сохранено в общем AGENTS.md обеих
+учёток и SOL-GUARD-RECOVERY.md; без повторов готовой работы и смены моделей.
+
+Astra577 зафиксировала уже принятые7 файлов Source538 отдельным локальным
+коммитом06e463711f5100b4a9c79b94f9075346e392946b,
+tree936c5e9258a3f52b91a691fb8448b8e4c2c6fde6, parent02a69a5.
+На срезе577 все2083 файла совпадали с исходным временным снимком по байтам
+и правам. На578 права приведены к Git0644/0755 под private0700; байты, commit
+и tree сохранены, trackedcheckout чистый. Версия0.208.61/schema50 сохранены, новая релизная идентичность
+не назначена. Исходный Source538 и рабочий main с незавершёнными изменениями
+сохранены; интеграции в main/push/нового gate/активации не было.
+Источник: /var/tmp/astra577-source-commit/final.json.
+
+Astra578: Lab585 принят по249 заявленным проверкам и20 сверенным корневым
+ссылкам. Все3 отказа подтверждены как ошибки условий запуска. Уточнение:
+старый538 имел0755 в Git, но0700 на диске; нужен Git0755, не копия0700.
+В собственном кандидате нормализованы2067 обычных файлов0644 и16 исполняемых0755.
+Sol329 принят:35 ссылок/2083 исходника в329,538,06e/561 установленный файл
+сверены; текущий короткий прогон3PASS/0FAIL/0ERROR/0SKIP и отрицательные
+контроли приняты. В каталоге сохранены3 короткие попытки, первая с ошибкой
+учёта после pytestrc0; не заявляем единственную попытку. Исправленный1329
+прогон завершён:1329PASS/0FAIL/0ERROR/0SKIP за277.085с, pytestrc0. Проверены
+все1329 начал/завершений в точном порядке, сроки, настоящий gw0PID583386,
+контроллер583330, исходники/установленный wheel и ECHILD/29reaped без
+принудительной очистки. SQLite не упала; это диагностический PASS, не
+доказательство устранения исходной native-причины и не финальный gate.
+Корневой результат: /var/tmp/astra578-sol329-root-review/verified-execution.json.
+Sol330 получил цельную подготовку нового source06e/all19 executor, без
+повторного runtime или изменения продукта. Lab586 независимо проверяет
+новый producer→consumer контракт; ACK17:41:15Z, deadline18:01:15Z.
+
+Astra579 приняла Lab586:218 заявленных проверок/0FAIL,25 корневых ссылок
+сверены. Несовместимости crash-полей нет: потребители сохраняют stdout по хешу,
+не разбирают добавленные поля; структурированное извлечение crashidentity не
+заявляется. Нужны обычные новые привязки source06e/producer/counts, не новая
+продуктовая правка.54701MiB — release scratch,58029MiB включает nightly;
+7 изменённых файлов — к122R4,18 — к предыдущему release121.
+Подготовлен цельный трёхфайловый пакет postgate-метаданных: принятую правку538
+preparer дополнили common/migration на18 файлов/10 функций и32375/32366.
+6 проверок подготовки прошли: новый JSON-производитель согласован с реальным
+build-потребителем; старые13/6 отвергаются. Производственный код не менялся.
+Это подготовка, не готовый исполнитель: новые source330/authority/candidate
+pins и весь23-member пакет будут связаны после окончательного результата330.
+Источник: /var/tmp/astra579-postgate06e-preparation/final.json.
+Лаборатория свободна для цельного review330 после поступления пакета; новых
+дробных ревью неизменных артефактов не назначено. Sol330 фактически inProgress,
+nativequeue пуста/goalnull; нового запуска или дубликатаTASK нет.
+
+Astra580: канонический mypy прошёл на545 исходных файлах за22.689с,
+Bandit HIGH — за19.166с; оба процесса завершены с ECHILD без принудительной
+очистки, все2083 байта source06e сохранены. Уже принятые lint/format/diff-check538
+переиспользованы по неизменным файлам, не запускались заново. Финальный gate
+этими короткими проверками не заменяется.
+Sol330 получен по native/ref/hash и exactitemconsumed:51 ссылка,50 артефактов,
+2083 файла/49 Git/127 каталогов, свежая коллекция32375 за31.355746с,30 заявленных
+контролей проверены. Выявлен общий дефект перехода к запуску: контракт закреплён
+в состоянии PENDING, но после whole-review требует изменения тех же байтов;
+сам whole-review также не проверяется на точное соответствие executor/plan/code.
+Продуктовый код исправлять не требуется. Sol331 получил цельное исправление
+обоих условий с настоящей проверкой всего успешного пути допуска на изолированных
+данных, без запуска gate и без фиктивных разрешений в реальных путях. Старый330
+заморожен; исходники/коллекция повторно не выполняются. После готового331 — одно
+независимое цельное source+executor review и штатный запуск.
+Lab587 завершила карту main1bfd против06e: 178 заявленных проверок, 0 FAIL.
+Astra582 проверила 8 входных pins и все39 затронутых файлов, сохранила 7.6МБ
+точных копий. 16 tracked и9 untracked уже равны кандидату;13 отличаются.
+Два различия — точные прежние blobs в ancestry кандидата; остальные11
+Lab588 разобрала и завершила: старые частичные реализации/форматирование,
+уникальных изменений для переноса поверх06e нет. Все13 — TAKE_CANDIDATE;
+минимальный overlay patch не нужен. Не восстанавливать старые9tracked/4untracked
+файлы поверх исправлений. Копии39файлов и последние служебные документы сохранены.
+
+Astra581 подготовила внешний recorder для следующего полного gate. Все AST
+проверенного534 тела сохранены; подставляются лишь конечные pins, имя launcher
+и схема terminal.5 проверок подготовки прошли: отсутствие настоящего review
+блокирует материализацию до создания каталога; посторонние launcher/plan пути
+отвергаются. Ни gate, ни фиктивный допуск не запускались. Окончательный renderer
+и его пределы входят в предстоящее цельное review331; реальные bindings и запуск
+появятся после независимой приёмки и корневого допуска. Результат:
+/var/tmp/astra581-dispatch-preparation/final.json.
+На срезе581 Сол фактически inProgress (01a0b094-df22-7e43-aa4e-b1e4206e1dfc),
+queueempty/goalnull;331 готового результата ещё нет. Lab587 RUNNING/ACK; нового
+задания или повторного запуска не создано.
+
+Astra582: владелец расширил обязанности лаборатории — привлекать по решению
+Астры, включая реализацию, исправления, подготовку и проверки. Правило записано
+в общем AGENTS.md и обеих инструкциях лаборатории. Самопроверка собственной
+реализации не заменяет независимое review; транспорт, защиты и полный scope
+качества сохранены. Директива ASTRA-582-owner-laboratory-role.json.
+Astra583 приняла native RESULT Sol331 по точному ref/hash. Проверены53pins,
+61файл immutable-пакета и20 независимых read-only проверок за3.383с, всё PASS;
+31контроль Сола сохранён. Обе причины отказа330 закрыты: внешние поздние
+разрешения больше не требуют переписывать пакет, а review связан с точными
+source/package/plan/code/controls. Полный положительный fixture-путь проходит;
+неверные/частичные/вторые разрешения отвергаются. Реальных допусков ещё нет.
+Lab588 принята Astra584:237заявленных проверок/0FAIL,8pins и5корневых
+сверок (полнота13решений,39копий,AST форматирования/добавленных тестов).
+Lab589 whole331+renderer581 review уже отправлена и принята: ACK18:50:42Z,
+deadline19:30:42Z, job_2f55e7d7adc74c008e77f1360a000853.
+Sol332 параллельно готовит цельный postgate-пакет для06e/331, всех23исполнителей
+и поздних настоящих bindings. TASK ASTRA583-SOL332-T1 доставлен; его новая TUI
+фактически inProgress/queueempty/goalnull. Старый331заморожен. Gate NOT_RUN.
+Текущий корневой результат: /var/tmp/astra583-sol331-root-review/final.json.
+Astra584 сопоставила три прежних диагностических runner-сбоя с каноническим
+quality_gate.py: main задаёт umask022, source330 уже имеет0644/0755, временный
+fq-root короткий и проверяет лимит UNIX socket107байт (расчётный путь107).
+План331 не передаёт real-Syncthing binary/длинный scratch/PYTEST_ADDOPTS;
+каноническая изоляция удаляет PYTEST_ADDOPTS/PYTHONPATH. Новая правка не нужна.
+Это статическая готовность, не выполненный gate и не доказательство SQLitefix:
+/var/tmp/astra584-canonical-runner-readiness/final.json.
+Astra585 проверила внешние входы текущего плана331 без исполнения продукта:
+Syncthing-архив содержит бинарник с каноническим SHA; фиксированный исторический
+observation-artifact совпадает с указанным SHA (не выдаётся за свежую production
+приёмку); указанный golden-journey release-root существует; Chromium и headless
+shell ревизии1228 установлены и исполняемы. Свободно124.76ГБ; после заявленных
+54701МиБ scratch остаётся67.4ГБ, но свежий dispatch-resource admit ещё впереди.
+Результат /var/tmp/astra585-offline-asset-readiness/final.json. Ничего не скачано,
+не запущено и не удалено; old releases не трогались, среди них есть входы gate.
+Lab589 завершилась и принята Astra587:300заявленных проверок,0FAIL,14входных
+pins совпали; фактические public validators приняли настоящий whole review
+cb824920. Сол332 завершил postgate-подготовку; корневая проверка73pins/11checks и
+2отрицательных контроля на настоящем красном587terminal прошли. Финальная
+приёмка и привязка к исправленному кандидату ещё впереди.
+Astra586 подготовила компактный локальный Git bundle06e (2.62МБ,40коммитов)
+для будущего переноса в main. Выполнен настоящий импорт в отдельный временный
+bare-repo с main-объектами только как read-only prerequisites; совпали candidate,
+tree и324изменённых пути, git fsck connectivity PASS. В canonical repo кандидат
+по-прежнему отсутствует, HEAD/index/worktree неизменны; push/активации не было.
+Результаты /var/tmp/astra586-main-transfer/final.json и import-verification.json.
+После обязательной приёмки можно использовать этот bundle вместо private-origin538.
+Astra587 выполнила настоящий staged допуск: whole review receipt/sourceacceptance,
+reviewed preparer (exit0), same-review executionreceipt, свежие ресурсы24CPU/
+22978476КиБ available/124748230656Б free, root admission, actual pre-effect и
+consumer (control_fixture=false) PASS. Renderer581 материализовал проверенный
+внешний wrapper39391318 по точным331pins; фиктивных разрешений нет.
+Полный canonical exact-release gate реально запущен19:12:54.607727Z:
+19этапов,20nonUI+4UI,cap21600+cleanup30. Завершился19:26:07Z exit1;
+session24248 закрыта, повторять её нельзя. NonUI32271PASS/1FAIL за697.75с,
+UI94NOT_RUN из-за раннего возврата строгого режима. Source неизменен,
+cleanup без принуждения, kernel ECHILD; новых SQLite-crash не наблюдалось.
+Единственный FAIL: test_document_dense_measurement.py:144 — текущий отпечаток
+измерения2cb6196c не совпал с сохранённым7f661a6c. Lab590 независимо разбирает
+причину; Sol333 получил цельное исправление receipt/связанных входов с настоящим
+измерением и короткой проверкой воспроизводимости на чистом successor.
+Сбор независимых ошибок уже реализован в --diagnostic-only; strict gate не менять.
+Подготовлен отдельный источник-only прогон оставшихся94UI/16модулей/4workers
+по прежнему06e: /var/tmp/astra587-ui06e-diagnostic. Ещё NOT_RUN; независимый
+review Lab591 отправлен и принят TUI19:38:03Z; Lab590 завершён и принят:
+причина stale current receipt подтверждена независимо,8pins/sourcehash совпали.
+Astra588 восстановила точные исходные байты только служебного .git/index
+из оригинала577 после обнаруженного cache refresh; весь sourceguard PASS.
+24CPU/доступно24ГБ/свободно124.59ГБ; свежая проверка перед dispatch обязательна.
+Это дополнение диагностики, без
+installed/fullgatecredit. Полный finalgate на исправленном артефакте обязателен.
+Факт результата: /var/tmp/astra587-whole06e-root-admission/gate-terminal-reconciled.json.
+Astra590 завершила оставшиеся94UI: все PASS/0FAIL0ERROR0SKIP за102.24с,
+16модулей/4workers/loadscope, точные collection/JUnit,sourceunchanged,
+outer cleanup без принуждения/ECHILD. Артефакт /var/tmp/astra590-ui-result/final.json.
+Совместная диагностика06e:32365PASS/1FAIL, весь32366release-node набор наблюдался;
+это смешанные диагностические контуры, не full19 или installedUI приёмка.
+Sol333 завершил исправление: clean d893ba74/tree4e6dcb24,parent06e, изменён
+только current dense receipt. Два настоящих измерения совпали по всем историческим
+метрикам/result/case hashes,24из24,0чужих источников;3x2+5+3коротких тестов PASS.
+Root проверил пакет/6закрытых проверок/fastpreflight; nativeRESULT hashverified,
+точный item consumed. Исторический benchmark/пороги/продуктовый код не менялись.
+Sol334 реально работает над цельным d893source/executor/postgate23/18 пакетом
+для одного финального независимого whole-review и fresh19step20+4gate.
+Lab592 параллельно получила первый независимый аудит неизменной механики332,
+чтобы собрать возможные дефекты до финальной фиксации334. Actual gates ещё NOT_RUN.
+Для будущей интеграции подготовлен новый d893bundle590:2.63МБ/41коммит/324пути,
+настоящий изолированный импорт+fsck+exacttree PASS; canonicalmainHEAD/index
+не менялись, candidate туда ещё не импортирован. Использовать590послеприёмки,
+а не старый06ebundle586. Текущие service/backlog/untracked владельца сохранить.
+
+
+
+
+
+
+Внешний веб-поиск и зависимая Research-приёмка отложены владельцем после1.0,
+не блокируют релиз и не считаются PASS. Локальный поиск, privacy/auth/isolation,
+J04 и независимые research-candidate HTTP-проверки сохраняются (карта Lab580).
+N6 TinyFish — первым сразу после1.0. Остальной backlog не переупорядочивался.
+Пакет браузерного исполнения Sol325 принят Astra564: учёт/завершение всего дерева
+и полная повторная проверка файлов исправлены; все4 сценария сохранены. Привязка
+к фактическому d893 выполнена604; настоящий запуск впереди. Astra592 проверила10точных
+членов/шаблонов325 и структуру прав текущего source333: несовместимости не найдены,
+существующий API поздней привязки сохранён; это не actual installed/live PASS.
+Obsidian514/519 принят Lab553 в прежней области; исторические14проверок сохранены.
+Для нового финального артефакта Astra592 подготовила все8core+6API вызовов вместе,
+вернула5пропущенных в прежних повторных запусках вызовов, сохранив тела функций
+и исправления514R2. Контроли14/14PASS; настоящий CLI отверг отсутствующийinstalled
+до создания каталога. Actual materialization выполнена604; live NOT_RUN. Ревью
+Lab593 завершено:277 независимых проверок/0failed, ACCEPT_PREPARATION_WITH_PENDING_FINAL_BINDINGS.
+Astra594 сверила30закреплённых входов и приняла подготовку; ACK21:04:29Z.
+Остаточные runtime-обязанности и финальная installed/source-привязка сохранены.
+Пакет: /var/tmp/astra592-obsidian-final-preparer/final.json.
+Полные живые14 нельзя заменить переносом старых результатов на новые байты.
+Full160:158PASS/2FAIL; исправление oracle ещё не свежая приёмка всех160.
+Coding591: read-only --check старого517 прошёл;24 файла пакета и12 закреплённых
+файлов компонента совпадают. Однако план/source-custody/readonly-boundary и
+root-resource привязаны к source121, а gate/wheel/callers — к прежнему релизу.
+Для d893 требуется единый пакет обновления этих привязок до живого запуска;
+старый517 не даёт допуска новому кандидату. Prepare511 для старого ресурса
+выполнен; ресурс и защищённые файлы не менялись, sudo/live не запускались.
+Доказательство: /var/tmp/astra591-coding-binding-readiness/final.json.
+Sol335 (Coding migration) завершён: native RESULT/ref/hash получен,44закреплённых
+ссылки сверены, публичная read-only проверка подготовки PASS;24контроля заявленыPASS.
+Точный queue item consumed. Независимая приёмка/текущие runtime bindings/root
+ресурс/F4live ещё нужны; старый295/511ресурс сохранён, root/live не исполнялись.
+Свободному Солу передан336: цельная миграция AB400/hour524 наd893 с настоящими
+поздними finite/producer/full160/runtime входами, без копирования старого PASS.
+Sol336#1 остановлен из-за capacity; выполнено одно штатное продолжение#2
+после PAUSED обеих записей. Actual turn01a0b16b-1eab-7973-a16e-e24a9be4f04a
+inProgress, очередь пуста, goalnull; владелец подтвердил успех. Модель не менялась.
+Ревью Obsidian593 закончено; дублирующее Sol review не назначалось.
+Sol334gen1 получен по native/ref/hash,19прямых ссылок совпали, точный item consumed;
+root ещё не принимает пакет: в postgate остался __pycache__, а verifier не сверяет
+фактический состав исполняемых входов до импорта. Lab592 дала2замечания к старому332:
+этот класс неполного census и согласованность admission581 с фактическим331writer.
+41ссылка проверена, RESULT получен/ACK20:38:08Z;346проверок/0failed не означают
+принятие — решение лаборатории отрицательное. Новое имя старого state не подставлять
+механически: Сол проверяет фактическую полноту текущей цепочки допуска.
+Генерация334#1 уже CLOSED; доставка REVIEW с active#1 штатно отвергнута до queue.
+Без обхода открыт334#2, задача доставлена: actual native turn01a0b11a-96d1-76c2-bc24-a22a8271c594
+inProgress20:44Z, очередь пуста, goalnull. Новый ownedroot /var/tmp/sol334-d893-whole-revision2;
+старый опубликованный пакет и source сохранить, повторная коллекция не требуется.
+На срезе595 native RESULT334#2 получен:88закреплённых входов проверены,
+точный item01a0b133-a821-7cf3-97be-194da13aaf5d consumed. Public verifier PASS за0.817с.
+Короткий изолированный root-контроль обнаружил оставшуюся несовместимость:
+inventory отвергает home/.cache, которую создаёт сам canonical gate. Исполнение
+gate до исправления не допускается. Доказательство и все88неизменённых pins:
+/var/tmp/astra594-sol334-root-review/final.json.
+Единый Lab594 whole source/executor/postgate review отправлен с этим finding,
+чтобы собрать весь независимый пакет замечаний до одного исправления.
+job_11fdd3cfac1843c596651e5ad0c845ea, executorACK21:15:28Z, deadline21:55:28Z;
+пакет334#2 заморожен, review не даёт допуска gate при незакрытом finding.
+Lab594 завершено21:27:52Z:192проверки/0failed; это подтверждение полного разбора,
+а не принятие пакета. Блокируют3проявления одной причины: HOME data/cache,
+quality-gate-failure.json и последующая загрузка postgate после этих выходов.
+Проверка допуска к записи принята; остальные замечания592 закрыты в334#2.
+Astra596 сверила17ссылок, приняла диагноз и ACK21:39:08Z.
+Astra597 собрала отдельный целый successor /var/tmp/astra597-d893-runtime-output-repair:
+учтены canonical HOME данные/умаски и quality-gate-failure.json; sealed code-input
+policy сохранена. Сканирование по descriptor не читает cache body, сверяет uid,
+nlink, тип/mode и изменения дерева; данные не превращаются в gate PASS.
+41короткий контрольPASS,15изолированных import-lifecycle контролейPASS,
+неуспешный terminal отвергнут; публичный pre-gate verifierPASS. Все88pins старого
+пакета неизменны;63функции common/postgate/preparer совпадают по AST.
+Новые assignment/provenance/caller/review pins пересобраны; Sol334#2 не переписан.
+Lab595 generation2 отправлено22:00:06Z для независимой приёмки всей дельты:
+job_b81dec13f7b0427585eefc499f487912 завершён22:21:20Z: принятие,316aggregate
+проверок/0failed. Созданы оба genuine whole/postgate review. Astra598 сверила24
+ссылки, настоящие launcher._validate_review и postgate.validate_postgate_review
+прошли. ACK22:25:38Z. Astra599 затем выполнила фактические root stages:
+review receipt/source acceptance, настоящий preparer, execution receipt,
+свежие ресурсы, root admission и pre-effect readiness. Preparer запускался
+без --source-only: этот флаг лишь проверяет source и не создаёт receipt.
+Canonical19step20+4gate запущен22:38:42Z и завершён22:53:05Z на неизменном d893;
+PASS32366/19этапов подтверждён Astra600 по настоящим summary/terminal/cleanup.
+Перед запуском24CPU без квоты,22.3GiB MemAvailable,
+124.2GB свободного диска, существенного CPU/IO/memory pressure не обнаружено.
+Root evidence: /var/tmp/astra599-d893-root-admission/admission.json;
+Все процессы завершены. Точная проверка результата:
+/var/tmp/astra600-d893-runtime-admission/canonical-gate-verified.json.
+Первоначальный postgate отказал: validate_dispatch_prepared повторно вызывал
+pre_effect_readiness после завершения и требует пустой gate-каталог.
+Sol337 завершил исправление перехода, сохранив597 и реальные gate/dispatch/
+authority доказательства. Astra602 независимо проверила код,37контролей,
+20наблюдений и полный render23файлов; genuine review выдана именно Астрой.
+Вспомогательный bind-review отказал на одном default-пути прямо в1777/var/tmp.
+Root разместила input через тот же atomic writer в собственном0700каталоге,
+сохранив все проверки; неизменный публичный prepare-final --late-input прошёл.
+Реально созданы nonsynthetic canonical410 observation/certificate,23caller
+файла/18nested и точный build plan;3порожденных control-процесса прошли.
+Настоящий finite598 producer_bridge.validate подтвердил весь текущий tuple
+и caller-граф. Lab600 завершила независимое actual caller+build review:
+286проверок/0failed, оба genuine review приняты фактическими потребителями.
+Astra603 создала current finite materialization и точные native3/full160 планы
+на реальных входах, включая повторный census3413; живые прогоны ещё NOT_RUN.
+Точный sibling build выполнен00:12:02–00:12:19Z:16.71с,build_accepted=true,
+integrity_errors=[],непринудительный ECHILD,stderr пуст,staging отсутствует.
+Новый immutable каталог d893/.61 создан с0500; wheel SHA d2013868 неизменен,
+manifest20a15f05/tree-manifest80eb18d4. Production anchor остаётся5497d28/.58.
+Доказательство: /var/tmp/astra603-next-stage-admission/build-materialized-verified.json.
+Нового полного gate нет: candidate и gate-executor не менялись.
+Свежая runtime600 проверка реально пересчитала3413записей/8tools/3roots/9links;
+существующий private models.env совпадает по SHA, конфигурация не менялась.
+Lab598 независимо приняла runtime census; Astra601 проверила настоящий
+finite598._review и повторное наблюдение3413записей. Это проверка окружения,
+а не выполнение native/full160 или перенос старых runtime результатов.
+Root evidence: /var/tmp/astra597-runtime-repair-work/final.json.
+Finite bridge596 принимает новую metadata identity и отвергает отсутствие
+реального review до импорта provider; положительная runtime связка ещё NOT_RUN.
+Native/full160517 и AB/hour524 также требуют согласованной миграции с121 наd893:
+53файла прежних пакетов проверены, карта зависимостей сохранена в
+/var/tmp/astra594-d893-acceptance-migration/final.json. WIP596 завершён отдельным
+пакетом /var/tmp/astra598-d893-finite-preparer:11code/21totalfiles,6contracts,
+44role partitions/11contextkeys. Закрытый pre-import census и pinloader для всех
+локальных модулей; source/metadata/currentproducer/plan/admission связаны.
+Исправлена обнаруженная до heavy запуска старая проверка writable.git/index
+в generatedadapter: текущий источник правильно требует список[].
+104коротких контроляPASS:18source,13late/refusal,45реальных namespace/lifecycle,
+28whole/import/adapter. Старый predicate воспроизвёл отказ на реальном d893;
+исправленный adapter source-seam проходит реальную проверку исходника с явно
+инертной upstream-заглушкой, без genuine runtime кредита. Native/full160/
+controller/authorizer/namespace/runtime algorithms сохранены по AST.
+Реальная целиком currentproducer materialization выполнена603 с genuine
+freshgate/currentcaller/runtime/review. Независимый wholefinite review Lab596
+job_c56f307f117e4e47bbb4764ddcf9ae85 завершён22:36:57Z:327проверок/0failed,
+ACCEPT preparation only. Astra599 проверила actual common.validate_static и
+finiteadmission._review, exact11code pins; received сохранён, ACK22:40:32Z.
+Старый WIP596 и принятый517 не переписаны. Lab597 приняла whole Coding preparation
+Sol335:305проверок/0failed,24члена сверены, received/ACK600. Это не live/plan
+admission: текущий295/511root resource сохранён; перед execution review нужен
+cache-free root (найден .ruff_cache), настоящие release bindings и новый допуск.
+Sol336#2 завершил AB/hour migration:31pins сверены,41контроль PASS, RESULT
+получен и точный nativeitem consumed. Root обнаружил реальный отказ текущего
+finite598 по slot_candidate:finite_package. Lab598 завершила400проверок,
+отклонила подготовку целиком по3причинам: форма finite identity, отказ на
+сохранённом finite121 ABI и жёсткая привязка provider597. Runtime census
+принят отдельно; received/ACK601 сохранены. Лаборатории назначено цельное
+исправление harness в новом пакете: Lab599/job_f385fc1aa4c94aca931a17a02e2e4ae4
+завершена23:43:36Z,58контролей(22positive36negative),46pins сверены/ACK602.
+Sol339 завершил whole-ревью: три прежние причины закрыты, но обнаружены пять
+других причин — неверный canonical summary predicate, непроверенная review/peer
+authority, поверхностные или неоднозначные27role-контракты, устаревшие positive
+inputs и невозможный безопасный construct output вне immutable пакета.
+RESULT/14refs проверены603, точный nativeitem consumed; подготовка отклонена.
+Lab601/job_b5c2ebdefac14b2989c3886c61ac88ed завершила цельное исправление:
+94контроля(36positive58negative),0FAIL; RESULT/pins проверены и ACK605.
+Sol342 завершил независимое whole-ревью: отклонено по6причинам — привязка
+к старому finite598 вместо605; невозможный переход18pending→genuine;
+не реализован hour plan; не аутентифицирован exact-plan review;
+не принимается настоящий build603; неоднозначные cross-target/admission связи.
+Gatev2 и безопасный private output подтверждены отдельно. RESULT/refs приняты606,
+точный item consumed; цельное поручение Sol344 отправлено607 после приёма343,
+фактический native ход inProgress. В нём явно устранён цикл plan→admission→plan:
+inert PREPARED, затем независимый
+REVIEWED, затем ADMITTED; полная власть обязательна до эффектов, без fake approvals.
+Lab601 остаётся непринятой. AB/hour execution NOT_RUN.
+Sol340 отклонил actual603 operational plans по трём причинам: преждевременный
+статус reviewed/live-ready, слабый допуск прямого controller CLI, потеря
+native plan/report/review pins перед full160 worker. Astra605 закрыла все три
+в отдельном immutable пакете;30коротких контролей PASS, включая реальные
+ранние отказы CLI. Старые598/603 не переписываются и не допускаются к запуску.
+Lab602 независимо приняла код605 и закрытие всех3Sol340причин:54проверки PASS,
+1materialization отказ до создания каталогов — runtime observation несла старый
+assignment598. Код не переписывался;606 снято настоящее новое наблюдение3413
+элементов,8tools/3roots/9links; фактический inventory совпадает с прежним.
+RESULT/кодreview/pins проверены606 и ACK. Lab603/job_c01afde9ee2c46b0b35acc3e131a274f
+приняла01:11:01Z (deadline01:51:01Z) новый census review, cause-corrected metadata
+materialization и оба exactplanreview; также независимые current Coding bindings.
+Native/full160 NOT_RUN, последующее независимое native-result review сохраняется.
+Заявление337 о ненужности изменения AB336 было неточным; root исключила этот
+кредит. Старые336/599 не приняты и не переписываются.
+Для Browser325/Obsidian592 Astra601 заранее проверила реальные source inputs:
+нативный snapshot требует явной проекции для прежнего формата потребителей.
+Проекция сохраняет все исходные поля и pin происхождения; canonical guard и
+старый consumer подтвердили все2107файлов,5отрицательных контролей отказали
+верно,6повторно используемых Obsidian входов сверены. Sol338 независимо принял
+проекцию:9отрицательных контролей, оба фактических consumer и render_api
+проверены, source/Git bytes+modes неизменны; RESULT получен/точныйitem consumed602.
+Настоящие installed target pins получены604: оба materializer завершились0,
+stderr пуст; Browser preflight проверил все4715элементов нового immutable
+каталога и исходник. Шесть значимых отрицательных контролей отказали верно;
+в реальных generated scripts сохранены все8core+6API+4Browser вызова.
+Собран один пакет с конкретными командами, границами и before/after custody:
+/var/tmp/astra604-installed-consumers/whole-review-input.json.
+Sol341 принял exact18 план для отдельного root-допуска; RESULT получен605,
+точный queue item consumed. Astra605 выполнила все доступные контуры:
+8core+6API Obsidian PASS на установленном d893/.61, включая durable reopen,
+изоляцию, реальные Syncthing onboarding/reconnect/cancel/retry и cleanup.
+Browser остановился перед первым сценарием: проверка искала исходное сообщение
+в preview, где уже отображается настоящий ответ. Честный итог:14PASS,4NOT_RUN,
+1ошибка предусловия harness. Все процессы завершились без принудительной
+очистки, kernel ECHILD/настоящий server-shutdown/source+installed custody PASS.
+Astra605 исправила оба выбора строки по API-derived user ID; все4сценария и
+границы сохранены. Реальный materializer/preflight нового отдельного пакета
+прошёл. Sol343 независимо принял изменённые selectors/новую actualbinding;
+RESULT/pins проверены607, точный nativeitem consumed. После root-допуска
+настоящий Browser4 завершился18.91с/4PASS: liveupdate, offline→online,
+запаздывающий настоящий ответ другого пользователя, ровно одна privateowner
+replyqueue mutation. Отправки Telegram/модельных запросов нет. Весь descendant
+контур завершён без принудительной очистки, ECHILD/server-shutdown/custody PASS.
+Итого scoped installed18:18PASS/0FAIL/0NOT_RUN на неизменном d893/.61,14Obsidian
+повторно не запускались. Это не вся F.0–F.11/H приёмка и не активация.
+Артефакт: /var/tmp/astra607-browser4-execution/verified-final.json.
+Проверка model-check607: реальный installed interpreter подтвердил3modulebytes,
+recipe, текущий gateconsumer,4sourcehelper и sealedpins;2negativepin отказаPASS.
+Подготовлены доступные входы; genuine native3/full160 и activation evidence
+ещё отсутствуют. Сетевой model-check по принятому контракту идёт послеактивации,
+запросов моделям сейчас0. /var/tmp/astra607-installed-readiness/final.json.
+
+Coding606: собраны5типизированных доказательств currentgate/postgate/build/
+installed identity/callers и настоящий wheel;48refs проверены. Это связь с
+реальными результатами, не новая итоговая приёмка релиза. Старый непрописанный
+.ruff_cache атомарно перенесён в закрытый606каталог с точной inventory; ни один
+из24members и package335 не изменён, публичный check-preparation PASS.
+Неполный bundle честно отвергается до review. Lab603 проверяет всю цепочку и,
+если она достаточна, выдаёт отдельное genuine releasebindings review. Старый
+Sol295 диск768МиБ ещё mounted; root-helper0500 не заменялся. После принятия
+нужны exact cleanup старого диска, новые helpers/resource, exact wholeplan review,
+one-use admission, configured-primary F4sixphases/2repair/15negative и cleanup.
+Артефакт: /var/tmp/astra606-coding-release-bindings/whole-review-input.json.
+
+Из11канонических входов10побайтно неизменны; synthetic_live_battery изменяет
+только2A09definition. Это позволяет сохранять механику, но не переносить runtimePASS.
+AB400: канонически подписан и проверен план6независимых содержательных оценок,
+2негативных контроля отказали верно; source333 до/после не изменился.
+План /var/tmp/astra594-d893-ab-preregistration/preregistered-plan.json;
+будущий pair /var/tmp/astra594-d893-ab400/pair отсутствует, reservedLabjob ещё не отправлен.
+Ключ остаётся только у root, не передавать исполнителям. Перед фактическим AB
+повторно сверить текущий contentdigest/attachment и отсутствие pair/job; прогон NOT_RUN.
+Все остальные
+F.0–F.11/18H, native/AB400/часовой прогон/документы/4ownerTelegram-ветви,
+финальные gates/installed/live/DR/backup/rollback/наблюдение сохранены.
+Production5497d28/.58 не менялась; исходники, библиотека и конфигурация не менялись568.
+Текущие ссылки и следующий недостающий результат:
+`/home/jericho/.jericho/grok-takeover/ASTRA-607-current-checkpoint.json`.
+
+Исторический срез Astra533 (2026-09-17): Sol310 полностью получен по ref/hash,
+45артефактов проверены, точный nativeitem consumed. Новый immutable source02a122R4
+(0.208.61/schema50) имеет фактическую свежую коллекцию32365(32262nonUI/94UI/9nightly),
+2083tracked+35git/114dirs/2118files, реальный265filecontract и20короткихконтролейPASS.
+Лаборатория проверяет whole source/готовность19executor: отдельный fullassignment
+SOURCE122R4-WHOLE-REVIEW-LAB-567, job_11f5864c2b3549d3b25fe14131297db1.
+До genuine sourceACCEPT/препарера/финальной execution-приёмки полныйgate НЕ запускать.
+Номер567 в producerABI не означает повтор старого POSTGATE309 assignment.
+Lab567 POSTGATE309 received+ACK. Root533 добавил4реальныхконтроля/разборcallgraph:
+actualRED иfailedowner отвергаются; D3номерschema не обязансовпадатьсjob; D4/L6
+проверяют настоящуюполнуюsummary/certificate ДО возвратаярлыка/рендеринга. Эти
+неподтверждённые обходы не требуют лишнейперепискикода. Реальнаяостача — согласованная
+привязкаwhole274/410/23callers ктекущему310 ифактическомууспешномуgate; fixturePASS
+не переносится вruntimeприёмку. Original309/529 сохранены.
+Root533 нашёл2корректныхразвёрнутыхответа, ошибочно PRODUCT_FAIL в532finitegrammar.
+Её32+2предыдущихконтроля не доказываютобщуюсмысловуюприёмку. Подготовленprivate
+collector точныхdurableответов:8контролейPASS, только4собственныхtestSQLiteсообщения,
+неproduction. Sol311 получилцельнуюдоработкуsemantic acceptance/evidence/status/
+consumer bindings, безсуженияответовПятницыилиподменымоделей. Все11 обязательны.
+Старый неподанныйResearch532 Lab568 отменёнкакнеотправленный; неставитьегодляприёмки.
+Checkpoint: `/home/jericho/.jericho/grok-takeover/ASTRA-533-current-checkpoint.json`.
+Релиз неготов, всеgates/live/часовойпрогон/приёмкасохраняются. Вопросвладельцао сроке
+отвечен в533; не повторятьоценкунаавтопродолжении. Production/.58 неизменён.
+Предыдущий срез Astra528 (2026-09-17): whole root-review Research306 завершён:
+32контроля,16расхождений в6группах; lifecycle пула/задач принят в своей области.
+Это дефекты проверяющего кода, не16доказанных продуктовых отказов. Все причины
+собраны в один repair-пакет Sol308, фактический новый ход активен. Пакет306 неизменён.
+Lab561 независимо приняла privacy2files и all11coherentdata; Lab562 выполнила
+8публичных GET и2настоящих успешных поиска Yandex. Средства на счёте не проверялись;
+старое сообщение о нулевом балансе не отменяет эти наблюдения. Owned-origin и
+полные реальные входы Research ещё отсутствуют, live/runtime зачёта нет.
+Sol307 передал source122R3 6bfc75d9/treecbdba543,32365узлов,54683MiB,21shortPASS.
+Астра проверила50ссылок/47артефактов и actual full-source static admission.
+Исходный код готов к независимому whole review Lab563. Исполняемые launcher/
+preparer/postgate ещё не адаптированы:307 содержит инертные ABI и устаревшую
+привязку Lab561 к527вместо фактической528. Астра интегрирует цельный исполняемый
+пакет на проверенной механике289; тяжёлый gate до этого не запускать.
+Подробности: `/var/tmp/astra528-research306-root-review/final.json` и
+`/var/tmp/astra528-source122r3-readiness/final.json`. Цель/production неизменны.
+Предыдущий срез Astra527: полный gate121 прошёл все19команд за14мин45с,
+код0, исходники и очистка процессов проверены. Wheel и полный набор доказательств
+аутентифицированы; привязка производителя опубликована. Повторять этот gate
+без изменения соответствующего снимка или нового основания не требуется.
+При подготовке потребителей обнаружены две причины отказа: ложная зависимость
+из-за совпадения хешей снимка и проекции, затем несовпадение root_input_counts.
+Первую Астра исправила с проверкой25настоящих связей и23файлов. Sol292 завершил
+цельное исправление схем сборки/postbuild/modelcheck; текущие23файла и26реальных
+связей проверены. Lab539 приняла пакет:315проверок,0отказов. Lab540 приняла точный план;
+Astra499 выполнила сборку121 за18.388с, sealed-дерево проверено целиком.
+Старые частичные артефакты/ошибки сохранены, повторение подготовщика запрещено.
+Результат Sol291 аутентифицирован:34ссылки/25копий. Lab536 завершила295проверок
+и вернула REVISE: реальный подготовщик передаёт exact_execution_review,
+а потребитель требует execution_review; синтетический контроль это пропускал.
+Астра подготовила исправление с13проверками реального выражения производителя.
+Sol293 закрыл также найденный запрет безопасных вложенных путей в23файлах
+потребителя. Старый291 неизменяем, одобрения ему нет; новый блокер293 описан ниже.
+Lab535 завершила208проверок карты покрытия. Обязательны семь незакрытых областей:
+1. Полный настоящий lifecycle Coding F4 с настроенными исполнителями.
+2. Положительный разрешённый Engineer и значимые отрицательные сценарии.
+3. Full160 остаётся обязательным подмножеством; он не доказывает целиком F1–F10/H.
+4. Настоящее потребление research нескольких провайдеров и негативные пути;
+   отсутствие средств Yandex блокирует только соответствующую ветвь.
+5. Канонический часовой GET /api/me soak сохраняется; смешанные F8/F9/F11
+   маршруты требуют отдельного настоящего доказательства.
+6. Все18маршрутовH требуют живой/установленной проверки на новых своих объектах;
+   коллекция тестов не доказательство исполнения, защищённую историю не читать.
+7. Telegram требует всех4owner-ветвей и свежего доступа, одного roundtrip мало.
+Это обязательные пробелы покрытия, а не разрешение сократить финальную приёмку.
+Общий диагностический baseline ещё не завершён. Full19/20+4, native3/248/900,
+full160120+40/8/c4, AB400, часовой soak, документы, ownerTelegram, installed/live,
+DR/rollback и отрицательные контроли сохраняются. Main121 опубликован; production107 прежний.
+После отключения питания18:50Z проверены оба native endpoint; лабораторный
+monitor восстановлен в прежней TUI/epoch14, новая536задача подтверждена executor_ack.
+Дополнение Astra493: общий диагностический сборщик реально запущен на текущих
+доказательствах:43строки, включая все18положительных и отрицательных маршрутовH.
+Пять результатов ограничены своим scope; ошибка подготовщика сохранена,37строк
+NOT_RUN.12проверок ложного зачёта/зависимостей/продолжения независимых ветвей прошли.
+Это исторический срез до исправления потребителей, не завершённый baseline.
+После reboot реальная короткая проверка штатной cgroup-изоляции Coding прошла;
+временных units не осталось. Полный configured-primary lifecycle ещё не доказан.
+Дополнение Astra494: подготовлен цельный компонент Coding: создать программу,
+проверить независимым оракулом, сохранить, потерять рабочую папку, переоткрыть БД,
+изменить поведение и восстановить обе версии. Семь настоящих изолированных
+проверок оракула прошли за6.13с, включая неверную программу, таймаут и избыток
+вывода. Сам lifecycle с настроенной моделью ещё NOT_RUN; source не даёт зачётF4.
+Lab537 вернула REVISE: проверка изоляции пропускала часть рабочих каталогов.
+Astra495 закрыла весь набор24типизированных путей Settings и побочные функции;
+70проверок путей и7реальных проверок worker прошли. Настоящий ensure_runtime_dirs
+создал10каталогов только внутри тестового дерева. Первый отказ на0755предке
+сохранён; внешний исполнитель должен заранее создавать общих предков с0700.
+Lab538 приняла исправленный Coding-компонент:448проверок,0отказов. Астра
+подготовила отдельные настройки тестовой среды без изменения параметров моделей;
+16проверок прошли, настоящая БД схемы50 закрылась и открылась с прежними данными.
+Сам полный configured-primary lifecycle и остальные обязательныеF4контроли NOT_RUN.
+Результат Sol292 получен и проверен:79ссылок/80копий/9процессов,19build/36bindings/
+34modelcheck/45postbuildконтролей и loader7+3отрицательных. Исправленный пакет
+потребителей808f546e принят Lab539. Sol293 уже принял
+цельное исправление finite по обеим найденным причинам, со свежей идентичностью;
+в500 результат293 принят:42PASS/0FAIL/1NOT_RUN,19файлов,44роли,11ключей.
+Астра завершила реальную подготовку послеgate: текущий потребитель прошёл,
+созданы root-плансборки95eedcae иprepared9dab3c2d. В499после Lab540 и свежего
+допуска ресурсов выполнена настоящая immutable-сборка; активации ещё нет.
+Неизменный gate121 не повторялся, старые ошибки и частичные артефакты сохранены.
+Дополнение Astra497: выполнена настоящая короткая read-only проверка всей
+готовности сборки:8PASS/0FAIL, включая wheelhouse, Python, toolchain и ресурсы.
+Lab540 затем приняла точный план95eedcae:296проверок,0отказов. Сборка выполнена499.
+Дополнение Astra498: текущий121кандидат реально принял ту же конфигурацию
+моделей обоими каноническими путями native/full160;0.515с, без model/network
+вызовов и изменений конфигурации. Подготовлено цельное назначение Sol294 на
+полного исполнителя Coding и обязательные F4контроли; в500 отправлено один раз
+и принято Солом после завершения293. Native no-execграницу ослаблять нельзя; Coding требует
+отдельного доверенного исполнителя со штатными изолированными worker.
+Дополнение Astra499: immutable121/0.208.60 собран18.388с, код0; весь sealed0500
+артефакт, relocation venv и завершение процессов проверены, staging отсутствует.
+Существенный блок23файлов/8коммитов опубликован fast-forward в GitHubmain3ea6f4d7;
+канонический index и60файлов frozen.git не изменены. Productionanchor107 прежний.
+Следующий критический путь — исправление жизненного цикла подготовщика finite121,
+затем native3 и full160; далее обязательный installed/live/DR/activation процесс.
+Дополнение Astra500: Sol293 аутентифицирован, nativeRESULT потреблён после received.
+Лаборатория541 проверяет цельный293пакет и свежий runtime вместе; Сол294 занят
+полным исполнителем Coding. На установленном121 отдельно прошли создание backup,
+штатный CLIrestore и новое открытие своей тестовой БД:3процесса,5.405с. FTS,
+изоляция пользователей и исходные данные сохранились; productionБД не читалась.
+Это частичная установленная проверка F1/F11, не вся DR/liveприёмка.
+Дополнение Astra501: на установленном121 прошли16отрицательных контролей
+обычного/зашифрованного зеркала и отказ восстановления повреждённого backup.
+Пять реальных процессов заняли7.09с: исправные копии сохранены, повреждённые
+восстановлены; после отказа CLI байты тестовой БД не изменились. Это отдельная
+частичнаяF1/F11проверка, не доказательство offsite или всей DR. Sealed-дерево цело.
+Lab541 аутентифицирована:228проверок/0отказов, текущие код и runtime приняты
+в её ограниченном scope. Астра собрала настоящий полный late-input; он прошёл
+проверку. Реальный materialize затем отказал за0.215с: сам создал3каталога,
+после чего повторный admission потребовал, чтобы они отсутствовали. Штатная
+очистка удалила только эти свежие каталоги; модельного запуска не было.
+Нужен цельный ремонт состояний materialize/admission/authorize/controller,
+без ослабления проверок владения, путей и хешей. Астра — владелец исправления;
+Lab542 проверяет всю цепочку независимо, Сол294 продолжает Coding.
+Доказательство: `/var/tmp/astra501-finite121/lifecycle-blocker.json`.
+Дополнение Astra502: Lab542 завершила94проверки и собрала6связанных причин
+отказа. Исправление выполнено целым новым пакетом0530a451; старый293 сохранён.
+До создания каталог должен отсутствовать; дальше проверяются его точная
+идентичность, права и маркер с привязкой к входам. Запись идёт через descriptor
+проверенного каталога без перехода по symlink; повторный запуск в занятом
+каталоге запрещён. Исправлены hex-входы, права в адаптере и сохранение обеих
+ошибок при отказе очистки. Частичные/чужие каталоги не принимаются и не удаляются.
+Реальная сборка пакета23файлов прошла за0.565с:42проверки базовых контрактов
+и45новых проверок файловой системы/адаптера успешны. Полный подготовщик на
+новых байтах ещё NOT_RUN: требуются настоящие независимые review. Lab543
+получила весь пакет, runtime и задание после их приёмки выполнить реальную
+безопасную материализацию на своих каталогах и повторный допуск через адаптер.
+Сол294 продолжает Coding; продукт, модели и production не изменены.
+Дополнение Astra503: на установленном121 прошли10проверок ядра Engineer за3.323с:
+две связанные реальные команды, независимый оракул, отсутствие повторного эффекта,
+отказ чужому актору, отмена/закрытие/переоткрытие. Четыре процесса и их cgroup
+завершены; весь sealed-артефакт проверен. Это частичная проверка на приватной
+cli_test-авторизации, не живой ownerTelegram или полный configured Engineer.
+Sol294 получен:47ссылок/20файлов,60негативных+8worker+2owner-fault проверок;
+полный configured-primary запуск ещё NOT_RUN. Lab543 дала107проверок без отказа,
+но настоящий materialize остановился на SOURCE_INTEGRITY до создания каталогов.
+Причина — четыре новых файла .pytest_cache после тестов Coding в frozen-source.
+Астра сохранила их отдельно и восстановила точный исходный снимок: штатная полная
+проверка снова возвращает пустой список ошибок, исходные файлы/.git/права не менялись.
+Sol295 получает цельное устранение повторения во всех offline/live входах Coding;
+Lab544 — настоящий повтор материализации на том же502пакете после восстановления.
+Старые interim ACCEPT543 отменены её окончательным REVISE; gate/build не повторялись.
+Дополнение Astra504: Lab544 приняла точный исходный снимок, пакет502 и runtime:
+126проверок,0отказов, настоящая материализация и повторный допуск прошли.
+Астра выполнила собственную материализацию за3.523с/код0: native3-план1ea37ba0
+и full160-планd48f00b5 созданы; рабочие каталоги ещё не запущены. Lab545 получила
+оба точных плана одним пакетом и проверку настоящего разрешения native без запуска.
+Новый установленный сценарий Engineer за2.220с доказал аварийный обрыв после
+реального действия, UNKNOWN после переоткрытия, отсутствие повторного действия
+и полную очистку процессов/cgroup. Symlink/hardlink в выходах отвергнуты.
+Отдельный обычный диагностический FAIL сохранён: в HOST_USER команда подставила
+код ошибки через зарезервированный файл .friday-export-error.v1. Статус остался
+FAILED, публикации файлов нет, очистка прошла; нужна независимая оценка контракта
+этого профиля. Без исправления продукта ради зелёного результата независимые
+проверки продолжены. Первый неверный тестовый профиль авторизации сохранён
+как ошибка fixture, не продуктовый отказ. Живой owner/configured Engineer ещё NOT_RUN.
+Дополнение Astra505: установленный API/Engineer прошёл6проверок за4.827с.
+Настоящие HTTPзапросы подтвердили token200/no-token401 и отказ старого approval409;
+реальный kernel отверг обычную APIроль владельца с подставленными Telegramполями.
+В независимом журнале команд0заданий, эффектов нет, после закрытия приложения
+дочерних процессов нет. Все24пути Settings принадлежат новой тестовой среде,
+полное sealed-дерево121 проверено; realTelegram/configured-positive ещё не доказаны.
+Lab545 завершила138проверок:137PASS и SOURCE_INTEGRITY из-за одного .pyc.
+Его создал проверочный скрипт Астры, запущенный без -B; это моя операционная
+ошибка, не дефект продукта или задача Сола. Только добавленный файл сохранён
+отдельно, полный исходный снимок снова точен. Правило всех rootPythonзапусков
+`/home/jericho/jericho/.venv/bin/python -I -B` и проверки флагов перед import
+закреплено в `/home/jericho/.jericho/grok-takeover/ASTRA-PYTHON-SOURCE-CUSTODY.md`.
+Lab546 завершила143проверки:142PASS, один блокер контроллера описан ниже;
+Сол295 продолжает свой пакет Coding/source custody.
+Ни materialize, ни полный gate/build не повторялись.
+Дополнение Astra506: настоящая короткая подготовительная проверка импортов
+канонических модулей и эксклюзивной блокировки прошла за0.317с: блокировка реально
+захвачена/освобождена, полный исходный снимок после импортов точен. Доступны24CPU,
+23.2ГиБ памяти и121.6ГиБ диска; показатели обновятся перед настоящим запуском.
+Подготовлен только захват процесса штатного controller239, без замены его
+lease/owner103/StartingHandoff, лимитов или моделей. Этот подготовленный запуск
+не допущен: финал546 — REVISE, никаких native/model-вызовов не было.
+Дополнение Astra507: контроллер отвергает оригинальные права0664 `.git/index`,
+хотя они точно записаны в исходном снимке; source/.git имеют0700, полный
+исходный predicate снова[]. Исходники/index не менялись. Получен и проверен
+финал546; подготовлен цельный Sol297: чтение точного inventory с проверкой
+custody и вся зависимая цепочка controller/finite-потребителей. Отправить один
+раз после приёмки295; сейчас297 НЕ отправлен.502 и его корни не перезапускать.
+Независимый разбор Engineer503/504/505 и служебного маркера передан видимой
+Lab547 (реальный executor_ack23:10:53Z). Старый подготовленный Sol296 НЕ
+отправлять — его область уже назначена лаборатории, дублирование запрещено.
+Установленная121:8проверок PASS в двух настоящих процессах за10.205с —
+обычный review unless_explicit, точный кириллический файл, ручное принятие,
+повторная доставка без дублей до/после перезапуска, поиск источника, изоляция
+пользователей, подписи/nonce/allowlist и assets/admin-доступ. Оба исходных
+сбоя проверочного скрипта сохранены: неправильное имя enum и подпись ещё не
+закодированного URL; продукт не менялся, повторена только зависимая часть.
+Полное sealed-дерево и исходный снимок проверены после операций. Это частичное
+доказательство private API; реальный Telegram/модель/браузер/fullH не доказаны.
+Дополнение Astra508: установленный API→настоящий scan→новый процесс дал6PASS
+за10.456с: три напоминания, корректная местная дата17сентября при UTC16сентября,
+только наступившие события попадают в очередь, отмена и состояние uncertain
+после выдачи мосту переживают перезапуск без повторной выдачи/дублей. Чужая
+отмена и подменённый указатель отвергнуты. Telegram не вызывался; доставки,
+DST/точное время/цикл WorkerSupervisor и полный H этим не подтверждены.
+Полное sealed-дерево и исходный predicate[] проверены после операций.
+Статус Сола проверен через native API: фактический ход295 inProgress,
+очередь пуста, RESULT ещё нет; признака остановки гвардом не обнаружено в
+ограниченном окне.297 не отправлен, живой ход не прерывался. Lab547 работает.
+Дополнение Astra509: Sol295 получен:57ссылок/24файла,60настоящих F4проверок
+и12контролей custody прошли. Полный configured-primary lifecycle ещё NOT_RUN.
+Точный native RESULT удалён после received; Sol297 отправлен один раз и работает.
+Lab547:151проверка без отказа; маркер Engineer — различие профилей/неверный
+оракул, продуктового исправления не требует. Lab548:224проверки без отказа;
+частичные установленные500/501/507/508 приняты в своём scope, оба RESULT подтверждены.
+Настоящий браузер установленного121 дал4уникальных PASS: обновление переписки,
+восстановление связи с черновиком, защита от позднего чужого ответа, один клик —
+одна запись ответа приватному владельцу. Ошибки сценария сохранены; повторены
+только две изменённые проверки. Все процессы/порты закрыты, исходник/seal точны.
+Штатное закрытие приложения не доказано: сервер вышел по SIGTERM без finally-receipt.
+Отдельно обнаружен дефект preview при нескольких сообщениях в одну секунду:
+feed сортирует только created_at и может показать старое сообщение. Собственный
+fixture и SQL подтверждают; независимая оценка и общий пакет исправлений впереди.
+Frozen121 не менялся. Lab549 получила цельное ревью Coding295: безопасность
+root-подготовки, затем настоящий ресурс/план через QUESTION→ANSWER того же job.
+Для root-подготовки sudo требует пароль; конкретные команды владельцу будут
+подготовлены после независимой проверки. Обхода прав/монтажа/live не было.
+Дополнение Astra510: Lab549 выдала настоящий preparation-only review:502проверки,
+0отказов;44ссылки и завершение процесса проверены. До root-действий обнаружена
+проблема команды запуска: Python из изменяемого окружения проекта загружает
+site-packages до проверок помощника. Предложен системный Python3.14 с -I -B -S;
+реальный nonroot custody-проход на нём успешен за0.315с, исходный снимок точен.
+Только это изменение команд передано на дополнительную проверку в том же549job;
+root-подготовки, монтажа и модели ещё не было. Команды владельцу подготовлены
+как черновик; окончательный запрос — после независимой приёмки этого изменения.
+Для свободного Сола после297 подготовлен цельный298разбор браузерных доказательств,
+дефекта preview и границ доказанной очистки. Пока298не отправлен.
+Дополнение Astra511: Sol297 принят как проверяемый пакет:61ссылка/27файлов,
+42finite+17custody+45lifecycle PASS; проверка чужого владельца файла честно NOT_RUN.
+Исходник и оба различных index точны. Новая задача298 отправлена Солу один раз;
+фактический native ход активен, очереди/общей цели нет. Lab550 поставлена в очередь
+на цельную независимую приёмку297, окружения и реальных будущих планов; пока не работает.
+Свежий runtime census Астры прошёл за0.366с:3413элементов,3корня/8инструментов/9связей.
+Материализации ещё нет: нужны настоящие новые отзывы, существующий502не повторялся.
+Lab549 подтвердила небезопасность root-запуска через projectvenv и приняла системный
+Python -I -B -S для prepare/cleanup:72дополнительные проверки без отказа, исходный
+review502проверок сохранён. Готова точная команда владельцу, её --check прошёл;
+запрос на выполнение в терминале отправлен. Root-подготовки/модели ещё не было.
+Дополнение Astra512: независимое ревью Sol298 принято,42браузерные ссылки
+проверены, точный nativeRESULT удалён после received. Четыре частичных поведения
+подтверждены; дефект preview при одинаковом времени независимо признан продуктовым
+и остаётся для общего пакета исправлений. Graceful shutdown по-прежнему не доказан.
+Солу299 передан цельный исполнитель всех11обязательных F3/research сценариев через
+существующие потребители; actualnativeход активен, model/externalcalls сейчас0.
+Для Coding сохранено обязательное продолжение точного whole-review/live после
+ownerroot-действия; rootreceipt ещё отсутствует, запрос владельцу не повторяется.
+Выявлена операционная ошибка лабораторной очереди: ожидающий будущий RUN550
+блокировал доставку ANSWER текущему549. Только незапущенная550G1 штатно отменена
+после tombstone/executor_ack=false/effects0; ANSWER549 реально доставлен и принят
+00:28:09Z. Лаборатория заканчивает частичный подготовительный отчёт, без wholePASS.
+Полный550G2 подготовлен и будет отправлен лишь после549terminal/received/ACK.
+Правило не ставить будущий RUN заранее сохранено в ASTRA-LAB-QUEUE-DEPENDENCY-RULE.md;
+код монитора, TUI и продукт не менялись. Все требования приёмки сохранены.
+Дополнение Astra513: Lab549 завершила подготовительный сегмент; финал и14ссылок
+проверены, RESULT подтверждён. Сохранены502+72проверки без отказов; whole/admit/
+model/live честно NOT_RUN, обязательное продолжение Coding сохранено отдельно.
+После закрытия549 отправлена550generation2: job_137cec5afeeb4c7a9de3814289315e1d.
+Monitor получил заявку; executor ACK на последней проверке ещё не наблюдался.
+Будущие RUN заранее не ставятся. Sol299 продолжает цельный F3пакет; rootресурс
+Coding отсутствует, уже отправленный запрос владельцу не повторяется.
+Дополнение Astra514–515: установленное локальное ядро Obsidian проверено на
+частных данных:8PASS,3реальных процесса/3.702с, включая новый процесс и SQLite/
+файлы/ledger, повторы/CAS/конфликт/поиск/изоляцию. Три ошибки harness сохранены
+и исправлены вместе; неизменные успешные контроли не повторялись. Независимая
+приёмка, настоящий настроенный chat/API/sync и весь H ещё не закрыты.
+Lab550 приняла весь297пакет и runtime426проверок/0отказов. Астра однократно
+материализовала точные native/full160планы за5.278с, rc0, source[]. Реальные планы
+отправлены ANSWER01:00:31Z; текущая независимая проверка продолжается, запусков нет.
+Владелец успешно подготовил Coding: rootreceipt и настоящий768МиБ tmpfs с защитой
+проверены. Неизменный binder за1.117с создал точный план, sourcebefore=after.
+551whole-review подготовлен локально, отправка только после550terminal/received/ACK.
+Sol299 вернул11controlled сценариев/64pytest,83ссылки/79файлов аутентифицированы,
+RESULT точно consumed. Но готового configuredисполнителя нет: admit лишь пишет
+inertJSON. Этот конкретный незакрытый путь передан Солу300 цельным назначением;
+его новый native ход фактически активен. Частичные тесты не заменяют wholeF3.
+Дополнение Astra516: Lab550 завершила707проверок/0отказов, точные планы и
+реальный harmlessauthorize приняты, RESULT подтверждён.551Coding передан после
+закрытия550, executorACK01:21:47Z, RUNNING. Подготовка владельца не повторяется.
+Реальный native121 остановился до случаев/модели за9.126с, rc1; процессы очищены,
+слот освобождён, исходники/индексы неизменны. Две причины сгруппированы: вместо
+сертифицирующего gate-summary передан storage-only wheel-receipt; generated
+admission.sha отвергает исходный pyvenv.cfg0664. Все8хешей инструментов совпали.
+Короткий реальный consumer-probe2.823с подтвердил отказ старой квитанции,
+приём настоящего summary и точный metadata-отказ. R1ошибка audit сохранена.
+Текущие планы/receipt/config/source не менялись; нужен единый private-successor,
+реальные проверки финальных потребителей и негативов перед независимым ревью.
+Повтора тяжёлого прогона нет; full160 NOT_RUN,nativePASS отсутствует. Sol300
+продолжает whole research-executor. Активный768МиБCodingtmpfs требует очистки
+после конечного исполнения/проверки; все обязательства приёмки сохраняются.
+Дополнение Astra517: обе причины native516 исправлены единым privateпакетом,
+29файлов/7изменённыхcodefiles. Реальные producer→native-validator, все8sha,
+cleanup-integrity и отрицательные контроли:31PASS/9.339с; finite42PASS, lifecycle45PASS.
+Исходная sourceprojection identity сохранена, source/297/wheel не изменялись.
+Первичные ошибки сборки/контролей сохранены; optionalGitwrites отключены.
+Новые реальные привязки всё ещё требуют независимого whole-review и materialization;
+старое одобрение не переносится. Lab552 реально приняла этот пакет01:47:59Z.
+Sol300 фактически активен; следующий цельный независимый Sol301review подготовлен,
+не отправлен до завершения300. Lab551 Coding завершила308проверок без отказов,
+whole-review и реальный consumer0.306с приняты/ACK. Готова новая команда владельцу
+на один30минутный rootadmit; --check прошёл, sudo требует интерактивный пароль.
+Подготовлен точный readonly_controller dispatch; live/model ещё не запускались.
+768МиБtmpfs остаётся подготовленным и требует точной rootcleanup после исполнения.
+Дополнение Astra518: Lab552 приняла whole/runtime517 (391проверка/0отказов)
+и запросила фактические новые планы. Неизменённый materializer выполнен один раз:
+5.674с/rc0/ECHILD, stderr пуст, исходники без изменений; native/full160 пока только
+с маркерами владения. Реальные планы переданы ANSWER552 02:06:12Z; лаборатория
+продолжила проверку их потребителей, допуска запуска пока нет.
+Sol300 получен:53ссылки/31файл проверены, точный PEER consumed; исполнитель
+Research реализован, configured/live NOT_RUN. Sol301 отправлен и реально работает
+над независимым ревью517. До дорогого Research-прогона выявлены сразу три дефекта
+его допуска: TypeError от dict в set, жёсткая старая511привязка, несовместимость
+с фактической схемой plan-review. Они сохранены единым пакетом в
+`ASTRA-518-sol300-admission-triage.json`; следующий связный repair после301.
+Подготовка Coding повторно подтверждена; rootliveadmission ещё отсутствует.
+Команда517 уже запрошена, повторять prepare511 или запрос пользователю не нужно.
+Дополнение Astra519: независимый Sol301 ACCEPT517,27проверок/0блокеров;
+36ссылок проверены, PEER точно consumed. Sol302 фактически выполняет цельный
+repair Research по всем трём дефектам допуска и соседним интерфейсам.
+Installed Obsidian:6уникальных scopedPASS, включая настоящуюSyncthing2.1.3,
+первичную настройку API, одноразовыйsetup-token, отказ остановленногоREST→перезапуск
+с прежнимdevice/profile, отмену/retry, авторизацию/изоляцию и чистое завершение.
+R1ошибка harness (убранHOME) сохранена; R2наследует исходныйHOME без изменения,
+скрывает его содержимое private mount и запускает4зависимых проверки:4PASS.
+Два процесса10.605с; source/sealedtree неизменны, owner103ECHILD/cleanup подтверждены.
+Парный Android/удалённая синхронизация/liveTG/model/полнаяH-приёмка не доказаны.
+Lab553review этих доказательств514+519 подготовлен локально, не отправлен до552terminal.
+Точный native517dispatch готов; Lab552FINAL/новыеconsumer-checks пока отсутствуют.
+Codingliveadmission по-прежнему отсутствует; действующий запрос владельцу не повторяется.
+Дополнение Astra520: Lab552 завершила737проверок без отказов: цельный пакет,
+точные планы и реальные потребители новых привязок приняты; RESULT получен и ACK.
+Native517 впервые выполнен на текущих байтах:3/3выбранных Word-сценария PASS,
+49.688с,3chat-submit/5modelHTTP; остальные245из248 честно NOT_RUN.
+34ссылки и все артефакты проверены; source/runtime/index неизменны, ECHILD,
+subreaper восстановлен, потомки собраны без принудительной остановки, lease освобождён.
+Это частичный native-результат; полный релиз не принят. Независимый review554 и
+настоящая inert-авторизация full160 подготовлены локально, не отправлены вперёд553.
+Lab553 фактически выполняет review Obsidian (executorACK02:31:19Z); Sol302 работает.
+Full160-root ещё содержит только marker; запуск ждёт независимого принятия native.
+Coding768МиБ-диск остаётся пустым; rootresource прежний, liveadmission отсутствует.
+Финальная дельта520: Lab553 приняла14локальных Obsidian-проверок,279контролей/0ошибок;
+46ссылок проверены, RESULT получен и ACK. Lab554 уже RUNNING и проверяет nativePASS
+с последующей inert-авторизацией full160. Sol302 получен:53ссылки/21файл,
+22контроля+12проверок пакета и настоящий отказ неверного review; configuredNOT_RUN.
+Все6причин допуска/schema/authority закрыты автором; независимая проверка у Астры.
+Sol303 фактически начал цельную подготовку AB400+часового исполнителя; тяжёлых запусков
+ему не поручено, модели/топология/пределы прежние. Full160 ещё NOT_RUN.
+Дополнение Astra521: независимый Lab554 принял native3 (423проверки/0ошибок),
+66ссылок аутентифицированы; настоящий inert-full160authorizer принят, RESULT ACK.
+Full160 выполнен один раз целиком:8проходов/160сценариев/параллелизм4 за139.544с.
+158PASS,2FAIL в SYN-A09-06 и SYN-A09-18: content_semantic_group_missing.
+P06:40/40PASS,2880нулевых ожиданий и1760tenant-полей точны. Все8evidence-хешей,
+исходники/runtime/index/приватность и очистка подтверждены;8потомков собраны,
+ECHILD/subreaper/lease проверены, без forcedkill. Первичный разбор допускает
+ложный отказ узкого A09-оракула; до независимого решения это гипотеза, RED не менять.
+Lab556 для независимого полного разбора подготовлен локально после текущего555.
+Root-reviewResearch302 выявил3реальных отрицательных контроли: ложный добор,
+утечка задачи/хука при таймауте отмены, продолжение после сбоя очистки с false-clear.
+Ещё3source-пробела: postcustody при ошибке child, искусственная restart-классификация,
+слабый conflict-oracle. Runtime ещё NOT_RUN; исправить весь набор перед живым запуском.
+Lab555 фактически RUNNING и проверяет все11маршрутов. Sol303 продолжает AB400+час.
+Короткий настоящий parser-probe Research:21Path,20внутриhome,host_agent_socket вне;
+дом/HTTPclient не создан, model/network0; configuredchain brave-html/duckduckgo/wikipedia.
+Это не доказательство wholeisolation или здоровья провайдеров. Полный baseline и релиз
+ещё не приняты; защищённая история, конфигурация, исходники и production сохранены.
+Дополнение Astra522: Lab555 завершила независимую диагностику327/0 и подтвердила
+3отрицательных контроли; объединила ещё8source/input-пробелов в один пакет Research.
+RESULT аутентифицирован и ACK; Sol304 фактически выполняет весь пакет исправлений,
+все11сценариев сохранены. Sol303 завершил подготовку AB400/час:54ссылки/16файлов
+проверены,7положительных+15отрицательных авторских контролей; whole-review ещё нужен,
+настоящие AB400/час не запускались. Очередь точного RESULT потреблена.
+Root522 вызвал неизменённый A09-оракул на7контролях: удаление одного «работы»
+из «режим работы системы» меняет FAIL18 наPASS; исходный RED неизменен.
+Lab556 приняла заявку с этими доказательствами после закрытия555; независимая
+классификация160 ещё нужна. Production/config/source неизменны, релиз не принят.
+Дополнение Astra523: root-проверка исполнителей303 объединила8причин отказа.
+За1.450с получены настоящие наблюдения: штатный B09 CLI под-I-B падает на импорте,
+явный bootstrap --help проходит; финализатор читает несуществующий верхний pair_clean;
+реальные552/554review не соответствуют новому общему predicate; canonicalhour
+отвергает фактический models.env с model_must_be_disabled. Контроли также выявили
+ложный зачёт alias-negative и cleanup_clear при uncertainty/fault_codes.
+Пробелы dispatch-authority/проверки байтов и последующей runtime/unit custody
+пока подтверждены разбором кода, без заявления о живом нарушении. Исходники неизменны,
+тяжёлые AB/hour не запускались. Следующий шаг — цельное исправление нового пакета,
+короткие реальные проверки, затем whole-review; дополнительный раунд лаборатории
+только ради уже заведомо сломанного303 не создавать. Sol304/Lab556 независимы.
+Дополнение Astra524: цельный новый пакет AB/hour исправлен и собран:24файла,
+9положительных+23точных отрицательных контроля;7реальных команд, включая9pytest
+и4CLI B09; настоящий isolated-hour context и2коротких owner103/Handoff процесса,
+включая сохранение terminal при ошибке проверки исходников. Прямой audit сначала
+не импортировал новый sibling под-I; ошибка сохранена, bootstrap исправлен,
+повторный точный audit и package verification PASS. Whole-приёмка у Lab558;
+тяжёлого AB/hour и релизного зачёта нет. Original303/source121/config неизменны.
+Lab556241/0 независимо подтвердила ложные отказы смысла A09; Lab557215/0 дала42
+семантических контроля (7FN/1FP, в том числе скобки с оставаясь открытой).
+Все42текста восстановлены по её опубликованным хешам без повторного задания.
+Оба RESULT приняты/ACK. Sol304 получен:79ссылок/49файлов, авторские30+14+3проверки,
+10исправлений+1недостающий набор настоящих входов; root-whole review следующий.
+Сол получил цельный A09 patch/test пакет305 в изолированной копии, без изменений
+original121 или подгонки модели. Full160 остаётся RED; цель и полный scope прежние.
+Текущий checkpoint: `/home/jericho/.jericho/grok-takeover/ASTRA-529-current-checkpoint.json`.
 
 ## Current production identity (verified 2026-09-15, Astra358)
 
@@ -57,6 +1278,175 @@ No old runtime result transfers to new candidate bytes. Keep historical ten mess
 current/fallback releases, golden DR evidence, backups and preimages protected.
 The old source and runtime summaries below are historical evidence, not renewed
 claims about current configuration or completion.
+
+### Current candidate checkpoint (Astra456, 2026-09-16)
+
+Candidate `139945b7504be03565cb31dce9bdb5830484df90` (`0.208.59`) passed
+the complete exact gate: 32,224 tests, including 94 UI tests. Its source was
+pushed and its immutable wheel installation built once. It has **not** been
+activated; production remains the verified `0.208.58` above.
+
+Candidate promotion is now held by actual installed backup-mirror failures.
+Owned fixtures demonstrated that existing corrupted plain and encrypted file
+and SQLite mirrors were skipped as successful; a corrupted content-addressed
+file source was also copied as successful. Production data was not accessed.
+Sol263 addressed the four earlier manifest, source-authority, symlink and
+hardlink defects. Astra independently ran 134 regression tests successfully,
+then rejected the package on two remaining fault boundaries: opening a named
+pipe can hang before file-type validation; a failed payload publication can
+replace the manifest of an existing valid recovery pair, leaving it inconsistent.
+The latter was reproduced for plain and encrypted backups; failures before
+manifest replacement preserved the pair. Sol264 supplied a frozen successor.
+Astra independently passed all 155 focused regression tests, seven real FIFO
+and regular-to-FIFO controls, and four plain/encrypted recovery-pair controls.
+The pair cases refuse an immutable-name conflict before either replacement;
+no injected-write credit is claimed. Evidence and pending qualification:
+`/var/tmp/astra439-mirror-independent-review/independent-review.json`.
+Both previously demonstrated faults were closed, but Lab506 rejected one remaining
+contract omission: existing-pair validation ignored actual decoded size. Astra440
+reproduced six plain/encrypted failures with two valid-pair positives, then corrected
+the shared size validation. All 163 focused regressions and 11 FIFO/pair controls
+passed, as did type checking. Lab507 accepted the frozen440 source contract. Its
+independent plain/encrypted matrix retained four child exit codes and source
+findings; the main driver terminal is absent and stderr excerpts are truncated,
+so no whole-driver or final-candidate execution credit is claimed. Frozen sources
+and reports remain preserved.
+Evidence: `/var/tmp/astra440-mirror-contract-review/proof.json`.
+
+The isolated `0.208.60` source candidate is frozen at commit
+`0c679873e7c9d24a19994cdc6199a043716c31ed`, after a real 24-case dense measurement
+on its code-identical parent. It is neither published nor activated. Ruff formatting
+was corrected in the integration copy, with exact AST identity to reviewed source;
+166 affected backup and current dense-receipt tests passed on the isolated final
+source, with no failures, errors or skips. Fresh canonical collection yielded
+32,295 nodes: 32,286 nonnightly, including 94 UI, plus nine nightly tests. All
+14,024 prior inventory policies remain unchanged; the 25 new functions and
+additional journal parameter are covered by actual collection. Source evidence:
+`/var/tmp/astra441-release115-evidence/source-package.json` and
+`targeted/observed.json` in the same evidence root. Sol266 independently accepted
+the final source and prepared the complete exact115 gate. Root verified the actual
+2,106-file census (2,082 tracked plus 24 Git files), all 58 referenced inputs and
+the unmodified static consumer. Lab509 independently accepted execution preparation,
+with complete external and child terminals. The actual full exact115 gate then
+failed: 32,187 non-UI tests passed and five failed; UI was not reached and no
+canonical success summary was produced. Source integrity and unforced process
+cleanup were preserved. Three release-document identity checks, an outdated exact
+inventory scratch total and a native worker thread-census assertion failed.
+Candidate116 `1387539a39e296b0a11acada50d47fcb24f384af` now combines those four
+preparation fixes with a native retirement-race repair. Root also corrected the
+first Sol269 patch's lost confirmation identity check. All 186 native tests and
+20 metadata/version/inventory checks passed; final isolated collection contains
+32,302 nodes (32,199 non-UI, 94 UI and nine nightly), with unchanged 54,634 MiB
+scratch policy. Source package: `/var/tmp/astra448-release116-evidence/source-package.json`.
+Root449 subsequently found a blocking mixed-thread case in116: one retired
+thread disappears during the second identity read, while another numeric TID is
+reused before the final census; the replacement is accepted without rechecking
+its identity. Proof: `/var/tmp/astra449-source-evidence-custody/third-census-blocker.json`.
+The earlier 206 focused passes do not override this counterexample. Candidate116
+is held before any full gate. Exact116 preparer270 was cancelled and its unstarted
+queue item safely deferred; Lab512 cancellation is confirmed and Lab513 was never
+submitted. Those cancelled generations must not be resumed.
+Lab511 did not reproduce115; no captured thread trace proves actual115 causality.
+Lab514 subsequently adjudicated the pre-stat ambiguity: absence at confirmation
+proves no remaining task, not historical identity of an already vanished task.
+That limitation does not block the stated remaining-task boundary; strict rejection
+of observed unknown/live/reused/missing/new tasks remains required. Root453 verified
+22 deterministic traces and the external terminal/streams. This is no final-source
+or release approval.
+Astra454 authenticated Sol271's completed R4 package, verified all 2,109 manifest
+entries and retained owned immutable evidence. Its independent source/evidence
+review passed; combined logs retain output but not separate stream identity.
+Candidate117 `abcfaad115a6c238d91ae14f822550cc0971b1f3` now combines that repair
+with the five metadata fixes and actual inventory refresh. Root made only a formatter
+change to native code, with exact AST equality to R4. All 187 native tests and 20
+metadata/version/inventory tests passed with full separate streams and process
+terminals. Fresh frozen-source collection contains 32,303 tests: 32,200 non-UI,
+94 UI and nine nightly; eight added parameters preserve every existing semantic
+inventory policy and the 54,634 MiB scratch total. Dense source/instrument bindings
+remain valid; the eventual canonical gate still performs its actual measurement.
+Source package: `/var/tmp/astra454-release117-evidence/source-package.json`.
+Lab515 independently approved final117 source; root456 authenticated its 23-test
+native run, 22 deterministic traces, full streams and external terminal. All 2,082
+tracked files still match; actual Git/domain census is 28/2,110, not old24/2,106.
+Astra461 authenticated Sol272's package: 70 pins and 43 captured artifacts, with
+static source/census checks passing. Its launcher nevertheless rejects the genuine
+Lab515 report (`SOURCE_REVIEW_IDENTITY`); four mismatches cover source fields,
+directory evidence, independent-test evidence and the root receipt schema/path.
+Sol273 repaired all four gaps using original515 and root456 evidence. Astra463
+authenticated 79 pins and captured 46 artifacts; the actual source-stage CLI and
+root source-acceptance consumer passed. All sixteen author controls and six external
+terminals were verified. Root source acceptance is issued; execution remains closed.
+Lab516 was never submitted and is obsolete. Independent Lab517 execution review is
+now submitted as `job_128ca965081c4b1bb9d9405bc146bc97`.
+No full gate, build, push or activation has occurred for117. Failed115
+and blocked116 remain frozen. Accepted267/265/434 mechanisms and268 projection
+require fresh final117 bindings and reviews. Production107 and main114 are unchanged.
+Astra455 prepared actual117 unbound build inputs and verified all 23 source-graph
+members plus seven unchanged helper implementations. Evaluating the old267 candidate
+predicates on actual117 confirmed three schema/count adaptations; the next whole
+postgate package must also separate Lab515 source authority from preparation.
+Evidence: /var/tmp/astra455-release117-readiness/input-manifest.json and
+consumer-shape-observation.json. No build or future approval is inferred.
+Root456 implemented the whole postgate-preparer draft with the candidate schema
+and separate source/preparer receipt checks. The actual candidate passed and twelve
+negative controls rejected; three CLI runs confirmed admission stays closed before
+output creation. Astra463 has now frozen the complete successor using real273/515
+bindings, the separate517 role and all five target-label corrections. Whole inert
+preflight passed, including actual existing consumer/loader fixtures; eight changed-
+area controls passed with their limited predicate coverage recorded. Source:
+`/var/tmp/astra463-release117-postgate-preparer`. Independent whole-source review275
+is queued for Sol's next native task boundary; it is independent of current274's
+result. No actual gate/caller/build credit is claimed.
+The root admission and external-terminal wrapper are prepared at
+`/var/tmp/astra463-gate-dispatch`; actual source bindings passed and four negative
+CLI cases refused before output creation. Genuine517 review/receipt, fresh resources
+and the complete validator still precede dispatch. Sol274 is assigned the separate
+postgate terminal/producer410 acceptance helper; it does not duplicate the renderer.
+The consumer repair and remaining admission work are recorded in the current
+checkpoint linked by `/home/jericho/.jericho/grok-takeover/ASTRA_RESTART_BRIEF.md`.
+
+
+
+Separately, Sol261 rejected the downstream modelcheck loader's second read of
+code after digest validation. Lab504 independently accepted the captured-byte
+successor's source; the authenticated receipt is
+`/home/jericho/.jericho/grok-takeover/ASTRA-436-lab504-received.json`.
+Its reported 87 assertions include metadata and evidence checks, with seven
+actual helper imports and nine negative controls. This is source acceptance;
+Lab504 did not deliver process transcripts for runtime acceptance. The previous
+rejection is retained. No source-only
+review or old runtime result supplies execution credit for a changed candidate.
+An additional installed114 fixture passed 23 assertions across local backup,
+CLI restore and a fresh process: graph/merge history and versions survived,
+unmerge preserved later edits, temporal/confidence filters and tenant refusal
+held. Evidence: `/var/tmp/astra436-installed114-graph-recovery/result.json`.
+Lab505 completed the isolated coding-source and uncertain-work recovery package
+and independently reviewed the FTS/graph evidence. Two exact source snapshots
+survived workspace loss and SQLite restore; corrupt archive and stale-attempt
+controls passed. The snapshots use distinct projects, and uncertain-work refusal
+was observed in a cancelled mission. These are partial diagnostics, with further
+process-evidence qualifications in
+`/home/jericho/.jericho/grok-takeover/ASTRA-438-lab505-received.json`.
+Cancelled Lab502 supplied no durable result and receives no credit.
+The reusable admission adapter also passed Astra's independent actual entry
+and terminal-consumer checks plus 16 negative controls. This accepts interface
+mechanics only; future candidate bindings and execution plans still need review.
+Actual canonical preintegration collection found 32,295 nodes: 32,286 non-nightly
+(32,192 non-UI and 94 UI), plus nine nightly. Canonical inventory write/check passed.
+The 25 new functions cover 61 new cases; the new Python module also adds one logging
+privacy parameter, which passed separately. All 14,024 existing function policies
+and budgets remain unchanged. New DB-test scratch accounting totals 3,463 MiB,
+conservatively budgeted once per function over its parameters. This is not measured
+peak usage or gate credit. Evidence:
+`/var/tmp/astra440-mirror-contract-review/inventory-integration.json`.
+Sol265's offline successor-preparer artifact is present; its native turn is still
+in progress and PEER receipt is not yet received. The actual source-manifest verifier
+passed for 18 files (17 reused sources plus the preparer), but independent code and
+future exact-binding acceptance are still required. Original114 remains held.
+
+After these packages are accepted, the successor needs its actual full test
+collection/inventory and resource declarations, mandatory change/exact gates,
+immutable build and the remaining installed/live/recovery acceptance above.
 
 ### Historical production snapshot before the 0.208.58 cutover
 
@@ -162,8 +1552,9 @@ deployed; the observation-bound consumed witness landed on live
 `0.208.51` assist and remains durable through live `0.208.57`. S5 40k lease
 and S6 recovery/browse paths stay live.
 
-The current live product acceptance queue is N1–N5; N6 TinyFish is planned
-after R10 under the 2026-09-08 owner intake below. N8 upstream adoption,
+The current live product acceptance queue is N1–N5; N6 TinyFish is the first
+work immediately after release 1.0 under the owner's 2026-09-17 priority update
+and the 2026-09-08 intake below. N8 upstream adoption,
 the existing N7 executor and the N9 Hermes addendum are scheduled for 1.0+,
 after RC acceptance; their
 intake does not expand the current R10 release criteria. F.11 `0.208.57` is live assist.
@@ -4856,10 +6247,15 @@ declare; `6536a2a8` ruff-format; `f9f7a656` isolated import probes;
       local 3.46.1. Not a deployed release.
 - [ ] F.2–F.6 product acceptance: source on this tree (calendar fixtures, research
       consume, TEST cgroup, coding oracle and reply-bound edits, mixed
-      consume). F.6 still needs real evidence preparation and durable
-      consumption through the common authorized publication path; its
-      current ledger is process-local. Live configured-model N2 acceptance is not
-      fabricated. Live on `0.208.57` including mixed-journey provider
+      consume). Candidate114 routes F.6 through `mixed_journey/runtime.py`:
+      source acquisition, the existing durable ingress uncertainty fence and
+      one authorized storage transaction for both conversation rows. The
+      process-local ledger in the older `consume.py` is not this runtime path.
+      Its four current runtime/replay/HTTP/Telegram test modules contributed
+      114 executed nodes to the passing exact114 gate; these isolated fixtures
+      do not close installed/live configured-model acceptance. Evidence:
+      `ASTRA-425-mixed114-source-gate-evidence.json`. Historical live on
+      `0.208.57` includes mixed-journey provider
       identity (`c8e245ea`).
 - [ ] F.7 real document delivery and recovery acceptance reopened by
       LIVE_OWNER API lab on unchanged `0.208.57`. The Markdown checklist
@@ -4940,12 +6336,14 @@ declare; `6536a2a8` ruff-format; `f9f7a656` isolated import probes;
       not rebind historical `0.208.1` registry receipts from this note.
 - [ ] F.8 existing cancellation/restart/idempotency contracts remain
       on this tree (`tests/test_turn_deadline_reliability.py`,
-      mixed-journey consume on `032bfb7a`/`60b08f2a`). Mixed consume
-      caller cancellation leaves a comparison task running on the inherited
-      source; event cancellation and success do not drain their children.
-      Astra's local repair requires independent review and release acceptance.
-      The process-local ledger is not durable restart proof. Existing installed
-      Telegram/HTTP restart evidence does not close this mixed-journey gap.
+      mixed-journey consume on `032bfb7a`/`60b08f2a`). Candidate114 runtime
+      tests cover owned cancellation cleanup, transaction rollback, source
+      reauthorization and reopening the file-backed Telegram inbox without
+      repeating generation. Accepted-but-uncertain delivery stays UNKNOWN.
+      These current source/gate observations are recorded in
+      `ASTRA-425-mixed114-source-gate-evidence.json`; they do not supply fresh
+      installed/live restart or delivery acceptance. The historical
+      process-local consume helper is not the production runtime's retry owner.
 - [x] F.9 N5 maintainability ratchet remains standing.
       `friday/agent_runtime/__init__.py` is 76_572 lines. F.6 added only
       thin dispatch there. No wholesale rewrite.
@@ -6137,6 +7535,15 @@ from already-durable identities. Telegram MIXED is PROJECTED-only.
 Primary and secondary share one operation identity. New modes compose
 existing primitives. Mixed-journey is not a registered organ.
 
+Candidate114 source update (2026-09-16): the runtime acquisition and common
+transaction path is integrated and covered by 114 executed nodes in the four
+runtime/replay/HTTP/Telegram modules of the passing exact114 gate. It reuses
+the ingress's durable uncertainty fence; the older process-local consume
+ledger is not its retry authority. This supersedes the source-integration
+status in the historical notes below, while all installed/live acceptance
+checkboxes remain open. No new test run or live credit is claimed. Evidence:
+`ASTRA-425-mixed114-source-gate-evidence.json`.
+
 - [ ] A real file + authorized archive + public web task produces a grounded
       comparison/table through the existing runtime and one final TEXT
       publisher (`friday/orchestration/mixed_file_archive_web_query.py`,
@@ -6204,9 +7611,11 @@ The directive's TF labels map to N6.0–N6.5 and optional N6.F; they are not a s
 Astra owns design, integration and release; Sol provides independent review;
 Grok's existing visible lab performs bounded evidence tasks when assigned.
 
-Execution window: **after the current R10 RC/1.0 acceptance package**, including
-its first full baseline, prioritized findings and release obligations. N6 is
-queued as a separate reversible N2 extension; it does not change the current RC
+Execution window: **first immediately after release 1.0**, ahead of N7, N8, N9
+and other 1.0+ work, by explicit owner instruction on 2026-09-17. The owner's
+external-search deferral above applies to current R10; unfinished search acceptance
+does not postpone this window. N6 is queued as a separate reversible N2 extension;
+it does not change the current RC
 scope, frozen052 instrument, sealed A/B sets or release gates. The present order
 is intake only. Code, owner-key use and rollout start when this package reaches
 that window. N6.1–N6.5 remain required queued work; optional N6.F does not block
@@ -7059,7 +8468,8 @@ record the owner required in this audit commit, not a failure dump):
 
 F.11 `0.208.57` is live assist. Mixed-journey consume provider identity
 is live (`c8e245ea`). The prior implementation hop is complete. N6 TinyFish
-is queued after current R10 acceptance; its implementation/live are NOT_RUN.
+is first immediately after release 1.0, ahead of other 1.0+ work; its
+implementation/live are NOT_RUN.
 Do not issue a no-product `0.208.58`. Live configured-model N2 acceptance is
 not fabricated.
 EXECUTE/RUN of uploaded programs stay fail-closed. Preserve the 05:25Z
@@ -7140,3 +8550,124 @@ After every production release update the source/live/fallback identities,
 health, completed package, active package, evidence rows and next order here.
 Never mark device-dependent or external-service observations complete from
 local tests. No other tracked file may become a mutable backlog or status log.
+
+Дополнение Astra525: Lab558 приняла весь пакет AB/hour524 и текущие привязки:
+468 проверок, 0 ошибок, 8 групп и24файла; это не разрешение AB/hour при красном160.
+Research304:6 фактически воспроизведённых дефектов наблюдений и7 связанных групп
+собраны в один пакет Sol306. Лаборатория559 отдельно готовит факты/ожидания
+всех11сценариев и честную готовность настоящих входов; работа идёт параллельно.
+Sol305 передал A09-патч; root подтвердил42примера, выявил4оставшихся варианта
+той же ошибки открытого состояния и исправил их в новом собственном снимке.
+Общий A09-пакет:264теста,42независимых примера,15дополнительных регрессий,
+ruff/format/diff/apply-check прошли. Независимое560подготовлено локально;
+в очередь пойдёт после559. Исходный121, Sol305, конфиг и индексы не изменены.
+Интеграция, новый candidate/gates/build и runtime-приёмка пока NOT_RUN.
+Артефакты: `ASTRA-525-research304-grouped-root-review.json`,
+`ASTRA-525-lab558-received.json`, `/var/tmp/astra525-a09-root-review/final.json`.
+
+Дополнение Astra526: подготовлен изолированный source122 R2/v0.208.61/schema50,
+commit `ebdbb5b3e8694c8c01b415dd3a4f61395c5199ef`, tree `1fd75e5c32651e1fd3cf66d1c65006cb8f8ffa6b`.
+Обнаружено до полного gate и исправлено рассогласование агрегата инвентаря:
+54_678 →54_683 МиБ; пять новых функций по1МиБ, старые бюджеты сохранены.
+Три теста потребителей инвентаря с отрицательными контролями PASS/1.318с;
+полная фактическая коллекция финального R2:32355/27.038с,14063функции/1132модуля,
+nonUI32252/UI94/nightly9. Снимок2083tracked+74git/150dirs, без неизвестных файлов и ссылок.
+Lab560 проверяет сохранённый первый122: A09/code/tests совпадают с R2, но его старый
+агрегат уже признан root неготовым; отдельная дельта R2 подготовлена для QUESTION
+того же job либо следующей проверки после RESULT/ACK. Изменять уже проверяемый
+снимок или переносить его приёмку на R2 автоматически запрещено.
+Lab559 получена/ACK:127проверок/0,11черновиков Research; genuine inputs0/11.
+Root установила, что все9 опубликованных сообщений пока не проходят mixed-cues;
+публичные RFC/Example данные пока не дают смыслового дополнения к Copper fixture.
+Это данные для доработки, не live-кредит. Sol306 продолжает цельный пакет Research.
+Полный gate/build/publish/live122 ещё NOT_RUN; production0.208.58 неизменён.
+Артефакты: `/var/tmp/astra526-source122-r2/delta.json`,
+`ASTRA-526-source122r2-review-delta.json`, `ASTRA-526-lab559-received.json`.
+
+Дополнение Astra527: до живого Research обнаружена утечка имени второго файла
+с завершающей точкой в публичный query (6из10вариантов, внешних запросов0).
+Root исправила2файла в отдельном источнике;173теста зависимостей PASS/9.642с,
+10регрессий, ruff/format/diff PASS. Lab561 независимо проверяет исправление.
+Согласованные11черновиков Research теперь относятся к JSON-профилю и RFC:
+66проверок фактического разбора PASS,10shape-admitted/1private-refused;
+это ещё не реальные авторизованные входы/живой прогон. Sol306 получен/109members,
+root пока выявила4ложных semantic PASS; продолжается весь разбор7групп одним пакетом.
+Lab560493/0 принята только по неизменным A09смысловым байтам; полный source-admission
+ограничен root: пропущенный агрегат уже исправлен вR2, новаяprivacyпочинка ещё не
+в финальном кандидате. СвободныйSol307 готовит цельныйsource122R3 и19gate-пакет,
+Lab561 — независимую privacy/data-проверку. Productsource/production неизменны.
+Артефакты: `/var/tmp/astra527-mixed-filename-repair/final.json`,
+`/var/tmp/astra527-research-fixtures-r2/final.json`,
+`/var/tmp/astra527-research306-root-review/observer-probes.json`.
+
+Дополнение Astra536: настоящий exact122R4 (02a69a52/.61) завершился RED за524с.
+Статика, сборка/чистая установка wheel и коллекция прошли; non-UI worker gw1
+упал SIGSEGV в SQLite при chronicle oracle[refusal_write], set_entity_time SELECT.
+20797 частичных PASS не являются gate-приёмкой; UI и последующие этапы не зачтены.
+Root установила отдельный дефект диагностики: xdist crash report when=???
+отвергается сборщиком даже для разрешённого nodeid;3коротких контроля воспроизвели.
+Очистка штатная, оставшихся принадлежащих прогону процессов нет, источник цел.
+Lab570 исследует причину SQLite; повторного тяжёлого запуска пока нет.
+Lab568 execution package и Lab569 postgate23/18 независимы и приняты только как код;
+реальный RED не даёт producer binding/сертификата/релизного кредита. До публикации
+нового postgate исправить оставшиеся source_package литералы8/1 (реальный delta13/6).
+Sol312 ведёт цельную интеграцию Research. S04:4различных текста/4факта связаны,
+3отрицательных входа отвергнуты; локальный HTTP fixture11/0, но live-кредит отсутствует.
+Владелец подтвердил: управляемого публичного сервера/домена нет. Реальный httpbingo
+дал пустой200, но нужный private redirect403 и длительный drip400; httpbin ConnectError.
+Три живых сценария публичных страниц остаются без подходящих входов; остальные
+обязательства не отменены. Source/production/config/пять защищённых pins не менялись.
+Артефакты: `/var/tmp/astra536-execution-dispatch/gate-failure-analysis.json`,
+`ASTRA-536-lab569-received.json`, `ASTRA-536-current-checkpoint.json`.
+
+Срез Astra536 перед завершением: RESULT Sol312 получен,142файла/40ссылок сверены,
+точный native item consumed.20контролей/0по отчёту;2реальных SQLite-case UNKNOWN,
+9NOT_RUN; root-приёмка всей цепочки ещё впереди. Солу313 отправлен цельный пакет
+исправления аварийных отчётов gate с настоящим коротким xdist crash-контролем;
+ENQUEUED, начало пока не подтверждено. Lab570 — причина SQLite, Astra — Research312
+и интеграция. Полный gate повторно не запускался.
+
+Дополнение Astra537: исправление факта536 — _graph.py:3156 выполняет INSERT
+INTO entity_time; предшествующий visibility SELECT уже прошёл. Lab570 получен
+и ACK: причина UNKNOWN, воспроизведения не было. Полный исходный stderr содержит
+C-стек SQLite; короткий фрагмент536 его не включал. Коррекция и ссылки:
+`/var/tmp/astra537-research312-root-review/sqlite-location-correction.json`.
+Sol313 получен (34 ссылки проверены), root приняла код обработки аварийных
+отчётов для общей интеграции: настоящий короткий xdist-контроль остаётся RED,
+сохраняет точный node/worker и штатно очищается; вторичная ошибка устранена.
+Новый candidate/полный gate ещё не выполнялись. Root-review:
+`/var/tmp/astra537-sol313-root-review/review.json`.
+В Research312 воспроизведены две ошибки допуска: локальный self-review без
+native receipt принимается; CONTROL можно ошибочно пометить FULL_CONFIGURED.
+Патч двух файлов прошёл13коротких проверок; весь пакет ещё не принят.
+Сол314 фактически работает над цельным исправлением и исполняемыми регрессиями;
+`/var/tmp/astra537-research312-root-review/review.json` — точные доказательства.
+Владелец сообщил о повторной остановке гвардом. По журналу Астры09:31:02Z и
+09:42:07Z — possible cybersecurity risk без конкретного действия/причины.
+Новые эксперименты по воспроизведению SQLite не запускались, Lab571 не отправлен;
+не повторять отклонённое действие, не переносить его другому исполнителю ради обхода.
+Независимая проверка кода допустима; защита, модели и production не менялись.
+Текущий снимок: `ASTRA-537-current-checkpoint.json`; все обязательства сохранены.
+
+Дополнение Astra538: закрыта причина неверного admin preview при одинаковом
+времени сообщений. В приватном снимке источник02a + принятый Sol313 + порядок
+created_at,rowid, совпадающий с thread. Два реальных регрессионных сценария на
+старом коде FAIL (показывается earlier вместо latest); после исправления все10
+проверок storage/API PASS, без skips/errors, очистка штатная ECHILD.
+Исправлено также браузерное ожидание, закреплявшее устаревший user preview вместо
+последнего ответа assistant; само браузерное выполнение ещё NOT_RUN.
+В общий пакет вошли7изменённых файлов,4новых function rules/10nodes, +18МиБ
+scratch;14064старых rules сохранены. Фактическая коллекция4модулей94nodes целиком
+классифицирована на окончательных байтах;3проверки inventory PASS. Это частичная
+проверка: полного нового collection/gate/нового commit/релиза ещё нет.
+Снимок `/var/tmp/astra538-source-batch-preparation/source-batch.json` передан
+Lab572 job_d12842dccda34c07a618bce5a713349b на независимое source-only ревью;
+настоящий executor ACK10:02:22Z, deadline10:22:22Z. SQL crash-пробы не передавались.
+Отдельно подготовлен патч metadata postgate: оба числовых поля и текст delta
+теперь используют проверенный previous-release delta вместо старых8/1; текущий
+122r4 имеет13/6.13коротких unit-проверок PASS, включая отказ неверных чисел и
+идентичности. `/var/tmp/astra538-postgate-metadata-repair/final.json` — PATCH_ONLY,
+не новый исполнитель; прежний535 не менялся, будущая полная перепривязка обязательна.
+Sol314 фактически продолжает цельный Research-пакет; новая TASK не дублировалась.
+SQLite native crash остаётся UNKNOWN; запрещённого повтора/обхода гварда не было.
+Все обязательства F.0–F.11 сохранены; production/config/5защищённых pins неизменны.

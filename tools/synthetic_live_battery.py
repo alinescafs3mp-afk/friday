@@ -5768,19 +5768,15 @@ _A09_06_FAULT_PREDICATE = (
     r"(?:сломается|откажет|да[её]т\s+сбой|даст\s+сбой|перестанет\s+отвечать|"
     r"(?:выйдет|вышел|вышла|вышло)\s+из\s+строя|упад[её]т)"
 )
-_A09_06_FAULT_EXPLANATION = (
-    r"(?:\s*:\s*(?:упад[её]т\s+сервис|закончится\s+память|пропад[её]т\s+сеть|"
-    r"прид[её]т\s+кривой\s+ввод)"
-    r"(?:(?:,\s*|\s+или\s+)(?:упад[её]т\s+сервис|закончится\s+память|"
-    r"пропад[её]т\s+сеть|прид[её]т\s+кривой\s+ввод)){0,4})?"
-)
-_A09_06_FAULT_EXAMPLE_PART = r"(?:сервер|диск|сеть|база\s+данных|хранилище|процесс)"
+_A09_06_FAULT_EXAMPLE_PART = r"(?:сервер|сервис|диск|сеть|связь|база\s+данных|хранилище|процесс)"
 _A09_06_FAULT_EXAMPLE = (
     # An example list may mix event forms, including the already accepted
     # colloquial typo. Keep every item bound to a concrete failing component.
-    rf"(?:упад[её]т\s+сервер|отвалит\s+{_A09_06_FAULT_EXAMPLE_PART}|"
-    r"(?:оборв[её]тся|прерв[её]тся|пропад[её]т)\s+сеть|"
-    r"закончится\s+(?:диск|память|место\s+на\s+диске))"
+    rf"(?:упад[её]т\s+(?:сервер|сервис|процесс)|"
+    rf"отвалит\s+{_A09_06_FAULT_EXAMPLE_PART}|"
+    r"(?:оборв[её]тся|прерв[её]тся|пропад[её]т)\s+(?:сеть|связь)|"
+    r"закончится\s+(?:диск|память|место\s+на\s+диске)|"
+    r"прид[её]т\s+кривой\s+ввод)"
 )
 _A09_06_FAULT_EVENT_EXAMPLES = (
     rf"{_A09_06_FAULT_EXAMPLE}"
@@ -5794,10 +5790,12 @@ _A09_06_FAULT_TYPO_EXAMPLES = (
     rf"отвалит\s+{_A09_06_FAULT_EXAMPLE_PART}"
     rf"(?:(?:,\s*|\s+(?:и|или)\s+){_A09_06_FAULT_EXAMPLE_PART}){{0,4}}"
 )
-_A09_06_FAULT_EXAMPLES = (
-    rf"(?:\s+\((?:например,?\s+)?(?:{_A09_06_FAULT_EVENT_EXAMPLES}|"
-    rf"{_A09_06_FAULT_TYPO_EXAMPLES}|{_A09_06_BARE_PART_EXAMPLES})\))?"
+_A09_06_FAULT_LIST = (
+    rf"(?:{_A09_06_FAULT_EVENT_EXAMPLES}|{_A09_06_FAULT_TYPO_EXAMPLES}|"
+    rf"{_A09_06_BARE_PART_EXAMPLES})"
 )
+_A09_06_FAULT_EXPLANATION = rf"(?:\s*(?::|[—–-])\s*(?:например,?\s+)?{_A09_06_FAULT_LIST})?"
+_A09_06_FAULT_EXAMPLES = rf"(?:\s+\((?:например,?\s+)?{_A09_06_FAULT_LIST}\))?"
 _A09_06_OWNED_FAULT = (
     rf"(?:(?:если|когда)\s+(?:"
     rf"{_A09_06_FAULT_PART}{_A09_06_PART_EXAMPLES}\s+{_A09_06_FAULT_PREDICATE}"
