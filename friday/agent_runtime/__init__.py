@@ -19907,7 +19907,14 @@ def _filename_clue_is_non_file_action_scope(value: str) -> bool:
     """Reject a closed non-file locator before approximate filename lookup."""
 
     normalized = stem(value, min_input=4).casefold().replace("ё", "е")
-    return _filename_clue_is_web_scope(value) or normalized in {"граф", "graph"}
+    return _filename_clue_is_web_scope(value) or normalized in {
+        "архив",
+        "archive",
+        "памят",
+        "memory",
+        "граф",
+        "graph",
+    }
 
 
 def _filename_clue_request(message: str) -> _FilenameClueRequest | None:

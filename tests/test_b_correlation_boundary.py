@@ -86,14 +86,24 @@ def test_real_approximate_filename_navigation_is_preserved() -> None:
     pair = _filename_clue_request("Скажи, Цветков Никита Андреевич с АК-74 №609416 — БПЛА штат, он там есть?")
     natural = _filename_clue_request("я раньше присылал файл, в alias666 посмотри что внутри")
     explicit_graph_name = _filename_clue_request("я раньше загружал файл, в графе посмотри что внутри")
+    explicit_archive_name = _filename_clue_request("я раньше загружал файл, в архиве посмотри что внутри")
+    explicit_memory_name = _filename_clue_request("я раньше загружал файл, в памяти посмотри что внутри")
 
     assert pair is not None and pair.display_clue == "БПЛА штат"
     assert natural is not None and natural.display_clue == "alias666"
     assert explicit_graph_name is not None and explicit_graph_name.display_clue == "графе"
+    assert explicit_archive_name is not None and explicit_archive_name.display_clue == "архиве"
+    assert explicit_memory_name is not None and explicit_memory_name.display_clue == "памяти"
 
 
 def test_non_file_action_scopes_do_not_claim_file_selection() -> None:
     for question in (
+        "Найди в архиве протокол проекта Север примерно за середину мая 2026 года",
+        "Найди в архиве именно предыдущую записку",
+        "Найди из архива протокол проекта Север",
+        "Найди в archive project protocol",
+        "Найди в памяти протокол проекта Север",
+        "Найди в memory project protocol",
         "Найди в графе событие",
         "Найди в интернете свежие новости",
         "В интернете найди, я кидал уже",
