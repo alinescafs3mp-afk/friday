@@ -1,8 +1,8 @@
 {
   "historical_evidence_sha256": "472c036d021be31d59f07a6d89448f7da282f36ce80a9093e5cc5c5075995eea",
   "instrument_sha256": "fd489c05b86f680b5cb29b150284add6f025099f59deb048ad1aa0bd8a2c08ec",
-  "observed_source_commit": "06e463711f5100b4a9c79b94f9075346e392946b",
-  "release_sha256": "2cb6196c20c79acc7639c15e7573fca5186ff7340e07ae8ee2997b3f76dc7850",
+  "observed_source_commit": "1a42e1eef3bd14a6865a239a53eba3e1a38bbec0",
+  "release_sha256": "6c6e90d454d415a171e6a0766781143ed49fa244aecca43b2761d64e23b87e2b",
   "schema": "friday.document-dense-recall.current-candidate.v1",
-  "stable_envelope_sha256": "a055b08507e2a43f2cf98e647343ee0ae3623cb3d5912e79dbb6ba27412690d2"
+  "stable_envelope_sha256": "2fd9931f85965ebb3fa0b55c2f28585e5a0b544d98b6a145520c263cb16c5293"
 }

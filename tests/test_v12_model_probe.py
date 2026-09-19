@@ -1044,10 +1044,18 @@ async def test_deadline_remains_bounded_when_client_suppresses_the_first_cancell
     client = _Client()
     client.block_plan = True
     client.ignore_first_plan_cancellation = True
+    case = PLAN_PROBE_CASES[0]
+    owned = asyncio.create_task(client.complete_plan(case, absolute_deadline=time.monotonic() + 1))
+    await asyncio.wait_for(client.plan_started.wait(), timeout=0.2)
     started = time.monotonic()
 
     with pytest.raises(ModelProbeError) as raised:
-        await _run(client, deadline=time.monotonic() + 0.02)
+        await model_probe_module._bounded_call(
+            lambda: owned,
+            deadline=time.monotonic() + 0.02,
+            ceiling=model_probe_module.PLAN_CASE_TIMEOUT_SEC,
+            failure=ModelProbeFailure.PLAN_CALL_FAILED,
+        )
 
     elapsed = time.monotonic() - started
     assert raised.value.code is ModelProbeFailure.DEADLINE_EXHAUSTED
@@ -1057,8 +1065,7 @@ async def test_deadline_remains_bounded_when_client_suppresses_the_first_cancell
     # Python cannot force-kill a coroutine which swallows CancelledError.  Let
     # this test double finish so the callback-owned result is also exercised.
     client.release_hostile_plan.set()
-    await asyncio.sleep(0)
-    await asyncio.sleep(0)
+    assert await asyncio.wait_for(owned, timeout=0.2) == _plan_response(case)
 
 
 @pytest.mark.asyncio
