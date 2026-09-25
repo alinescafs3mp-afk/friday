@@ -1,6 +1,6 @@
 # Friday: canonical project backlog
 
-Updated: 2026-09-18 (last verified production `0.208.58`; canonical DR restoration, rollback and generation publication completed in Astra358; final R10/F.0–F.11 acceptance incomplete. N6 TinyFish is the first work after release 1.0, ahead of N7, N8 upstream adoption V5 and N9 Hermes; historical S3 witness preserved; Pandora unchanged.)
+Updated: 2026-09-21 (last verified production `0.208.58`; canonical DR restoration, rollback and generation publication completed in Astra358; final R10/F.0–F.11 acceptance incomplete. Postrelease order: N6 TinyFish first, then the Agent Zero V6 first slice inside N8, then other independent N7/N8/N9 work by dependency; historical S3 witness preserved; Pandora unchanged.)
 
 This is the project's only backlog and mutable status register. It owns the
 current production identity, execution order, acceptance gaps and owner actions.
@@ -16,17 +16,20 @@ The 2026-09-03 post-backlog audit snapshot (`main` `43a16c8b`, source
 live host, the laptop or Telegram. Do not copy historical release claims
 forward or treat a source correction as a deployed release.
 
-## Ближайшая очередь: релиз 1.0 → N6 TinyFish (владелец, 2026-09-17)
+## Ближайшая очередь: релиз 1.0 → N6 TinyFish → Agent Zero V6 (владелец, 2026-09-21)
 
 1. Завершить выпуск 1.0 с согласованным ниже исключением для внешнего веб-поиска.
 2. **Сразу после 1.0 первым взять N6 TinyFish Search**, чтобы восстановить внешний
-   поиск. N6 стоит перед N7, N8, N9 и остальными задачами 1.0+.
-3. Затем продолжать остальной бэклог 1.0+ с его существующими зависимостями.
+   поиск.
+3. **Сразу после принятого N6 выполнить первый Agent Zero V6 срез внутри N8**:
+   реальная серверная автономная задача через существующий Engineer route.
+4. Затем продолжать независимый бэклог N7/N8/N9 с его существующими зависимостями.
 
 Этот порядок задан владельцем и сохраняется после compact, resume и перезапуска.
-Подробный scope и обязательная приёмка остаются в единственном пункте N6 ниже.
-Приоритет не означает готовность TinyFish или уже работающий поиск; реализация
-и live-проверки N6 ещё NOT_RUN. TinyFish не становится блокером выпуска 1.0.
+Подробный scope и обязательная приёмка остаются в пунктах N6 и N8.AZ ниже.
+Приоритет не означает готовность TinyFish, Agent Zero V6 или уже работающий поиск;
+их production/live-проверки ещё NOT_RUN. Ни N6, ни Agent Zero V6 не становятся
+блокером выпуска 1.0.
 
 ## Исключение для релиза 1.0: внешний веб-поиск (владелец, 2026-09-17)
 
@@ -2920,7 +2923,7 @@ Astra suite revision `r10-astra-harness-065`, isolated from product repairs:
   Source1997,19 indexes and13 evidence pins verified. Lab025 independently
   ACCEPTed this source, retained executions/classification and three new bindings;
   all17 review pins verified and RESULT acknowledged. Still outside067.
-  OPEN `R10-PROBE-CLI-DOCUMENT-DATES-LIMIT`: real
+  CLOSED-RECONCILED `R10-PROBE-CLI-DOCUMENT-DATES-LIMIT` (2026-09-23, ledger ASTRA-2537; LAB-732 ACCEPT: oracle GREEN on candidate 34b6770, repair already in ancestor b5c616ec; original FIRST evidence preserved): real
   `backfill-document-dates --user OWNER --batch 200 --limit 1` updates three
   owned documents because the limit is checked only after the fetched batch.
   Keep the required expected-pass oracle and both original/repaired results.
@@ -2940,7 +2943,7 @@ Astra suite revision `r10-astra-harness-065`, isolated from product repairs:
   write failure rolls back the complete component with a sanitized error.
   Lab026 independently ACCEPTed source/run/oracle repair and four new bindings;
   all18 review pins verified and RESULT acknowledged. Original failures retained.
-  OPEN `R10-PROBE-CLI-ENTITY-BACKFILL-LIMIT`: `backfill-entities --apply`
+  CLOSED-RECONCILED `R10-PROBE-CLI-ENTITY-BACKFILL-LIMIT` (2026-09-23, ledger ASTRA-2537; LAB-732 ACCEPT: oracle GREEN on candidate 34b6770, repair already in ancestor b5c616ec; original FIRST evidence preserved): `backfill-entities --apply`
   with `--batch 200 --limit 1` creates three entities instead of one. This is the
   same batch-limit defect class in a separate handler; fix after full baseline.
   Private provisional068 composes the ten accepted new CLI bindings and five
@@ -2975,11 +2978,11 @@ Astra suite revision `r10-astra-harness-065`, isolated from product repairs:
   through a scripted chat boundary, real disabled-model refusal and learn/rebuild.
   Actual model/transport/live execution and global dictionary tenant isolation
   are not claimed. Source1997,19 indexes and13 evidence pins verified.
-  OPEN `R10-PROBE-CLI-RETAG-LIMIT`: batch200/limit1 retags three owned documents.
-  OPEN `R10-PROBE-CLI-RETAG-EXCEPTION-OUTPUT`: the CLI prints a model exception's
+  CLOSED-RECONCILED `R10-PROBE-CLI-RETAG-LIMIT` (2026-09-23, ledger ASTRA-2537; LAB-733 ACCEPT: all three roots already closed in candidate by ancestor b5c616ec; ASTRA-001 package authenticated, oracle 12x2 GREEN byte-identical to Lab028 collection; original FIRST preserved): batch200/limit1 retags three owned documents.
+  CLOSED-RECONCILED `R10-PROBE-CLI-RETAG-EXCEPTION-OUTPUT` (2026-09-23, ledger ASTRA-2537; LAB-733 ACCEPT: all three roots already closed in candidate by ancestor b5c616ec; ASTRA-001 package authenticated, oracle 12x2 GREEN byte-identical to Lab028 collection; original FIRST preserved): the CLI prints a model exception's
   contents verbatim to stderr, including a synthetic credential canary in this
   test; no production-secret exposure has been measured.
-  OPEN `R10-PROBE-CLI-RETAG-REPORT-ERROR`, independently confirmed as a product defect:
+  CLOSED-RECONCILED `R10-PROBE-CLI-RETAG-REPORT-ERROR` (2026-09-23, ledger ASTRA-2537; LAB-733 ACCEPT: all three roots already closed in candidate by ancestor b5c616ec; ASTRA-001 package authenticated, oracle 12x2 GREEN byte-identical to Lab028 collection; original FIRST preserved), independently confirmed as a product defect:
   symlink/directory report targets raise uncaught OSError/IsADirectoryError instead
   of the asserted CLI input-error exit2. Later preservation assertions were not
   reached; do not claim verified failure cleanup or archive preservation.
@@ -2990,7 +2993,7 @@ Astra suite revision `r10-astra-harness-065`, isolated from product repairs:
   preserve expected-pass failures and defer product fixes until full baseline.
   Separate import/purge CLI FIRST18 measured15 PASS/3 FAIL, no errors/skips
   (`46999f6230a285a14cff983e8ef79eedeced91836fcfbeba9420b826fe12d0e3`).
-  OPEN `R10-PROBE-CLI-IMPORT-RESUME-PREFIX`: with20 already-imported sorted files,
+  CLOSED-RECONCILED `R10-PROBE-CLI-IMPORT-RESUME-PREFIX` (2026-09-23, ledger ASTRA-2537; LAB-732 ACCEPT: oracle GREEN on candidate 34b6770, repair already in ancestor b5c616ec; original FIRST evidence preserved): with20 already-imported sorted files,
   adding a new21st file then repeating `import --limit 1` reports success/new0/
   duplicates20 and never reaches the new file. Small2-file prefix resumes correctly.
   The fixed20x plan ceiling prevents the advertised resumable batch from advancing;
@@ -3022,13 +3025,13 @@ Astra suite revision `r10-astra-harness-065`, isolated from product repairs:
   failure, two-vote confirm/reject/unsure/disagreement, actual accepted relation
   endpoints, terminal repeat, private0600 provenance report, review limit1 and
   structural rejection without a model call. No actual model/transport/live credit.
-  OPEN `R10-PROBE-CLI-STRUCTURE-LIMIT`: `extract-structure-relations --batch 50
+  CLOSED-RECONCILED `R10-PROBE-CLI-STRUCTURE-LIMIT` (2026-09-23, ledger ASTRA-2537; LAB-732 ACCEPT: oracle GREEN on candidate 34b6770, repair already in ancestor b5c616ec; original FIRST evidence preserved): `extract-structure-relations --batch 50
   --limit 1 --apply` scans three owned documents and calls the arbiter three times;
   batch1 control passes. Foreign/unrelated tables preserved before failed bound.
-  OPEN `R10-PROBE-CLI-RELATION-REVIEW-EXCEPTION-REPORT`: on a scripted RuntimeError,
+  CLOSED-RECONCILED `R10-PROBE-CLI-RELATION-REVIEW-EXCEPTION-REPORT` (2026-09-23, ledger ASTRA-2537; LAB-732 ACCEPT: oracle GREEN on candidate 34b6770, repair already in ancestor b5c616ec; original FIRST evidence preserved): on a scripted RuntimeError,
   CLI returns1 and preserves the graph but writes its synthetic credential canary
   verbatim into the private JSONL report. No actual production-secret leak measured.
-  OPEN `R10-PROBE-CLI-RELATION-REVIEW-REPORT-ERROR`: symlink/directory targets cause
+  CLOSED-RECONCILED `R10-PROBE-CLI-RELATION-REVIEW-REPORT-ERROR` (2026-09-23, ledger ASTRA-2537; LAB-732 ACCEPT: oracle GREEN on candidate 34b6770, repair already in ancestor b5c616ec; original FIRST evidence preserved): symlink/directory targets cause
   uncaught ELOOP/IsADirectoryError instead of required input-error exit2. Two failed
   nodes; later canary/archive/lease assertions are not reached and earn no credit.
   These four failed nodes have three product roots; Lab032 independently ACCEPTed
@@ -3050,7 +3053,7 @@ Astra suite revision `r10-astra-harness-065`, isolated from product repairs:
   class instead of private error codes; original evidence remains immutable.
   Repaired FIRST9 is8 PASS/1 PRODUCT FAIL/0 errors/skips
   (`42e6a097f1d2cb197d847459c1dc096132dc15d4bf2033b2da8b169c2de0e1f7`).
-  OPEN `R10-PROBE-CLI-COMMAND-KEY-SYMLINK`: provision with a symlink key raises
+  CLOSED-RECONCILED `R10-PROBE-CLI-COMMAND-KEY-SYMLINK` (2026-09-23, ledger ASTRA-2537; LAB-732 ACCEPT: oracle GREEN on candidate 34b6770, repair already in ancestor b5c616ec; original FIRST evidence preserved): provision with a symlink key raises
   uncaught OSError ELOOP from O_NOFOLLOW open instead of graceful input-error exit2.
   Later no-create/canary/archive assertions are not reached; no cleanup credit.
   Eight passing nodes verify actual CLI provision, private modes, authenticated
@@ -3135,7 +3138,7 @@ Astra suite revision `r10-astra-harness-065`, isolated from product repairs:
   Root applied only equivalent lint changes before FIRST, retaining original
   source and normalized-AST proof. FIRST5=4 PASS/1 PRODUCT FAIL/0errors/skips
   (`3013a916b7f1de252389153c5648067cacf641b15ec8c80cdb3f65c6690b425d`).
-  OPEN `R10-PROBE-CLI-TUI-FAILED-AUTOSAVE-EXEC`: real atomic save refusal leaves
+  CLOSED-RECONCILED `R10-PROBE-CLI-TUI-FAILED-AUTOSAVE-EXEC` (2026-09-23, ledger ASTRA-2537; LAB-732 ACCEPT: oracle GREEN on candidate 34b6770, repair already in ancestor b5c616ec; original FIRST evidence preserved): real atomic save refusal leaves
   settings dirty, but _loop still returns START_BACKEND and actual CLI reaches
   _exec_up/execvp. Test captures forbidden exec; no backend is really launched.
   Keep expected-pass failure until post-baseline repair. Later q/error-display/
@@ -3155,7 +3158,7 @@ Astra suite revision `r10-astra-harness-065`, isolated from product repairs:
   use local MockTransport for getMe/setMyCommands and three endless loops are gated.
   Passing paths cover normal/error loop exit, second-client construction failure,
   client/task/queue/lease cleanup, held-lease refusal and three invalid configurations.
-  OPEN `R10-PROBE-CLI-BRIDGE-CA-STARTUP-CLEANUP`: invalid owned CA escapes before
+  CLOSED-RECONCILED `R10-PROBE-CLI-BRIDGE-CA-STARTUP-CLEANUP` (2026-09-23, ledger ASTRA-2537; LAB-732 ACCEPT: oracle GREEN on candidate 34b6770, repair already in ancestor b5c616ec; original FIRST evidence preserved): invalid owned CA escapes before
   run's cleanup finally; after actual refusal the opened inbox instance remains.
   Later direct SQLite-close and lease-release/reacquisition assertions are unreached;
   underlying handle/lease retention is source inference, not additional measured
@@ -3169,7 +3172,7 @@ Astra suite revision `r10-astra-harness-065`, isolated from product repairs:
   bounded window; no wake performed and owner's parallel assignment respected.
   New server startup FIRST3=1 PASS/2 PRODUCT FAIL/0errors/skips
   (`25f06a703ba723907dd20a9972c77a55dc8b5c39e2e8d6ba50dd49e828606d2f`).
-  OPEN `R10-PROBE-SERVER-PREYIELD-STORAGE-CLEANUP`: Workers.start or MCP.start
+  CLOSED-RECONCILED `R10-PROBE-SERVER-PREYIELD-STORAGE-CLEANUP` (2026-09-23, ledger ASTRA-2537; LAB-732 ACCEPT: oracle GREEN on candidate 34b6770, repair already in ancestor b5c616ec; original FIRST evidence preserved): Workers.start or MCP.start
   failure unwinds the backend role before permanently closing storage. Both
   measured failure snapshots show final=False, two registered SQLite connections
   still answering SELECT1, lease_active=False, before any assertion or fallback.
@@ -3186,7 +3189,7 @@ Astra suite revision `r10-astra-harness-065`, isolated from product repairs:
   normal-control pause until actual Supervisor.stop, avoiding an exit/handle race.
   All other AST exact. Actual Supervisor FIRST3=1 PASS/2 PRODUCT FAIL/0errors/skips
   (`71d7cd928448a34cf3b8bf8f7eea0847c0b2d8c17af34dd2750590ed990884b6`).
-  OPEN `R10-PROBE-SUPERVISOR-INITIAL-START-CLEANUP`: first missing Popen leaves
+  CLOSED-RECONCILED `R10-PROBE-SUPERVISOR-INITIAL-START-CLEANUP` (2026-09-23, ledger ASTRA-2537; LAB-732 ACCEPT: oracle GREEN on candidate 34b6770, repair already in ancestor b5c616ec; original FIRST evidence preserved): first missing Popen leaves
   its log open; second missing Popen leaves the already started child running.
   These are two nodes of one cleanup root. Later second-node group/log assertions
   are unreached. Normal SIGTERM stop passes; exact owned fallback runs only after
@@ -3235,7 +3238,7 @@ Astra suite revision `r10-astra-harness-065`, isolated from product repairs:
   (`f7b2f2ec0c3fe1a35a1ca0c783849ddffdb1819f55bdc2851735f487600e6099`),
   25.73s outer0/group absent;2008 source files/25 indexes/13 evidence pins verified.
   Original and intermediate results are retained unchanged.
-  OPEN `R10-PROBE-REENRICH-RESPONSE-VERSION-LINK-DIVERGENCE`: applying enrichment
+  CLOSED-RECONCILED `R10-PROBE-REENRICH-RESPONSE-VERSION-LINK-DIVERGENCE` (2026-09-23, ledger ASTRA-2537; LAB-732 ACCEPT: oracle GREEN on candidate 34b6770, repair already in ancestor b5c616ec; original FIRST evidence preserved): applying enrichment
   returns item.entity_id=None, while the committed row already contains ent_*.
   Two previews were identical/effect-free; apply returned nonempty graph_links.
   Version/lineage/audit/repeat assertions after the response-equality failure remain
@@ -3303,7 +3306,7 @@ Astra suite revision `r10-astra-harness-065`, isolated from product repairs:
   Mission start/research-candidate HTTP FIRST26 now has24PASS/2PRODUCT,0errors/skips
   (`76f0fcd82f83fd7c8b9ea8577d3bd4e0cca4a52650dcaa5e626a60c2057f0786`),
   21.77s outer0/group absent;2014 source files/25 indexes/13 evidence pins exact.
-  OPEN `R10-PROBE-MISSION-START-SHARED-AUDIT-ACTOR`: in a shared archive, starting
+  CLOSED-RECONCILED `R10-PROBE-MISSION-START-SHARED-AUDIT-ACTOR` (2026-09-23, ledger ASTRA-2537; LAB-732 ACCEPT: oracle GREEN on candidate 34b6770, repair already in ancestor b5c616ec; original FIRST evidence preserved): in a shared archive, starting
   either person- or agent-authored missions as Alice records the archive owner
   as the audit actor. Exact ready/version/error response and stored transition,
   preserved tasks/data and audit action/target pass before the actor assertion;
@@ -3344,7 +3347,7 @@ Astra suite revision `r10-astra-harness-065`, isolated from product repairs:
   without changing assertions or product code. FIRST8 now has7PASS/1PRODUCT
   (`ee162d2183513f6f480f53d160d9fb64c2d76d67350e02f2e6e3facdd5808f43`),
   10.69s outer0/group absent;2013 source files/25 indexes/13 evidence pins exact.
-  OPEN `R10-PROBE-OPERATOR-BACKUP-WITNESS-DECOY-FALSE-POSITIVE`: actual purge/replay,
+  CLOSED-RECONCILED `R10-PROBE-OPERATOR-BACKUP-WITNESS-DECOY-FALSE-POSITIVE` (2026-09-23, ledger ASTRA-2537; LAB-732 ACCEPT: oracle GREEN on candidate 34b6770, repair already in ancestor b5c616ec; original FIRST evidence preserved): actual purge/replay,
   exact ordinary backup rows and safe audit lineage pass, but release operator
   `_exact_sqlite_backup` raises `backup_active_secondary_product_witness` for
   surviving unmarked same-owner manual/foreign API decoys. Its guard matches only
@@ -4724,14 +4727,18 @@ Astra suite revision `r10-astra-harness-065`, isolated from product repairs:
 - Required baseline edge probes remain queued, not waived by narrow positive
   cases: `R10-PROBE-CONTAINER-PARENT` (parent validation follows entity creation)
   and `R10-PROBE-GRAPH-PATH-ALIAS` (route treats alias lookup list as one entity).
-  The parent-validation probe is still NOT_RUN. Graph-path now has a retained
+  CLOSED 2026-09-23 (ledger ASTRA-2537): `R10-PROBE-CONTAINER-PARENT` repaired — parent
+  validation now precedes entity creation (LAB-731 ACCEPT, patch 0766d085,
+  integrated into the post-34b6770 integration line); `R10-PROBE-GRAPH-PATH-ALIAS`
+  confirmed already repaired in ancestor b5c616ec (LAB-731 context, 19 GREEN).
+  Historical note: the parent-validation probe was NOT_RUN at baseline time. Graph-path now has a retained
   isolated first diagnostic slice; product changes remain deferred. Details and
   exact source hashes: private `astra-acceptance-086-baseline-edge-probes.json`.
   Grok source-map job `job_6cae6c1e0d4d44eda9ae5d9f9316a8e6` completed
   within its actual acknowledged window; source hashes independently checked.
   Exact mounted entrance is `GET /api/kg/graph-path`; no existing test hits
   that HTTP route. A new private HTTP file now exercises 17 exact nodes.
-- `R10-PRODUCT-GRAPH-PATH-RESOLVER` — confirmed HTTP defect, OPEN. First
+- `R10-PRODUCT-GRAPH-PATH-RESOLVER` — confirmed HTTP defect, CLOSED-RECONCILED (2026-09-23, ledger ASTRA-2537; LAB-731 context: alias/list resolver defect already repaired in ancestor b5c616ec, oracle test_graph_path_http.py 19 GREEN; original first087 evidence preserved). Historical note: First
   isolated slice on unchanged061 product: **9 PASS / 8 FAIL**, zero errors/skips,
   pytest15.24s. Four name/alias cases returned500 instead of200; four missing/
   foreign endpoint cases returned500 instead of404. ID paths/directions/depth,
@@ -4745,7 +4752,7 @@ Astra suite revision `r10-astra-harness-065`, isolated from product repairs:
   SHA `69a59ed4ce2fb3958417981028905713ef0fae1e6ba3ac40b508e2281c19aacb`.
   New tests and their binding are frozen in063; full baseline remains NOT_RUN.
 
-- `R10-PRODUCT-ADMIN-RESOLUTION-REJECT` — confirmed HTTP defect, OPEN.
+- `R10-PRODUCT-ADMIN-RESOLUTION-REJECT` — confirmed HTTP defect, CLOSED-RECONCILED (2026-09-23, ledger ASTRA-2537; LAB-732 ACCEPT: 404 contract GREEN on candidate 34b6770, repair already in ancestor b5c616ec; original first088 evidence preserved).
   Corrected-fixture diagnostics002 and003 returned500 instead of404 for missing and
   foreign resolution candidates. These are two manifestations of one failure
   cluster. Source shows an uncaught resolver ValueError; no exception trace was
@@ -7974,6 +7981,47 @@ Receipt: `~/.jericho/grok-takeover/ASTRA-221-adoption-v5-intake.json`.
 These checks validate the handoff helpers and structure only. No donor was
 fetched, built, installed or enabled; native vendir/Renovate validation,
 Friday integration, model journeys and acceptance remain NOT_RUN.
+
+#### N8.AZ — Agent Zero V6 persistent server autonomy (owner, 2026-09-21)
+
+Status: **OWNER_INTAKE_REGISTERED — QUEUED_AFTER_N6; PRODUCTION_NOT_RUN**.
+This is the V6 update to the same N8 initiative, not a second backlog or a current
+release requirement. Execution order is release 1.0 → accepted N6 TinyFish → this
+first slice immediately → other independent postrelease work by dependency. Retain
+accepted V5 server-side capabilities and its withdrawn-scope decisions.
+
+Inputs: [V6 start](../../FRIDAY_AGENT_ZERO_ASTRA_V6_2026-09-21/START_HERE_FOR_ASTRA.txt),
+[directive](../../FRIDAY_AGENT_ZERO_ASTRA_V6_2026-09-21/FRIDAY_AGENT_ZERO_ASTRA_DIRECTIVE_V6_2026-09-21.md),
+[integration map](../../FRIDAY_AGENT_ZERO_ASTRA_V6_2026-09-21/implementation/INTEGRATION_MAP.md),
+[team packets](../../FRIDAY_AGENT_ZERO_ASTRA_V6_2026-09-21/implementation/TEAM_PACKETS.md),
+[optimization plan](../../FRIDAY_AGENT_ZERO_ASTRA_V6_2026-09-21/OPTIMIZATION_PLAN.json)
+and [acceptance matrix](../../FRIDAY_AGENT_ZERO_ASTRA_V6_2026-09-21/ACCEPTANCE_MATRIX.md).
+The package inventory verified 62 files; 161 supplied unit tests and both local
+preparation/recovery demos passed. These are synthetic/local preparation results:
+all 173 production scenarios remain NOT_RUN and give no Friday runtime, model,
+network, live or deployment credit.
+
+**First slice:** use the existing Engineer route and a real server workspace/task.
+Recover from two independent recoverable server-side failures, preserve the original
+success checks, and deliver the exact artifact correctly. Prove both Telegram and web
+entry, and distinguish observer disconnect from explicit Stop with owned cleanup.
+Independent review and Lab evidence apply to the exact candidate.
+
+| Item / owner | Selected work | Completion evidence |
+|---|---|---|
+| [ ] **N8.AZ0 — first autonomous result / Astra integration; Grok evidence; Sol review** | Existing Engineer route, one admitted real task, two independent recoverable faults and exact publication; Telegram/web only. | Same successful outcome checks before/after recovery, exact artifact receipt, disconnect leaves admitted work owned/running, explicit Stop cancels and cleans it, installed exact-candidate independent acceptance. |
+| [ ] **OPT-01 — dependency-complete preparation cache / Sol; Astra integration** | Cache only pure revision-complete preparation; count the exact final request/tokenizer input. | Dependency drift invalidates reuse; cached and uncached bytes agree; actual hit/miss/request counts and no model/effect caching. |
+| [ ] **OPT-02 — scoped singleflight / Sol; Astra review** | Coalesce identical authorized pure work within the existing owner/scope. | Identical results with measured deduplication; effects/model answers stay separate; waiter departure and owner Stop obey existing lifecycle. |
+| [ ] **OPT-03 — exact evidence windows / Grok; Sol review** | Bound evidence reads while preserving precise source and omission states. | Exact window/source receipts, truncation visible, no unsupported claim or hidden full capture. |
+| [ ] **OPT-04 — responsive execution / Sol; Grok evidence; Astra acceptance** | Bounded streams and valid warm reuse through existing admission/backpressure. | Status and Stop stay responsive under representative work; cold/warm measured separately; config drift invalidates reuse and owned resources close. |
+| [ ] **OPT-05 — correctness-first experiments / Astra; Sol review** | Compare a bounded candidate with a frozen baseline; no autonomous production/config edits. | Correctness gates pass first, evidence is reviewable, measured benefit or explicit no-benefit decision, safe discard/rollback. |
+| [ ] **OPT-06 — critical-path evidence / Astra; Grok measurement; Sol review** | Measure non-overlapping critical-path stages and target affected regressions. | Real comparable workload/model/resources, no double-counting or unknown-as-zero, targeted checks plus final applicable installed acceptance. |
+
+Required scope is server-side Friday with self-hosted model routes, Telegram and the
+dedicated web UI. It adds no personal-device agent, editor/desktop control, mandatory
+cluster, Dispatcher, model/reasoning/concurrency change or six new services. An optional
+server pool remains an admitted deployment choice. The 42 active capability areas and
+seven optional groups stay in the package catalogue and are not duplicated here.
 
 The delivery references public checkpoint
 `b5c616ec4b39e3147f172e69ac5cebddcb0b8e4b`; intake observes local canonical HEAD
