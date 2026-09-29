@@ -686,7 +686,7 @@ def test_isolated_cli_audits_collected_bindings_and_preserves_coverage_gaps(tmp_
     assert report["valid_scope"] == "structural bindings and sealed inventory; not release execution"
 
 
-def test_collected_protocol_binding_does_not_credit_required_live_execution():
+def test_collected_protocol_node_cannot_credit_required_live_execution():
     matrix = acceptance.load_matrix()
     case = next(case for case in matrix["cases"] if case["id"] == "R10-LIVE-DOC-WORD-FIRST-GEN")
     surface = "api:POST /api/chat"
