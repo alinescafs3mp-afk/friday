@@ -614,7 +614,9 @@ def test_native_controller_timeout_kills_and_reaps_its_process_group(
 ) -> None:
     marker = tmp_path / "controller.pid"
     monkeypatch.setattr(evidence, "VALIDATION_TIMEOUT_SECONDS", 0.2)
-    monkeypatch.setattr(evidence, "VALIDATION_TERMINATION_GRACE_SECONDS", 0.1)
+    # Production grace stays 5s. A 0.1s reap wait expired under canonical
+    # 20-worker scheduling delay and was reported as validation failure.
+    monkeypatch.setattr(evidence, "VALIDATION_TERMINATION_GRACE_SECONDS", 2.0)
     code = (
         "import os,pathlib,signal,sys,time; "
         "pathlib.Path(sys.argv[1]).write_text(str(os.getpid()),encoding='ascii'); "
