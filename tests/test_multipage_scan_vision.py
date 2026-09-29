@@ -685,6 +685,32 @@ async def test_pdf_pages_and_each_vision_request_have_independent_pixel_bounds(
     assert result["batch_fallback_used"] is False
 
 
+def _use_prerendered_pages(
+    pipeline: IngestionPipeline,
+    pdf: bytes,
+    filename: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Spend the OCR budget on the deadline contract, not on PDFium speed."""
+
+    rendered = pipeline._doc_extractor.render_pdf_pages(  # noqa: SLF001
+        pdf,
+        filename,
+        "application/pdf",
+        max_pages=ingestion_files._VISION_PDF_MAX_PAGES,
+        max_pixels=ingestion_files._VISION_PAGE_MAX_PIXELS,
+        max_encoded_bytes=1_500_000,
+        deadline=time.monotonic() + 5,
+    )
+    assert rendered.deadline_reached is False
+    assert rendered.pages_rendered == rendered.pages_total > 0
+    monkeypatch.setattr(  # noqa: SLF001
+        pipeline._doc_extractor,
+        "render_pdf_pages",
+        lambda *args, **kwargs: rendered,
+    )
+
+
 @pytest.mark.asyncio
 async def test_timed_out_multi_page_batches_retry_as_one_contiguous_single_page_prefix(
     settings,
@@ -694,8 +720,16 @@ async def test_timed_out_multi_page_batches_retry_as_one_contiguous_single_page_
     monkeypatch.setattr(ingestion_files, "_VISION_OCR_BUDGET_SEC", 0.45)
     monkeypatch.setattr(ingestion_files, "_VISION_OCR_FALLBACK_RESERVE_SEC", 0.3)
     llm = _PageVision(delay_sec=0.03, multi_delay_sec=0.25)
-    result = await _pipeline(settings, storage, llm)._extract_visual_document(  # noqa: SLF001
-        _raster_pdf(5),
+    fallback_pdf = _raster_pdf(5)
+    pipeline = _pipeline(settings, storage, llm)
+    _use_prerendered_pages(
+        pipeline,
+        fallback_pdf,
+        "fallback-five-page-scan.pdf",
+        monkeypatch,
+    )
+    result = await pipeline._extract_visual_document(  # noqa: SLF001
+        fallback_pdf,
         filename="fallback-five-page-scan.pdf",
         mime_type="application/pdf",
     )
@@ -711,10 +745,24 @@ async def test_timed_out_multi_page_batches_retry_as_one_contiguous_single_page_
     assert result["batches_total"] == 7
 
     # A single page cannot be made smaller as a batch.  It receives the whole
-    # common deadline instead of being cut off at the fallback boundary.
-    single_llm = _PageVision(delay_sec=0.2)
-    single = await _pipeline(settings, storage, single_llm)._extract_visual_document(  # noqa: SLF001
-        _raster_pdf(1),
+    # common deadline instead of being cut off at the fallback boundary, even
+    # when local OCR is available.
+    single_llm = _PageVision(delay_sec=0.25)
+    single_pdf = _raster_pdf(1)
+    single_pipeline = _pipeline(settings, storage, single_llm)
+    _use_prerendered_pages(
+        single_pipeline,
+        single_pdf,
+        "single-page-control.pdf",
+        monkeypatch,
+    )
+    monkeypatch.setattr(  # noqa: SLF001
+        single_pipeline._doc_extractor,
+        "local_ocr_available",
+        lambda: True,
+    )
+    single = await single_pipeline._extract_visual_document(  # noqa: SLF001
+        single_pdf,
         filename="single-page-control.pdf",
         mime_type="application/pdf",
     )

@@ -1397,11 +1397,14 @@ class FilesMixin(PipelineShared):
             ),
             _VISION_OCR_BUDGET_SEC / 2.0,
         )
-        initial_deadline = (
-            common_deadline - fallback_reserve
-            if local_ocr_enabled or any(len(batch) > 1 for _offset, batch in batch_specs)
-            else common_deadline
+        # A single-page document cannot be split into a smaller vision batch,
+        # so give it the whole common deadline even when local OCR is present.
+        # Preserve the bounded suffix for aggregate-batch retries and for a
+        # multi-page local OCR fallback.
+        reserve_fallback = any(len(batch) > 1 for _offset, batch in batch_specs) or (
+            local_ocr_enabled and len(assets) > 1
         )
+        initial_deadline = common_deadline - fallback_reserve if reserve_fallback else common_deadline
         batch_attempts = 0
 
         async def run_batch(
