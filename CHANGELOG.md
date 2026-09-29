@@ -1,3 +1,15 @@
+## 0.208.62 — Unreleased
+
+### Reserve a distinct sealed-candidate version
+
+- The sealed 0.208.61 candidate was not activated. Its commit, tree and
+  wheel remain that candidate's identity and are not reused.
+- This successor reserves the next package and runtime version. Schema
+  stays at 50. Previous and the compatible immutable fallback stay exact
+  0.208.58.
+- Full gates, immutable installation and live acceptance on this
+  candidate remain required before production activation.
+
 ## 0.208.61 — Unreleased
 
 ### Preserve filename privacy and current acceptance evidence

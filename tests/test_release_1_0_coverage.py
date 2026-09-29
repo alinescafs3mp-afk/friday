@@ -673,21 +673,101 @@ def test_isolated_cli_audits_collected_bindings_and_preserves_coverage_gaps(tmp_
         cwd=tmp_path,
         env=environment,
     )
-    assert result.returncode == 2, result.stderr
+    assert result.returncode == 0, result.stderr
     report = json.loads(result.stdout)
     assert report["case_bindings"]["valid"] is True
-    assert report["valid"] is False
-    assert any(code.startswith("surface_without_case:") for code in report["complaints"])
+    assert report["valid"] is True
+    assert report["surface_coverage_gaps"] == []
+    assert not any(code.startswith("surface_without_case:") for code in report["complaints"])
+    assert report["surface_execution_gaps"]
+    assert report["execution_complete"] is False
+    assert report["product_accepted_1_0"] is False
+    assert report["go_emitted"] is False
+    assert report["valid_scope"] == "structural bindings and sealed inventory; not release execution"
 
 
-def test_collected_protocol_node_cannot_credit_required_live_execution():
+def test_collected_protocol_binding_does_not_credit_required_live_execution():
     matrix = acceptance.load_matrix()
     case = next(case for case in matrix["cases"] if case["id"] == "R10-LIVE-DOC-WORD-FIRST-GEN")
     surface = "api:POST /api/chat"
     rule = next(rule for rule in matrix["surface_rules"] if rule["pattern"] == surface)
     rule["required_layers"] = ["isolated-live"]
-    report = acceptance.classify_surfaces({"api": [surface]}, matrix, verified_case_ids=[case["id"]])
-    assert report["coverage_gaps"] == [surface]
+    structural = acceptance.classify_surfaces({"api": [surface]}, matrix, verified_case_ids=[case["id"]])
+    missing_receipt = acceptance.classify_surfaces(
+        {"api": [surface]},
+        matrix,
+        verified_case_ids=[case["id"]],
+        executed_case_layers={},
+    )
+    wrong_layer = acceptance.classify_surfaces(
+        {"api": [surface]},
+        matrix,
+        verified_case_ids=[case["id"]],
+        executed_case_layers={case["id"]: "deterministic"},
+    )
+    assert structural["coverage_kind"] == "structural" and structural["coverage_gaps"] == []
+    assert missing_receipt["coverage_kind"] == "executed"
+    assert missing_receipt["coverage_gaps"] == wrong_layer["coverage_gaps"] == [surface]
+
+
+def test_lab765_structural_bindings_are_distinct_from_retained_gate_execution_credit():
+    matrix = acceptance.load_matrix()
+    surfaces = [
+        "api:MOUNT /admin",
+        "api:POST /api/chat",
+        "ui:dashboard",
+        "ui:chats",
+        "ui:inbox",
+        "ui:knowledge",
+        "ui:timeline",
+        "ui:graph",
+        "ui:quality",
+        "ui:cleanup",
+        "ui:users",
+        "ui:activity",
+        "ui:conversations",
+        "ui:files",
+        "ui:sources",
+        "ui:backups",
+        "ui:audit",
+        "ui:compacts",
+        "ui:diagnostics",
+    ]
+    bindings = acceptance.audit_case_bindings(matrix, _declared_nodes(matrix))
+    assert bindings["valid"] is True
+    structural = acceptance.classify_surfaces(
+        {"lab765": surfaces}, matrix, verified_case_ids=bindings["verified_case_ids"]
+    )
+    retained_gate_layers = {
+        "R10-DIA-EMPTY-NO-ADMIN": "deterministic",
+        "R10-UI-ACTIVITY": "user-ui",
+        "R10-UI-AUDIT": "user-ui",
+        "R10-UI-BACKUPS": "user-ui",
+        "R10-UI-CHATS": "user-ui",
+        "R10-UI-CLEANUP": "user-ui",
+        "R10-UI-COMPACTS": "user-ui",
+        "R10-UI-CONVERSATIONS": "user-ui",
+        "R10-UI-DASHBOARD": "user-ui",
+        "R10-UI-DIAGNOSTICS": "user-ui",
+        "R10-UI-FILES": "user-ui",
+        "R10-UI-GRAPH": "user-ui",
+        "R10-UI-INBOX": "user-ui",
+        "R10-UI-KNOWLEDGE": "user-ui",
+        "R10-UI-QUALITY": "user-ui",
+        "R10-UI-SOURCES": "user-ui",
+        "R10-UI-TIMELINE": "user-ui",
+        "R10-UI-USERS": "user-ui",
+    }
+    executed = acceptance.classify_surfaces(
+        {"lab765": surfaces},
+        matrix,
+        verified_case_ids=bindings["verified_case_ids"],
+        executed_case_layers=retained_gate_layers,
+    )
+    assert len(surfaces) == 19
+    assert structural["coverage_kind"] == "structural" and structural["coverage_gaps"] == []
+    assert executed["coverage_kind"] == "executed"
+    assert executed["coverage_gaps"] == ["api:POST /api/chat"]
 
 
 def _refresh_synthetic_children(gate_receipt, matrix, root):
@@ -1053,7 +1133,7 @@ def test_gate_receipt_ui_credit_requires_every_member_to_be_browser(gate_evidenc
     executed = acceptance.classify_surfaces(
         surfaces, matrix, verified_case_ids=verified, executed_case_layers=report["case_layers"]
     )
-    assert structural["coverage_gaps"] == ["ui:audit", "ui:backups"]
+    assert structural["coverage_gaps"] == []
     assert executed["coverage_gaps"] == (
         ["ui:backups"] if membership == "browser" else ["ui:audit", "ui:backups"]
     )
@@ -1123,12 +1203,16 @@ def test_cli_ui_receipt_preserves_denominator_and_unexecuted_layers(
 
     monkeypatch.setattr(acceptance, "_frozen_gate_identity", frozen_identity)
     args = ["--audit-only", "--collection", str(collection)]
-    assert acceptance.main(args) == 2
+    assert acceptance.main(args) == 0
     before = json.loads(capsys.readouterr().out)
     required = {case["id"] for case in matrix["cases"] if case["release_required"]}
     assert {row["id"] for row in before["required_case_execution"]} == required
     assert all(row["status"] == "NOT_RUN" for row in before["required_case_execution"])
     assert before["surface_execution_gaps"] == ["ui:audit", "ui:backups"]
+    assert before["valid"] is True
+    assert before["execution_complete"] is False
+    assert before["product_accepted_1_0"] is False and before["go_emitted"] is False
+    assert before["valid_scope"] == "structural bindings and sealed inventory; not release execution"
     args += [
         "--gate-receipt",
         str(path),
@@ -1141,7 +1225,7 @@ def test_cli_ui_receipt_preserves_denominator_and_unexecuted_layers(
         "--wheel-sha256",
         identity["wheel_sha256"],
     ]
-    assert acceptance.main(args) == 2
+    assert acceptance.main(args) == (2 if late_drift else 0)
     after = json.loads(capsys.readouterr().out)
     assert after["go_emitted"] is False
     if late_drift:
@@ -1156,8 +1240,9 @@ def test_cli_ui_receipt_preserves_denominator_and_unexecuted_layers(
         if case["release_required"] and case["layer"] != "deterministic" and case["id"] != "R10-UI-AUDIT"
     )
     assert after["surface_execution_gaps"] == ["ui:backups"]
-    assert after["valid"] is False and after["execution_complete"] is False
+    assert after["valid"] is True and after["execution_complete"] is False
     assert after["product_accepted_1_0"] is False
+    assert after["valid_scope"] == "structural bindings and sealed inventory; not release execution"
 
 
 @pytest.mark.parametrize("excess_ns", [-1, 0, 1])
@@ -1409,10 +1494,14 @@ def test_cli_receipt_audit_keeps_unexecuted_layers_and_required_denominator(
         acceptance, "discover_surfaces", lambda: {"api": ["api:POST /api/files", "api:POST /api/chat"]}
     )
     args = ["--audit-only", "--collection", str(collection)]
-    assert acceptance.main(args) == 2
+    assert acceptance.main(args) == 0
     no_receipt = json.loads(capsys.readouterr().out)
     assert no_receipt["gate_execution"]["status"] == "NOT_RUN"
     assert all(row["status"] == "NOT_RUN" for row in no_receipt["required_case_execution"])
+    assert no_receipt["valid"] is True
+    assert no_receipt["execution_complete"] is False
+    assert no_receipt["product_accepted_1_0"] is False and no_receipt["go_emitted"] is False
+    assert no_receipt["valid_scope"] == "structural bindings and sealed inventory; not release execution"
     args += [
         "--gate-receipt",
         str(path),
@@ -1425,14 +1514,16 @@ def test_cli_receipt_audit_keeps_unexecuted_layers_and_required_denominator(
         "--wheel-sha256",
         identity["wheel_sha256"],
     ]
-    assert acceptance.main(args) == 2
+    assert acceptance.main(args) == (2 if late_drift else 0)
     result = json.loads(capsys.readouterr().out)
     if late_drift:
         assert result["error"] == "gate_candidate_not_frozen"
         assert result["valid"] is False and result["go_emitted"] is False
         return
     assert result["gate_execution"]["status"] == "PASS" and result["execution_complete"] is False
+    assert result["valid"] is True
     assert result["go_emitted"] is False and result["product_accepted_1_0"] is False
+    assert result["valid_scope"] == "structural bindings and sealed inventory; not release execution"
     assert len(result["required_case_execution"]) == sum(case["release_required"] for case in matrix["cases"])
     assert all(
         row["status"] == "NOT_RUN"
@@ -1951,7 +2042,7 @@ def test_cli_native_receipt_preserves_status_denominator_and_gaps(native_cli_tra
         for case in matrix["cases"]
         if case["release_required"]
     }
-    assert acceptance.main(bundle["cli_arguments"]()[:3]) == 2
+    assert acceptance.main(bundle["cli_arguments"]()[:3]) == 0
     before = json.loads(capsys.readouterr().out)
     assert {row["id"]: row for row in before["required_case_execution"]} == required
     assert before["native_execution"] == {
@@ -1962,6 +2053,10 @@ def test_cli_native_receipt_preserves_status_denominator_and_gaps(native_cli_tra
         "go_emitted": False,
     }
     assert before["surface_execution_gaps"] == ["api:GET /api/files/{raw_id}", "api:POST /api/chat"]
+    assert before["valid"] is True
+    assert before["execution_complete"] is False
+    assert before["product_accepted_1_0"] is False and before["go_emitted"] is False
+    assert before["valid_scope"] == "structural bindings and sealed inventory; not release execution"
     if status in {"FAIL", "NOT_RUN"}:
         bundle["final"].update(
             status=status, failure_codes=["native_worker_response_invalid"], root_class="harness"
@@ -1978,7 +2073,7 @@ def test_cli_native_receipt_preserves_status_denominator_and_gaps(native_cli_tra
             },
         )
     bundle["publish"]()
-    assert acceptance.main(bundle["cli_arguments"]()) == 2
+    assert acceptance.main(bundle["cli_arguments"]()) == 0
     report = json.loads(capsys.readouterr().out)
     required[case_id]["status"] = "NOT_RUN" if status == "root-suppressed-PASS" else status
     assert {row["id"]: row for row in report["required_case_execution"]} == required
@@ -1994,8 +2089,10 @@ def test_cli_native_receipt_preserves_status_denominator_and_gaps(native_cli_tra
     assert report["native_execution"]["root_failure"] == bundle["summary"]["root_failure"]
     assert report["native_execution"]["results"] == bundle["summary"]["results"]
     assert report["gate_execution"] == before["gate_execution"]
+    assert report["valid"] is True
     assert report["execution_complete"] is False
     assert report["product_accepted_1_0"] is False and report["go_emitted"] is False
+    assert report["valid_scope"] == "structural bindings and sealed inventory; not release execution"
 
 
 @pytest.mark.parametrize(
@@ -2155,7 +2252,7 @@ def test_cli_merges_gate_and_native_only_for_same_candidate(
         "--wheel-sha256",
         gate_identity["wheel_sha256"],
     ]
-    assert acceptance.main(args) == 2
+    assert acceptance.main(args) == (2 if cross_candidate else 0)
     report = json.loads(capsys.readouterr().out)
     if cross_candidate:
         assert report == {
@@ -2174,8 +2271,10 @@ def test_cli_merges_gate_and_native_only_for_same_candidate(
     assert report["gate_execution"] == gate_result
     assert report["native_execution"]["case_layers"] == {bundle["case_id"]: "isolated-live"}
     assert report["surface_execution_gaps"] == ["api:GET /api/files/{raw_id}"]
+    assert report["valid"] is True
     assert report["execution_complete"] is False
     assert report["product_accepted_1_0"] is False and report["go_emitted"] is False
+    assert report["valid_scope"] == "structural bindings and sealed inventory; not release execution"
 
 
 @pytest.mark.parametrize("fault", ["none", "tree", "source", "suite", "read-error"])

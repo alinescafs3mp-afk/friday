@@ -4065,8 +4065,9 @@ def classify_surfaces(
                     "obligation": rule["obligation"],
                 }
             )
-    # A case label alone is not evidence: it must actually cover this exact
-    # surface and execute in every required layer.
+    # A case label alone is not evidence: it must be a verified executable
+    # reciprocal binding for this exact surface. Executed coverage additionally
+    # requires an authenticated case_id-to-declared-layer receipt match.
     cases = {case["id"]: case for case in matrix["cases"]}
     verified = set(verified_case_ids)
     uncovered = []
@@ -4081,14 +4082,7 @@ def classify_surfaces(
             and case_id in cases
             and cases[case_id].get("executable") is True
             and row["surface"] in cases[case_id].get("covered_surfaces", [])
-            # Collection can establish deterministic test bindings. Native,
-            # browser and device execution require bound run receipts; the
-            # model-free Word protocol node cannot satisfy that live layer.
-            and (
-                cases[case_id]["layer"] == "deterministic"
-                if executed_case_layers is None
-                else executed_case_layers.get(case_id) == cases[case_id]["layer"]
-            )
+            and (executed_case_layers is None or executed_case_layers.get(case_id) == cases[case_id]["layer"])
         }
         if not links or not required_layers or not set(required_layers).issubset(linked_layers):
             uncovered.append(row["surface"])
