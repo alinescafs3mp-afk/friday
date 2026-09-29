@@ -49,6 +49,20 @@ def _stable_measurement(payload: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _git_object(commit: str, path: str) -> str:
+    return (
+        subprocess.run(  # noqa: S603,S607
+            ["git", "--no-optional-locks", "rev-parse", "--verify", f"{commit}:{path}"],
+            cwd=_ROOT,
+            check=True,
+            capture_output=True,
+            timeout=10,
+        )
+        .stdout.decode("ascii")
+        .strip()
+    )
+
+
 def _run_candidate() -> tuple[dict[str, Any], bytes]:
     head = (
         subprocess.run(  # noqa: S603,S607
@@ -134,6 +148,27 @@ def test_current_dense_report_reproduces_the_exact_body_free_candidate() -> None
     }
     assert current["schema"] == "friday.document-dense-recall.current-candidate.v1"
     assert current["historical_evidence_sha256"] == hashlib.sha256(_EVIDENCE.read_bytes()).hexdigest()
+    observed_commit = current["observed_source_commit"]
+    assert isinstance(observed_commit, str)
+    assert len(observed_commit) == 40 and all(
+        character in "0123456789abcdef" for character in observed_commit
+    )
+    subprocess.run(  # noqa: S603,S607
+        ["git", "--no-optional-locks", "merge-base", "--is-ancestor", observed_commit, "HEAD"],
+        cwd=_ROOT,
+        check=True,
+        capture_output=True,
+        timeout=10,
+    )
+    # Receipt-only commits may follow the observation, but every input that
+    # defines the measured envelope must still be the exact observed object.
+    for observed_path in (
+        "friday",
+        "tools/document_dense_recall_measurement.py",
+        "tools/retrieval_bench.py",
+        "evidence/s4_document_dense_recall_before_after.json",
+    ):
+        assert _git_object(observed_commit, observed_path) == _git_object("HEAD", observed_path)
     assert measured["schema"] == "friday.document-dense-recall-measurement.body-free.v1"
     assert measured["corpus"] == {
         key: value for key, value in evidence["corpus"].items() if key != "projection"
