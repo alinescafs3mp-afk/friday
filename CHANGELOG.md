@@ -1,3 +1,18 @@
+## 0.208.63 — Unreleased
+
+### Reserve the successor after a sealed zero-effect candidate
+
+- 0.208.62 was sealed but never activated. Its unit installation failed
+  closed before effects because the durable B/A journal required the
+  accepted create-only exact-v2 supersession path. No 0.208.62 gate or
+  build credit transfers.
+- Schema stays at 50. Previous and the compatible immutable fallback stay
+  exact 0.208.58. Retired unactivated 0.208.61 keeps that candidate's
+  identity. Copies of 0.208.57 and 0.208.56 stay in place.
+- Full gates, immutable installation and live acceptance on 0.208.63
+  remain required before production activation. This entry does not
+  activate, release, or claim GO.
+
 ## 0.208.62 — Unreleased
 
 ### Reserve a distinct sealed-candidate version

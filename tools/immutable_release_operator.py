@@ -18,6 +18,8 @@ from __future__ import annotations
 import argparse
 import base64
 import csv
+import ctypes
+import errno
 import fcntl
 import hashlib
 import importlib
@@ -49,7 +51,11 @@ ACTIVATION_RECEIPT_SCHEMA = "friday.immutable-release-activation.v1"
 DR_ENROLLMENT_RECEIPT_SCHEMA = "friday.immutable-release-dr-enrollment-receipt.v1"
 ACTIVATION_JOURNAL_SCHEMA = "friday.immutable-release-activation-journal.v1"
 UNIT_INSTALL_JOURNAL_SCHEMA = "friday.immutable-release-unit-install-journal.v2"
+UNIT_INSTALL_LINEAGE_SCHEMA = "friday.immutable-release-unit-install-lineage.v1"
 _LEGACY_UNIT_INSTALL_JOURNAL_SCHEMA = "friday.immutable-release-unit-install-journal.v1"
+_UNIT_INSTALL_LINEAGE_DIRECTORY = "immutable-release-unit-install-lineage.v1"
+_UNIT_INSTALL_SUPERSESSION_AUTHORITY = "explicit-unactivated-terminal-supersession"
+_RENAME_NOREPLACE = 1
 ALBUM_RECOVERY_SCHEMA = "friday.telegram-historical-album-recovery.v1"
 ALBUM_RECOVERY_PENDING_RECEIPT_SCHEMA = "friday.telegram-historical-album-recovery-pending-receipt.v1"
 ALBUM_RECOVERY_RECEIPT_SCHEMA = "friday.telegram-historical-album-recovery-receipt.v1"
@@ -15348,6 +15354,508 @@ def _unit_surface_path(unit_dir: Path, key: str) -> Path:
     return unit_dir / Path(key)
 
 
+def _optional_supersession_raw_sha(value: str | None) -> str | None:
+    if value is None:
+        return None
+    if type(value) is not str:
+        raise ReleaseFailure("unit_install_supersession_authority_mismatch")
+    return _closed_hash(value, "unit_install_supersession_authority_mismatch")
+
+
+def _reject_private_path_text(value: Any, *, code: str) -> None:
+    if isinstance(value, str):
+        if "/" in value:
+            raise ReleaseFailure(code)
+        return
+    if isinstance(value, Mapping):
+        for item in value.values():
+            _reject_private_path_text(item, code=code)
+        return
+    if isinstance(value, Sequence) and not isinstance(value, (bytes, bytearray)):
+        for item in value:
+            _reject_private_path_text(item, code=code)
+
+
+def _public_release_identity(record: Mapping[str, Any]) -> dict[str, Any]:
+    _validate_journal_release_record(record, code="unit_install_supersession_release_invalid")
+    return {
+        "commit": record["commit"],
+        "max_schema": record["max_schema"],
+        "tree_manifest_sha256": record["tree_manifest_sha256"],
+        "version": record["version"],
+    }
+
+
+def _unit_journal_bytes(core: Mapping[str, Any]) -> tuple[bytes, str, str]:
+    internal = _sha256_bytes(_canonical_json(dict(core)))
+    payload = {**core, "journal_sha256": internal}
+    raw = _canonical_json(payload) + b"\n"
+    return raw, internal, _sha256_bytes(raw)
+
+
+def _prepared_successor_core(
+    *,
+    identity: Mapping[str, Any],
+    admission: Mapping[str, Any],
+) -> dict[str, Any]:
+    core = {
+        "schema": UNIT_INSTALL_JOURNAL_SCHEMA,
+        "phase": "prepared",
+        "candidate": dict(identity["candidate"]),
+        "previous": dict(identity["previous"]),
+        "transition_root": identity["transition_root"],
+        "candidate_unit_hashes": dict(identity["candidate_unit_hashes"]),
+        "transition_unit_hashes": dict(identity["transition_unit_hashes"]),
+        "legacy_bootstrap_unit_install_file_sha256": "",
+        "retention_admission": dict(admission),
+        "retention_admission_receipt_sha256": admission["receipt_sha256"],
+        "receipt_sha256": "",
+    }
+    core["transaction_id"] = _unit_install_transaction_id(core)
+    return core
+
+
+def _retired_surface_keyset_sha256() -> str:
+    """Hash the closed surface keyset without storing private path text."""
+
+    return _sha256_bytes(_canonical_json(list(_UNIT_SURFACE_KEYS)))
+
+
+def _retired_surface_hash_list(hashes: Mapping[str, str], *, code: str) -> list[str]:
+    """Bind one closed lowercase hash per canonical surface key, in key order."""
+
+    if not isinstance(hashes, Mapping) or set(hashes) != set(_UNIT_SURFACE_KEYS):
+        raise ReleaseFailure(code)
+    values: list[str] = []
+    for key in _UNIT_SURFACE_KEYS:
+        digest = hashes[key]
+        if type(digest) is not str:
+            raise ReleaseFailure(code)
+        values.append(_closed_hash(digest, code))
+    return values
+
+
+def _retired_surface_map(
+    values: object,
+    *,
+    aggregate: str,
+    keyset_sha256: str,
+    code: str,
+) -> dict[str, str]:
+    """Recover the retired per-key map and require its aggregate and keyset."""
+
+    if keyset_sha256 != _retired_surface_keyset_sha256():
+        raise ReleaseFailure(code)
+    if type(values) is not list or len(values) != len(_UNIT_SURFACE_KEYS):
+        raise ReleaseFailure(code)
+    mapping: dict[str, str] = {}
+    for key, digest in zip(_UNIT_SURFACE_KEYS, values, strict=True):
+        if type(digest) is not str:
+            raise ReleaseFailure(code)
+        mapping[key] = _closed_hash(digest, code)
+    if _sha256_bytes(_canonical_json(mapping)) != _closed_hash(aggregate, code):
+        raise ReleaseFailure(code)
+    return mapping
+
+
+_LINEAGE_DOCUMENT_KEYS = frozenset(
+    {
+        "activation_phase",
+        "activation_raw_sha256",
+        "anchor_commit",
+        "anchor_tree_sha256",
+        "authority",
+        "lineage_sha256",
+        "live_release",
+        "manager_projection_sha256",
+        "retention_admission_receipt_sha256",
+        "retired_internal_journal_sha256",
+        "retired_raw_journal_sha256",
+        "retired_receipt_sha256",
+        "retired_release",
+        "retired_transaction_id",
+        "retired_unit_hashes",
+        "retired_unit_keyset_sha256",
+        "schema",
+        "successor_journal_internal_sha256",
+        "successor_journal_raw_sha256",
+        "successor_release",
+        "successor_transaction_id",
+        "unit_surface_sha256",
+    }
+)
+_SUPERSESSION_OBSERVATION_KEYS = frozenset(
+    {
+        "activation_phase",
+        "activation_raw_sha256",
+        "anchor_commit",
+        "anchor_tree_sha256",
+        "live_release",
+        "manager_projection_sha256",
+        "retired_internal_journal_sha256",
+        "retired_raw_journal_sha256",
+        "retired_receipt_sha256",
+        "retired_release",
+        "retired_transaction_id",
+        "retired_unit_hashes",
+        "retired_unit_keyset_sha256",
+        "retention_admission_receipt_sha256",
+        "successor_release",
+        "unit_surface_sha256",
+    }
+)
+
+
+def _validate_lineage_bytes(raw: bytes) -> dict[str, Any]:
+    try:
+        payload = _unique_json(raw.decode("ascii"))
+    except (UnicodeError, ValueError, json.JSONDecodeError) as exc:
+        raise ReleaseFailure("unit_install_supersession_lineage_invalid") from exc
+    if (
+        raw != _canonical_json(payload) + b"\n"
+        or set(payload) != _LINEAGE_DOCUMENT_KEYS
+        or payload.get("schema") != UNIT_INSTALL_LINEAGE_SCHEMA
+        or payload.get("authority") != _UNIT_INSTALL_SUPERSESSION_AUTHORITY
+        or payload.get("activation_phase") != "clear"
+    ):
+        raise ReleaseFailure("unit_install_supersession_lineage_invalid")
+    core = {key: value for key, value in payload.items() if key != "lineage_sha256"}
+    if payload["lineage_sha256"] != _sha256_bytes(_canonical_json(core)):
+        raise ReleaseFailure("unit_install_supersession_lineage_invalid")
+    _reject_private_path_text(payload, code="unit_install_supersession_lineage_invalid")
+    for key in (
+        "activation_raw_sha256",
+        "anchor_tree_sha256",
+        "lineage_sha256",
+        "manager_projection_sha256",
+        "retention_admission_receipt_sha256",
+        "retired_internal_journal_sha256",
+        "retired_raw_journal_sha256",
+        "retired_receipt_sha256",
+        "retired_transaction_id",
+        "successor_journal_internal_sha256",
+        "retired_unit_keyset_sha256",
+        "successor_journal_raw_sha256",
+        "successor_transaction_id",
+        "unit_surface_sha256",
+    ):
+        _closed_hash(str(payload.get(key) or ""), "unit_install_supersession_lineage_invalid")
+    if _HEX40.fullmatch(str(payload.get("anchor_commit") or "")) is None:
+        raise ReleaseFailure("unit_install_supersession_lineage_invalid")
+    for key in ("live_release", "retired_release", "successor_release"):
+        release = payload.get(key)
+        if not isinstance(release, dict) or set(release) != {
+            "commit",
+            "max_schema",
+            "tree_manifest_sha256",
+            "version",
+        }:
+            raise ReleaseFailure("unit_install_supersession_lineage_invalid")
+        if (
+            _HEX40.fullmatch(str(release.get("commit") or "")) is None
+            or _HEX64.fullmatch(str(release.get("tree_manifest_sha256") or "")) is None
+            or type(release.get("max_schema")) is not int
+            or int(release["max_schema"]) <= 0
+            or _VERSION.fullmatch(str(release.get("version") or "")) is None
+        ):
+            raise ReleaseFailure("unit_install_supersession_lineage_invalid")
+    _retired_surface_map(
+        payload.get("retired_unit_hashes"),
+        aggregate=str(payload.get("unit_surface_sha256") or ""),
+        keyset_sha256=str(payload.get("retired_unit_keyset_sha256") or ""),
+        code="unit_install_supersession_lineage_invalid",
+    )
+    return payload
+
+
+def _lineage_document(
+    *,
+    observation: Mapping[str, Any],
+    successor_journal_raw_sha256: str,
+    successor_journal_internal_sha256: str,
+    successor_transaction_id: str,
+) -> bytes:
+    core = {
+        "activation_phase": "clear",
+        "activation_raw_sha256": observation["activation_raw_sha256"],
+        "anchor_commit": observation["anchor_commit"],
+        "anchor_tree_sha256": observation["anchor_tree_sha256"],
+        "authority": _UNIT_INSTALL_SUPERSESSION_AUTHORITY,
+        "live_release": dict(observation["live_release"]),
+        "manager_projection_sha256": observation["manager_projection_sha256"],
+        "retention_admission_receipt_sha256": observation["retention_admission_receipt_sha256"],
+        "retired_internal_journal_sha256": observation["retired_internal_journal_sha256"],
+        "retired_raw_journal_sha256": observation["retired_raw_journal_sha256"],
+        "retired_receipt_sha256": observation["retired_receipt_sha256"],
+        "retired_release": dict(observation["retired_release"]),
+        "retired_transaction_id": observation["retired_transaction_id"],
+        "retired_unit_hashes": list(observation["retired_unit_hashes"]),
+        "retired_unit_keyset_sha256": observation["retired_unit_keyset_sha256"],
+        "schema": UNIT_INSTALL_LINEAGE_SCHEMA,
+        "successor_journal_internal_sha256": successor_journal_internal_sha256,
+        "successor_journal_raw_sha256": successor_journal_raw_sha256,
+        "successor_release": dict(observation["successor_release"]),
+        "successor_transaction_id": successor_transaction_id,
+        "unit_surface_sha256": observation["unit_surface_sha256"],
+    }
+    signed = {**core, "lineage_sha256": _sha256_bytes(_canonical_json(core))}
+    raw = _canonical_json(signed) + b"\n"
+    _validate_lineage_bytes(raw)
+    return raw
+
+
+def _rename_noreplace(source: Path, target: Path) -> None:
+    try:
+        libc = ctypes.CDLL(None, use_errno=True)
+        renameat2 = libc.renameat2
+        renameat2.argtypes = (
+            ctypes.c_int,
+            ctypes.c_char_p,
+            ctypes.c_int,
+            ctypes.c_char_p,
+            ctypes.c_uint,
+        )
+        renameat2.restype = ctypes.c_int
+        ctypes.set_errno(0)
+        result = renameat2(
+            -100,
+            os.fsencode(source),
+            -100,
+            os.fsencode(target),
+            _RENAME_NOREPLACE,
+        )
+    except (AttributeError, OSError, TypeError, UnicodeError, ValueError) as exc:
+        raise OSError(errno.ENOSYS, "renameat2") from exc
+    if result != 0:
+        error = ctypes.get_errno()
+        raise OSError(error, os.strerror(error), target)
+
+
+def _fsync_lineage_descriptor(descriptor: int) -> None:
+    os.fsync(descriptor)
+
+
+def _fsync_lineage_directory(path: Path) -> None:
+    try:
+        _fsync_directory(path)
+    except OSError as exc:
+        raise ReleaseFailure("unit_install_supersession_lineage_invalid") from exc
+
+
+def _fsync_lineage_parent(path: Path) -> None:
+    """Durably publish the lineage directory entry in the authenticated state directory."""
+
+    try:
+        _fsync_directory(path)
+    except OSError as exc:
+        raise ReleaseFailure("unit_install_supersession_lineage_invalid") from exc
+
+
+def _fresh_sealed_retention_callable(
+    admission: Any,
+    activation_receipt_path: Path,
+) -> Callable[[], Mapping[str, Any]]:
+    """Invoke the sealed retention operator, not a previously stored receipt."""
+
+    def fresh() -> Mapping[str, Any]:
+        receipt = admission.retention_release_admission(activation_receipt_path)
+        if not isinstance(receipt, Mapping):
+            raise ReleaseFailure("retention_release_admission_invalid")
+        return receipt
+
+    return fresh
+
+
+def _canonical_manager_quantity(value: bytes) -> str:
+    """Accept one integer without leading zeros, or infinity."""
+
+    try:
+        text = value.decode("ascii").strip()
+    except UnicodeError as exc:
+        raise ReleaseFailure("systemd_manager_property_invalid") from exc
+    if text.lower() in {"inf", "infinity"}:
+        return "infinity"
+    if not text.isdigit() or (len(text) > 1 and text.startswith("0")):
+        raise ReleaseFailure("systemd_manager_property_invalid")
+    return text
+
+
+def _write_lineage_temporary(path: Path, payload: bytes) -> None:
+    descriptor = os.open(
+        path,
+        os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0),
+        0o600,
+    )
+    try:
+        _write_all(descriptor, payload)
+        os.fchmod(descriptor, 0o600)
+        _fsync_lineage_descriptor(descriptor)
+    except OSError as exc:
+        raise ReleaseFailure("unit_install_supersession_lineage_invalid") from exc
+    finally:
+        os.close(descriptor)
+
+
+def _accept_exact_lineage_or_reject(path: Path, payload: bytes) -> None:
+    try:
+        existing = _read_private_regular_file(
+            path,
+            maximum_bytes=1 << 20,
+            code="unit_install_supersession_lineage_collision",
+            allowed_modes=frozenset({0o600}),
+        )
+    except ReleaseFailure as exc:
+        raise ReleaseFailure("unit_install_supersession_lineage_collision") from exc
+    if existing == payload:
+        return
+    try:
+        parsed = _unique_json(existing.decode("ascii"))
+    except (UnicodeError, ValueError, json.JSONDecodeError) as exc:
+        raise ReleaseFailure("unit_install_supersession_lineage_collision") from exc
+    if isinstance(parsed, dict) and parsed.get("schema") == UNIT_INSTALL_LINEAGE_SCHEMA:
+        raise ReleaseFailure("unit_install_supersession_lineage_stale")
+    raise ReleaseFailure("unit_install_supersession_lineage_collision")
+
+
+def _publish_create_only_bytes(
+    path: Path,
+    payload: bytes,
+    *,
+    namespace_guard: Callable[[], None] | None = None,
+) -> None:
+    """Publish one lineage file without replacing an existing inode."""
+
+    def reassert_namespace() -> None:
+        if namespace_guard is not None:
+            namespace_guard()
+
+    parent_lexical = Path(os.path.abspath(path.parent))
+    if not parent_lexical.exists():
+        reassert_namespace()
+    parent = _private_directory(path.parent, create=True)
+    try:
+        _fsync_lineage_parent(parent.parent)
+    except OSError as exc:
+        raise ReleaseFailure("unit_install_supersession_lineage_invalid") from exc
+    lexical = Path(os.path.abspath(path))
+    if lexical.parent != parent or lexical.name in {"", ".", ".."}:
+        raise ReleaseFailure("unit_install_supersession_lineage_invalid")
+    if lexical.is_symlink() or lexical.exists():
+        _accept_exact_lineage_or_reject(lexical, payload)
+        try:
+            _fsync_lineage_directory(parent)
+        except OSError as exc:
+            raise ReleaseFailure("unit_install_supersession_lineage_invalid") from exc
+        return
+    reassert_namespace()
+    temporary = parent / f".{lexical.name}.{os.getpid()}.{os.urandom(8).hex()}.new"
+    # Unpublished residue is not authority and is intentionally left in place.
+    try:
+        _write_lineage_temporary(temporary, payload)
+    except ReleaseFailure:
+        raise
+    except OSError as exc:
+        raise ReleaseFailure("unit_install_supersession_lineage_invalid") from exc
+    reassert_namespace()
+    try:
+        _rename_noreplace(temporary, lexical)
+    except FileExistsError:
+        _accept_exact_lineage_or_reject(lexical, payload)
+        try:
+            _fsync_lineage_directory(parent)
+        except OSError as exc:
+            raise ReleaseFailure("unit_install_supersession_lineage_invalid") from exc
+        return
+    except OSError as exc:
+        raise ReleaseFailure("unit_install_supersession_lineage_invalid") from exc
+    try:
+        _fsync_lineage_directory(parent)
+    except OSError as exc:
+        raise ReleaseFailure("unit_install_supersession_lineage_invalid") from exc
+
+
+def _require_supersession_observation(
+    observation: Mapping[str, Any],
+    *,
+    current: Mapping[str, Any],
+    identity: Mapping[str, Any],
+    admission: Mapping[str, Any],
+    authority: str,
+) -> None:
+    if set(observation) != _SUPERSESSION_OBSERVATION_KEYS:
+        raise ReleaseFailure("unit_install_supersession_lineage_invalid")
+    _reject_private_path_text(observation, code="unit_install_supersession_lineage_invalid")
+    if observation["retired_raw_journal_sha256"] != authority:
+        raise ReleaseFailure("unit_install_supersession_authority_mismatch")
+    if observation["activation_phase"] != "clear":
+        raise ReleaseFailure("unit_install_supersession_activation_not_clear")
+    if observation["retired_transaction_id"] != current["transaction_id"]:
+        raise ReleaseFailure("unit_install_supersession_lineage_stale")
+    if observation["retired_receipt_sha256"] != current["receipt_sha256"]:
+        raise ReleaseFailure("unit_install_supersession_lineage_stale")
+    internal = _sha256_bytes(_canonical_json(dict(current)))
+    if observation["retired_internal_journal_sha256"] != internal:
+        raise ReleaseFailure("unit_install_supersession_lineage_stale")
+    retired = _public_release_identity(current["candidate"])
+    live = _public_release_identity(identity["previous"])
+    successor = _public_release_identity(identity["candidate"])
+    if observation["retired_release"] != retired or observation["successor_release"] != successor:
+        raise ReleaseFailure("unit_install_supersession_release_invalid")
+    if observation["live_release"] != live or observation["live_release"] != _public_release_identity(
+        current["previous"]
+    ):
+        raise ReleaseFailure("unit_install_supersession_previous_mismatch")
+    if (
+        observation["anchor_commit"] != live["commit"]
+        or observation["anchor_tree_sha256"] != live["tree_manifest_sha256"]
+    ):
+        raise ReleaseFailure("unit_install_supersession_anchor_mismatch")
+    if observation["retention_admission_receipt_sha256"] != admission["receipt_sha256"]:
+        raise ReleaseFailure("unit_install_supersession_retention_drift")
+    journal_hashes = current.get("candidate_unit_hashes")
+    if not isinstance(journal_hashes, Mapping):
+        raise ReleaseFailure("unit_install_supersession_unit_drift")
+    retired_map = _retired_surface_map(
+        observation.get("retired_unit_hashes"),
+        aggregate=str(observation.get("unit_surface_sha256") or ""),
+        keyset_sha256=str(observation.get("retired_unit_keyset_sha256") or ""),
+        code="unit_install_supersession_lineage_invalid",
+    )
+    if retired_map != _retired_surface_map(
+        _retired_surface_hash_list(journal_hashes, code="unit_install_supersession_unit_drift"),
+        aggregate=_sha256_bytes(_canonical_json(dict(journal_hashes))),
+        keyset_sha256=_retired_surface_keyset_sha256(),
+        code="unit_install_supersession_unit_drift",
+    ):
+        raise ReleaseFailure("unit_install_supersession_unit_drift")
+    surface = _sha256_bytes(_canonical_json(dict(journal_hashes)))
+    if observation["unit_surface_sha256"] != surface:
+        raise ReleaseFailure("unit_install_supersession_unit_drift")
+    for key in ("activation_raw_sha256", "manager_projection_sha256"):
+        _closed_hash(str(observation[key]), "unit_install_supersession_lineage_invalid")
+
+
+def _preflight_unit_supersession(
+    journal: DurableUnitInstallJournal,
+    authority: str | None,
+    candidate: ReleaseIdentity,
+    previous: ReleaseIdentity,
+) -> None:
+    if authority is None:
+        return
+    if journal.path.is_symlink() or not journal.path.exists():
+        raise ReleaseFailure("unit_install_supersession_authority_mismatch")
+    durable, _bootstrap = journal.retention_admission_for(
+        candidate=candidate,
+        previous=previous,
+        retired_journal_raw_sha256=authority,
+    )
+    if durable is None:
+        return
+    if _sha256_bytes(journal._raw_bytes()) == authority:
+        raise ReleaseFailure("unit_install_supersession_not_a_gap")
+
+
 class DurableUnitInstallJournal:
     """Crash boundary for the only non-atomic part of first unit installation."""
 
@@ -15358,6 +15866,7 @@ class DurableUnitInstallJournal:
             raise ReleaseFailure("unit_install_journal_path_invalid")
         self.path = lexical
         self._state: dict[str, Any] | None = None
+        self.public_supersession_receipt: dict[str, Any] | None = None
 
     def _write(self, core: Mapping[str, Any]) -> None:
         payload = {**core, "journal_sha256": _sha256_bytes(_canonical_json(core))}
@@ -15529,11 +16038,21 @@ class DurableUnitInstallJournal:
         *,
         candidate: ReleaseIdentity,
         previous: ReleaseIdentity,
+        retired_journal_raw_sha256: str | None = None,
     ) -> tuple[dict[str, Any] | None, bool]:
         """Return only a same-transaction durable admission, plus bootstrap authority."""
 
+        authority = (
+            None
+            if retired_journal_raw_sha256 is None
+            else _optional_supersession_raw_sha(retired_journal_raw_sha256)
+        )
         if not self.path.exists() and not self.path.is_symlink():
+            if authority is not None:
+                raise ReleaseFailure("unit_install_supersession_authority_mismatch")
             return None, False
+        if self.path.is_symlink() and authority is not None:
+            raise ReleaseFailure("unit_install_supersession_authority_mismatch")
         current = self._read()
         candidate_record = _journal_release(candidate)
         previous_record = _journal_release(previous)
@@ -15555,8 +16074,155 @@ class DurableUnitInstallJournal:
         if current.get("phase") != "complete":
             raise ReleaseFailure("unfinished_unit_install_identity_changed")
         if current.get("candidate") != previous_record:
-            raise ReleaseFailure("unit_install_predecessor_chain_invalid")
+            if current.get("schema") != UNIT_INSTALL_JOURNAL_SCHEMA or authority is None:
+                if authority is not None:
+                    raise ReleaseFailure("unit_install_supersession_journal_invalid")
+                raise ReleaseFailure("unit_install_predecessor_chain_invalid")
+            raw_sha = _sha256_bytes(self._raw_bytes())
+            if raw_sha != authority:
+                raise ReleaseFailure("unit_install_supersession_authority_mismatch")
+            if current.get("previous") != previous_record:
+                raise ReleaseFailure("unit_install_supersession_previous_mismatch")
+            retired = current.get("candidate")
+            if (
+                not isinstance(retired, dict)
+                or len(
+                    {
+                        retired.get("commit"),
+                        previous_record.get("commit"),
+                        candidate_record.get("commit"),
+                    }
+                )
+                != 3
+                or len(
+                    {
+                        retired.get("root"),
+                        previous_record.get("root"),
+                        candidate_record.get("root"),
+                    }
+                )
+                != 3
+                or retired in (previous_record, candidate_record)
+                or previous_record == candidate_record
+            ):
+                raise ReleaseFailure("unit_install_supersession_candidate_not_distinct")
+            return None, False
+        if authority is not None:
+            raise ReleaseFailure("unit_install_supersession_not_a_gap")
         return None, current.get("schema") == _LEGACY_UNIT_INSTALL_JOURNAL_SCHEMA
+
+    def _raw_bytes(self) -> bytes:
+        return _read_private_regular_file(
+            self.path,
+            maximum_bytes=1 << 20,
+            code="unit_install_journal_invalid",
+            allowed_modes=frozenset({0o600}),
+        )
+
+    def _lineage_path(self, retired_raw_sha256: str) -> Path:
+        digest = _closed_hash(retired_raw_sha256, "unit_install_supersession_lineage_invalid")
+        return self.path.parent / _UNIT_INSTALL_LINEAGE_DIRECTORY / f"{digest}.json"
+
+    def _remember_public_supersession_receipt(self, document: Mapping[str, Any]) -> None:
+        receipt = {
+            "lineage_sha256": str(document["lineage_sha256"]),
+            "retired_internal_journal_sha256": str(document["retired_internal_journal_sha256"]),
+            "retired_raw_journal_sha256": str(document["retired_raw_journal_sha256"]),
+            "retired_receipt_sha256": str(document["retired_receipt_sha256"]),
+            "retired_transaction_id": str(document["retired_transaction_id"]),
+            "supersession": True,
+        }
+        _reject_private_path_text(receipt, code="unit_install_supersession_lineage_invalid")
+        self.public_supersession_receipt = receipt
+
+    def _require_successor_lineage(self, current: Mapping[str, Any], authority: str) -> None:
+        path = self._lineage_path(authority)
+        if path.is_symlink() or not path.exists():
+            raise ReleaseFailure("unit_install_supersession_lineage_invalid")
+        document = _validate_lineage_bytes(
+            _read_private_regular_file(
+                path,
+                maximum_bytes=1 << 20,
+                code="unit_install_supersession_lineage_invalid",
+                allowed_modes=frozenset({0o600}),
+            )
+        )
+        successor = _public_release_identity(current["candidate"])
+        live = _public_release_identity(current["previous"])
+        if (
+            document["retired_raw_journal_sha256"] != authority
+            or document["successor_transaction_id"] != current["transaction_id"]
+            or document["successor_release"] != successor
+            or document["live_release"] != live
+        ):
+            raise ReleaseFailure("unit_install_supersession_lineage_stale")
+        if str(current.get("phase") or "") == "prepared" and (
+            document["successor_journal_internal_sha256"] != _sha256_bytes(_canonical_json(dict(current)))
+            or document["successor_journal_raw_sha256"] != _sha256_bytes(self._raw_bytes())
+        ):
+            raise ReleaseFailure("unit_install_supersession_lineage_stale")
+        self._remember_public_supersession_receipt(document)
+
+    def _publish_supersession_successor(
+        self,
+        *,
+        identity: Mapping[str, Any],
+        admission: Mapping[str, Any],
+        authority: str,
+        current: Mapping[str, Any],
+        reauthenticate: Callable[[], Mapping[str, Any]],
+        fresh_retention_admission: Callable[[], Mapping[str, Any]],
+        namespace_guard: Callable[[], None] | None = None,
+    ) -> dict[str, Any]:
+        def cross_durable_boundary() -> None:
+            if namespace_guard is not None:
+                namespace_guard()
+            derived = _validated_retention_release_admission(
+                dict(fresh_retention_admission()),
+                allow_first_v2_deferred=admission.get("status") == "first_v2_deferred",
+            )
+            if derived != dict(admission):
+                raise ReleaseFailure("unit_install_supersession_retention_drift")
+            if namespace_guard is not None:
+                namespace_guard()
+
+        first = dict(reauthenticate())
+        _require_supersession_observation(
+            first,
+            current=current,
+            identity=identity,
+            admission=admission,
+            authority=authority,
+        )
+        if _sha256_bytes(self._raw_bytes()) != authority:
+            raise ReleaseFailure("unit_install_supersession_authority_mismatch")
+        prepared = _prepared_successor_core(identity=identity, admission=admission)
+        _payload, internal, raw_sha = _unit_journal_bytes(prepared)
+        lineage = _lineage_document(
+            observation=first,
+            successor_journal_raw_sha256=raw_sha,
+            successor_journal_internal_sha256=internal,
+            successor_transaction_id=str(prepared["transaction_id"]),
+        )
+        lineage_path = self._lineage_path(authority)
+        cross_durable_boundary()
+        _publish_create_only_bytes(lineage_path, lineage, namespace_guard=namespace_guard)
+        second = dict(reauthenticate())
+        if second != first or _sha256_bytes(self._raw_bytes()) != authority:
+            raise ReleaseFailure("unit_install_supersession_lineage_stale")
+        reread = _read_private_regular_file(
+            lineage_path,
+            maximum_bytes=1 << 20,
+            code="unit_install_supersession_lineage_invalid",
+            allowed_modes=frozenset({0o600}),
+        )
+        if reread != lineage:
+            raise ReleaseFailure("unit_install_supersession_lineage_stale")
+        _validate_lineage_bytes(reread)
+        cross_durable_boundary()
+        self._write(prepared)
+        self._remember_public_supersession_receipt(_validate_lineage_bytes(lineage))
+        return prepared
 
     def begin_or_resume(
         self,
@@ -15567,7 +16233,20 @@ class DurableUnitInstallJournal:
         candidate_unit_hashes: Mapping[str, str],
         transition_unit_hashes: Mapping[str, str],
         retention_admission: Mapping[str, Any],
+        retired_journal_raw_sha256: str | None = None,
+        supersession_reauthenticate: Callable[[], Mapping[str, Any]] | None = None,
+        fresh_retention_admission: Callable[[], Mapping[str, Any]] | None = None,
+        namespace_guard: Callable[[], None] | None = None,
     ) -> Mapping[str, Any]:
+        authority = (
+            None
+            if retired_journal_raw_sha256 is None
+            else _optional_supersession_raw_sha(retired_journal_raw_sha256)
+        )
+        if (authority is None) != (supersession_reauthenticate is None) or (authority is None) != (
+            fresh_retention_admission is None
+        ):
+            raise ReleaseFailure("unit_install_supersession_authority_mismatch")
         identity = {
             "candidate": _journal_release(candidate),
             "previous": _journal_release(previous),
@@ -15578,6 +16257,7 @@ class DurableUnitInstallJournal:
         durable_admission, legacy_bootstrap = self.retention_admission_for(
             candidate=candidate,
             previous=previous,
+            retired_journal_raw_sha256=authority,
         )
         admission = _validated_retention_release_admission(
             dict(retention_admission),
@@ -15594,7 +16274,32 @@ class DurableUnitInstallJournal:
                     else "unfinished_unit_install_identity_changed"
                 )
                 raise ReleaseFailure(code)
+            if authority is not None:
+                if _sha256_bytes(self._raw_bytes()) == authority:
+                    raise ReleaseFailure("unit_install_supersession_not_a_gap")
+                self._require_successor_lineage(current, authority)
             return current
+        if authority is not None:
+            if supersession_reauthenticate is None or self.path.is_symlink() or not self.path.exists():
+                raise ReleaseFailure("unit_install_supersession_authority_mismatch")
+            current = self._read()
+            if (
+                current.get("schema") == UNIT_INSTALL_JOURNAL_SCHEMA
+                and current.get("phase") == "complete"
+                and current.get("candidate") != identity["previous"]
+            ):
+                if fresh_retention_admission is None or supersession_reauthenticate is None:
+                    raise ReleaseFailure("unit_install_supersession_authority_mismatch")
+                return self._publish_supersession_successor(
+                    identity=identity,
+                    admission=admission,
+                    authority=authority,
+                    current=current,
+                    reauthenticate=supersession_reauthenticate,
+                    fresh_retention_admission=fresh_retention_admission,
+                    namespace_guard=namespace_guard,
+                )
+            raise ReleaseFailure("unit_install_supersession_not_a_gap")
         if self.path.exists() or self.path.is_symlink():
             current = self._read()
             if current["phase"] != "complete" or current["candidate"] != identity["previous"]:
@@ -16278,6 +16983,327 @@ def _replace_unit_file(destination: Path, content: bytes) -> None:
         temporary.unlink(missing_ok=True)
 
 
+def _unit_directive(content: bytes, name: str, *, code: str) -> str:
+    try:
+        text = content.decode("utf-8")
+    except UnicodeError as exc:
+        raise ReleaseFailure(code) from exc
+    prefix = f"{name}="
+    values = [line[len(prefix) :] for line in text.splitlines() if line.startswith(prefix)]
+    if len(values) != 1:
+        raise ReleaseFailure(code)
+    return values[0]
+
+
+def _verify_supersession_manager_projection(directory: Path, unit: str) -> dict[str, Any]:
+    """Verify material manager properties and return the hashed projection preimage."""
+
+    content = _read_private_regular_file(
+        directory / unit,
+        maximum_bytes=1 << 20,
+        code="unit_install_supersession_unit_drift",
+        allowed_modes=frozenset({0o600}),
+    )
+    _verify_manager_unit_surface(
+        directory,
+        unit,
+        _unit_exec_argv(content, code="release_unit_exec_invalid"),
+    )
+    database = _database_dropin_path(
+        _read_private_regular_file(
+            directory / f"{unit}.d" / "database.conf",
+            maximum_bytes=1 << 20,
+            code="unit_install_supersession_unit_drift",
+            allowed_modes=frozenset({0o600}),
+        )
+    )
+    pre_argv = _systemd_exec_argv(
+        _run_systemctl("show", unit, "--property=ExecStartPre", "--value").stdout,
+        code="systemd_manager_execstartpre_invalid",
+    )
+    if pre_argv != ("/usr/bin/test", "-s", str(database)):
+        raise ReleaseFailure("systemd_manager_execstartpre_invalid")
+    extra_exec: dict[str, None] = {}
+    for property_name in (
+        "ExecCondition",
+        "ExecStartPost",
+        "ExecReload",
+        "ExecStop",
+        "ExecStopPost",
+    ):
+        if (
+            _systemd_exec_argv(
+                _run_systemctl("show", unit, f"--property={property_name}", "--value").stdout,
+                code="systemd_manager_extra_exec_invalid",
+            )
+            is not None
+        ):
+            raise ReleaseFailure("systemd_manager_extra_exec_invalid")
+        extra_exec[property_name] = None
+    kill_mode = _unit_directive(content, "KillMode", code="systemd_manager_kill_mode_invalid")
+    if _run_systemctl("show", unit, "--property=KillMode", "--value").stdout.strip() != kill_mode.encode():
+        raise ReleaseFailure("systemd_manager_kill_mode_invalid")
+    umask = _unit_directive(content, "UMask", code="systemd_manager_umask_invalid")
+    if _run_systemctl("show", unit, "--property=UMask", "--value").stdout.strip() != umask.encode():
+        raise ReleaseFailure("systemd_manager_umask_invalid")
+    working = _unit_directive(content, "WorkingDirectory", code="systemd_manager_property_invalid")
+    unset = _unit_directive(content, "UnsetEnvironment", code="systemd_manager_property_invalid")
+    if b"\nEnvironmentFile=" in b"\n" + content:
+        raise ReleaseFailure("systemd_manager_property_invalid")
+    unit_file_state = _run_systemctl("show", unit, "--property=UnitFileState", "--value").stdout.strip()
+    if unit_file_state != b"enabled":
+        raise ReleaseFailure("systemd_manager_property_invalid")
+    tasks_max = _canonical_manager_quantity(
+        _run_systemctl("show", unit, "--property=TasksMax", "--value").stdout.strip()
+    )
+    memory_max = _canonical_manager_quantity(
+        _run_systemctl("show", unit, "--property=MemoryMax", "--value").stdout.strip()
+    )
+    memory_swap_max = _canonical_manager_quantity(
+        _run_systemctl("show", unit, "--property=MemorySwapMax", "--value").stdout.strip()
+    )
+    if unit == "friday-backend.service":
+        if (
+            tasks_max != str(_BACKEND_TASKS_MAX)
+            or memory_max != str(_BACKEND_MEMORY_MAX_BYTES)
+            or memory_swap_max != str(_BACKEND_MEMORY_SWAP_MAX_BYTES)
+        ):
+            raise ReleaseFailure("systemd_manager_property_invalid")
+    elif memory_max != "infinity" or memory_swap_max != "infinity":
+        raise ReleaseFailure("systemd_manager_property_invalid")
+    expected_properties = {
+        "EnvironmentFiles": b"",
+        "UnsetEnvironment": unset.encode(),
+        "WorkingDirectory": working.encode(),
+    }
+    observed: dict[str, str] = {}
+    for property_name, expected_value in expected_properties.items():
+        actual = _run_systemctl("show", unit, f"--property={property_name}", "--value").stdout.strip()
+        if actual != expected_value:
+            raise ReleaseFailure("systemd_manager_property_invalid")
+        observed[property_name] = actual.decode("utf-8")
+    try:
+        fragment = _run_systemctl("show", unit, "--property=FragmentPath", "--value").stdout.decode("utf-8")
+        dropins = _run_systemctl("show", unit, "--property=DropInPaths", "--value").stdout.decode("utf-8")
+    except UnicodeError as exc:
+        raise ReleaseFailure("systemd_manager_property_invalid") from exc
+    return {
+        "dropins": dropins.strip(),
+        "environment_files": observed["EnvironmentFiles"],
+        "exec_start_pre": list(pre_argv),
+        "extra_exec": extra_exec,
+        "fragment": fragment.strip(),
+        "kill_mode": kill_mode,
+        "memory_max": memory_max,
+        "memory_swap_max": memory_swap_max,
+        "tasks_max": tasks_max,
+        "umask": umask,
+        "unit": unit,
+        "unit_file_state": "enabled",
+        "unset_environment": observed["UnsetEnvironment"],
+        "working_directory": observed["WorkingDirectory"],
+    }
+
+
+def _require_retired_unit_surface(
+    journal: DurableUnitInstallJournal,
+    unit_dir: Path,
+    authority: str,
+) -> dict[str, str]:
+    """Authenticate B before replacement, or the lineage's retired surface after it."""
+
+    current = journal._read()
+    observed: dict[str, str] = {}
+    for key in _UNIT_SURFACE_KEYS:
+        payload = _read_private_regular_file(
+            _unit_surface_path(unit_dir, key),
+            maximum_bytes=1 << 20,
+            code="unit_install_supersession_unit_drift",
+            allowed_modes=frozenset({0o600}),
+        )
+        observed[key] = _sha256_bytes(payload)
+    if _sha256_bytes(journal._raw_bytes()) == authority:
+        hashes = current.get("candidate_unit_hashes")
+        if not isinstance(hashes, dict):
+            raise ReleaseFailure("unit_install_supersession_unit_drift")
+        for key in _UNIT_SURFACE_KEYS:
+            expected = hashes.get(key)
+            if type(expected) is not str or observed[key] != expected:
+                raise ReleaseFailure("unit_install_supersession_unit_drift")
+        return observed
+    path = journal._lineage_path(authority)
+    if path.is_symlink() or not path.exists():
+        raise ReleaseFailure("unit_install_supersession_lineage_invalid")
+    document = _validate_lineage_bytes(
+        _read_private_regular_file(
+            path,
+            maximum_bytes=1 << 20,
+            code="unit_install_supersession_lineage_invalid",
+            allowed_modes=frozenset({0o600}),
+        )
+    )
+    if document["retired_raw_journal_sha256"] != authority or document[
+        "successor_transaction_id"
+    ] != current.get("transaction_id"):
+        raise ReleaseFailure("unit_install_supersession_lineage_stale")
+    retired_map = _retired_surface_map(
+        document.get("retired_unit_hashes"),
+        aggregate=str(document.get("unit_surface_sha256") or ""),
+        keyset_sha256=str(document.get("retired_unit_keyset_sha256") or ""),
+        code="unit_install_supersession_lineage_invalid",
+    )
+    successor = current.get("candidate_unit_hashes")
+    if not isinstance(successor, Mapping) or set(successor) != set(_UNIT_SURFACE_KEYS):
+        raise ReleaseFailure("unit_install_supersession_unit_drift")
+    for key in _UNIT_SURFACE_KEYS:
+        successor_digest = successor[key]
+        if type(successor_digest) is not str:
+            raise ReleaseFailure("unit_install_supersession_unit_drift")
+        _closed_hash(successor_digest, "unit_install_supersession_unit_drift")
+        if observed[key] not in {retired_map[key], successor_digest}:
+            raise ReleaseFailure("unit_install_supersession_unit_drift")
+    return dict(retired_map)
+
+
+def _authenticate_unactivated_terminal_supersession(
+    *,
+    journal: DurableUnitInstallJournal,
+    candidate: ReleaseIdentity,
+    previous: ReleaseIdentity,
+    authority: str,
+    activation_journal: Path,
+    anchor: Path,
+    unit_dir: Path,
+    retention_admission: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Re-read the full unactivated B/A boundary immediately before a durable write."""
+
+    raw = journal._raw_bytes()
+    raw_sha = _sha256_bytes(raw)
+    if raw_sha != authority:
+        raise ReleaseFailure("unit_install_supersession_authority_mismatch")
+    current = journal._read()
+    if current.get("schema") != UNIT_INSTALL_JOURNAL_SCHEMA or current.get("phase") != "complete":
+        raise ReleaseFailure("unit_install_supersession_journal_invalid")
+    previous_record = _journal_release(previous)
+    candidate_record = _journal_release(candidate)
+    retired = current.get("candidate")
+    if current.get("previous") != previous_record:
+        raise ReleaseFailure("unit_install_supersession_previous_mismatch")
+    if (
+        not isinstance(retired, dict)
+        or len({retired.get("commit"), previous_record.get("commit"), candidate_record.get("commit")}) != 3
+        or len({retired.get("root"), previous_record.get("root"), candidate_record.get("root")}) != 3
+        or retired in (previous_record, candidate_record)
+        or previous_record == candidate_record
+    ):
+        raise ReleaseFailure("unit_install_supersession_candidate_not_distinct")
+
+    def load_record(record: Mapping[str, Any]) -> None:
+        try:
+            identity = load_release_identity(
+                Path(str(record["root"])),
+                expected_tree_sha256=str(record["tree_manifest_sha256"]),
+            )
+        except (ReleaseFailure, OSError) as exc:
+            raise ReleaseFailure("unit_install_supersession_release_invalid") from exc
+        if _journal_release(identity) != dict(record):
+            raise ReleaseFailure("unit_install_supersession_release_invalid")
+
+    load_record(retired)
+    load_record(previous_record)
+    load_record(candidate_record)
+    if _sha256_bytes(journal._raw_bytes()) != authority:
+        raise ReleaseFailure("unit_install_supersession_authority_mismatch")
+    activation_raw = _read_private_regular_file(
+        activation_journal,
+        maximum_bytes=1 << 20,
+        code="unit_install_supersession_activation_mismatch",
+        allowed_modes=frozenset({0o600}),
+    )
+    try:
+        activation = _unique_json(activation_raw.decode("ascii"))
+    except (UnicodeError, ValueError, json.JSONDecodeError) as exc:
+        raise ReleaseFailure("unit_install_supersession_activation_mismatch") from exc
+    if activation_raw != _canonical_json(activation) + b"\n":
+        raise ReleaseFailure("unit_install_supersession_activation_mismatch")
+    if activation.get("schema") != ACTIVATION_JOURNAL_SCHEMA:
+        raise ReleaseFailure("unit_install_supersession_activation_mismatch")
+    if activation.get("phase") != "clear":
+        raise ReleaseFailure("unit_install_supersession_activation_not_clear")
+    activation_candidate = activation.get("candidate")
+    _validate_journal_release_record(
+        activation_candidate,
+        code="unit_install_supersession_activation_mismatch",
+    )
+    _validate_journal_release_record(
+        activation.get("previous"),
+        code="unit_install_supersession_activation_mismatch",
+    )
+    if activation_candidate == retired:
+        raise ReleaseFailure("unit_install_supersession_candidate_active")
+    if activation_candidate != previous_record:
+        raise ReleaseFailure("unit_install_supersession_activation_mismatch")
+    file_sha = _closed_hash(
+        str(activation.get("activation_receipt_file_sha256") or ""),
+        "unit_install_supersession_retention_drift",
+    )
+    receipt_sha = _closed_hash(
+        str(activation.get("activation_receipt_sha256") or ""),
+        "unit_install_supersession_retention_drift",
+    )
+    if file_sha != retention_admission.get(
+        "activation_receipt_file_sha256"
+    ) or receipt_sha != retention_admission.get("activation_receipt_sha256"):
+        raise ReleaseFailure("unit_install_supersession_retention_drift")
+    try:
+        anchored = anchor.resolve(strict=True)
+        expected_anchor = previous.root.resolve(strict=True)
+    except OSError as exc:
+        raise ReleaseFailure("unit_install_supersession_anchor_mismatch") from exc
+    if not anchor.is_symlink() or anchored != expected_anchor:
+        raise ReleaseFailure("unit_install_supersession_anchor_mismatch")
+    hashes = current["candidate_unit_hashes"]
+    for key in _UNIT_SURFACE_KEYS:
+        observed = _read_private_regular_file(
+            _unit_surface_path(unit_dir, key),
+            maximum_bytes=1 << 20,
+            code="unit_install_supersession_unit_drift",
+            allowed_modes=frozenset({0o600}),
+        )
+        if _sha256_bytes(observed) != hashes[key]:
+            raise ReleaseFailure("unit_install_supersession_unit_drift")
+    projection = {
+        "units": [_verify_supersession_manager_projection(unit_dir, unit) for unit in _RUNTIME_UNIT_NAMES]
+    }
+    live = _public_release_identity(previous_record)
+    observation = {
+        "activation_phase": "clear",
+        "activation_raw_sha256": _sha256_bytes(activation_raw),
+        "anchor_commit": live["commit"],
+        "anchor_tree_sha256": live["tree_manifest_sha256"],
+        "live_release": live,
+        "manager_projection_sha256": _sha256_bytes(_canonical_json(projection)),
+        "retired_internal_journal_sha256": _sha256_bytes(_canonical_json(dict(current))),
+        "retired_raw_journal_sha256": raw_sha,
+        "retired_receipt_sha256": str(current["receipt_sha256"]),
+        "retired_release": _public_release_identity(retired),
+        "retired_transaction_id": str(current["transaction_id"]),
+        "retention_admission_receipt_sha256": str(retention_admission["receipt_sha256"]),
+        "retired_unit_hashes": _retired_surface_hash_list(
+            hashes,
+            code="unit_install_supersession_lineage_invalid",
+        ),
+        "retired_unit_keyset_sha256": _retired_surface_keyset_sha256(),
+        "successor_release": _public_release_identity(candidate_record),
+        "unit_surface_sha256": _sha256_bytes(_canonical_json(dict(hashes))),
+    }
+    if set(observation) != _SUPERSESSION_OBSERVATION_KEYS:
+        raise ReleaseFailure("unit_install_supersession_lineage_invalid")
+    _reject_private_path_text(observation, code="unit_install_supersession_lineage_invalid")
+    return observation
+
+
 def install_units(
     candidate: ReleaseIdentity,
     previous: ReleaseIdentity,
@@ -16289,14 +17315,27 @@ def install_units(
     retention_admission: Mapping[str, Any],
     journal: DurableUnitInstallJournal,
     namespace_guard: Callable[[], None] | None = None,
+    retired_journal_raw_sha256: str | None = None,
+    activation_journal: Path | None = None,
+    fresh_retention_admission: Callable[[], Mapping[str, Any]] | None = None,
 ) -> dict[str, str]:
     """Converge the complete unit surface without mixed runtime roots."""
 
+    authority = (
+        None
+        if retired_journal_raw_sha256 is None
+        else _optional_supersession_raw_sha(retired_journal_raw_sha256)
+    )
+    if (authority is None) != (activation_journal is None) or (authority is None) != (
+        fresh_retention_admission is None
+    ):
+        raise ReleaseFailure("unit_install_supersession_authority_mismatch")
     guard = namespace_guard or (lambda: None)
     journal_port: DurableUnitInstallJournal | _NamespaceGuardedProxy = journal
     if namespace_guard is not None:
         journal_port = _NamespaceGuardedProxy(journal, guard)
     guard()
+    _preflight_unit_supersession(journal, authority, candidate, previous)
     if candidate.root == previous.root or candidate.commit == previous.commit:
         raise ReleaseFailure("candidate_previous_identity_not_distinct")
     _require_venv_relocation_contract(
@@ -16319,12 +17358,36 @@ def install_units(
         main_content[name] = content
         expected_argv[name] = _unit_exec_argv(content, code="release_unit_exec_invalid")
         _closed_hash(str(transition_unit_hashes[name]), "transition_unit_hash_invalid")
+    retired_surface: dict[str, str] = {}
+    if authority is not None:
+        retired_surface = _require_retired_unit_surface(journal, directory, authority)
     expected_content, predecessor_dropins = _candidate_unit_surface(directory, main_content)
     candidate_hashes = {key: _sha256_bytes(content) for key, content in expected_content.items()}
     for name in _RUNTIME_UNIT_NAMES:
         enabled = _run_systemctl("is-enabled", name, check=False)
         if enabled.returncode != 0 or enabled.stdout.strip() != b"enabled":
             raise ReleaseFailure("systemd_unit_not_enabled")
+    reauthenticate: Callable[[], Mapping[str, Any]] | None = None
+    if authority is not None:
+        activation_path = activation_journal
+
+        def reauthenticate() -> Mapping[str, Any]:
+            guard()
+            if activation_path is None or fresh_retention_admission is None:
+                raise ReleaseFailure("unit_install_supersession_authority_mismatch")
+            observation = _authenticate_unactivated_terminal_supersession(
+                journal=journal,
+                candidate=candidate,
+                previous=previous,
+                authority=authority,
+                activation_journal=activation_path,
+                anchor=anchor,
+                unit_dir=directory,
+                retention_admission=retention_admission,
+            )
+            guard()
+            return observation
+
     state = journal_port.begin_or_resume(
         candidate=candidate,
         previous=previous,
@@ -16332,6 +17395,10 @@ def install_units(
         candidate_unit_hashes=candidate_hashes,
         transition_unit_hashes=transition_unit_hashes,
         retention_admission=retention_admission,
+        retired_journal_raw_sha256=authority,
+        supersession_reauthenticate=reauthenticate,
+        fresh_retention_admission=fresh_retention_admission,
+        namespace_guard=guard,
     )
     phase = str(state["phase"])
     if phase == "complete":
@@ -16352,7 +17419,11 @@ def install_units(
                 code="installed_transition_unit_invalid",
             )
             digest = _sha256_file(installed)
-            if digest not in {str(transition_unit_hashes[name]), candidate_hashes[name]}:
+            allowed = {str(transition_unit_hashes[name]), candidate_hashes[name]}
+            retired_digest = retired_surface.get(name)
+            if type(retired_digest) is str:
+                allowed.add(retired_digest)
+            if digest not in allowed:
                 raise ReleaseFailure("installed_transition_unit_digest_mismatch")
         for key, predecessor_content in predecessor_dropins.items():
             installed_content = _read_owned_unit_surface_file(
@@ -20037,6 +21108,33 @@ def _reconcile_terminal_activation_admission(
         raise ReleaseFailure("activation_predecessor_dr_lifecycle_required")
 
 
+def _install_units_operation_receipt(
+    *,
+    release: ReleaseIdentity,
+    previous: ReleaseIdentity,
+    retention_admission: Mapping[str, Any],
+    unit_hashes: Mapping[str, str],
+    journal: DurableUnitInstallJournal,
+) -> dict[str, Any]:
+    """Public install receipt. Supersession adds hashes only, never a private path."""
+
+    receipt: dict[str, Any] = {
+        "schema": OPERATOR_SCHEMA,
+        "operation": "install-units",
+        "status": "clear",
+        "release_tree_sha256": release.tree_manifest_sha256,
+        "previous_tree_sha256": previous.tree_manifest_sha256,
+        "retention_admission": dict(retention_admission),
+        "retention_admission_receipt_sha256": retention_admission["receipt_sha256"],
+        "unit_hashes": dict(unit_hashes),
+    }
+    extra = journal.public_supersession_receipt
+    if extra is not None:
+        receipt.update(extra)
+        _reject_private_path_text(extra, code="unit_install_supersession_lineage_invalid")
+    return receipt
+
+
 def _unit_install_retention_admission(
     *,
     activation_journal: DurableActivationJournal,
@@ -20044,12 +21142,14 @@ def _unit_install_retention_admission(
     candidate: ReleaseIdentity,
     previous: ReleaseIdentity,
     admission: _SealedCandidateDRAdmission,
+    retired_journal_raw_sha256: str | None = None,
 ) -> dict[str, Any]:
     """Bind fresh predecessor truth once; recovery uses only the fsync'd binding."""
 
     durable, legacy_bootstrap = unit_journal.retention_admission_for(
         candidate=candidate,
         previous=previous,
+        retired_journal_raw_sha256=retired_journal_raw_sha256,
     )
     if durable is not None:
         return _validated_retention_release_admission(
@@ -20649,6 +21749,7 @@ def build_parser() -> argparse.ArgumentParser:
     install.add_argument("--transition-runtime-root", required=True, type=Path)
     install.add_argument("--transition-backend-unit-sha256", required=True)
     install.add_argument("--transition-bridge-unit-sha256", required=True)
+    install.add_argument("--supersede-completed-unit-journal-sha256", default=None)
 
     activate = commands.add_parser("activate")
     activate.add_argument("--candidate", required=True, type=Path)
@@ -20745,6 +21846,7 @@ def _run_cli(args: argparse.Namespace) -> dict[str, Any]:
             "tree_manifest_sha256": release.tree_manifest_sha256,
         }
     elif args.command == "install-units":
+        retired_raw = _optional_supersession_raw_sha(args.supersede_completed_unit_journal_sha256)
         friday_home = _operator_friday_home_from_state_dir(args.state_dir)
         _require_operator_layout(
             friday_home,
@@ -20794,7 +21896,19 @@ def _run_cli(args: argparse.Namespace) -> dict[str, Any]:
                     candidate=release,
                     previous=previous,
                     admission=admission,
+                    retired_journal_raw_sha256=retired_raw,
                 )
+                fresh_retention = None
+                if retired_raw is not None:
+                    bound_state = dict(journal.load())
+                    bound = _bound_activation_receipt(admission=admission, state=bound_state)
+                    if bound is None:
+                        raise ReleaseFailure("activation_receipt_journal_binding_invalid")
+                    _bound_payload, activation_receipt_path = bound
+                    fresh_retention = _fresh_sealed_retention_callable(
+                        admission,
+                        activation_receipt_path,
+                    )
                 unit_hashes = install_units(
                     release,
                     previous,
@@ -20808,17 +21922,21 @@ def _run_cli(args: argparse.Namespace) -> dict[str, Any]:
                     retention_admission=retention_admission,
                     journal=unit_journal,
                     namespace_guard=transaction_lock.assert_held,
+                    retired_journal_raw_sha256=retired_raw,
+                    activation_journal=(
+                        args.state_dir / "immutable-release-activation.v1.json"
+                        if retired_raw is not None
+                        else None
+                    ),
+                    fresh_retention_admission=fresh_retention,
                 )
-        receipt = {
-            "schema": OPERATOR_SCHEMA,
-            "operation": "install-units",
-            "status": "clear",
-            "release_tree_sha256": release.tree_manifest_sha256,
-            "previous_tree_sha256": previous.tree_manifest_sha256,
-            "retention_admission": retention_admission,
-            "retention_admission_receipt_sha256": retention_admission["receipt_sha256"],
-            "unit_hashes": unit_hashes,
-        }
+        receipt = _install_units_operation_receipt(
+            release=release,
+            previous=previous,
+            retention_admission=retention_admission,
+            unit_hashes=unit_hashes,
+            journal=unit_journal,
+        )
     elif args.command == "activate":
         config = _systemd_config(args)
         _require_runtime_operator_layout(config)
@@ -21126,6 +22244,7 @@ __all__ = [
     "SystemdActivationPort",
     "SystemdConfig",
     "UNIT_INSTALL_JOURNAL_SCHEMA",
+    "UNIT_INSTALL_LINEAGE_SCHEMA",
     "activate_release",
     "build_release",
     "installed_surface_smoke",

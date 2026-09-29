@@ -4342,3 +4342,35 @@ def test_operator_lock_displacement_stops_before_candidate_mutation(
 
     assert synthetic_inventory["old"].identity.root.exists()
     assert not list(synthetic_inventory["inventory"].glob(".friday-retention-q-v1-*"))
+
+
+def test_lab775_retention_blocks_preactivation_accepts_postactivation_and_invalidates_old_journal_sha(
+    synthetic_inventory: dict[str, Any],
+) -> None:
+    activation = json.loads(synthetic_inventory["activation_journal"].read_text(encoding="ascii"))
+    backup = activation["backup"]
+    captured = _bindings(synthetic_inventory)
+    _write_journal(
+        synthetic_inventory["unit_journal"],
+        _unit_core(synthetic_inventory["old"], synthetic_inventory["current"]),
+    )
+    blocked = _plan(synthetic_inventory)
+    assert blocked["block_reason"] == "journal_identity_mismatch"
+    assert blocked["classification_status"] == "blocked"
+    assert not any(item["decision"] == "delete_candidate" for item in blocked["targets"])
+    invalidated = _plan(synthetic_inventory, authority_bindings=captured)
+    assert invalidated["block_reason"] == "unit_install_journal_digest_mismatch"
+    assert not any(item["decision"] == "delete_candidate" for item in invalidated["targets"])
+    _write_journal(
+        synthetic_inventory["activation_journal"],
+        _activation_core(
+            synthetic_inventory["old"],
+            synthetic_inventory["current"],
+            synthetic_inventory["fallback"],
+            backup=backup,
+        ),
+    )
+    accepted = _plan(synthetic_inventory)
+    assert accepted["block_reason"] != "journal_identity_mismatch"
+    assert accepted["classification_status"] == "eligible"
+    assert accepted["block_reason"] == ""

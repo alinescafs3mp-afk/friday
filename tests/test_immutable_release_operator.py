@@ -15933,3 +15933,1836 @@ else:
         assert result.stderr == b""
     finally:
         shutil.rmtree(scenario_root)
+
+
+def _lab775_private(path: Path) -> None:
+    path.mkdir(mode=0o700, exist_ok=True)
+    path.chmod(0o700)
+
+
+def _lab775_release(
+    root: Path,
+    commit: str,
+    version: str,
+    tree: str,
+    *,
+    relocate: bool = False,
+) -> operator.ReleaseIdentity:
+    _lab775_private(root)
+    _lab775_private(root / "artifacts")
+    return operator.ReleaseIdentity(
+        root,
+        commit,
+        version,
+        tree,
+        50,
+        venv_relocation_contract=operator.VENV_RELOCATION_CONTRACT if relocate else "",
+    )
+
+
+def _lab775_record(argv: tuple[str, ...]) -> bytes:
+    rendered = " ".join(argv)
+    return (
+        f"{{ path={argv[0]} ; argv[]={rendered} ; ignore_errors=no ; "
+        "start_time=[n/a] ; stop_time=[n/a] ; pid=0 ; code=(null) ; status=0/0 }"
+    ).encode()
+
+
+def _lab775_world(tmp_path: Path, *, retired: bool = True) -> dict[str, object]:
+    """Private A/B/C unit surface. The retired journal is optional for ordinary installs."""
+
+    tmp_path.chmod(0o700)
+    unit_dir = tmp_path / "units"
+    state_dir = tmp_path / "state"
+    transition = tmp_path / "transition"
+    for directory in (unit_dir, state_dir, transition):
+        _lab775_private(directory)
+    live = _lab775_release(tmp_path / "live", "a" * 40, "0.208.58", "e" * 64)
+    retired_release = _lab775_release(tmp_path / "retired", "b" * 40, "0.208.61", "f" * 64)
+    successor = _lab775_release(
+        tmp_path / "successor",
+        "c" * 40,
+        "0.208.63",
+        "d" * 64,
+        relocate=True,
+    )
+    anchor = tmp_path / "current-release"
+    env_file = tmp_path / ".env.local"
+    env_file.write_text("FRIDAY_PROFILE=production\n", encoding="ascii")
+    env_file.chmod(0o600)
+    rendered = operator.render_units(anchor=anchor, env_file=env_file, friday_home=tmp_path)
+    database = (
+        "[Service]\n"
+        f"Environment=FRIDAY_DATABASE_PATH={state_dir / 'jericho.sqlite3'}\n"
+        "Environment=FRIDAY_DATABASE_MUST_EXIST=1\n"
+        f"ExecStartPre=/usr/bin/test -s {state_dir / 'jericho.sqlite3'}\n"
+    ).encode()
+    dependency = b"[Unit]\nWants=friday-backend.service\nAfter=friday-backend.service\n"
+    surface: dict[str, bytes] = {}
+    transition_hashes: dict[str, str] = {}
+    for name, content in rendered.items():
+        text = content.encode("utf-8")
+        (successor.root / "artifacts" / name).write_bytes(text)
+        installed = unit_dir / name
+        installed.write_bytes(text)
+        installed.chmod(0o600)
+        surface[name] = text
+        rewritten = content.replace(
+            f"ExecStart={anchor}/venv/bin/python",
+            f"ExecStart={transition}/venv/bin/python",
+        )
+        transition_hashes[name] = hashlib.sha256(rewritten.encode()).hexdigest()
+        dropin_directory = unit_dir / f"{name}.d"
+        _lab775_private(dropin_directory)
+        (dropin_directory / "database.conf").write_bytes(database)
+        surface[f"{name}.d/database.conf"] = database
+        if name == "friday-bridge.service":
+            (dropin_directory / "dependency.conf").write_bytes(dependency)
+            surface[f"{name}.d/dependency.conf"] = dependency
+        security = operator._unit_security_dropin(name)  # noqa: SLF001
+        (dropin_directory / "security.conf").write_bytes(security)
+        surface[f"{name}.d/security.conf"] = security
+        for dropin in dropin_directory.iterdir():
+            dropin.chmod(0o600)
+    anchor.symlink_to(live.root, target_is_directory=True)
+    surface_hashes = {
+        key: hashlib.sha256(surface[key]).hexdigest()
+        for key in operator._UNIT_SURFACE_KEYS  # noqa: SLF001
+    }
+    admission = _retention_admission_receipt()
+    journal_path = state_dir / "immutable-release-unit-install.v1.json"
+    activation_path = state_dir / "immutable-release-activation.v1.json"
+    retired_raw = ""
+    retired_transaction = ""
+    if retired:
+        activation = {
+            "activation_receipt_file_sha256": "1" * 64,
+            "activation_receipt_sha256": "2" * 64,
+            "candidate": operator._journal_release(live),  # noqa: SLF001
+            "phase": "clear",
+            "previous": operator._journal_release(live),  # noqa: SLF001
+            "schema": operator.ACTIVATION_JOURNAL_SCHEMA,
+        }
+        activation_path.write_bytes(operator._canonical_json(activation) + b"\n")  # noqa: SLF001
+        activation_path.chmod(0o600)
+        journal = operator.DurableUnitInstallJournal(journal_path)
+        journal.begin_or_resume(
+            candidate=retired_release,
+            previous=live,
+            transition_root=transition,
+            candidate_unit_hashes=surface_hashes,
+            transition_unit_hashes=transition_hashes,
+            retention_admission=admission,
+        )
+        for phase in (
+            "transition_anchor_active",
+            "units_converged",
+            "manager_reloaded",
+            "previous_anchor_active",
+        ):
+            journal.record(phase)
+        receipt_core = {
+            "candidate_tree_sha256": retired_release.tree_manifest_sha256,
+            "previous_tree_sha256": live.tree_manifest_sha256,
+            "retention_admission": admission,
+            "retention_admission_receipt_sha256": admission["receipt_sha256"],
+            "unit_hashes": surface_hashes,
+        }
+        journal.record(
+            "complete",
+            receipt_sha256=hashlib.sha256(
+                operator._canonical_json(receipt_core)  # noqa: SLF001
+            ).hexdigest(),
+        )
+        retired_raw = hashlib.sha256(journal_path.read_bytes()).hexdigest()
+        retired_transaction = str(journal.load()["transaction_id"])
+    return {
+        "activation_path": activation_path,
+        "admission": admission,
+        "anchor": anchor,
+        "database": str(state_dir / "jericho.sqlite3"),
+        "friday_home": tmp_path,
+        "journal_path": journal_path,
+        "live": live,
+        "retired": retired_release,
+        "retired_raw": retired_raw,
+        "retired_transaction": retired_transaction,
+        "state_dir": state_dir,
+        "successor": successor,
+        "surface_hashes": surface_hashes,
+        "transition": transition,
+        "transition_hashes": transition_hashes,
+        "unit_dir": unit_dir,
+    }
+
+
+def _lab775_systemctl(world: dict[str, object], broken: dict[str, bytes]):
+    unit_dir = world["unit_dir"]
+    assert isinstance(unit_dir, Path)
+    friday_home = world["friday_home"]
+    database = str(world["database"])
+    commands: list[str] = []
+
+    def systemctl(*arguments: str, check: bool = True) -> subprocess.CompletedProcess[bytes]:
+        del check
+        commands.append(arguments[0])
+        if arguments[0] == "is-enabled":
+            return subprocess.CompletedProcess(arguments, 0, stdout=b"enabled\n", stderr=b"")
+        if arguments[0] == "daemon-reload":
+            return subprocess.CompletedProcess(arguments, 0, stdout=b"", stderr=b"")
+        if arguments[0] in {"start", "restart", "stop", "kill"}:
+            raise AssertionError(arguments[0])
+        name = arguments[1]
+        property_name = ""
+        for item in arguments:
+            if item.startswith("--property="):
+                property_name = item.split("=", 1)[1]
+        if property_name == broken.get("name"):
+            return subprocess.CompletedProcess(arguments, 0, stdout=broken["stdout"], stderr=b"")
+        stdout = b"\n"
+        if property_name == "ExecStart":
+            stdout = _lab775_record(
+                operator._unit_exec_argv((unit_dir / name).read_bytes(), code="test")  # noqa: SLF001
+            )
+        elif property_name == "ExecStartPre":
+            stdout = _lab775_record(("/usr/bin/test", "-s", database))
+        elif property_name in {
+            "ExecCondition",
+            "ExecStartPost",
+            "ExecReload",
+            "ExecStop",
+            "ExecStopPost",
+        }:
+            stdout = b"\n"
+        elif property_name == "FragmentPath":
+            stdout = str(unit_dir / name).encode() + b"\n"
+        elif property_name == "DropInPaths":
+            stdout = " ".join(
+                str(unit_dir / f"{name}.d" / dropin)
+                for dropin in operator._UNIT_DROPIN_NAMES[name]  # noqa: SLF001
+            ).encode()
+        elif property_name == "Environment":
+            stdout = (
+                f"FRIDAY_HOME={friday_home} "
+                f"FRIDAY_DATABASE_PATH={database} "
+                "FRIDAY_DATABASE_MUST_EXIST=1 "
+                f"TMPDIR={operator._unit_runtime_tmp_directory(name)}\n"  # noqa: SLF001
+            ).encode()
+        elif property_name == "LimitCORE":
+            stdout = b"0\n"
+        elif property_name == "MemorySwapMax":
+            stdout = b"0\n" if name == "friday-backend.service" else b"infinity\n"
+        elif property_name == "UnitFileState":
+            stdout = b"enabled\n"
+        elif property_name in {"PrivateTmp", "PrivateUsers"}:
+            stdout = b"no\n"
+        elif property_name == "RuntimeDirectory":
+            stdout = operator._unit_runtime_directory_name(name).encode() + b"\n"  # noqa: SLF001
+        elif property_name == "RuntimeDirectoryMode":
+            stdout = b"0700\n"
+        elif property_name == "RuntimeDirectoryPreserve":
+            stdout = b"no\n"
+        elif property_name == "KillMode":
+            stdout = b"control-group\n"
+        elif property_name == "UMask":
+            stdout = b"0077\n"
+        elif property_name == "WorkingDirectory":
+            stdout = str(friday_home).encode() + b"\n"
+        elif property_name == "UnsetEnvironment":
+            stdout = b"PYTHONPATH\n"
+        elif property_name == "EnvironmentFiles":
+            stdout = b"\n"
+        elif property_name == "TasksMax":
+            stdout = b"512\n" if name == "friday-backend.service" else b"37170\n"
+        elif property_name == "MemoryMax":
+            stdout = (
+                str(operator._BACKEND_MEMORY_MAX_BYTES).encode() + b"\n"  # noqa: SLF001
+                if name == "friday-backend.service"
+                else b"infinity\n"
+            )
+        return subprocess.CompletedProcess(arguments, 0, stdout=stdout, stderr=b"")
+
+    return systemctl, commands
+
+
+def _lab775_fresh(world: dict[str, object]):
+    admission = world["admission"]
+    assert isinstance(admission, dict)
+
+    def fresh() -> dict[str, object]:
+        return dict(admission)
+
+    return fresh
+
+
+def _lab775_install(world: dict[str, object], **kwargs: object):
+    journal_path = world["journal_path"]
+    assert isinstance(journal_path, Path)
+    if "retired_journal_raw_sha256" in kwargs and "fresh_retention_admission" not in kwargs:
+        kwargs["fresh_retention_admission"] = _lab775_fresh(world)
+    journal = operator.DurableUnitInstallJournal(journal_path)
+    successor = world["successor"]
+    live = world["live"]
+    unit_dir = world["unit_dir"]
+    anchor = world["anchor"]
+    transition = world["transition"]
+    transition_hashes = world["transition_hashes"]
+    admission = world["admission"]
+    assert isinstance(successor, operator.ReleaseIdentity)
+    assert isinstance(live, operator.ReleaseIdentity)
+    assert isinstance(unit_dir, Path)
+    assert isinstance(anchor, Path)
+    assert isinstance(transition, Path)
+    assert isinstance(transition_hashes, dict)
+    assert isinstance(admission, dict)
+    return journal, operator.install_units(
+        successor,
+        live,
+        unit_dir=unit_dir,
+        anchor=anchor,
+        transition_runtime_root=transition,
+        transition_unit_hashes=transition_hashes,
+        retention_admission=admission,
+        journal=journal,
+        **kwargs,  # type: ignore[arg-type]
+    )
+
+
+def _lab775_bind_loader(monkeypatch: pytest.MonkeyPatch, world: dict[str, object]) -> list[tuple[Path, str]]:
+    calls: list[tuple[Path, str]] = []
+    releases = (world["live"], world["retired"], world["successor"])
+
+    def load(root: Path, *, expected_tree_sha256: str) -> operator.ReleaseIdentity:
+        calls.append((root, expected_tree_sha256))
+        for identity in releases:
+            assert isinstance(identity, operator.ReleaseIdentity)
+            if Path(root) == identity.root and expected_tree_sha256 == identity.tree_manifest_sha256:
+                return identity
+        raise operator.ReleaseFailure("release_metadata_invalid")
+
+    monkeypatch.setattr(operator, "load_release_identity", load)
+    return calls
+
+
+def _lab775_lineage_dir(world: dict[str, object]) -> Path:
+    state_dir = world["state_dir"]
+    assert isinstance(state_dir, Path)
+    return state_dir / "immutable-release-unit-install-lineage.v1"
+
+
+def _lab775_clear_lineage(world: dict[str, object]) -> None:
+    directory = _lab775_lineage_dir(world)
+    if not directory.exists():
+        return
+    for child in directory.iterdir():
+        child.unlink()
+    directory.rmdir()
+
+
+def test_lab775_default_authority_refuses_gap_before_lineage(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    world = _lab775_world(tmp_path)
+    systemctl, commands = _lab775_systemctl(world, {})
+    monkeypatch.setattr(operator, "_run_systemctl", systemctl)
+    journal_path = world["journal_path"]
+    assert isinstance(journal_path, Path)
+    original = journal_path.read_bytes()
+    with pytest.raises(operator.ReleaseFailure, match="^unit_install_predecessor_chain_invalid$"):
+        _lab775_install(world)
+    assert journal_path.read_bytes() == original
+    assert not _lab775_lineage_dir(world).exists()
+    assert "daemon-reload" not in commands
+    assert "start" not in commands
+
+
+def test_lab775_cli_raw_sha_defaults_off_and_rejects_malformed(capsys: pytest.CaptureFixture[str]) -> None:
+    base = [
+        "install-units",
+        "--release",
+        "/var/tmp/lab775-not-a-release",
+        "--release-tree-sha256",
+        "d" * 64,
+        "--previous",
+        "/var/tmp/lab775-not-a-previous",
+        "--previous-tree-sha256",
+        "e" * 64,
+        "--anchor",
+        "/var/tmp/lab775-not-an-anchor",
+        "--unit-dir",
+        "/var/tmp/lab775-not-units",
+        "--state-dir",
+        "/var/tmp/lab775-not-state",
+        "--backup-dir",
+        "/var/tmp/lab775-not-backups",
+        "--transition-runtime-root",
+        "/var/tmp/lab775-not-transition",
+        "--transition-backend-unit-sha256",
+        "1" * 64,
+        "--transition-bridge-unit-sha256",
+        "2" * 64,
+    ]
+    parser = operator.build_parser()
+    assert parser.parse_args(base).supersede_completed_unit_journal_sha256 is None
+    for removed in (
+        ["--retired-journal-sha256", "1" * 64],
+        ["--retired-transaction-id", "1" * 64],
+        ["--retired-receipt-sha256", "1" * 64],
+        ["--supersede-unactivated-terminal"],
+    ):
+        with pytest.raises(SystemExit):
+            parser.parse_args([*base, *removed])
+    for malformed in ("", "ab", "A" * 64, "1" * 63, "zz" * 32):
+        assert operator.main([*base, "--supersede-completed-unit-journal-sha256", malformed]) == 2
+        payload = json.loads(capsys.readouterr().out)
+        assert payload["failure_code"] == "unit_install_supersession_authority_mismatch"
+
+
+def test_lab775_identity_negatives_refuse_before_lineage(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    world = _lab775_world(tmp_path)
+    systemctl, commands = _lab775_systemctl(world, {})
+    monkeypatch.setattr(operator, "_run_systemctl", systemctl)
+    real_load = operator.load_release_identity
+    calls = _lab775_bind_loader(monkeypatch, world)
+    journal_path = world["journal_path"]
+    activation_path = world["activation_path"]
+    anchor = world["anchor"]
+    successor = world["successor"]
+    live = world["live"]
+    retired = world["retired"]
+    assert isinstance(journal_path, Path)
+    assert isinstance(activation_path, Path)
+    assert isinstance(anchor, Path)
+    assert isinstance(successor, operator.ReleaseIdentity)
+    assert isinstance(live, operator.ReleaseIdentity)
+    assert isinstance(retired, operator.ReleaseIdentity)
+    original = journal_path.read_bytes()
+    activation_original = activation_path.read_bytes()
+    internal = str(json.loads(original.decode("ascii"))["journal_sha256"])
+
+    def refuse(code: str, **overrides: object) -> None:
+        before = len(commands)
+        snapshot = journal_path.read_bytes()
+        options: dict[str, object] = {
+            "retired_journal_raw_sha256": world["retired_raw"],
+            "activation_journal": activation_path,
+        }
+        options.update(overrides)
+        with pytest.raises(operator.ReleaseFailure, match=f"^{code}$"):
+            _lab775_install(world, **options)
+        assert journal_path.read_bytes() == snapshot
+        assert not _lab775_lineage_dir(world).exists()
+        assert "daemon-reload" not in commands[before:]
+
+    refuse("unit_install_supersession_authority_mismatch", retired_journal_raw_sha256="4" * 64)
+    refuse("unit_install_supersession_authority_mismatch", retired_journal_raw_sha256=internal)
+    _rewrite_signed_journal(
+        journal_path,
+        lambda core: core.update({"phase": "prepared", "receipt_sha256": ""}),
+    )
+    refuse("unfinished_unit_install_identity_changed")
+    journal_path.write_bytes(original)
+    journal_path.chmod(0o600)
+
+    def previous_mismatch(core: dict[str, object]) -> None:
+        core["previous"] = operator._journal_release(successor)  # noqa: SLF001
+        core["transaction_id"] = operator._unit_install_transaction_id(core)  # noqa: SLF001
+        core["receipt_sha256"] = hashlib.sha256(
+            operator._canonical_json(  # noqa: SLF001
+                {
+                    "candidate_tree_sha256": core["candidate"]["tree_manifest_sha256"],  # type: ignore[index]
+                    "previous_tree_sha256": core["previous"]["tree_manifest_sha256"],  # type: ignore[index]
+                    "retention_admission": core["retention_admission"],
+                    "retention_admission_receipt_sha256": core["retention_admission_receipt_sha256"],
+                    "unit_hashes": core["candidate_unit_hashes"],
+                }
+            )
+        ).hexdigest()
+
+    _rewrite_signed_journal(journal_path, previous_mismatch)
+    fresh_raw = hashlib.sha256(journal_path.read_bytes()).hexdigest()
+    refuse("unit_install_supersession_previous_mismatch", retired_journal_raw_sha256=fresh_raw)
+    journal_path.write_bytes(original)
+    journal_path.chmod(0o600)
+    aliased = replace(successor, commit=live.commit)
+    _lab775_bind_loader(monkeypatch, world)
+    del calls
+
+    def refuse_alias() -> None:
+        journal = operator.DurableUnitInstallJournal(journal_path)
+        with pytest.raises(
+            operator.ReleaseFailure,
+            match="^unit_install_supersession_candidate_not_distinct$",
+        ):
+            operator.install_units(
+                aliased,
+                live,
+                unit_dir=world["unit_dir"],  # type: ignore[arg-type]
+                anchor=anchor,
+                transition_runtime_root=world["transition"],  # type: ignore[arg-type]
+                transition_unit_hashes=world["transition_hashes"],  # type: ignore[arg-type]
+                retention_admission=world["admission"],  # type: ignore[arg-type]
+                journal=journal,
+                retired_journal_raw_sha256=str(world["retired_raw"]),
+                activation_journal=activation_path,
+                fresh_retention_admission=_lab775_fresh(world),
+            )
+
+    refuse_alias()
+    assert not _lab775_lineage_dir(world).exists()
+    payload = json.loads(activation_original.decode("ascii"))
+    payload["candidate"] = operator._journal_release(retired)  # noqa: SLF001
+    activation_path.write_bytes(operator._canonical_json(payload) + b"\n")  # noqa: SLF001
+    activation_path.chmod(0o600)
+    refuse("unit_install_supersession_candidate_active")
+    payload["candidate"] = operator._journal_release(successor)  # noqa: SLF001
+    activation_path.write_bytes(operator._canonical_json(payload) + b"\n")  # noqa: SLF001
+    activation_path.chmod(0o600)
+    refuse("unit_install_supersession_activation_mismatch")
+    payload = json.loads(activation_original.decode("ascii"))
+    payload["phase"] = "prepared"
+    activation_path.write_bytes(operator._canonical_json(payload) + b"\n")  # noqa: SLF001
+    activation_path.chmod(0o600)
+    refuse("unit_install_supersession_activation_not_clear")
+    activation_path.write_bytes(activation_original)
+    activation_path.chmod(0o600)
+    drifted = _retention_admission_receipt(activation_receipt_sha256="3" * 64)
+    journal = operator.DurableUnitInstallJournal(journal_path)
+    with pytest.raises(operator.ReleaseFailure, match="^unit_install_supersession_retention_drift$"):
+        operator.install_units(
+            successor,
+            live,
+            unit_dir=world["unit_dir"],  # type: ignore[arg-type]
+            anchor=anchor,
+            transition_runtime_root=world["transition"],  # type: ignore[arg-type]
+            transition_unit_hashes=world["transition_hashes"],  # type: ignore[arg-type]
+            retention_admission=drifted,
+            journal=journal,
+            retired_journal_raw_sha256=str(world["retired_raw"]),
+            activation_journal=activation_path,
+            fresh_retention_admission=_lab775_fresh(world),
+        )
+    assert journal_path.read_bytes() == original
+    anchor.unlink()
+    anchor.symlink_to(retired.root, target_is_directory=True)
+    refuse("unit_install_supersession_anchor_mismatch")
+    anchor.unlink()
+    anchor.symlink_to(live.root, target_is_directory=True)
+    security = world["unit_dir"] / "friday-backend.service.d" / "security.conf"  # type: ignore[operator]
+    assert isinstance(security, Path)
+    saved_security = security.read_bytes()
+    security.write_bytes(saved_security + b"# drift\n")
+    security.chmod(0o600)
+    refuse("unit_install_supersession_unit_drift")
+    security.write_bytes(saved_security)
+    security.chmod(0o600)
+
+    monkeypatch.setattr(operator, "load_release_identity", real_load)
+    with pytest.raises(operator.ReleaseFailure, match="^unit_install_supersession_release_invalid$"):
+        _lab775_install(
+            world,
+            retired_journal_raw_sha256=world["retired_raw"],
+            activation_journal=activation_path,
+        )
+    assert not _lab775_lineage_dir(world).exists()
+
+    def drifted_loader(root: Path, *, expected_tree_sha256: str) -> operator.ReleaseIdentity:
+        return operator.ReleaseIdentity(root, "9" * 40, "0.208.1", expected_tree_sha256, 50)
+
+    monkeypatch.setattr(operator, "load_release_identity", drifted_loader)
+    with pytest.raises(operator.ReleaseFailure, match="^unit_install_supersession_release_invalid$"):
+        _lab775_install(
+            world,
+            retired_journal_raw_sha256=world["retired_raw"],
+            activation_journal=activation_path,
+        )
+    assert journal_path.read_bytes() == original
+    assert not _lab775_lineage_dir(world).exists()
+
+
+def test_lab775_manager_projection_negatives_refuse_before_lineage(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    world = _lab775_world(tmp_path)
+    _lab775_bind_loader(monkeypatch, world)
+    journal_path = world["journal_path"]
+    activation_path = world["activation_path"]
+    assert isinstance(journal_path, Path)
+    assert isinstance(activation_path, Path)
+    original = journal_path.read_bytes()
+    false_exec = _lab775_record(("/bin/false",))
+    cases = {
+        "ExecStartPre": ("systemd_manager_execstartpre_invalid", false_exec),
+        "ExecCondition": ("systemd_manager_extra_exec_invalid", false_exec),
+        "ExecStartPost": ("systemd_manager_extra_exec_invalid", false_exec),
+        "ExecReload": ("systemd_manager_extra_exec_invalid", false_exec),
+        "ExecStop": ("systemd_manager_extra_exec_invalid", false_exec),
+        "ExecStopPost": ("systemd_manager_extra_exec_invalid", false_exec),
+        "KillMode": ("systemd_manager_kill_mode_invalid", b"process\n"),
+        "UMask": ("systemd_manager_umask_invalid", b"0022\n"),
+        "WorkingDirectory": ("systemd_manager_property_invalid", b"/tmp\n"),
+        "UnsetEnvironment": ("systemd_manager_property_invalid", b"OTHER\n"),
+        "EnvironmentFiles": ("systemd_manager_property_invalid", b"/tmp/env.conf\n"),
+        "TasksMax": ("systemd_manager_property_invalid", b"37170\n"),
+        "MemoryMax": ("systemd_manager_property_invalid", b"1\n"),
+        "MemorySwapMax": ("systemd_manager_property_invalid", b"1\n"),
+        "UnitFileState": ("systemd_manager_property_invalid", b"disabled\n"),
+    }
+    for name, (code, stdout) in cases.items():
+        systemctl, commands = _lab775_systemctl(world, {"name": name, "stdout": stdout})
+        monkeypatch.setattr(operator, "_run_systemctl", systemctl)
+        with pytest.raises(operator.ReleaseFailure, match=f"^{code}$"):
+            _lab775_install(
+                world,
+                retired_journal_raw_sha256=world["retired_raw"],
+                activation_journal=activation_path,
+            )
+        assert journal_path.read_bytes() == original
+        assert not _lab775_lineage_dir(world).exists()
+        assert "daemon-reload" not in commands
+        assert "start" not in commands
+
+
+def test_lab775_create_only_collision_torn_fsync_and_exact_retry(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    world = _lab775_world(tmp_path)
+    systemctl, _commands = _lab775_systemctl(world, {})
+    monkeypatch.setattr(operator, "_run_systemctl", systemctl)
+    _lab775_bind_loader(monkeypatch, world)
+    journal_path = world["journal_path"]
+    activation_path = world["activation_path"]
+    successor = world["successor"]
+    live = world["live"]
+    assert isinstance(journal_path, Path)
+    assert isinstance(activation_path, Path)
+    assert isinstance(successor, operator.ReleaseIdentity)
+    assert isinstance(live, operator.ReleaseIdentity)
+    original = journal_path.read_bytes()
+    real_temporary = operator._write_lineage_temporary  # noqa: SLF001
+    real_file_fsync = operator._fsync_lineage_descriptor  # noqa: SLF001
+    kwargs = {
+        "retired_journal_raw_sha256": world["retired_raw"],
+        "activation_journal": activation_path,
+    }
+
+    def torn(path: Path, payload: bytes) -> None:
+        del payload
+        path.write_bytes(b"tornbyte")
+        raise OSError("torn lineage")
+
+    monkeypatch.setattr(operator, "_write_lineage_temporary", torn)
+    with pytest.raises(operator.ReleaseFailure, match="^unit_install_supersession_lineage_invalid$"):
+        _lab775_install(world, **kwargs)
+    assert journal_path.read_bytes() == original
+    assert not list(_lab775_lineage_dir(world).glob("*.json"))
+    monkeypatch.setattr(operator, "_write_lineage_temporary", real_temporary)
+    _lab775_clear_lineage(world)
+
+    def bad_file_fsync(descriptor: int) -> None:
+        del descriptor
+        raise OSError("file fsync")
+
+    monkeypatch.setattr(operator, "_fsync_lineage_descriptor", bad_file_fsync)
+    with pytest.raises(operator.ReleaseFailure, match="^unit_install_supersession_lineage_invalid$"):
+        _lab775_install(world, **kwargs)
+    assert journal_path.read_bytes() == original
+    assert not list(_lab775_lineage_dir(world).glob("*.json"))
+    monkeypatch.setattr(operator, "_fsync_lineage_descriptor", real_file_fsync)
+    _lab775_clear_lineage(world)
+    lineage_path = operator.DurableUnitInstallJournal(journal_path)._lineage_path(  # noqa: SLF001
+        str(world["retired_raw"])
+    )
+    _lab775_private(lineage_path.parent)
+    lineage_path.write_bytes(b"not-a-lineage-document\n")
+    lineage_path.chmod(0o600)
+    with pytest.raises(operator.ReleaseFailure, match="^unit_install_supersession_lineage_collision$"):
+        _lab775_install(world, **kwargs)
+    assert journal_path.read_bytes() == original
+    lineage_path.write_bytes(
+        operator._canonical_json({"schema": operator.UNIT_INSTALL_LINEAGE_SCHEMA}) + b"\n"  # noqa: SLF001
+    )
+    lineage_path.chmod(0o600)
+    with pytest.raises(operator.ReleaseFailure, match="^unit_install_supersession_lineage_stale$"):
+        _lab775_install(world, **kwargs)
+    assert journal_path.read_bytes() == original
+    _lab775_clear_lineage(world)
+    saved_activation = activation_path.read_bytes()
+    observed = {"n": 0}
+    real_auth = operator._authenticate_unactivated_terminal_supersession  # noqa: SLF001
+
+    def stale_boundary(**boundary_kwargs: object) -> dict[str, object]:
+        result = real_auth(**boundary_kwargs)  # type: ignore[arg-type]
+        observed["n"] += 1
+        if observed["n"] == 1:
+            payload = json.loads(activation_path.read_text(encoding="ascii"))
+            payload["lab775_stale_marker"] = "1"
+            activation_path.write_bytes(operator._canonical_json(payload) + b"\n")  # noqa: SLF001
+            activation_path.chmod(0o600)
+        return result
+
+    monkeypatch.setattr(operator, "_authenticate_unactivated_terminal_supersession", stale_boundary)
+    with pytest.raises(operator.ReleaseFailure, match="^unit_install_supersession_lineage_stale$"):
+        _lab775_install(world, **kwargs)
+    assert journal_path.read_bytes() == original
+    assert list(_lab775_lineage_dir(world).glob("*.json"))
+    activation_path.write_bytes(saved_activation)
+    activation_path.chmod(0o600)
+    monkeypatch.setattr(operator, "_authenticate_unactivated_terminal_supersession", real_auth)
+    _lab775_clear_lineage(world)
+    fsync_calls = {"n": 0}
+    real_directory_fsync = operator._fsync_lineage_directory  # noqa: SLF001
+
+    def flaky_directory(path: Path) -> None:
+        fsync_calls["n"] += 1
+        if fsync_calls["n"] == 1:
+            raise OSError("directory fsync")
+        real_directory_fsync(path)
+
+    monkeypatch.setattr(operator, "_fsync_lineage_directory", flaky_directory)
+    with pytest.raises(operator.ReleaseFailure, match="^unit_install_supersession_lineage_invalid$"):
+        _lab775_install(world, **kwargs)
+    published = next(_lab775_lineage_dir(world).glob("*.json"))
+    inode = published.stat().st_ino
+    assert journal_path.read_bytes() == original
+    real_replace = operator._replace_private_durable  # noqa: SLF001
+
+    def crash_before(path: Path, value: bytes) -> None:
+        if path.name == "immutable-release-unit-install.v1.json":
+            raise RuntimeError("crash before replacement")
+        real_replace(path, value)
+
+    monkeypatch.setattr(operator, "_replace_private_durable", crash_before)
+    with pytest.raises(RuntimeError, match="crash before replacement"):
+        _lab775_install(world, **kwargs)
+    assert published.stat().st_ino == inode
+    assert journal_path.read_bytes() == original
+    monkeypatch.setattr(operator, "_replace_private_durable", real_replace)
+    _hashes, _journal = None, None
+    returned = _lab775_install(world, **kwargs)
+    assert published.stat().st_ino == inode
+    assert set(returned[1]) == set(operator._UNIT_SURFACE_KEYS)  # noqa: SLF001
+    final = json.loads(journal_path.read_text(encoding="ascii"))
+    assert final["schema"] == operator.UNIT_INSTALL_JOURNAL_SCHEMA
+    assert final["phase"] == "complete"
+    assert final["candidate"]["commit"] == "c" * 40
+    assert final["previous"]["commit"] == "a" * 40
+    assert b"/" not in published.read_bytes()
+    del _hashes, _journal
+
+
+def test_lab775_explicit_supersession_publishes_lineage_then_exact_v2(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import importlib.util
+
+    world = _lab775_world(tmp_path)
+    systemctl, commands = _lab775_systemctl(world, {})
+    monkeypatch.setattr(operator, "_run_systemctl", systemctl)
+    calls = _lab775_bind_loader(monkeypatch, world)
+    journal_path = world["journal_path"]
+    activation_path = world["activation_path"]
+    anchor = world["anchor"]
+    successor = world["successor"]
+    live = world["live"]
+    retired = world["retired"]
+    assert isinstance(journal_path, Path)
+    assert isinstance(activation_path, Path)
+    assert isinstance(anchor, Path)
+    assert isinstance(successor, operator.ReleaseIdentity)
+    assert isinstance(live, operator.ReleaseIdentity)
+    assert isinstance(retired, operator.ReleaseIdentity)
+    targets: list[Path] = []
+    real_anchor = operator._atomic_anchor_root  # noqa: SLF001
+
+    def crash_after(anchor_path: Path, root: Path) -> None:
+        targets.append(root)
+        if len(targets) == 1:
+            raise RuntimeError("crash after replacement")
+        real_anchor(anchor_path, root)
+
+    monkeypatch.setattr(operator, "_atomic_anchor_root", crash_after)
+    with pytest.raises(RuntimeError, match="crash after replacement"):
+        _lab775_install(
+            world,
+            retired_journal_raw_sha256=world["retired_raw"],
+            activation_journal=activation_path,
+        )
+    prepared = json.loads(journal_path.read_text(encoding="ascii"))
+    assert prepared["schema"] == operator.UNIT_INSTALL_JOURNAL_SCHEMA
+    assert prepared["phase"] == "prepared"
+    assert prepared["candidate"]["commit"] == "c" * 40
+    assert prepared["previous"]["commit"] == "a" * 40
+    assert anchor.resolve(strict=True) == live.root
+    lineage = next(_lab775_lineage_dir(world).glob("*.json"))
+    assert stat.S_IMODE(lineage.stat().st_mode) == 0o600
+    assert stat.S_IMODE(lineage.parent.stat().st_mode) == 0o700
+    assert b"/" not in lineage.read_bytes()
+    clone = Path(operator.__file__).resolve().parents[1]
+    blob = subprocess.check_output(
+        ["git", "show", "HEAD:tools/immutable_release_operator.py"],
+        cwd=clone,
+        env={**os.environ, "GIT_OPTIONAL_LOCKS": "0"},
+    )
+    module_path = tmp_path / "base-immutable-release-operator.py"
+    module_path.write_bytes(blob)
+    spec = importlib.util.spec_from_file_location("lab775_base_operator", module_path)
+    assert spec is not None and spec.loader is not None
+    base = importlib.util.module_from_spec(spec)
+    sys.modules["lab775_base_operator"] = base
+    spec.loader.exec_module(base)
+    parsed = base.DurableUnitInstallJournal(journal_path).load()
+    assert parsed["schema"] == base.UNIT_INSTALL_JOURNAL_SCHEMA
+    assert parsed["phase"] == "prepared"
+    sealed_source = Path(
+        "/home/jericho/.jericho/wheel-only-releases/"
+        "5c3ce13c1e486e6512d64e62a898a2ba84d76f93/artifacts/immutable_release_operator.py"
+    )
+    sealed_bytes = sealed_source.read_bytes()
+    assert (
+        hashlib.sha256(sealed_bytes).hexdigest()
+        == "794b6c7b0316a59ca39ef4cb7202545e5d2691f24f4ea09b3bd32cca7385b81e"
+    )
+    sealed_path = tmp_path / "sealed-fallback-immutable-release-operator.py"
+    sealed_path.write_bytes(sealed_bytes)
+    sealed_path.chmod(0o400)
+    sealed_spec = importlib.util.spec_from_file_location("lab776_sealed_fallback", sealed_path)
+    assert sealed_spec is not None and sealed_spec.loader is not None
+    sealed = importlib.util.module_from_spec(sealed_spec)
+    sys.modules["lab776_sealed_fallback"] = sealed
+    sealed_spec.loader.exec_module(sealed)
+    sealed_prepared = sealed.DurableUnitInstallJournal(journal_path).load()
+    assert sealed_prepared["schema"] == sealed.UNIT_INSTALL_JOURNAL_SCHEMA
+    assert sealed_prepared["phase"] == "prepared"
+    monkeypatch.setattr(operator, "_atomic_anchor_root", crash_after)
+    returned = _lab775_install(
+        world,
+        retired_journal_raw_sha256=world["retired_raw"],
+        activation_journal=activation_path,
+    )
+    journal, hashes = returned
+    final = journal.load()
+    assert final["schema"] == operator.UNIT_INSTALL_JOURNAL_SCHEMA
+    assert final["phase"] == "complete"
+    assert final["candidate"]["commit"] == successor.commit
+    assert final["previous"]["commit"] == live.commit
+    assert set(final) == {
+        "candidate",
+        "candidate_unit_hashes",
+        "legacy_bootstrap_unit_install_file_sha256",
+        "phase",
+        "previous",
+        "receipt_sha256",
+        "retention_admission",
+        "retention_admission_receipt_sha256",
+        "schema",
+        "transaction_id",
+        "transition_root",
+        "transition_unit_hashes",
+    }
+    assert not hasattr(operator, "UNIT_INSTALL_JOURNAL_SCHEMA_V3")
+    document = json.loads(lineage.read_text(encoding="ascii"))
+    assert document["retired_transaction_id"] == world["retired_transaction"]
+    assert document["successor_transaction_id"] == final["transaction_id"]
+    assert document["successor_transaction_id"] != document["retired_transaction_id"]
+    assert document["retired_raw_journal_sha256"] == world["retired_raw"]
+    assert anchor.resolve(strict=True) == live.root
+    assert retired.root not in targets
+    assert targets[-1] == live.root
+    assert set(hashes) == set(operator._UNIT_SURFACE_KEYS)  # noqa: SLF001
+    assert "start" not in commands
+    base.DurableUnitInstallJournal(journal_path).load()
+    base._require_completed_unit_install(world["state_dir"], successor, live)
+    sealed.DurableUnitInstallJournal(journal_path).load()
+    sealed._require_completed_unit_install(world["state_dir"], successor, live)
+    assert "37170" not in Path(operator.__file__).read_text(encoding="utf-8")
+    receipt = operator._install_units_operation_receipt(  # noqa: SLF001
+        release=successor,
+        previous=live,
+        retention_admission=world["admission"],  # type: ignore[arg-type]
+        unit_hashes=hashes,
+        journal=journal,
+    )
+    encoded = json.dumps(receipt, sort_keys=True)
+    assert receipt["supersession"] is True
+    assert receipt["lineage_sha256"] == document["lineage_sha256"]
+    assert receipt["retired_raw_journal_sha256"] == world["retired_raw"]
+    assert receipt["retired_internal_journal_sha256"] == document["retired_internal_journal_sha256"]
+    assert receipt["retired_transaction_id"] == world["retired_transaction"]
+    assert receipt["retired_receipt_sha256"] == document["retired_receipt_sha256"]
+    assert str(lineage) not in encoded
+    assert "immutable-release-unit-install-lineage.v1" not in encoded
+    roots = [root for root, _tree in calls]
+    assert roots.count(retired.root) >= 2
+    assert roots.count(live.root) >= 2
+    assert roots.count(successor.root) >= 2
+    lineage.unlink()
+    with pytest.raises(operator.ReleaseFailure, match="^unit_install_supersession_lineage_invalid$"):
+        _lab775_install(
+            world,
+            retired_journal_raw_sha256=world["retired_raw"],
+            activation_journal=activation_path,
+        )
+
+
+def test_lab775_ordinary_chain_stays_v2_without_lineage(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    world = _lab775_world(tmp_path, retired=False)
+    systemctl, commands = _lab775_systemctl(world, {})
+    monkeypatch.setattr(operator, "_run_systemctl", systemctl)
+    journal, hashes = _lab775_install(world)
+    loaded = journal.load()
+    assert loaded["schema"] == operator.UNIT_INSTALL_JOURNAL_SCHEMA
+    assert loaded["phase"] == "complete"
+    assert loaded["candidate"]["commit"] == "c" * 40
+    assert loaded["previous"]["commit"] == "a" * 40
+    assert journal.public_supersession_receipt is None
+    assert not _lab775_lineage_dir(world).exists()
+    assert not hasattr(operator, "UNIT_INSTALL_JOURNAL_SCHEMA_V3")
+    assert set(hashes) == set(operator._UNIT_SURFACE_KEYS)  # noqa: SLF001
+    assert "start" not in commands
+    anchor = world["anchor"]
+    live = world["live"]
+    assert isinstance(anchor, Path)
+    assert isinstance(live, operator.ReleaseIdentity)
+    assert anchor.resolve(strict=True) == live.root
+
+
+def _lab776_authority(world: dict[str, object], **overrides: object) -> dict[str, object]:
+    options: dict[str, object] = {
+        "retired_journal_raw_sha256": world["retired_raw"],
+        "activation_journal": world["activation_path"],
+        "fresh_retention_admission": _lab775_fresh(world),
+    }
+    options.update(overrides)
+    return options
+
+
+def test_lab776_parent_fsync_orders_before_replacement_and_fails_closed(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    world = _lab775_world(tmp_path)
+    systemctl, commands = _lab775_systemctl(world, {})
+    monkeypatch.setattr(operator, "_run_systemctl", systemctl)
+    _lab775_bind_loader(monkeypatch, world)
+    journal_path = world["journal_path"]
+    state_dir = world["state_dir"]
+    assert isinstance(journal_path, Path)
+    assert isinstance(state_dir, Path)
+    original = journal_path.read_bytes()
+
+    def bad_parent(path: Path) -> None:
+        del path
+        raise OSError("parent fsync")
+
+    monkeypatch.setattr(operator, "_fsync_lineage_parent", bad_parent)
+    with pytest.raises(operator.ReleaseFailure, match="^unit_install_supersession_lineage_invalid$"):
+        _lab775_install(world, **_lab776_authority(world))
+    assert journal_path.read_bytes() == original
+    assert not list(_lab775_lineage_dir(world).glob("*.json"))
+    assert "daemon-reload" not in commands
+    order: list[tuple[str, str]] = []
+    real_parent = operator._fsync_directory  # noqa: SLF001
+    original_replace = operator._replace_private_durable  # noqa: SLF001
+
+    def parent(path: Path) -> None:
+        order.append(("parent", path.name))
+        real_parent(path)
+
+    def directory(path: Path) -> None:
+        order.append(("lineage", path.name))
+        operator._fsync_directory(path)  # noqa: SLF001
+
+    def replace(path: Path, value: bytes) -> None:
+        order.append(("journal", path.name))
+        if path.name == "immutable-release-unit-install.v1.json":
+            raise RuntimeError("stop after durability order")
+        original_replace(path, value)
+
+    monkeypatch.setattr(operator, "_fsync_lineage_parent", parent)
+    monkeypatch.setattr(operator, "_fsync_lineage_directory", directory)
+    monkeypatch.setattr(operator, "_replace_private_durable", replace)
+    _lab775_clear_lineage(world)
+    with pytest.raises(RuntimeError, match="stop after durability order"):
+        _lab775_install(world, **_lab776_authority(world))
+    names = [kind for kind, _name in order]
+    assert names.index("parent") < names.index("lineage") < names.index("journal")
+    assert order[0] == ("parent", state_dir.name)
+    assert journal_path.read_bytes() == original
+
+
+def test_lab776_second_successor_collides_on_retired_raw_identity(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    world = _lab775_world(tmp_path)
+    systemctl, commands = _lab775_systemctl(world, {})
+    monkeypatch.setattr(operator, "_run_systemctl", systemctl)
+    _lab775_bind_loader(monkeypatch, world)
+    journal_path = world["journal_path"]
+    successor = world["successor"]
+    live = world["live"]
+    retired = world["retired"]
+    assert isinstance(journal_path, Path)
+    assert isinstance(successor, operator.ReleaseIdentity)
+    assert isinstance(live, operator.ReleaseIdentity)
+    assert isinstance(retired, operator.ReleaseIdentity)
+    original = journal_path.read_bytes()
+    real_replace = operator._replace_private_durable  # noqa: SLF001
+
+    def crash_before(path: Path, value: bytes) -> None:
+        if path.name == "immutable-release-unit-install.v1.json":
+            raise RuntimeError("crash before replacement")
+        real_replace(path, value)
+
+    monkeypatch.setattr(operator, "_replace_private_durable", crash_before)
+    with pytest.raises(RuntimeError, match="crash before replacement"):
+        _lab775_install(world, **_lab776_authority(world))
+    published = next(_lab775_lineage_dir(world).glob("*.json"))
+    inode = published.stat().st_ino
+    expected = operator.DurableUnitInstallJournal(journal_path)._lineage_path(  # noqa: SLF001
+        str(world["retired_raw"])
+    )
+    assert published == expected
+    assert journal_path.read_bytes() == original
+    other = _lab775_release(tmp_path / "other", "d" * 40, "0.208.64", "1" * 64, relocate=True)
+    for name in operator._RUNTIME_UNIT_NAMES:  # noqa: SLF001
+        target = other.root / "artifacts" / name
+        target.write_bytes((successor.root / "artifacts" / name).read_bytes() + b"\n# lab776-other\n")
+        target.chmod(0o600)
+    releases = (live, retired, successor, other)
+
+    def load(root: Path, *, expected_tree_sha256: str) -> operator.ReleaseIdentity:
+        for identity in releases:
+            if Path(root) == identity.root and expected_tree_sha256 == identity.tree_manifest_sha256:
+                return identity
+        raise operator.ReleaseFailure("release_metadata_invalid")
+
+    monkeypatch.setattr(operator, "load_release_identity", load)
+    monkeypatch.setattr(operator, "_replace_private_durable", real_replace)
+    with pytest.raises(operator.ReleaseFailure, match="^unit_install_supersession_lineage_stale$"):
+        operator.install_units(
+            other,
+            live,
+            unit_dir=world["unit_dir"],  # type: ignore[arg-type]
+            anchor=world["anchor"],  # type: ignore[arg-type]
+            transition_runtime_root=world["transition"],  # type: ignore[arg-type]
+            transition_unit_hashes=world["transition_hashes"],  # type: ignore[arg-type]
+            retention_admission=world["admission"],  # type: ignore[arg-type]
+            journal=operator.DurableUnitInstallJournal(journal_path),
+            retired_journal_raw_sha256=str(world["retired_raw"]),
+            activation_journal=world["activation_path"],  # type: ignore[arg-type]
+            fresh_retention_admission=_lab775_fresh(world),
+        )
+    assert published.stat().st_ino == inode
+    assert journal_path.read_bytes() == original
+    assert "start" not in commands
+    assert "restart" not in commands
+    assert "daemon-reload" not in commands
+
+
+def test_lab776_post_replace_resume_accepts_distinct_unit_bytes(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    world = _lab775_world(tmp_path)
+    systemctl, commands = _lab775_systemctl(world, {})
+    monkeypatch.setattr(operator, "_run_systemctl", systemctl)
+    _lab775_bind_loader(monkeypatch, world)
+    successor = world["successor"]
+    journal_path = world["journal_path"]
+    unit_dir = world["unit_dir"]
+    anchor = world["anchor"]
+    live = world["live"]
+    assert isinstance(successor, operator.ReleaseIdentity)
+    assert isinstance(journal_path, Path)
+    assert isinstance(unit_dir, Path)
+    assert isinstance(anchor, Path)
+    assert isinstance(live, operator.ReleaseIdentity)
+    installed_before = {
+        name: (unit_dir / name).read_bytes()
+        for name in operator._RUNTIME_UNIT_NAMES  # noqa: SLF001
+    }
+    for name, content in installed_before.items():
+        artifact = successor.root / "artifacts" / name
+        artifact.write_bytes(content + b"\n# lab776-distinct-successor\n")
+        artifact.chmod(0o600)
+        assert hashlib.sha256(artifact.read_bytes()).hexdigest() != hashlib.sha256(content).hexdigest()
+    calls: list[Path] = []
+
+    class Admission:
+        def retention_release_admission(self, path: Path) -> dict[str, object]:
+            calls.append(path)
+            admission = world["admission"]
+            assert isinstance(admission, dict)
+            return dict(admission)
+
+    receipt = tmp_path / "activation-receipt.json"
+    receipt.write_bytes(b"{}\n")
+    receipt.chmod(0o600)
+    fresh = operator._fresh_sealed_retention_callable(Admission(), receipt)  # noqa: SLF001
+    real_anchor = operator._atomic_anchor_root  # noqa: SLF001
+
+    def crash_after(anchor_path: Path, root: Path) -> None:
+        if not crashed["value"]:
+            crashed["value"] = True
+            raise RuntimeError("crash after replacement")
+        real_anchor(anchor_path, root)
+
+    crashed = {"value": False}
+    monkeypatch.setattr(operator, "_atomic_anchor_root", crash_after)
+    with pytest.raises(RuntimeError, match="crash after replacement"):
+        _lab775_install(world, **_lab776_authority(world, fresh_retention_admission=fresh))
+    assert all((unit_dir / name).read_bytes() == content for name, content in installed_before.items())
+    assert anchor.resolve(strict=True) == live.root
+    prepared = json.loads(journal_path.read_text(encoding="ascii"))
+    assert prepared["phase"] == "prepared"
+    assert prepared["candidate"]["commit"] == successor.commit
+    lineage = operator.DurableUnitInstallJournal(journal_path)._lineage_path(  # noqa: SLF001
+        str(world["retired_raw"])
+    )
+    assert lineage.is_file()
+    monkeypatch.setattr(operator, "_atomic_anchor_root", crash_after)
+    _journal, hashes = _lab775_install(world, **_lab776_authority(world, fresh_retention_admission=fresh))
+    final = json.loads(journal_path.read_text(encoding="ascii"))
+    assert final["phase"] == "complete"
+    assert final["schema"] == operator.UNIT_INSTALL_JOURNAL_SCHEMA
+    assert anchor.resolve(strict=True) == live.root
+    assert set(hashes) == set(operator._UNIT_SURFACE_KEYS)  # noqa: SLF001
+    assert (unit_dir / "friday-backend.service").read_bytes().endswith(b"# lab776-distinct-successor\n")
+    assert calls == [receipt, receipt]
+    assert "start" not in commands
+    assert "restart" not in commands
+
+
+def test_lab776_retention_and_lock_drift_stop_at_each_durable_boundary(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    world = _lab775_world(tmp_path)
+    systemctl, _commands = _lab775_systemctl(world, {})
+    monkeypatch.setattr(operator, "_run_systemctl", systemctl)
+    _lab775_bind_loader(monkeypatch, world)
+    journal_path = world["journal_path"]
+    assert isinstance(journal_path, Path)
+    original = journal_path.read_bytes()
+    drifted = _retention_admission_receipt(activation_receipt_sha256="3" * 64)
+    seen = {"n": 0}
+
+    def drift_first() -> dict[str, object]:
+        seen["n"] += 1
+        if seen["n"] == 1:
+            return drifted
+        admission = world["admission"]
+        assert isinstance(admission, dict)
+        return dict(admission)
+
+    with pytest.raises(operator.ReleaseFailure, match="^unit_install_supersession_retention_drift$"):
+        _lab775_install(world, **_lab776_authority(world, fresh_retention_admission=drift_first))
+    assert journal_path.read_bytes() == original
+    assert not list(_lab775_lineage_dir(world).glob("*.json"))
+    seen["n"] = 0
+
+    def drift_second() -> dict[str, object]:
+        seen["n"] += 1
+        if seen["n"] == 2:
+            return drifted
+        admission = world["admission"]
+        assert isinstance(admission, dict)
+        return dict(admission)
+
+    with pytest.raises(operator.ReleaseFailure, match="^unit_install_supersession_retention_drift$"):
+        _lab775_install(world, **_lab776_authority(world, fresh_retention_admission=drift_second))
+    assert journal_path.read_bytes() == original
+    assert list(_lab775_lineage_dir(world).glob("*.json"))
+    _lab775_clear_lineage(world)
+    armed = {"value": False}
+
+    def guard() -> None:
+        if armed["value"]:
+            raise operator.ReleaseFailure("operator_transaction_lock_not_held")
+
+    def arm_on_first() -> dict[str, object]:
+        armed["value"] = True
+        admission = world["admission"]
+        assert isinstance(admission, dict)
+        return dict(admission)
+
+    with pytest.raises(operator.ReleaseFailure, match="^operator_transaction_lock_not_held$"):
+        _lab775_install(
+            world,
+            **_lab776_authority(world, fresh_retention_admission=arm_on_first, namespace_guard=guard),
+        )
+    assert journal_path.read_bytes() == original
+    assert not list(_lab775_lineage_dir(world).glob("*.json"))
+    armed["value"] = False
+    fresh_calls = {"n": 0}
+
+    def arm_on_second() -> dict[str, object]:
+        fresh_calls["n"] += 1
+        if fresh_calls["n"] == 2:
+            armed["value"] = True
+        admission = world["admission"]
+        assert isinstance(admission, dict)
+        return dict(admission)
+
+    with pytest.raises(operator.ReleaseFailure, match="^operator_transaction_lock_not_held$"):
+        _lab775_install(
+            world,
+            **_lab776_authority(world, fresh_retention_admission=arm_on_second, namespace_guard=guard),
+        )
+    assert journal_path.read_bytes() == original
+    assert list(_lab775_lineage_dir(world).glob("*.json"))
+
+
+def test_lab776_manager_properties_drift_at_the_second_boundary(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    assert operator._canonical_manager_quantity(b"inf") == "infinity"  # noqa: SLF001
+    assert operator._canonical_manager_quantity(b"infinity\n") == "infinity"  # noqa: SLF001
+    assert operator._canonical_manager_quantity(b"37170") == "37170"  # noqa: SLF001
+    with pytest.raises(operator.ReleaseFailure, match="^systemd_manager_property_invalid$"):
+        operator._canonical_manager_quantity(b"0512")  # noqa: SLF001
+    world = _lab775_world(tmp_path)
+    systemctl, commands = _lab775_systemctl(world, {})
+    monkeypatch.setattr(operator, "_run_systemctl", systemctl)
+    _lab775_bind_loader(monkeypatch, world)
+    journal_path = world["journal_path"]
+    assert isinstance(journal_path, Path)
+    original = journal_path.read_bytes()
+    calls = {"n": 0}
+    real_projection = operator._verify_supersession_manager_projection  # noqa: SLF001
+
+    def projection(directory: Path, unit: str) -> dict[str, object]:
+        calls["n"] += 1
+        if calls["n"] == 3:
+            raise operator.ReleaseFailure("systemd_manager_property_invalid")
+        return real_projection(directory, unit)
+
+    monkeypatch.setattr(operator, "_verify_supersession_manager_projection", projection)
+    with pytest.raises(operator.ReleaseFailure, match="^systemd_manager_property_invalid$"):
+        _lab775_install(world, **_lab776_authority(world))
+    assert journal_path.read_bytes() == original
+    assert list(_lab775_lineage_dir(world).glob("*.json"))
+    assert "daemon-reload" not in commands
+    assert "start" not in commands
+
+
+def test_lab776_lineage_directory_stays_inside_protected_state(
+    tmp_path: Path,
+) -> None:
+    config = _engineer_recovery_config(tmp_path)
+    _root, key, _lifecycle_key = _provision_test_engineer_store(config)
+    lineage = config.state_dir / "immutable-release-unit-install-lineage.v1"
+    lineage.mkdir(mode=0o700)
+    document = lineage / f"{'ab' * 32}.json"
+    document.write_bytes(b"{}\n")
+    document.chmod(0o600)
+    release_roots = (
+        tmp_path / "releases" / "candidate",
+        tmp_path / "releases" / "previous",
+        tmp_path / "releases" / "fallback",
+    )
+    operator._validate_engineer_recovery_contour(config, release_roots)  # noqa: SLF001
+    key.unlink()
+    os.link(document, key)
+    with pytest.raises(
+        operator.ReleaseFailure,
+        match="engineer_recovery_contour_(overlap|invalid|inode_alias)",
+    ):
+        operator._validate_engineer_recovery_contour(config, release_roots)  # noqa: SLF001
+
+
+def _lab777_prepare_distinct(world: dict[str, object]) -> dict[str, bytes]:
+    """Make successor unit bytes and one security drop-in differ from retired B."""
+
+    unit_dir = world["unit_dir"]
+    successor = world["successor"]
+    journal_path = world["journal_path"]
+    assert isinstance(unit_dir, Path)
+    assert isinstance(successor, operator.ReleaseIdentity)
+    assert isinstance(journal_path, Path)
+    marker = b"\n# lab777-distinct-successor\n"
+    for name in operator._RUNTIME_UNIT_NAMES:  # noqa: SLF001
+        installed = unit_dir / name
+        artifact = successor.root / "artifacts" / name
+        artifact.write_bytes(installed.read_bytes() + marker)
+        artifact.chmod(0o600)
+    security = unit_dir / "friday-backend.service.d" / "security.conf"
+    security.write_bytes(
+        operator._pre_aggregate_unit_security_dropin("friday-backend.service")  # noqa: SLF001
+    )
+    security.chmod(0o600)
+
+    def mutate(core: dict[str, object]) -> None:
+        hashes = dict(core["candidate_unit_hashes"])  # type: ignore[arg-type]
+        hashes["friday-backend.service.d/security.conf"] = hashlib.sha256(security.read_bytes()).hexdigest()
+        core["candidate_unit_hashes"] = hashes
+        core["transaction_id"] = operator._unit_install_transaction_id(core)  # noqa: SLF001
+        candidate = core["candidate"]
+        previous = core["previous"]
+        assert isinstance(candidate, dict)
+        assert isinstance(previous, dict)
+        core["receipt_sha256"] = hashlib.sha256(
+            operator._canonical_json(  # noqa: SLF001
+                {
+                    "candidate_tree_sha256": candidate["tree_manifest_sha256"],
+                    "previous_tree_sha256": previous["tree_manifest_sha256"],
+                    "retention_admission": core["retention_admission"],
+                    "retention_admission_receipt_sha256": core["retention_admission_receipt_sha256"],
+                    "unit_hashes": hashes,
+                }
+            )
+        ).hexdigest()
+
+    _rewrite_signed_journal(journal_path, mutate)
+    loaded = operator.DurableUnitInstallJournal(journal_path).load()
+    world["retired_raw"] = hashlib.sha256(journal_path.read_bytes()).hexdigest()
+    world["retired_transaction"] = str(loaded["transaction_id"])
+    retired = {
+        key: hashlib.sha256((unit_dir / key).read_bytes()).hexdigest()
+        for key in operator._UNIT_SURFACE_KEYS  # noqa: SLF001
+    }
+    world["retired_hashes"] = retired
+    targets: dict[str, bytes] = {}
+    for key in operator._UNIT_SURFACE_KEYS:  # noqa: SLF001
+        if key in operator._RUNTIME_UNIT_NAMES:  # noqa: SLF001
+            targets[key] = (successor.root / "artifacts" / key).read_bytes()
+        elif key == "friday-backend.service.d/security.conf":
+            targets[key] = operator._unit_security_dropin("friday-backend.service")  # noqa: SLF001
+        else:
+            targets[key] = (unit_dir / key).read_bytes()
+        assert hashlib.sha256(targets[key]).hexdigest() == retired[key] or key in {
+            "friday-backend.service",
+            "friday-bridge.service",
+            "friday-backend.service.d/security.conf",
+        }
+    assert hashlib.sha256(targets["friday-backend.service"]).hexdigest() != retired["friday-backend.service"]
+    assert (
+        hashlib.sha256(targets["friday-backend.service.d/security.conf"]).hexdigest()
+        != retired["friday-backend.service.d/security.conf"]
+    )
+    return targets
+
+
+def _lab777_resign_lineage(path: Path, mutate: Callable[[dict[str, object]], None]) -> None:
+    payload = json.loads(path.read_text(encoding="ascii"))
+    mutate(payload)
+    payload.pop("lineage_sha256", None)
+    payload["lineage_sha256"] = hashlib.sha256(
+        operator._canonical_json(payload)  # noqa: SLF001
+    ).hexdigest()
+    path.chmod(0o600)
+    path.write_bytes(operator._canonical_json(payload) + b"\n")  # noqa: SLF001
+    path.chmod(0o600)
+
+
+def test_lab777_partial_convergence_retries_every_position(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    keys = operator._UNIT_SURFACE_KEYS  # noqa: SLF001
+    for position in range(1, len(keys) + 1):
+        root = tmp_path / f"position-{position}"
+        root.mkdir(mode=0o700)
+        world = _lab775_world(root)
+        targets = _lab777_prepare_distinct(world)
+        systemctl, commands = _lab775_systemctl(world, {})
+        monkeypatch.setattr(operator, "_run_systemctl", systemctl)
+        _lab775_bind_loader(monkeypatch, world)
+        journal_path = world["journal_path"]
+        unit_dir = world["unit_dir"]
+        anchor = world["anchor"]
+        live = world["live"]
+        transition = world["transition"]
+        assert isinstance(journal_path, Path)
+        assert isinstance(unit_dir, Path)
+        assert isinstance(anchor, Path)
+        assert isinstance(live, operator.ReleaseIdentity)
+        assert isinstance(transition, Path)
+        retired = world["retired_hashes"]
+        assert isinstance(retired, dict)
+        seen = {"n": 0}
+        real_replace = operator._replace_unit_file  # noqa: SLF001
+
+        def crash_after(
+            destination: Path,
+            content: bytes,
+            *,
+            _real: Callable[[Path, bytes], None] = real_replace,
+            _seen: dict[str, int] = seen,
+            _position: int = position,
+        ) -> None:
+            _real(destination, content)
+            _seen["n"] += 1
+            if _seen["n"] == _position:
+                raise RuntimeError("crash after unit replace")
+
+        monkeypatch.setattr(operator, "_replace_unit_file", crash_after)
+        before = len(commands)
+        with pytest.raises(RuntimeError, match="crash after unit replace"):
+            _lab775_install(world, **_lab776_authority(world))
+        crashed = json.loads(journal_path.read_text(encoding="ascii"))
+        assert crashed["schema"] == operator.UNIT_INSTALL_JOURNAL_SCHEMA
+        assert crashed["phase"] == "transition_anchor_active"
+        assert crashed["candidate"]["commit"] == "c" * 40
+        assert crashed["previous"]["commit"] == "a" * 40
+        assert anchor.resolve(strict=True) == transition
+        assert seen["n"] == position
+        for index, key in enumerate(keys):
+            disk = (unit_dir / key).read_bytes()
+            if index < position:
+                assert disk == targets[key]
+            else:
+                assert hashlib.sha256(disk).hexdigest() == retired[key]
+        lineage = next(_lab775_lineage_dir(world).glob("*.json"))
+        assert b"/" not in lineage.read_bytes()
+        document = json.loads(lineage.read_text(encoding="ascii"))
+        assert document["retired_unit_hashes"] == [retired[key] for key in keys]
+        assert document["retired_unit_keyset_sha256"] == operator._retired_surface_keyset_sha256()  # noqa: SLF001
+        assert (
+            document["unit_surface_sha256"]
+            == hashlib.sha256(
+                operator._canonical_json(  # noqa: SLF001
+                    {key: retired[key] for key in keys}
+                )
+            ).hexdigest()
+        )
+        admitted = operator._require_retired_unit_surface(  # noqa: SLF001
+            operator.DurableUnitInstallJournal(journal_path),
+            unit_dir,
+            str(world["retired_raw"]),
+        )
+        assert admitted == {key: retired[key] for key in keys}
+        assert "daemon-reload" not in commands[before:]
+        assert "start" not in commands
+        assert "restart" not in commands
+        monkeypatch.setattr(operator, "_replace_unit_file", real_replace)
+        _journal, hashes = _lab775_install(world, **_lab776_authority(world))
+        final = json.loads(journal_path.read_text(encoding="ascii"))
+        assert final["schema"] == operator.UNIT_INSTALL_JOURNAL_SCHEMA
+        assert final["phase"] == "complete"
+        assert final["candidate"]["commit"] == "c" * 40
+        assert final["previous"]["commit"] == "a" * 40
+        assert anchor.resolve(strict=True) == live.root
+        assert set(hashes) == set(keys)
+        for key in keys:
+            assert (unit_dir / key).read_bytes() == targets[key]
+        assert "start" not in commands
+        assert "restart" not in commands
+        assert "stop" not in commands
+        assert "kill" not in commands
+
+
+def test_lab777_third_hash_and_bad_lineage_refuse_before_mutation(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    world = _lab775_world(tmp_path)
+    _lab777_prepare_distinct(world)
+    systemctl, commands = _lab775_systemctl(world, {})
+    monkeypatch.setattr(operator, "_run_systemctl", systemctl)
+    _lab775_bind_loader(monkeypatch, world)
+    journal_path = world["journal_path"]
+    unit_dir = world["unit_dir"]
+    anchor = world["anchor"]
+    transition = world["transition"]
+    assert isinstance(journal_path, Path)
+    assert isinstance(unit_dir, Path)
+    assert isinstance(anchor, Path)
+    assert isinstance(transition, Path)
+    real_replace = operator._replace_unit_file  # noqa: SLF001
+    seen = {"n": 0}
+
+    def crash_after(destination: Path, content: bytes) -> None:
+        real_replace(destination, content)
+        seen["n"] += 1
+        if seen["n"] == 1:
+            raise RuntimeError("crash after unit replace")
+
+    monkeypatch.setattr(operator, "_replace_unit_file", crash_after)
+    with pytest.raises(RuntimeError, match="crash after unit replace"):
+        _lab775_install(world, **_lab776_authority(world))
+    monkeypatch.setattr(operator, "_replace_unit_file", real_replace)
+    crashed = journal_path.read_bytes()
+    lineage = next(_lab775_lineage_dir(world).glob("*.json"))
+    lineage_bytes = lineage.read_bytes()
+    bridge = unit_dir / "friday-bridge.service"
+    bridge_bytes = bridge.read_bytes()
+
+    def refuse(code: str) -> None:
+        before = len(commands)
+        with pytest.raises(operator.ReleaseFailure, match=f"^{code}$"):
+            _lab775_install(world, **_lab776_authority(world))
+        assert journal_path.read_bytes() == crashed
+        assert anchor.resolve(strict=True) == transition
+        assert "daemon-reload" not in commands[before:]
+        assert "start" not in commands[before:]
+        assert "restart" not in commands[before:]
+
+    bridge.write_bytes(bridge_bytes + b"\n# lab777-third\n")
+    bridge.chmod(0o600)
+    refuse("unit_install_supersession_unit_drift")
+    bridge.write_bytes(bridge_bytes)
+    bridge.chmod(0o600)
+    lineage.write_bytes(b"not-a-lineage\n")
+    lineage.chmod(0o600)
+    refuse("unit_install_supersession_lineage_invalid")
+    lineage.unlink()
+    refuse("unit_install_supersession_lineage_invalid")
+    lineage.write_bytes(lineage_bytes)
+    lineage.chmod(0o600)
+
+    def cases(payload: dict[str, object]) -> None:
+        payload["retired_unit_hashes"] = list(payload["retired_unit_hashes"])[:-1]  # type: ignore[index]
+
+    _lab777_resign_lineage(lineage, cases)
+    refuse("unit_install_supersession_lineage_invalid")
+
+    def wrong_type(payload: dict[str, object]) -> None:
+        values = list(payload["retired_unit_hashes"])  # type: ignore[arg-type]
+        values[0] = 1
+        payload["retired_unit_hashes"] = values
+
+    lineage.write_bytes(lineage_bytes)
+    lineage.chmod(0o600)
+    _lab777_resign_lineage(lineage, wrong_type)
+    refuse("unit_install_supersession_lineage_invalid")
+
+    def wrong_hash(payload: dict[str, object]) -> None:
+        values = list(payload["retired_unit_hashes"])  # type: ignore[arg-type]
+        values[0] = "ab" * 32
+        payload["retired_unit_hashes"] = values
+
+    lineage.write_bytes(lineage_bytes)
+    lineage.chmod(0o600)
+    _lab777_resign_lineage(lineage, wrong_hash)
+    refuse("unit_install_supersession_lineage_invalid")
+
+    def uppercase(payload: dict[str, object]) -> None:
+        values = list(payload["retired_unit_hashes"])  # type: ignore[arg-type]
+        values[0] = str(values[0]).upper()
+        payload["retired_unit_hashes"] = values
+
+    lineage.write_bytes(lineage_bytes)
+    lineage.chmod(0o600)
+    _lab777_resign_lineage(lineage, uppercase)
+    refuse("unit_install_supersession_lineage_invalid")
+
+    def wrong_keyset(payload: dict[str, object]) -> None:
+        payload["retired_unit_keyset_sha256"] = "cd" * 32
+
+    lineage.write_bytes(lineage_bytes)
+    lineage.chmod(0o600)
+    _lab777_resign_lineage(lineage, wrong_keyset)
+    refuse("unit_install_supersession_lineage_invalid")
+
+    def stale_successor(payload: dict[str, object]) -> None:
+        payload["successor_transaction_id"] = "ef" * 32
+
+    lineage.write_bytes(lineage_bytes)
+    lineage.chmod(0o600)
+    _lab777_resign_lineage(lineage, stale_successor)
+    refuse("unit_install_supersession_lineage_stale")
+    lineage.write_bytes(lineage_bytes)
+    lineage.chmod(0o600)
+    _journal, _hashes = _lab775_install(world, **_lab776_authority(world))
+    final = json.loads(journal_path.read_text(encoding="ascii"))
+    assert final["phase"] == "complete"
+    assert final["schema"] == operator.UNIT_INSTALL_JOURNAL_SCHEMA
+    assert anchor.resolve(strict=True) == world["live"].root  # type: ignore[attr-defined]
+    assert "start" not in commands
+    assert "restart" not in commands
+
+
+def test_lab777_lineage_namespace_guards_precede_each_mutation(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    trace_root = tmp_path / "trace"
+    trace_root.mkdir(mode=0o700)
+    world = _lab775_world(trace_root)
+    systemctl, commands = _lab775_systemctl(world, {})
+    monkeypatch.setattr(operator, "_run_systemctl", systemctl)
+    _lab775_bind_loader(monkeypatch, world)
+    trace: list[str] = []
+    phase = {"record": False}
+    real_publish = operator._publish_create_only_bytes  # noqa: SLF001
+    real_parent = operator._fsync_lineage_parent  # noqa: SLF001
+    real_private = operator._private_directory  # noqa: SLF001
+    real_descriptor = operator._fsync_lineage_descriptor  # noqa: SLF001
+    real_rename = operator._rename_noreplace  # noqa: SLF001
+
+    def publish(path: Path, payload: bytes, *, namespace_guard: object = None) -> None:
+        phase["record"] = True
+        try:
+            real_publish(path, payload, namespace_guard=namespace_guard)  # type: ignore[arg-type]
+        finally:
+            phase["record"] = False
+
+    def guard() -> None:
+        if phase["record"]:
+            trace.append("guard")
+
+    def parent(path: Path) -> None:
+        real_parent(path)
+        if phase["record"]:
+            trace.append("parent")
+
+    def private(path: Path, *, create: bool = False) -> Path:
+        if phase["record"] and create and path.name == "immutable-release-unit-install-lineage.v1":
+            trace.append("mkdir")
+        return real_private(path, create=create)
+
+    def descriptor(descriptor_fd: int) -> None:
+        real_descriptor(descriptor_fd)
+        if phase["record"]:
+            trace.append("file")
+
+    def rename(source: Path, target: Path) -> None:
+        if phase["record"]:
+            trace.append("rename")
+        real_rename(source, target)
+
+    monkeypatch.setattr(operator, "_publish_create_only_bytes", publish)
+    monkeypatch.setattr(operator, "_fsync_lineage_parent", parent)
+    monkeypatch.setattr(operator, "_private_directory", private)
+    monkeypatch.setattr(operator, "_fsync_lineage_descriptor", descriptor)
+    monkeypatch.setattr(operator, "_rename_noreplace", rename)
+    _lab775_install(world, **_lab776_authority(world, namespace_guard=guard))
+    assert trace == ["guard", "mkdir", "parent", "guard", "file", "guard", "rename"]
+    assert "start" not in commands
+
+    fault_root = tmp_path / "fault"
+    fault_root.mkdir(mode=0o700)
+    fault_world = _lab775_world(fault_root)
+    fault_systemctl, fault_commands = _lab775_systemctl(fault_world, {})
+    monkeypatch.setattr(operator, "_run_systemctl", fault_systemctl)
+    _lab775_bind_loader(monkeypatch, fault_world)
+    journal_path = fault_world["journal_path"]
+    anchor = fault_world["anchor"]
+    live = fault_world["live"]
+    assert isinstance(journal_path, Path)
+    assert isinstance(anchor, Path)
+    assert isinstance(live, operator.ReleaseIdentity)
+    original = journal_path.read_bytes()
+    fault = {"mode": ""}
+
+    def fault_publish(path: Path, payload: bytes, *, namespace_guard: object = None) -> None:
+        if fault["mode"] == "mkdir":
+            fault["mode"] = "armed"
+        real_publish(path, payload, namespace_guard=namespace_guard)  # type: ignore[arg-type]
+
+    def fault_guard() -> None:
+        if fault["mode"] == "armed":
+            raise operator.ReleaseFailure("operator_transaction_lock_not_held")
+
+    def fault_parent(path: Path) -> None:
+        real_parent(path)
+        if fault["mode"] == "temp":
+            fault["mode"] = "armed"
+
+    def fault_descriptor(descriptor_fd: int) -> None:
+        real_descriptor(descriptor_fd)
+        if fault["mode"] == "rename":
+            fault["mode"] = "armed"
+
+    monkeypatch.setattr(operator, "_publish_create_only_bytes", fault_publish)
+    monkeypatch.setattr(operator, "_fsync_lineage_parent", fault_parent)
+    monkeypatch.setattr(operator, "_fsync_lineage_descriptor", fault_descriptor)
+    monkeypatch.setattr(operator, "_private_directory", real_private)
+    monkeypatch.setattr(operator, "_rename_noreplace", real_rename)
+
+    def displaced(mode: str) -> None:
+        fault["mode"] = mode
+        before = len(fault_commands)
+        with pytest.raises(operator.ReleaseFailure, match="^operator_transaction_lock_not_held$"):
+            _lab775_install(fault_world, **_lab776_authority(fault_world, namespace_guard=fault_guard))
+        fault["mode"] = ""
+        assert journal_path.read_bytes() == original
+        assert anchor.resolve(strict=True) == live.root
+        assert not list(_lab775_lineage_dir(fault_world).glob("*.json"))
+        assert "daemon-reload" not in fault_commands[before:]
+        assert "start" not in fault_commands
+        assert "restart" not in fault_commands
+
+    displaced("mkdir")
+    assert not _lab775_lineage_dir(fault_world).exists()
+    displaced("temp")
+    assert _lab775_lineage_dir(fault_world).is_dir()
+    assert not list(_lab775_lineage_dir(fault_world).glob("*.json"))
+    displaced("rename")
+    residue = list(_lab775_lineage_dir(fault_world).iterdir())
+    assert residue and all(path.suffix != ".json" for path in residue)
+    _journal, _hashes = _lab775_install(
+        fault_world,
+        **_lab776_authority(fault_world, namespace_guard=fault_guard),
+    )
+    published = list(_lab775_lineage_dir(fault_world).glob("*.json"))
+    assert len(published) == 1
+    assert b"/" not in published[0].read_bytes()
+    final = json.loads(journal_path.read_text(encoding="ascii"))
+    assert final["phase"] == "complete"
+    assert final["schema"] == operator.UNIT_INSTALL_JOURNAL_SCHEMA
+    assert anchor.resolve(strict=True) == live.root
+    assert "start" not in fault_commands
+    assert "restart" not in fault_commands
+
+
+_LAB777_MANAGER_CASES = (
+    ("ExecStart", "systemd_manager_execstart_invalid", "exec"),
+    ("ExecStartPre", "systemd_manager_execstartpre_invalid", "exec"),
+    ("ExecCondition", "systemd_manager_extra_exec_invalid", "exec"),
+    ("ExecStartPost", "systemd_manager_extra_exec_invalid", "exec"),
+    ("ExecReload", "systemd_manager_extra_exec_invalid", "exec"),
+    ("ExecStop", "systemd_manager_extra_exec_invalid", "exec"),
+    ("ExecStopPost", "systemd_manager_extra_exec_invalid", "exec"),
+    ("FragmentPath", "systemd_manager_fragment_invalid", "path"),
+    ("DropInPaths", "systemd_manager_dropins_invalid", "path"),
+    ("Environment", "systemd_manager_environment_invalid", "env"),
+    ("LimitCORE", "systemd_manager_property_invalid", "one"),
+    ("PrivateTmp", "systemd_manager_property_invalid", "yes"),
+    ("PrivateUsers", "systemd_manager_property_invalid", "yes"),
+    ("RuntimeDirectory", "systemd_manager_property_invalid", "text"),
+    ("RuntimeDirectoryMode", "systemd_manager_property_invalid", "mode"),
+    ("RuntimeDirectoryPreserve", "systemd_manager_property_invalid", "yes"),
+    ("KillMode", "systemd_manager_kill_mode_invalid", "process"),
+    ("UMask", "systemd_manager_umask_invalid", "umask"),
+    ("WorkingDirectory", "systemd_manager_property_invalid", "path"),
+    ("UnsetEnvironment", "systemd_manager_property_invalid", "text"),
+    ("EnvironmentFiles", "systemd_manager_property_invalid", "path"),
+    ("UnitFileState", "systemd_manager_property_invalid", "disabled"),
+    ("TasksMax", "systemd_manager_property_invalid", "tasks"),
+    ("TasksMax", "systemd_manager_property_invalid", "leading-zero"),
+    ("MemoryMax", "systemd_manager_property_invalid", "one"),
+    ("MemoryMax", "systemd_manager_property_invalid", "infinity"),
+    ("MemorySwapMax", "systemd_manager_property_invalid", "one"),
+    ("MemorySwapMax", "systemd_manager_property_invalid", "infinity"),
+)
+
+
+def _lab777_manager_stdout(kind: str) -> bytes:
+    if kind == "exec":
+        return _lab775_record(("/bin/false",))
+    if kind == "path":
+        return b"/nope\n"
+    if kind == "env":
+        return b"ONLY=1\n"
+    if kind == "one":
+        return b"1\n"
+    if kind == "yes":
+        return b"yes\n"
+    if kind == "text":
+        return b"nope\n"
+    if kind == "mode":
+        return b"0755\n"
+    if kind == "process":
+        return b"process\n"
+    if kind == "umask":
+        return b"0022\n"
+    if kind == "disabled":
+        return b"disabled\n"
+    if kind == "tasks":
+        return b"37170\n"
+    if kind == "leading-zero":
+        return b"0512\n"
+    if kind == "infinity":
+        return b"infinity\n"
+    raise AssertionError(kind)
+
+
+def test_lab777_manager_property_matrix_at_both_boundaries(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    assert "37170" not in Path(operator.__file__).read_text(encoding="utf-8")
+    assert operator._canonical_manager_quantity(b"37170") == "37170"  # noqa: SLF001
+    matrix_root = tmp_path / "matrix"
+    matrix_root.mkdir(mode=0o700)
+    world = _lab775_world(matrix_root)
+    _lab775_bind_loader(monkeypatch, world)
+    journal_path = world["journal_path"]
+    anchor = world["anchor"]
+    live = world["live"]
+    assert isinstance(journal_path, Path)
+    assert isinstance(anchor, Path)
+    assert isinstance(live, operator.ReleaseIdentity)
+    original = journal_path.read_bytes()
+    real_projection = operator._verify_supersession_manager_projection  # noqa: SLF001
+
+    def run_case(name: str, code: str, kind: str, *, fail_on: int) -> None:
+        systemctl, commands = _lab775_systemctl(world, {})
+        state = {"inject": False, "projections": 0}
+
+        def projection(directory: Path, unit: str) -> dict[str, object]:
+            state["projections"] += 1
+            state["inject"] = state["projections"] == fail_on
+            try:
+                return real_projection(directory, unit)
+            finally:
+                state["inject"] = False
+
+        def injected(*arguments: str, check: bool = True) -> subprocess.CompletedProcess[bytes]:
+            property_name = ""
+            for item in arguments:
+                if item.startswith("--property="):
+                    property_name = item.split("=", 1)[1]
+            if state["inject"] and property_name == name:
+                return subprocess.CompletedProcess(
+                    arguments, 0, stdout=_lab777_manager_stdout(kind), stderr=b""
+                )
+            return systemctl(*arguments, check=check)
+
+        monkeypatch.setattr(operator, "_verify_supersession_manager_projection", projection)
+        monkeypatch.setattr(operator, "_run_systemctl", injected)
+        with pytest.raises(operator.ReleaseFailure, match=f"^{code}$"):
+            _lab775_install(world, **_lab776_authority(world))
+        assert journal_path.read_bytes() == original
+        assert anchor.resolve(strict=True) == live.root
+        if fail_on == 1:
+            assert not list(_lab775_lineage_dir(world).glob("*.json"))
+        else:
+            assert list(_lab775_lineage_dir(world).glob("*.json"))
+        assert "daemon-reload" not in commands
+        assert "start" not in commands
+        assert "restart" not in commands
+
+    for name, code, kind in _LAB777_MANAGER_CASES:
+        run_case(name, code, kind, fail_on=1)
+    for name, code, kind in _LAB777_MANAGER_CASES:
+        run_case(name, code, kind, fail_on=3)
+
+    monkeypatch.setattr(operator, "_verify_supersession_manager_projection", real_projection)
+    happy_systemctl, happy_commands = _lab775_systemctl(world, {})
+    bridge_tasks: list[bytes] = []
+
+    def record_tasks(*arguments: str, check: bool = True) -> subprocess.CompletedProcess[bytes]:
+        result = happy_systemctl(*arguments, check=check)
+        if (
+            len(arguments) > 1
+            and arguments[1] == "friday-bridge.service"
+            and "--property=TasksMax" in arguments
+        ):
+            bridge_tasks.append(result.stdout)
+        return result
+
+    monkeypatch.setattr(operator, "_run_systemctl", record_tasks)
+    _journal, _hashes = _lab775_install(world, **_lab776_authority(world))
+    final = json.loads(journal_path.read_text(encoding="ascii"))
+    assert final["phase"] == "complete"
+    assert final["schema"] == operator.UNIT_INSTALL_JOURNAL_SCHEMA
+    assert b"37170\n" in bridge_tasks
+    assert anchor.resolve(strict=True) == live.root
+    assert "start" not in happy_commands
+    assert "restart" not in happy_commands
