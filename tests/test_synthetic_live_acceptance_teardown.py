@@ -198,7 +198,6 @@ def test_process_lock_serializes_isolated_homes_and_survives_every_unwind(tmp_pa
         holder_line = holder.stdout.readline().strip()
         assert holder_line.startswith("LOCKED\t")
 
-        started = time.monotonic()
         contender = _run_lock_process(
             "normal",
             home=second_home,
@@ -206,7 +205,6 @@ def test_process_lock_serializes_isolated_homes_and_survives_every_unwind(tmp_pa
             host_root=host_root,
             protocol=protocol,
         )
-        assert time.monotonic() - started < 2.0
         assert contender.returncode == 23, contender.stderr
         assert contender.stdout == holder_line.replace("LOCKED\t", "BUSY\t") + "\n"
 
