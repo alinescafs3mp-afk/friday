@@ -15968,7 +15968,12 @@ def _lab775_record(argv: tuple[str, ...]) -> bytes:
     ).encode()
 
 
-def _lab775_world(tmp_path: Path, *, retired: bool = True) -> dict[str, object]:
+def _lab775_world(
+    tmp_path: Path,
+    *,
+    retired: bool = True,
+    surface_parent_mode: int = 0o700,
+) -> dict[str, object]:
     """Private A/B/C unit surface. The retired journal is optional for ordinary installs."""
 
     tmp_path.chmod(0o700)
@@ -16024,6 +16029,9 @@ def _lab775_world(tmp_path: Path, *, retired: bool = True) -> dict[str, object]:
         surface[f"{name}.d/security.conf"] = security
         for dropin in dropin_directory.iterdir():
             dropin.chmod(0o600)
+    unit_dir.chmod(surface_parent_mode)
+    for name in rendered:
+        (unit_dir / f"{name}.d").chmod(surface_parent_mode)
     anchor.symlink_to(live.root, target_is_directory=True)
     surface_hashes = {
         key: hashlib.sha256(surface[key]).hexdigest()
@@ -17766,3 +17774,490 @@ def test_lab777_manager_property_matrix_at_both_boundaries(
     assert anchor.resolve(strict=True) == live.root
     assert "start" not in happy_commands
     assert "restart" not in happy_commands
+
+
+def _lab784_read_surface(path: Path) -> bytes:
+    return operator._read_private_unit_surface_file(  # noqa: SLF001
+        path,
+        code="unit_install_supersession_unit_drift",
+    )
+
+
+def _lab784_expect_closed(
+    world: dict[str, object],
+    monkeypatch: pytest.MonkeyPatch,
+    code: str,
+) -> None:
+    journal_path = world["journal_path"]
+    anchor = world["anchor"]
+    live = world["live"]
+    assert isinstance(journal_path, Path)
+    assert isinstance(anchor, Path)
+    assert isinstance(live, operator.ReleaseIdentity)
+    original = journal_path.read_bytes()
+    systemctl, commands = _lab775_systemctl(world, {})
+    monkeypatch.setattr(operator, "_run_systemctl", systemctl)
+    _lab775_bind_loader(monkeypatch, world)
+    with pytest.raises(operator.ReleaseFailure, match=f"^{code}$"):
+        _lab775_install(world, **_lab776_authority(world))
+    assert journal_path.read_bytes() == original
+    assert anchor.resolve(strict=True) == live.root
+    assert not list(_lab775_lineage_dir(world).glob("*.json"))
+    assert "daemon-reload" not in commands
+    assert "start" not in commands
+    assert "restart" not in commands
+    assert "stop" not in commands
+    assert "kill" not in commands
+
+
+def _lab784_fresh(tmp_path: Path, name: str) -> dict[str, object]:
+    root = tmp_path / name
+    root.mkdir(mode=0o700)
+    return _lab775_world(root, surface_parent_mode=0o755)
+
+
+def test_lab784_0755_owner_controlled_parents_complete_supersession(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    world = _lab784_fresh(tmp_path, "positive")
+    unit_dir = world["unit_dir"]
+    anchor = world["anchor"]
+    live = world["live"]
+    journal_path = world["journal_path"]
+    assert isinstance(unit_dir, Path)
+    assert isinstance(anchor, Path)
+    assert isinstance(live, operator.ReleaseIdentity)
+    assert isinstance(journal_path, Path)
+    assert stat.S_IMODE(unit_dir.stat().st_mode) == 0o755
+    for name in operator._RUNTIME_UNIT_NAMES:  # noqa: SLF001
+        dropin_dir = unit_dir / f"{name}.d"
+        assert stat.S_IMODE(dropin_dir.stat().st_mode) == 0o755
+        assert not dropin_dir.is_symlink()
+    assert not unit_dir.is_symlink()
+    import inspect
+
+    helper = operator._read_private_unit_surface_file  # noqa: SLF001
+    signature = inspect.signature(helper)
+    assert list(signature.parameters) == ["path", "code"]
+    assert signature.parameters["code"].kind is inspect.Parameter.KEYWORD_ONLY
+    helper_source = inspect.getsource(helper)
+    assert "_owned_directory(" in helper_source
+    assert "_owner_controlled_directory" not in helper_source
+    assert "_private_directory" not in helper_source
+    assert "allowed_modes" not in helper_source
+    assert "0o077" not in helper_source
+    assert "!= 0o600" in helper_source
+    assert not hasattr(operator, "_owner_controlled_directory")
+    assert not hasattr(operator, "_read_owner_controlled_unit_surface_file")
+    for key in operator._UNIT_SURFACE_KEYS:  # noqa: SLF001
+        path = unit_dir / key
+        status = path.lstat()
+        assert stat.S_ISREG(status.st_mode)
+        assert stat.S_IMODE(status.st_mode) == 0o600
+        assert status.st_nlink == 1
+        assert _lab784_read_surface(path) == path.read_bytes()
+    with pytest.raises(operator.ReleaseFailure, match="^private_directory_invalid$"):
+        operator._read_private_regular_file(  # noqa: SLF001
+            unit_dir / "friday-backend.service",
+            maximum_bytes=1 << 20,
+            code="unit_install_supersession_unit_drift",
+            allowed_modes=frozenset({0o600}),
+        )
+    systemctl, commands = _lab775_systemctl(world, {})
+    monkeypatch.setattr(operator, "_run_systemctl", systemctl)
+    _lab775_bind_loader(monkeypatch, world)
+    for unit in operator._RUNTIME_UNIT_NAMES:  # noqa: SLF001
+        projection = operator._verify_supersession_manager_projection(unit_dir, unit)  # noqa: SLF001
+        assert projection["unit"] == unit
+        assert projection["unit_file_state"] == "enabled"
+    admitted = operator._require_retired_unit_surface(  # noqa: SLF001
+        operator.DurableUnitInstallJournal(journal_path),
+        unit_dir,
+        str(world["retired_raw"]),
+    )
+    assert set(admitted) == set(operator._UNIT_SURFACE_KEYS)  # noqa: SLF001
+    seen: list[object] = []
+    real_require = operator._require_retired_unit_surface  # noqa: SLF001
+    real_auth = operator._authenticate_unactivated_terminal_supersession  # noqa: SLF001
+    real_projection = operator._verify_supersession_manager_projection  # noqa: SLF001
+
+    def require(*args: object, **kwargs: object) -> dict[str, str]:
+        seen.append("require")
+        return real_require(*args, **kwargs)  # type: ignore[arg-type]
+
+    def authenticate(*args: object, **kwargs: object) -> dict[str, object]:
+        seen.append("authenticate")
+        return real_auth(*args, **kwargs)  # type: ignore[arg-type]
+
+    def projection(directory: Path, unit: str) -> dict[str, object]:
+        seen.append(("projection", unit))
+        return real_projection(directory, unit)
+
+    monkeypatch.setattr(operator, "_require_retired_unit_surface", require)
+    monkeypatch.setattr(operator, "_authenticate_unactivated_terminal_supersession", authenticate)
+    monkeypatch.setattr(operator, "_verify_supersession_manager_projection", projection)
+    _journal, hashes = _lab775_install(world, **_lab776_authority(world))
+    assert "require" in seen
+    assert "authenticate" in seen
+    assert {item[1] for item in seen if isinstance(item, tuple)} == set(
+        operator._RUNTIME_UNIT_NAMES  # noqa: SLF001
+    )
+    final = json.loads(journal_path.read_text(encoding="ascii"))
+    assert final["schema"] == operator.UNIT_INSTALL_JOURNAL_SCHEMA
+    assert final["phase"] == "complete"
+    assert final["candidate"]["commit"] == "c" * 40
+    assert final["previous"]["commit"] == "a" * 40
+    assert anchor.resolve(strict=True) == live.root
+    assert set(hashes) == set(operator._UNIT_SURFACE_KEYS)  # noqa: SLF001
+    assert stat.S_IMODE(unit_dir.stat().st_mode) == 0o755
+    for name in operator._RUNTIME_UNIT_NAMES:  # noqa: SLF001
+        assert stat.S_IMODE((unit_dir / f"{name}.d").stat().st_mode) == 0o755
+    for key in operator._UNIT_SURFACE_KEYS:  # noqa: SLF001
+        assert stat.S_IMODE((unit_dir / key).stat().st_mode) == 0o600
+    assert "start" not in commands
+    assert "restart" not in commands
+    assert "stop" not in commands
+    assert "kill" not in commands
+
+
+def test_lab784_writable_or_symlinked_parents_refuse_before_mutation(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    writable = (
+        ("unit-dir-0775", "unit", 0o775),
+        ("unit-dir-0757", "unit", 0o757),
+        ("unit-dir-0777", "unit", 0o777),
+        ("backend-dropin-0775", "friday-backend.service", 0o775),
+        ("backend-dropin-0757", "friday-backend.service", 0o757),
+        ("bridge-dropin-0775", "friday-bridge.service", 0o775),
+        ("bridge-dropin-0757", "friday-bridge.service", 0o757),
+        ("bridge-dropin-0777", "friday-bridge.service", 0o777),
+    )
+    for name, target, mode in writable:
+        world = _lab784_fresh(tmp_path, name)
+        unit_dir = world["unit_dir"]
+        assert isinstance(unit_dir, Path)
+        if target == "unit":
+            parent = unit_dir
+            sample = unit_dir / "friday-backend.service"
+        else:
+            parent = unit_dir / f"{target}.d"
+            sample = parent / "database.conf"
+        parent.chmod(mode)
+        assert stat.S_IMODE(parent.stat().st_mode) == mode
+        with pytest.raises(operator.ReleaseFailure, match="^owned_directory_invalid$"):
+            _lab784_read_surface(sample)
+        _lab784_expect_closed(world, monkeypatch, "owned_directory_invalid")
+
+    def swap_parent(path: Path) -> None:
+        moved = path.parent / f"{path.name}-real"
+        path.rename(moved)
+        path.symlink_to(moved.name, target_is_directory=True)
+
+    for name, target in (
+        ("unit-dir-symlink", "unit"),
+        ("backend-dropin-symlink", "friday-backend.service"),
+        ("bridge-dropin-symlink", "friday-bridge.service"),
+    ):
+        world = _lab784_fresh(tmp_path, name)
+        unit_dir = world["unit_dir"]
+        assert isinstance(unit_dir, Path)
+        if target == "unit":
+            swap_parent(unit_dir)
+            sample = unit_dir / "friday-backend.service"
+        else:
+            parent = unit_dir / f"{target}.d"
+            swap_parent(parent)
+            sample = parent / "database.conf"
+        with pytest.raises(operator.ReleaseFailure, match="^owned_directory_invalid$"):
+            _lab784_read_surface(sample)
+        _lab784_expect_closed(world, monkeypatch, "owned_directory_invalid")
+
+
+def test_lab784_unit_file_identity_negatives_refuse_before_mutation(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    assert os.O_NOFOLLOW
+
+    def backend(world: dict[str, object]) -> Path:
+        unit_dir = world["unit_dir"]
+        assert isinstance(unit_dir, Path)
+        return unit_dir / "friday-backend.service"
+
+    world = _lab784_fresh(tmp_path, "symlink-file")
+    path = backend(world)
+    real_name = f"{path.name}.real"
+    path.rename(path.with_name(real_name))
+    path.symlink_to(real_name)
+    with pytest.raises(operator.ReleaseFailure, match="^unit_install_supersession_unit_drift$"):
+        _lab784_read_surface(path)
+    _lab784_expect_closed(world, monkeypatch, "unit_install_supersession_unit_drift")
+
+    world = _lab784_fresh(tmp_path, "hardlink")
+    path = backend(world)
+    os.link(path, path.with_name(f"{path.name}.hardlink"))
+    assert path.stat().st_nlink == 2
+    with pytest.raises(operator.ReleaseFailure, match="^unit_install_supersession_unit_drift$"):
+        _lab784_read_surface(path)
+    _lab784_expect_closed(world, monkeypatch, "unit_install_supersession_unit_drift")
+
+    for mode in (0o400, 0o640, 0o644, 0o700):
+        world = _lab784_fresh(tmp_path, f"mode-{mode:04o}")
+        path = backend(world)
+        path.chmod(mode)
+        with pytest.raises(operator.ReleaseFailure, match="^unit_install_supersession_unit_drift$"):
+            _lab784_read_surface(path)
+        _lab784_expect_closed(world, monkeypatch, "unit_install_supersession_unit_drift")
+
+    world = _lab784_fresh(tmp_path, "empty")
+    path = backend(world)
+    path.write_bytes(b"")
+    path.chmod(0o600)
+    with pytest.raises(operator.ReleaseFailure, match="^unit_install_supersession_unit_drift$"):
+        _lab784_read_surface(path)
+    _lab784_expect_closed(world, monkeypatch, "unit_install_supersession_unit_drift")
+
+    world = _lab784_fresh(tmp_path, "replaced-descriptor")
+    path = backend(world)
+    original = path.read_bytes()
+    real_read = operator.os.read
+    swapped = {"done": False}
+
+    def swapping_read(fd: int, size: int) -> bytes:
+        chunk = real_read(fd, size)
+        if not swapped["done"]:
+            swapped["done"] = True
+            replacement = path.with_name(f"{path.name}.replacement")
+            replacement.write_bytes(original + b"\n# lab784-replaced\n")
+            replacement.chmod(0o600)
+            os.replace(replacement, path)
+        return chunk
+
+    monkeypatch.setattr(operator.os, "read", swapping_read)
+    with pytest.raises(operator.ReleaseFailure, match="^unit_install_supersession_unit_drift$"):
+        _lab784_read_surface(path)
+    assert swapped["done"] is True
+    monkeypatch.setattr(operator.os, "read", real_read)
+
+    probe = tmp_path / "foreign-owner"
+    probe.mkdir(mode=0o700)
+    probe.chmod(0o755)
+    sample = probe / "friday-backend.service"
+    sample.write_bytes(b"[Service]\nExecStart=/bin/true\n")
+    sample.chmod(0o600)
+    try:
+        os.chown(sample, 65534, -1)
+    except PermissionError:
+        real_fstat = operator.os.fstat
+
+        def foreign_owner(fd: int) -> SimpleNamespace:
+            status = real_fstat(fd)
+            copied = {name: getattr(status, name) for name in dir(status) if name.startswith("st_")}
+            copied["st_uid"] = 65534
+            return SimpleNamespace(**copied)
+
+        monkeypatch.setattr(operator.os, "fstat", foreign_owner)
+    with pytest.raises(operator.ReleaseFailure, match="^unit_install_supersession_unit_drift$"):
+        _lab784_read_surface(sample)
+
+
+def test_lab785_mode_0400_is_not_exact_0600(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    assert stat.S_IMODE(0o400) & 0o077 == 0
+    assert stat.S_IMODE(0o400) != 0o600
+    world = _lab784_fresh(tmp_path, "mode-0400-exact")
+    unit_dir = world["unit_dir"]
+    assert isinstance(unit_dir, Path)
+    path = unit_dir / "friday-backend.service"
+    path.chmod(0o400)
+    assert stat.S_IMODE(path.stat().st_mode) == 0o400
+    with pytest.raises(operator.ReleaseFailure, match="^unit_install_supersession_unit_drift$"):
+        _lab784_read_surface(path)
+    _lab784_expect_closed(world, monkeypatch, "unit_install_supersession_unit_drift")
+
+
+def test_lab785_fifo_rejects_without_blocking(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import time
+
+    world = _lab784_fresh(tmp_path, "fifo")
+    unit_dir = world["unit_dir"]
+    assert isinstance(unit_dir, Path)
+    path = unit_dir / "friday-backend.service"
+    path.unlink()
+    os.mkfifo(path, mode=0o600)
+    assert stat.S_ISFIFO(path.lstat().st_mode)
+    real_open = operator.os.open
+    real_read = operator.os.read
+    seen_flags: list[int] = []
+
+    def recording_open(file: object, flags: int, *args: object, **kwargs: object) -> int:
+        seen_flags.append(flags)
+        return real_open(file, flags, *args, **kwargs)
+
+    def reject_fifo_read(descriptor: int, size: int) -> bytes:
+        if stat.S_ISFIFO(os.fstat(descriptor).st_mode):
+            raise AssertionError("FIFO descriptor reached read")
+        return real_read(descriptor, size)
+
+    monkeypatch.setattr(operator.os, "open", recording_open)
+    monkeypatch.setattr(operator.os, "read", reject_fifo_read)
+    started = time.monotonic()
+    with pytest.raises(operator.ReleaseFailure, match="^unit_install_supersession_unit_drift$"):
+        _lab784_read_surface(path)
+    assert time.monotonic() - started < 1.0
+    assert seen_flags
+    assert all(flags & os.O_NONBLOCK for flags in seen_flags)
+    assert all(flags & os.O_NOFOLLOW for flags in seen_flags)
+    monkeypatch.setattr(operator.os, "open", real_open)
+    monkeypatch.setattr(operator.os, "read", real_read)
+    _lab784_expect_closed(world, monkeypatch, "unit_install_supersession_unit_drift")
+
+
+def test_lab785_opened_inode_mutation_rejects(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    world = _lab784_fresh(tmp_path, "opened-inode")
+    unit_dir = world["unit_dir"]
+    assert isinstance(unit_dir, Path)
+    path = unit_dir / "friday-backend.service"
+    before = path.lstat()
+    real_read = operator.os.read
+    mutated = {"done": False}
+
+    def mutate_opened_inode(descriptor: int, size: int) -> bytes:
+        chunk = real_read(descriptor, size)
+        if not mutated["done"]:
+            mutated["done"] = True
+            os.utime(path, None)
+        return chunk
+
+    monkeypatch.setattr(operator.os, "read", mutate_opened_inode)
+    with pytest.raises(operator.ReleaseFailure, match="^unit_install_supersession_unit_drift$"):
+        _lab784_read_surface(path)
+    after = path.lstat()
+    assert mutated["done"] is True
+    assert after.st_ino == before.st_ino
+    assert after.st_dev == before.st_dev
+    assert after.st_size == before.st_size
+    assert after.st_nlink == 1
+    assert stat.S_IMODE(after.st_mode) == 0o600
+    assert after.st_mtime_ns != before.st_mtime_ns
+    monkeypatch.setattr(operator.os, "read", real_read)
+
+
+def test_lab784_0755_third_digest_crash_resume_refuses(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    world = _lab784_fresh(tmp_path, "third")
+    _lab777_prepare_distinct(world)
+    systemctl, commands = _lab775_systemctl(world, {})
+    monkeypatch.setattr(operator, "_run_systemctl", systemctl)
+    _lab775_bind_loader(monkeypatch, world)
+    journal_path = world["journal_path"]
+    unit_dir = world["unit_dir"]
+    anchor = world["anchor"]
+    transition = world["transition"]
+    assert isinstance(journal_path, Path)
+    assert isinstance(unit_dir, Path)
+    assert isinstance(anchor, Path)
+    assert isinstance(transition, Path)
+    assert stat.S_IMODE(unit_dir.stat().st_mode) == 0o755
+    real_replace = operator._replace_unit_file  # noqa: SLF001
+    seen = {"n": 0}
+
+    def crash_after(destination: Path, content: bytes) -> None:
+        real_replace(destination, content)
+        seen["n"] += 1
+        if seen["n"] == 1:
+            raise RuntimeError("crash after unit replace")
+
+    monkeypatch.setattr(operator, "_replace_unit_file", crash_after)
+    with pytest.raises(RuntimeError, match="crash after unit replace"):
+        _lab775_install(world, **_lab776_authority(world))
+    monkeypatch.setattr(operator, "_replace_unit_file", real_replace)
+    crashed = journal_path.read_bytes()
+    bridge = unit_dir / "friday-bridge.service"
+    bridge_bytes = bridge.read_bytes()
+    bridge.write_bytes(bridge_bytes + b"\n# lab784-third\n")
+    bridge.chmod(0o600)
+    before = len(commands)
+    with pytest.raises(operator.ReleaseFailure, match="^unit_install_supersession_unit_drift$"):
+        _lab775_install(world, **_lab776_authority(world))
+    assert journal_path.read_bytes() == crashed
+    assert anchor.resolve(strict=True) == transition
+    assert "daemon-reload" not in commands[before:]
+    assert "start" not in commands[before:]
+    assert "restart" not in commands[before:]
+    bridge.write_bytes(bridge_bytes)
+    bridge.chmod(0o600)
+    _journal, _hashes = _lab775_install(world, **_lab776_authority(world))
+    final = json.loads(journal_path.read_text(encoding="ascii"))
+    assert final["phase"] == "complete"
+    assert final["schema"] == operator.UNIT_INSTALL_JOURNAL_SCHEMA
+    assert stat.S_IMODE(unit_dir.stat().st_mode) == 0o755
+    assert stat.S_IMODE((unit_dir / "friday-bridge.service.d").stat().st_mode) == 0o755
+    assert "start" not in commands
+    assert "restart" not in commands
+
+
+def test_lab784_strict_private_parents_still_reject_open_bits(tmp_path: Path) -> None:
+    world = _lab784_fresh(tmp_path, "strict")
+    unit_dir = world["unit_dir"]
+    state_dir = world["state_dir"]
+    journal_path = world["journal_path"]
+    activation_path = world["activation_path"]
+    assert isinstance(unit_dir, Path)
+    assert isinstance(state_dir, Path)
+    assert isinstance(journal_path, Path)
+    assert isinstance(activation_path, Path)
+    surface = unit_dir / "friday-backend.service"
+    assert _lab784_read_surface(surface) == surface.read_bytes()
+    state_dir.chmod(0o755)
+    with pytest.raises(operator.ReleaseFailure, match="^private_directory_invalid$"):
+        operator.DurableUnitInstallJournal(journal_path)._raw_bytes()  # noqa: SLF001
+    with pytest.raises(operator.ReleaseFailure, match="^private_directory_invalid$"):
+        operator._read_private_regular_file(  # noqa: SLF001
+            activation_path,
+            maximum_bytes=1 << 20,
+            code="unit_install_supersession_activation_mismatch",
+            allowed_modes=frozenset({0o600}),
+        )
+    with pytest.raises(operator.ReleaseFailure, match="^private_directory_invalid$"):
+        operator._private_directory(state_dir)  # noqa: SLF001
+    assert _lab784_read_surface(surface) == surface.read_bytes()
+    state_dir.chmod(0o700)
+    assert operator._private_directory(state_dir) == state_dir.resolve(strict=True)  # noqa: SLF001
+    lineage_parent = tmp_path / "lineage-parent"
+    lineage_parent.mkdir(mode=0o700)
+    lineage_parent.chmod(0o755)
+    assert stat.S_IMODE(lineage_parent.stat().st_mode) == 0o755
+    sidecar = lineage_parent / "authority.json"
+    sidecar.write_bytes(b'{"lineage":"lab784"}\n')
+    sidecar.chmod(0o600)
+    with pytest.raises(operator.ReleaseFailure, match="^private_directory_invalid$"):
+        operator._read_private_regular_file(  # noqa: SLF001
+            sidecar,
+            maximum_bytes=1 << 20,
+            code="unit_install_supersession_lineage_invalid",
+            allowed_modes=frozenset({0o600}),
+        )
+    lineage_parent.chmod(0o700)
+    assert (
+        operator._read_private_regular_file(  # noqa: SLF001
+            sidecar,
+            maximum_bytes=1 << 20,
+            code="unit_install_supersession_lineage_invalid",
+            allowed_modes=frozenset({0o600}),
+        )
+        == b'{"lineage":"lab784"}\n'
+    )

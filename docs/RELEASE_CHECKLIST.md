@@ -209,7 +209,7 @@ failed/error/skipped-тест в любой фазе делает гейт кр�
 Для optional GPT-OSS secondary brain начиная с 0.207.11 дополнительно:
 
 - release принимается и первый раз запускается без `FRIDAY_SECONDARY_LLM_*`:
-  health имеет `status=ok`, `version=0.208.63`, `secondary.mode=disabled`,
+  health имеет `status=ok`, `version=0.208.64`, `secondary.mode=disabled`,
   `secondary.state=disabled` и `secondary.available=false`;
 - `ACCEPTED_SECONDARY_RUNTIME_PROFILES` содержит ровно finalist
   `gptoss20b-2335df123cac7fc0e13e347cde1e1ffa8562daafcaf0fc76ade1a851d2b0ff1f`
@@ -498,7 +498,7 @@ failed/error/skipped-тест в любой фазе делает гейт кр�
 - post-context load допускает bounded convergence не более 20 секунд с шагом
   50 мс только для valid same-epoch busy; invalid/epoch/deadline fail-closed, а
   initial idle и post-cancellation quiet остаются строгими;
-- final startup health имеет `status=ok`, `version=0.208.63`, configured/installed,
+- final startup health имеет `status=ok`, `version=0.208.64`, configured/installed,
   `canary`, routes `[archive_read, file_read]`, точный `profile_id`,
   `verified_context_tokens=40960` и непустой public `attestation_sha256`;
 - q38 выбирает только минимально достаточный closed tier из
@@ -718,7 +718,10 @@ failed/error/skipped-тест в любой фазе делает гейт кр�
 - кандидат `0.208.62/schema50` запечатан и не активирован: установка юнитов
   закрылась до эффектов, потому что устойчивый журнал B/A требовал принятый
   create-only exact-v2 путь supersession; кредит gate и build не переносится.
-  Для кандидата `0.208.63/schema50` previous и совместимый immutable fallback —
+  Кандидат `0.208.63/schema50` прошёл gate и immutable build, но не был
+  установлен в юниты и не активирован: preflight поймал несовпадение политики
+  родителя 0755; кредит gate и build не переносится.
+  Для кандидата `0.208.64/schema50` previous и совместимый immutable fallback —
   exact `0.208.58/schema50`; копии `0.208.57` и `0.208.56` сохраняются.
   Неактивированный кандидат `0.208.61` сохраняет свою идентичность. Полная
   приёмка и активация кандидата остаются обязательными; фактический production

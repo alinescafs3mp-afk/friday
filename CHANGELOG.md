@@ -1,3 +1,22 @@
+## 0.208.64 — Unreleased
+
+### Correct the unit-parent policy without transferring 0.208.63 credit
+
+- 0.208.63 was gated and built, but never unit-installed or activated.
+  Preflight caught the mismatch: the supersession reader required a
+  private parent, while the established owner-controlled systemd user
+  unit layout is mode 0755. No 0.208.63 gate or build credit transfers.
+- Installed unit files use one closed reader. Its parent check is the
+  existing owner-controlled directory rule, so 0755 stays valid and group
+  or other write bits do not. The file must be exact mode 0600, nlink 1,
+  and at most 1 MiB. Generic private readers stay strict.
+- Schema stays at 50. Previous and the compatible immutable fallback stay
+  exact 0.208.58. Retired unactivated candidates keep their own identity.
+  Copies of 0.208.57 and 0.208.56 stay in place.
+- Full gates, immutable installation and live acceptance on 0.208.64
+  remain required before production activation. This entry does not
+  activate, release, or claim GO.
+
 ## 0.208.63 — Unreleased
 
 ### Reserve the successor after a sealed zero-effect candidate

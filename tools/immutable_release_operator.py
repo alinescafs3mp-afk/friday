@@ -2339,6 +2339,78 @@ def _read_private_regular_file(
             os.close(descriptor)
 
 
+def _read_private_unit_surface_file(path: Path, *, code: str) -> bytes:
+    """Read one installed unit-surface file through a stable no-follow descriptor.
+
+    The immediate parent is admitted by unchanged ``_owned_directory``: mode
+    0755 is valid, and any group or other write bit is not. The file itself is
+    a regular euid-owned nlink-1 file in exact mode 0600, nonempty and at most
+    1 MiB. There is no mode, size, or public/private policy argument.
+    """
+
+    lexical = Path(os.path.abspath(path))
+    parent = _owned_directory(lexical.parent)
+    if lexical.parent != parent or lexical.name in {"", ".", ".."}:
+        raise ReleaseFailure(code)
+    descriptor = -1
+    try:
+        descriptor = os.open(
+            lexical,
+            os.O_RDONLY
+            | getattr(os, "O_CLOEXEC", 0)
+            | getattr(os, "O_NOFOLLOW", 0)
+            | getattr(os, "O_NONBLOCK", 0),
+        )
+        before = os.fstat(descriptor)
+        if (
+            not stat.S_ISREG(before.st_mode)
+            or before.st_nlink != 1
+            or before.st_uid != os.geteuid()
+            or stat.S_IMODE(before.st_mode) != 0o600
+            or not 0 < before.st_size <= 1 << 20
+        ):
+            raise ReleaseFailure(code)
+        chunks: list[bytes] = []
+        remaining = int(before.st_size)
+        while remaining:
+            chunk = os.read(descriptor, min(remaining, 1 << 20))
+            if not chunk:
+                raise ReleaseFailure(code)
+            chunks.append(chunk)
+            remaining -= len(chunk)
+        if os.read(descriptor, 1):
+            raise ReleaseFailure(code)
+        after = os.fstat(descriptor)
+        current = os.stat(lexical, follow_symlinks=False)
+        identity = (
+            int(before.st_dev),
+            int(before.st_ino),
+            int(before.st_size),
+            int(before.st_mtime_ns),
+            int(before.st_ctime_ns),
+        )
+        if (
+            identity
+            != (
+                int(after.st_dev),
+                int(after.st_ino),
+                int(after.st_size),
+                int(after.st_mtime_ns),
+                int(after.st_ctime_ns),
+            )
+            or (int(current.st_dev), int(current.st_ino)) != identity[:2]
+        ):
+            raise ReleaseFailure(code)
+        return b"".join(chunks)
+    except ReleaseFailure:
+        raise
+    except OSError as exc:
+        raise ReleaseFailure(code) from exc
+    finally:
+        if descriptor >= 0:
+            os.close(descriptor)
+
+
 def _read_stable_regular_file(path: Path, *, maximum_bytes: int, code: str) -> bytes:
     """Read one regular file through a stable no-follow descriptor."""
 
@@ -16998,11 +17070,9 @@ def _unit_directive(content: bytes, name: str, *, code: str) -> str:
 def _verify_supersession_manager_projection(directory: Path, unit: str) -> dict[str, Any]:
     """Verify material manager properties and return the hashed projection preimage."""
 
-    content = _read_private_regular_file(
+    content = _read_private_unit_surface_file(
         directory / unit,
-        maximum_bytes=1 << 20,
         code="unit_install_supersession_unit_drift",
-        allowed_modes=frozenset({0o600}),
     )
     _verify_manager_unit_surface(
         directory,
@@ -17010,11 +17080,9 @@ def _verify_supersession_manager_projection(directory: Path, unit: str) -> dict[
         _unit_exec_argv(content, code="release_unit_exec_invalid"),
     )
     database = _database_dropin_path(
-        _read_private_regular_file(
+        _read_private_unit_surface_file(
             directory / f"{unit}.d" / "database.conf",
-            maximum_bytes=1 << 20,
             code="unit_install_supersession_unit_drift",
-            allowed_modes=frozenset({0o600}),
         )
     )
     pre_argv = _systemd_exec_argv(
@@ -17115,11 +17183,9 @@ def _require_retired_unit_surface(
     current = journal._read()
     observed: dict[str, str] = {}
     for key in _UNIT_SURFACE_KEYS:
-        payload = _read_private_regular_file(
+        payload = _read_private_unit_surface_file(
             _unit_surface_path(unit_dir, key),
-            maximum_bytes=1 << 20,
             code="unit_install_supersession_unit_drift",
-            allowed_modes=frozenset({0o600}),
         )
         observed[key] = _sha256_bytes(payload)
     if _sha256_bytes(journal._raw_bytes()) == authority:
@@ -17265,11 +17331,9 @@ def _authenticate_unactivated_terminal_supersession(
         raise ReleaseFailure("unit_install_supersession_anchor_mismatch")
     hashes = current["candidate_unit_hashes"]
     for key in _UNIT_SURFACE_KEYS:
-        observed = _read_private_regular_file(
+        observed = _read_private_unit_surface_file(
             _unit_surface_path(unit_dir, key),
-            maximum_bytes=1 << 20,
             code="unit_install_supersession_unit_drift",
-            allowed_modes=frozenset({0o600}),
         )
         if _sha256_bytes(observed) != hashes[key]:
             raise ReleaseFailure("unit_install_supersession_unit_drift")
