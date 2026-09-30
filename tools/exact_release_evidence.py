@@ -168,6 +168,8 @@ _SEALED_CHILD_INHERITED_ENVIRONMENT = (
     "FRIDAY_TEST_BACKUPS_DIR",
     "PYTHONDONTWRITEBYTECODE",
     "PYTHONHASHSEED",
+    "OMP_NUM_THREADS",
+    "OPENBLAS_NUM_THREADS",
 )
 _SEALED_CHILD_ENVIRONMENT_KEYS = frozenset(
     {
@@ -345,7 +347,7 @@ expected_environment={
     "FRIDAY_DATABASE_MUST_EXIST","JERICHO_DATABASE_MUST_EXIST",
     "FRIDAY_LLM_ENABLED","FRIDAY_EMBEDDINGS_ENABLED","FRIDAY_WORKERS_ENABLED",
     "FRIDAY_CODE_EXECUTION_ENABLED","FRIDAY_TEST_BACKUPS_DIR",
-    "PYTHONDONTWRITEBYTECODE","PYTHONHASHSEED","HOME","LANG","LC_ALL","PATH",
+    "PYTHONDONTWRITEBYTECODE","PYTHONHASHSEED","OMP_NUM_THREADS","OPENBLAS_NUM_THREADS","HOME","LANG","LC_ALL","PATH",
     "PYTEST_DISABLE_PLUGIN_AUTOLOAD","PYTHONPYCACHEPREFIX","TMPDIR","TZ","VIRTUAL_ENV",
 }
 if (
@@ -372,6 +374,8 @@ if (
     or os.environ["LANG"] != "C.UTF-8"
     or os.environ["LC_ALL"] != "C.UTF-8"
     or os.environ["TZ"] != "UTC"
+    or os.environ["OMP_NUM_THREADS"] != "1"
+    or os.environ["OPENBLAS_NUM_THREADS"] != "1"
     or report_path.parent != report_parent
     or pathlib.Path(os.environ["PYTHONPYCACHEPREFIX"]).resolve(strict=False) != pycache_prefix
     or pathlib.Path(os.environ["PYTHONPYCACHEPREFIX"]) != pycache_prefix
@@ -3439,6 +3443,10 @@ def _sealed_pytest_environment(
             raise ExactReleaseEvidenceError("sealed_pytest_environment_invalid")
         inherited = {name: base_environment[name] for name in _SEALED_CHILD_INHERITED_ENVIRONMENT}
         if any(type(value) is not str for value in inherited.values()):
+            raise ExactReleaseEvidenceError("sealed_pytest_environment_invalid")
+        # The outer gate overwrites these two names. The sealed child still
+        # rejects any other value so a poisoned base cannot widen the pool.
+        if inherited["OMP_NUM_THREADS"] != "1" or inherited["OPENBLAS_NUM_THREADS"] != "1":
             raise ExactReleaseEvidenceError("sealed_pytest_environment_invalid")
         home = Path(inherited["FRIDAY_HOME"])
         if (

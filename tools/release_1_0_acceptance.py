@@ -3978,6 +3978,11 @@ def _isolated_runtime_surfaces(root: Path) -> tuple[str, ...]:
                 "FRIDAY_CODE_EXECUTION_ENABLED",
                 "TMPDIR",
                 "XDG_CONFIG_HOME",
+                # Copied from the outer environment, where both values are
+                # already the canonical "1". Other pool names stay out of
+                # this 30-second worker.
+                "OMP_NUM_THREADS",
+                "OPENBLAS_NUM_THREADS",
             }
             environment = {key: isolated[key] for key in names}
             environment.update(

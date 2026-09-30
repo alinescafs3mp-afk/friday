@@ -1101,6 +1101,11 @@ def _isolated_test_environment(
         env_file_value = str(env_file)
         environment.update(
             {
+                # Numpy on this host loads OpenBLAS. OMP_NUM_THREADS and
+                # OPENBLAS_NUM_THREADS each cut that pool from 24 threads to
+                # 1. MKL, NUMEXPR, BLIS and VECLIB do not, so they are not set.
+                "OMP_NUM_THREADS": "1",
+                "OPENBLAS_NUM_THREADS": "1",
                 # Set both names: a test which deliberately removes the current
                 # name must still fall back to the same scratch boundary, never
                 # to an operator setting inherited from the launching shell.

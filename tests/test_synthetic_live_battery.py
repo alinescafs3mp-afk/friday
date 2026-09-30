@@ -982,6 +982,31 @@ def test_explicit_live_env_file_is_outer_only_and_not_in_worker_environment(
     assert str(private_path.resolve()) not in json.dumps(worker, sort_keys=True)
 
 
+def test_worker_environment_overwrites_ambient_openblas_pool(tmp_path: Path) -> None:
+    context = battery.PassContext(
+        battery_id="A",
+        pass_id="A-P01",
+        pass_index=1,
+        seed=1,
+        clock=battery.FIXED_CLOCK,
+        timezone=battery.FIXED_TIMEZONE,
+        manifest_sha256=battery.FROZEN_MANIFEST_SHA256["A"],
+        home=tmp_path / "isolated-home",
+        evidence_path=tmp_path / "evidence" / "raw.jsonl",
+    )
+    worker = battery._worker_environment(
+        {
+            "OMP_NUM_THREADS": "8",
+            "OPENBLAS_NUM_THREADS": "8",
+            "MKL_NUM_THREADS": "8",
+        },
+        context,
+    )
+    assert worker["OMP_NUM_THREADS"] == "1"
+    assert worker["OPENBLAS_NUM_THREADS"] == "1"
+    assert worker["MKL_NUM_THREADS"] == "8"
+
+
 def test_explicit_live_env_file_replaces_conflicting_ambient_model_values(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

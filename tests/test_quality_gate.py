@@ -258,6 +258,16 @@ def test_pytest_phases_share_one_private_non_live_environment(
     }
     for name, value in test_assets.items():
         monkeypatch.setenv(name, value)
+    monkeypatch.setenv("OMP_NUM_THREADS", "8")
+    monkeypatch.setenv("OPENBLAS_NUM_THREADS", "8")
+    for name in (
+        "MKL_NUM_THREADS",
+        "NUMEXPR_NUM_THREADS",
+        "BLIS_NUM_THREADS",
+        "VECLIB_MAXIMUM_THREADS",
+        "MALLOC_ARENA_MAX",
+    ):
+        monkeypatch.delenv(name, raising=False)
     for prefix in quality_gate._RUNTIME_ENV_PREFIXES:
         monkeypatch.setenv(prefix + "SECRET_SENTINEL", "must-not-survive")
         monkeypatch.setenv(prefix + "HOME", "/sentinel/live-home")
@@ -300,6 +310,16 @@ def test_pytest_phases_share_one_private_non_live_environment(
         assert environment["FRIDAY_CODE_EXECUTION_ENABLED"] == "0"
         assert environment["PYTHONDONTWRITEBYTECODE"] == "1"
         assert environment["PYTHONHASHSEED"] == "0"
+        assert environment["OMP_NUM_THREADS"] == "1"
+        assert environment["OPENBLAS_NUM_THREADS"] == "1"
+        for name in (
+            "MKL_NUM_THREADS",
+            "NUMEXPR_NUM_THREADS",
+            "BLIS_NUM_THREADS",
+            "VECLIB_MAXIMUM_THREADS",
+            "MALLOC_ARENA_MAX",
+        ):
+            assert name not in environment
         assert home.is_dir()
         assert env_file.is_file()
         assert env_file.is_relative_to(home)

@@ -12,6 +12,7 @@ import subprocess
 import sys
 import tempfile
 import venv
+from collections.abc import Callable
 from dataclasses import replace
 from pathlib import Path
 
@@ -618,6 +619,7 @@ def _run_installed_bootstrap(
     report: Path,
     *,
     interpreter: Path | None = None,
+    mutate_environment: Callable[[dict[str, str]], None] | None = None,
 ) -> subprocess.CompletedProcess[bytes]:
     source_tooling_site = evidence._test_tooling_site(source, release)  # noqa: SLF001
     runtime = _release_runtime(release, _identity())
@@ -637,6 +639,8 @@ def _run_installed_bootstrap(
             scratch,
             scratch / "python-cache",
         )
+        if mutate_environment is not None:
+            mutate_environment(environment)
         completed = subprocess.run(
             (
                 str(interpreter or release / "venv/bin/python"),
@@ -1163,6 +1167,8 @@ def test_closed_clean_runner_binds_the_installed_bootstrap_and_origin_report(
             "FRIDAY_TEST_BACKUPS_DIR",
             "PYTHONDONTWRITEBYTECODE",
             "PYTHONHASHSEED",
+            "OMP_NUM_THREADS",
+            "OPENBLAS_NUM_THREADS",
             "HOME",
             "LANG",
             "LC_ALL",
@@ -1178,6 +1184,16 @@ def test_closed_clean_runner_binds_the_installed_bootstrap_and_origin_report(
         assert Path(environment["TMPDIR"]).parent == Path(environment["PYTHONPYCACHEPREFIX"]).parent
         assert environment["VIRTUAL_ENV"] == str(runtime.root / "venv")
         assert environment["PATH"] == os.defpath
+        assert environment["OMP_NUM_THREADS"] == "1"
+        assert environment["OPENBLAS_NUM_THREADS"] == "1"
+        for name in (
+            "MKL_NUM_THREADS",
+            "NUMEXPR_NUM_THREADS",
+            "BLIS_NUM_THREADS",
+            "VECLIB_MAXIMUM_THREADS",
+            "MALLOC_ARENA_MAX",
+        ):
+            assert name not in environment
         assert "PYTHONHOME" not in environment
         assert "PYTHONPATH" not in environment
         report = Path(next(item[11:] for item in command if item.startswith("--junitxml=")))
@@ -1285,6 +1301,122 @@ def test_closed_clean_runner_binds_the_installed_bootstrap_and_origin_report(
             RESTART_CLASS,
             release_runtime=runtime,
         )
+
+
+_UNJUSTIFIED_NATIVE_POOLS = (
+    "MKL_NUM_THREADS",
+    "NUMEXPR_NUM_THREADS",
+    "BLIS_NUM_THREADS",
+    "VECLIB_MAXIMUM_THREADS",
+    "MALLOC_ARENA_MAX",
+)
+
+
+def _private_scratch(tmp_path: Path, name: str) -> Path:
+    scratch = (tmp_path / name).resolve()
+    scratch.mkdir(mode=0o700)
+    scratch.chmod(0o700)
+    return scratch
+
+
+def test_sealed_child_binds_selected_pools_and_rejects_drift(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("OMP_NUM_THREADS", "8")
+    monkeypatch.setenv("OPENBLAS_NUM_THREADS", "8")
+    for name in _UNJUSTIFIED_NATIVE_POOLS:
+        monkeypatch.setenv(name, "8")
+    monkeypatch.setenv("FRIDAY_LLM_API_KEY", "must-not-cross")
+    monkeypatch.setenv("HTTP_PROXY", "http://127.0.0.1:9")
+    monkeypatch.setenv("FRIDAY_REAL_SYNCTHING_BINARY", "/test-assets/syncthing")
+    runtime = _release_runtime(tmp_path / "release", _identity())
+    with quality_gate._isolated_test_environment() as base:  # noqa: SLF001
+        assert base["OMP_NUM_THREADS"] == "1"
+        assert base["OPENBLAS_NUM_THREADS"] == "1"
+        scratch = _private_scratch(tmp_path, "sealed-ok")
+        environment = evidence._sealed_pytest_environment(  # noqa: SLF001
+            base,
+            runtime,
+            scratch,
+            scratch / "python-cache",
+        )
+        assert environment["OMP_NUM_THREADS"] == "1"
+        assert environment["OPENBLAS_NUM_THREADS"] == "1"
+        assert set(environment) == evidence._SEALED_CHILD_ENVIRONMENT_KEYS  # noqa: SLF001
+        for name in _UNJUSTIFIED_NATIVE_POOLS:
+            assert name not in environment
+        assert "FRIDAY_LLM_API_KEY" not in environment
+        assert "HTTP_PROXY" not in environment
+        assert "FRIDAY_REAL_SYNCTHING_BINARY" not in environment
+        assert "QUALITY_GATE_SYNCTHING_BINARY" not in environment
+        poisoned = dict(base)
+        poisoned["OPENBLAS_NUM_THREADS"] = "8"
+        rejected = _private_scratch(tmp_path, "sealed-value")
+        with pytest.raises(
+            evidence.ExactReleaseEvidenceError,
+            match="^sealed_pytest_environment_invalid$",
+        ):
+            evidence._sealed_pytest_environment(  # noqa: SLF001
+                poisoned,
+                runtime,
+                rejected,
+                rejected / "python-cache",
+            )
+        missing = dict(base)
+        del missing["OMP_NUM_THREADS"]
+        missing_scratch = _private_scratch(tmp_path, "sealed-missing")
+        with pytest.raises(
+            evidence.ExactReleaseEvidenceError,
+            match="^sealed_pytest_environment_invalid$",
+        ):
+            evidence._sealed_pytest_environment(  # noqa: SLF001
+                missing,
+                runtime,
+                missing_scratch,
+                missing_scratch / "python-cache",
+            )
+
+
+def test_installed_bootstrap_rejects_native_pool_value_and_key_drift(tmp_path: Path) -> None:
+    source, release, site, probe = _write_bootstrap_fixture(
+        tmp_path,
+        "def test_pool_drift_must_not_run():\n    raise AssertionError('pool drift reached the test')\n",
+    )
+
+    def poison_value(environment: dict[str, str]) -> None:
+        environment["OMP_NUM_THREADS"] = "8"
+
+    value_report = tmp_path / "value.json"
+    value = _run_installed_bootstrap(
+        source,
+        release,
+        site,
+        probe,
+        value_report,
+        mutate_environment=poison_value,
+    )
+    assert value.returncode != 0
+    assert not value_report.exists()
+    assert b"installed_site_binding_invalid" in value.stderr
+    assert b"pool drift reached" not in value.stdout
+
+    def poison_key(environment: dict[str, str]) -> None:
+        environment["MKL_NUM_THREADS"] = "1"
+
+    key_report = tmp_path / "key.json"
+    key = _run_installed_bootstrap(
+        source,
+        release,
+        site,
+        probe,
+        key_report,
+        mutate_environment=poison_key,
+    )
+    assert key.returncode != 0
+    assert not key_report.exists()
+    assert b"installed_site_binding_invalid" in key.stderr
+    assert b"pool drift reached" not in key.stdout
 
 
 @pytest.mark.parametrize(

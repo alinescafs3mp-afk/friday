@@ -345,3 +345,94 @@ def test_plan_final_keeps_red_a_from_starting_b(monkeypatch, capsys) -> None:
         "tests/test_bridge_events.py::test_every_allowed_type_is_accepted[bridge.poll_failed]",
         "tests/test_bridge_events.py::test_every_allowed_type_is_accepted[bridge.poll_recovered]",
     }
+
+
+def test_runtime_surface_child_receives_only_the_selected_pool_bounds(monkeypatch) -> None:
+    acceptance = _acceptance()
+    from tools import synthetic_live_battery as battery
+
+    captured: dict[str, object] = {}
+
+    def fake_run(argv, *, cwd, env, input_bytes, timeout):  # noqa: ANN001
+        captured["argv"] = tuple(argv)
+        captured["cwd"] = cwd
+        captured["env"] = dict(env)
+        captured["input_bytes"] = input_bytes
+        captured["timeout"] = timeout
+        return battery.BoundedProcessResult(
+            returncode=2,
+            stdout=b"",
+            stderr=b"",
+            stdout_truncated=False,
+            stderr_truncated=False,
+            timed_out=False,
+        )
+
+    monkeypatch.setattr(battery, "_run_worker_bounded", fake_run)
+    monkeypatch.setenv("OMP_NUM_THREADS", "8")
+    monkeypatch.setenv("OPENBLAS_NUM_THREADS", "8")
+    for name in (
+        "MKL_NUM_THREADS",
+        "NUMEXPR_NUM_THREADS",
+        "BLIS_NUM_THREADS",
+        "VECLIB_MAXIMUM_THREADS",
+        "MALLOC_ARENA_MAX",
+    ):
+        monkeypatch.setenv(name, "8")
+    monkeypatch.setenv("FRIDAY_LLM_API_KEY", "must-not-reach-surface-worker")
+    monkeypatch.setenv("HTTP_PROXY", "http://127.0.0.1:9")
+    monkeypatch.setenv("HTTPS_PROXY", "http://127.0.0.1:9")
+    monkeypatch.setenv("FRIDAY_REAL_SYNCTHING_BINARY", "/test-assets/syncthing")
+    with pytest.raises(acceptance.AcceptanceError, match="^runtime_surface_discovery_failed$"):
+        acceptance._isolated_runtime_surfaces(acceptance.ROOT)
+    environment = captured["env"]
+    assert isinstance(environment, dict)
+    assert captured["timeout"] == 30
+    assert captured["input_bytes"] == b""
+    assert environment["OMP_NUM_THREADS"] == "1"
+    assert environment["OPENBLAS_NUM_THREADS"] == "1"
+    assert environment["FRIDAY_LLM_ENABLED"] == "0"
+    assert environment["FRIDAY_EMBEDDINGS_ENABLED"] == "0"
+    assert environment["FRIDAY_WORKERS_ENABLED"] == "0"
+    assert environment["FRIDAY_CODE_EXECUTION_ENABLED"] == "0"
+    assert environment["FRIDAY_SECONDARY_LLM_ENABLED"] == "0"
+    assert environment["PATH"] == "/usr/bin:/bin"
+    assert environment["LANG"] == "C.UTF-8"
+    assert environment["HOME"] == environment["FRIDAY_HOME"]
+    assert set(environment) == {
+        "FRIDAY_HOME",
+        "JERICHO_HOME",
+        "FRIDAY_ENV_FILE",
+        "JERICHO_ENV_FILE",
+        "FRIDAY_DATABASE_PATH",
+        "JERICHO_DATABASE_PATH",
+        "FRIDAY_DATABASE_MUST_EXIST",
+        "JERICHO_DATABASE_MUST_EXIST",
+        "FRIDAY_LLM_ENABLED",
+        "FRIDAY_EMBEDDINGS_ENABLED",
+        "FRIDAY_WORKERS_ENABLED",
+        "FRIDAY_CODE_EXECUTION_ENABLED",
+        "TMPDIR",
+        "XDG_CONFIG_HOME",
+        "OMP_NUM_THREADS",
+        "OPENBLAS_NUM_THREADS",
+        "PATH",
+        "LANG",
+        "HOME",
+        "FRIDAY_SECONDARY_LLM_ENABLED",
+    }
+    assert {
+        "MKL_NUM_THREADS",
+        "NUMEXPR_NUM_THREADS",
+        "BLIS_NUM_THREADS",
+        "VECLIB_MAXIMUM_THREADS",
+        "MALLOC_ARENA_MAX",
+        "FRIDAY_LLM_API_KEY",
+        "HTTP_PROXY",
+        "HTTPS_PROXY",
+        "FRIDAY_REAL_SYNCTHING_BINARY",
+        "QUALITY_GATE_SYNCTHING_BINARY",
+    }.isdisjoint(environment)
+    argv = captured["argv"]
+    assert isinstance(argv, tuple)
+    assert "-I" in argv and "-B" in argv
