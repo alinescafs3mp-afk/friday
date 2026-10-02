@@ -1,6 +1,6 @@
 # Friday: canonical project backlog
 
-Updated: 2026-09-21 (last verified production `0.208.58`; canonical DR restoration, rollback and generation publication completed in Astra358; final R10/F.0–F.11 acceptance incomplete. Postrelease order: N6 TinyFish first, then the Agent Zero V6 first slice inside N8, then other independent N7/N8/N9 work by dependency; historical S3 witness preserved; Pandora unchanged.)
+Updated: 2026-10-02 (release frontier reconciled against current local authority and actual A193/LAB869 results; recorded production `0.208.58` unchanged; final R10/F.0–F.11 acceptance incomplete. Postrelease order: 1.0 → N6 TinyFish → first Agent Zero V6 slice inside N8. Historical evidence below is not current execution credit.)
 
 This is the project's only backlog and mutable status register. It owns the
 current production identity, execution order, acceptance gaps and owner actions.
@@ -15,6 +15,80 @@ The 2026-09-03 post-backlog audit snapshot (`main` `43a16c8b`, source
 `0.208.4`, recorded production `0.208.1`) is expired. The later repository record below supersedes it. C1 has not re-probed the
 live host, the laptop or Telegram. Do not copy historical release claims
 forward or treat a source correction as a deployed release.
+
+## Current release frontier — 2026-10-02, 17:18 MSK
+
+This bounded reconciliation supersedes older live-state paragraphs below, not
+their immutable evidence or the agreed acceptance contract. The authoritative
+local `/home/jericho/.jericho/team/kimi/state/leadership.json` still records
+`active_lead=astra`, epoch 4, Kimi continuity deputy; its committed owner
+authorization and current native bindings agree. No leadership/model/guard change.
+
+Identity boundaries: published `main` checkpoint
+`4aebe36ee864c652fa7052b819a60a9aa4ffcfda` is archival. The active product/work
+checkout remains frozen at `cecd28a92ac4fd4e34c4d3813d0c598debe09436`,
+`0.208.64/schema50`, index SHA256
+`29ddfd4a8810d4396673e153fd5da301f7cf86ea00c1bf478ea2ec76fe844e4f`.
+This backlog correction is in the existing isolated publication checkout; it
+does not pull/reset/edit the frozen checkout or rebind reviewed packages.
+No final wheel or installed runtime is inferred from either Git HEAD. Recorded
+installed production is `0.208.58`, unchanged, not newly probed here.
+
+All five source roots below are **harness** blockers, not five newly established
+product defects. “Locally checked” here means inert source/JSON/hash review only;
+it does not mean tests or runtime execution. Current exact source packages remain
+private and separate from the product candidate.
+
+| Existing grouped root / exact current package | Implemented / locally checked | Integrated / independently accepted / target verified | Invariant → failing path → next closure; owner/dependency |
+| --- | --- | --- | --- |
+| Browser: LAB866 manifest `b2b530…`, current209; SOL063; active SOL064 input SHA256 `fcd1f697f0cb5f112c6327c86ac28028d462fa2beab61bc93277e8146110ca72` | Partial implementation; whole-source rejection consumed | No / no / NOT_RUN | Original whole209/all216/all29/all6 completion and resource obligations → Controls producer/raw framing → unchanged Supervisor/A087/parser/oracle → retirement. SOL064 closes connected C01–C09/M01, including normal/error/negative paths and passed-after-confirmed-cleanup ordering. Sol is actually RUNNING; preserve it. Non-author whole acceptance follows the stable package. |
+| Scanner: A189 manifest SHA256 `21bf7d65905f936f8d11a46aad1e1abfd121bf65c2492355850ff066731bfba7`, current52; A192 terminal SHA256 `21aa5c71830e0e64afaf0741aa6d26546ce66c666e9e56c8895d8a77c8582411` | Generic raw-before-projection and confirmed Root warm retirement credited; A192 review closed | No / no / NOT_RUN | Full202/raw/error/FD custody and direct child-parenthood before owner loss → final Root unresolved-end C1 **and** actual Source main C2. Astra owns one connected ownership decision and both endpoint/init/error/finite-end closure. Use confirmed retirement or legally accepted fold/transfer into an already existing outside native parent; no new service/role/observer chain. Whole non-author review must rejoin the changed endpoints with existing credits. |
+| Publisher: A190 manifest SHA256 `86b5769a839fefe07fb7c748cd5953f8a7147818f269d03f42c9cb1b8d145e9c`; LAB869 manifest SHA256 `68e25f2e2e52554c199a22b70cc143a724b17f34718e9cd0ddee4c656927d4a2` | A190 source plus actual LAB869 result authenticated/received/ACK; selected OwnedFDs C03 cancellation is genuine credit, not whole acceptance | No / no / NOT_RUN | C01/C02/C04/C05/C06/C09 → actual bootstrap/raw/body/error aliases/standalone receiver/cost/retirement; ForkOwner preowned census cancellation remains distinct from credited FD cancellation. Astra joins producer and both receivers within the existing 2,000,000-byte wire/resource bounds. Required whole-body and standalone caller validation, then non-author acceptance; no cap raise, truncation or hash-only substitution. |
+| Sender: LAB867 current96; A193 terminal SHA256 `415c7156f2c6705b59fc8ab5f8f3b8b5808b40f312a405ab4cfd80af031720ab`; active LAB870 input SHA256 `10c47faee0467b93745c0d7903e7ac51fd5b5dabba73b08c71b508b33866d292` | Full A193 intake/lifecycle CLOSED; partial R03/R05 and earlier N02 credits preserved | No / no / NOT_RUN | Original54/all96/all32/all7 → actual startup/TOOL+HELPER endpoints/raw/default/error/finite-end/cost and replay relations R01–R07. Grok LAB870 implements the connected package in its existing TUI; executor ACK verified, RUNNING. Stable source needs non-author review, not lab self-acceptance. |
+| Node: LAB868 manifest SHA256 `49769863995e65ea796ca78a12934d632f85241b0a6c8415d1348e3cb9fc01af`; caller SHA256 `7a065f3aead7f0a7c075b5b42e2d108b5e75f79e5a1823b9c216439afa560282` | New implementation authenticated: simultaneous FD256 separated from lifetime accounting/reclamation; not yet independently closed | No / pending / NOT_RUN | Original6/all35/all6/all3/GPG6/F1F2D1D2/current19 → actual callers, reclamation/error/custody and changed resource/hash bindings. Next compatible Sol assignment is non-author review of this actual source; do not inherit old A191 B04 automatically. Prepared A196 inputs are evidence only, not a running review. Separate implementation defects from qualification gaps, unknown costs and NOT_RUN execution. |
+
+Private intake/decision links:
+`/home/jericho/.jericho/grok-takeover/ASTRA-E4-A193-INDEPENDENT-SENDER-SOURCE-REVIEW-RECEIVED-20261002.json`,
+`/home/jericho/.jericho/grok-takeover/ASTRA-E4-LAB869-INDEPENDENT-PUBLISHER-SOURCE-REVIEW-RECEIVED-20261002.json`,
+`/var/tmp/friday-astra-a189-scanner-whole17-all52-all6-raw-native-custody-independent-source-review-a192-g1/REVIEW.md`,
+`/home/jericho/.jericho/grok-takeover/ASTRA-E4-A196-INPUT-20261002.json`.
+These are immutable scoped evidence, not additional mutable status registers.
+
+Movement: A193 full intake/lifecycle and LAB869 result authentication/ACK are
+complete. **No whole source root was newly independently accepted in this
+reconciliation; no new required execution layer completed.** Existing genuine
+local credits remain scoped. LAB868's changed lifetime accounting is awaiting
+independent review, not an automatically carried-forward old defect. Missing
+future image/grant/provider/ABI/clock alone is an environment/evidence prerequisite,
+not CODE. Unknown whole costs remain unknown, not zero.
+
+Critical path: connected source closure → independent whole acceptance → fresh
+selected-image/compiler-native-ABI/grants/provider/resource/finite-clock
+qualification through the existing Source/Root path → stable collect-all diagnostic
+execution → connected correction batch if needed → final seal and canonical
+release sequence. Do not execute inert unadmitted source or repeatedly bind
+expiring prerequisites while source changes. Ordinary failures leave independent
+available branches running; missing prerequisites give exact dependent NOT_RUN;
+lost containment/privacy/uncertain cleanup/invalid evidence stops that contour.
+
+Current evidence/deployment frontier: r5 immutable RED, no reuse credit; r6 absent;
+Source admission, Root admission, compiler-ABI and runtime not established;
+exact-release, mandatory 160 live, official A+B/B09 binder, R10/all30/F.0–F.11,
+applicable enabled-feature checks, final build/install/restore/rollback and target
+observation are incomplete/NOT_RUN on the final artifact. Next newly executable
+release stage: none yet; the next boundary is independent Source acceptance and
+fresh Root qualification. The exact gate must execute change+exact once in one
+canonical invocation; its valid receipt may then feed the existing acceptance
+reader without a second pytest controller. B is forbidden after red A; pair exit4
+pending B09 content is neither GO nor a reason by itself to rerun the pair.
+
+ETA: the previous rolling “1–2 days” is withdrawn. No grounded release range is
+available until these connected residuals close and actual qualified diagnostic
+durations are measured. Assignment deadline caps are not measured durations;
+24/7 operation is not an assumed threefold speedup. Next forecast must name
+remaining dependencies, measured execution durations and actual queueing.
+Release GO requires the entire unchanged conjunction; web search alone remains
+OWNER_DEFERRED_POST_1_0, never PASS. 1.0 → N6 → N8.AZ remains the order.
 
 ## Ближайшая очередь: релиз 1.0 → N6 TinyFish → Agent Zero V6 (владелец, 2026-09-21)
 
