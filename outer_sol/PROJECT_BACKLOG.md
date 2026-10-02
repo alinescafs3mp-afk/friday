@@ -16,7 +16,7 @@ The 2026-09-03 post-backlog audit snapshot (`main` `43a16c8b`, source
 live host, the laptop or Telegram. Do not copy historical release claims
 forward or treat a source correction as a deployed release.
 
-## Current release frontier — 2026-10-03, 00:18 MSK
+## Current release frontier — 2026-10-03, 00:46 MSK
 
 This bounded reconciliation supersedes older live-state paragraphs below, not
 their immutable evidence or the agreed acceptance contract. The authoritative
@@ -31,7 +31,8 @@ backlog-only corrections are `a3465598533f769f7aa2fd3ce1cc0f215e7bc7df`,
 `4344327f9decb862936d9ee899371d803949b0f5` and
 `23820e74675d336d50296b4d9a7838573ab51e74` and
 `920078ee962be4d25e11c03cd77fea04d3043d9f` and
-`76b2fec41b1e909fe9c49ffec84a46d4a5d405f1`.
+`76b2fec41b1e909fe9c49ffec84a46d4a5d405f1` and
+`50b77fe01a9fb08388d532df45513fe1b553a8cb`.
 These are not the active product/work candidate. The product checkout
 remains frozen at `cecd28a92ac4fd4e34c4d3813d0c598debe09436`,
 `0.208.64/schema50`, index SHA256
@@ -48,9 +49,9 @@ private and separate from the product candidate.
 
 | Existing grouped root / exact current package | Implemented / locally checked | Integrated / independently accepted / target verified | Invariant → failing path → next closure; owner/dependency |
 | --- | --- | --- | --- |
-| Browser: SOL069 manifest SHA256 `f445c0dea389fccddb9cc29af5397fd829695bced6b7f96de5d9aeadce2f0453`, actual209 plus owned G1/R4/DS69 | Completed23:51:49 MSK, 17m56s; full55/current209 10 changed/199 equal authenticated. Full binary/alias DS69 events and both receivers joined; original Root cleanup-only work1140/hard1200 Source window added. Original stored cap_get had no WORK gate; fr_cap_read WORK refusal is START-only | Connected text partly joined / no whole acceptance / NOT_RUN | Original216/29/all6/all9/C01–C08/M01 → conditional RLE is not every original reachable body/history fit; complete preformat/partial/after-emission/last-close originals still local; native/caller final end and complete resource/deadline9 qualification open. Grok LAB881 implements permitted preowned Source-only body/native backing or actual stock preimages, BOTH receivers/end and original whole costs. No universal entropy/privateheap theorem, cap/case cuts or Source access to privileged Root writable storage. |
-| Scanner: LAB878 manifest SHA256 `0e1b665928b7d24af67ed65b7b1222c3ba1896df851d5c4900db11d384c39a92`; Astra A198 overlay manifest SHA256 `de0dba8dc076e99ec1a8df2f4d8cc094e2d97a8b607a0553392c1f5762fb0d31`, actual52 | LAB878 sealed22:40:21 MSK, 16m56s; full61/current52 3 changed/49 equal verified. It fixes normal FD/publish order but leaves actual Python arenas anonymous. A198 completed23:35:24 MSK, 16m18s: 2 changed/50 equal, actual Source allocator byte regions/raw roots/error triplets/packet chain now directly preheld before Python initialization, with paired read-only Root receiver and no late duplicate packet body | Connected storage text joined and literal/SHA9 checked / no whole acceptance / NOT_RUN | Existing C1/C2 → complete required body/native/stock/FD correspondence and actual final outside native caller. A198 replaces Source storage, not original memory authority or2M wire; checks direct reap/geometry/actual shared FD retirement. Root outside-parent endpoint/callsite and original whole memory/RSS/IO fit remain open; current52 does not establish an authenticated independently selected host caller consumer. Missing future image/ABI alone is not CODE. Astra owns this connected closure; no new service/role, universal heap theorem, end-as-transfer or Source access to Root writable privileged VM. |
-| Publisher: LAB879134; new Astra A199 manifest SHA256 `db72d83509a1aad9d1c96f1798e9705874b57e77cca5e4ad53a5445385c50612`, actual134 | A199 sealed03.10 00:05:31 MSK: 6 changed/128 equal, full9 owned leaves. Actual original traceback/cause/context now untouched; nested private scopes/partial assembly/chunk/join bodies retained; both real receivers hold exact complete call roots before cleanup. Terminal slots use original WholeMeter after ContextVar reset; failed retirement never blindly repeated | Connected text/SHA9 checked only / no whole acceptance / NOT_RUN | Existing C01/C02/C04/C05/C06/C09 → original mutation/alias path repaired, not full body/native/end acceptance. Actual selected ContextVars/Tokens/sets/native state still unsupported by current encoder/validator; standalone root list has no established finite outside-owner completion; chosen1667917 is not complete workload/body/copy/error upper. Sol SOL070 closes this connected selected-stock/producer/BOTH receivers/end/cost package. LAB879 omitted8 evidence leaves remain immutable intake-only, not source credits. |
+| Browser: LAB881 manifest SHA256 `f0bfffd9b3668edaa54863c870812f43121738fc528d0145a4773efc70c89d0a`, actual209 plus G1/R4/DS69 | Sealed03.10 00:23:36 MSK, 8m58s; full225/current209 8 changed/201 equal authenticated against actualSOL069; all221 owned Source/evidence leaves bound. Immutable/readonly local body pairs before channel writes authored; original binary/framing/work-vs-hard credits preserved | New changed code pending actual non-author connected read / no whole acceptance / NOT_RUN | Original216/29/all6/all9/C01–C08/M01 → author explicitly retains local pair != outside-owner handover, parent Root view still event-pipe read end, unwritten-tail/full stock/native body/final-end/full48MiB costs open. Astra must implement actual permitted preowned Source-only physical backing and existing Root view BEFORE first risky operation, not another local readonly/private copy or universal SIGKILL theorem. No known-incompatible whole review; caps/cases/roles unchanged. |
+| Scanner: LAB878 manifest SHA256 `0e1b665928b7d24af67ed65b7b1222c3ba1896df851d5c4900db11d384c39a92`; Astra A198 overlay manifest SHA256 `de0dba8dc076e99ec1a8df2f4d8cc094e2d97a8b607a0553392c1f5762fb0d31`, actual52 | LAB878 sealed22:40:21 MSK, 16m56s; full61/current52 3 changed/49 equal verified. It fixes normal FD/publish order but leaves actual Python arenas anonymous. A198 completed23:35:24 MSK, 16m18s: 2 changed/50 equal, actual Source allocator byte regions/raw roots/error triplets/packet chain now directly preheld before Python initialization, with paired read-only Root receiver and no late duplicate packet body | Connected storage text joined and literal/SHA9 checked / no whole acceptance / NOT_RUN | Existing C1/C2 → complete required body/native/stock/FD correspondence and actual final outside native caller. A198 replaces Source storage, not original memory authority or2M wire; checks direct reap/geometry/actual shared FD retirement. Root outside-parent endpoint/callsite and original whole memory/RSS/IO fit remain open; current52 does not establish an authenticated independently selected host caller consumer. Missing future image/ABI alone is not CODE. SOL071 implements this connected closure under Astra's existing-parent fold design; no new service/role, universal heap theorem, end-as-transfer or Source access to Root writable privileged VM. |
+| Publisher: SOL070 manifest SHA256 `b6913489094e38af0a41749fc97cad6d2c637c8ae8496027e1c519e3b6fd35f3`, actual134; Astra A199 original correction retained in successor | Sealed03.10 00:28:08 MSK, 11m59s; full62/current134 5 changed/129 equal authenticated, actual134 before/after gapless byte partitions and provenance DAG verified. Iterative original-body arena, sets/float/code/frame/context/default/token fields and matched both receivers authored; original A199 error/partial-body/slot mechanism preserved | A199 independently scoped credited by LAB882; Sol070 new dependent paths not whole accepted / NOT_RUN | Existing C01/C02/C04/C05/C06/C09 → preserve A199 original error/body/slot credit with new caller joins; early scalar/alias stock prefix, selected native full-body/receipt producer and actual final parent/callsite remain absent; standalone repeated roots have no finite aggregate lifetime bound. Chosen1667917 chronology and conditional740878 consumer hex overlap are NOT a reachable witness or universal fit/impossibility. Astra must implement actual existing native end/body receiver or permitted Source-only preowned backing plus Root readonly view, then complete actual whole representation/copy/history/cost fit. No whole-source review while known performing gaps remain. |
 | Sender: LAB873 manifest SHA256 `fd00045ff696d9c2e19782ec14bdbf7d24dcb78ec245ec2189c67869fbb30404`, actual96 plus separate auxiliary | Sealed 18:49:29 MSK, 12m39s; full17 received/ACK; actual96 5 changed/91 equal. Astra read actual adoption/cleanup/caller/final-close paths | No / scoped R02 terminal-order and M01 binding credits only / NOT_RUN | Existing R02 → actual caller now settles helper/tool while recorder is live, then finishes/seals, then final-closes an externally preowned outcome. Old guaranteed append-after-seal failure is retired, not whole native/helper-end acceptance. Fresh original96 join replaces stale 1/95 claim; full R01–R07 raw/value/error/retirement/bounds must be rejoined before non-author whole acceptance. No FD-cleanup-to-native-end self-certification. |
 | Node: LAB880 manifest SHA256 `dfdc69d86bcd0776c0611fb276d7ae7be52ee1dd36ff47aa0bb4ac345310fd42`, actual6; Root A200 precheck SHA256 `7cfc7adc9c17e9d19c4adfc85bb46b109778d529330e42e4d5807a62bc063f2f` | Sealed23:59:51 MSK, 16m59s; full19/current6 5 changed/1 equal authenticated; all15 owned Source/evidence leaves bound. Actual regular-file parent receiver pwrite/pread/size path implemented; prior B04/B05/pre-projection hold credits preserved | Actual connected non-author precheck / no whole acceptance / NOT_RUN | Existing actual6/35/all6/3/GPG6/F1F2D1D2/19 → second encode and commit_existing_receiver can still propagate to interpreter end on ordinary failure with private unwritten tail/secondary originals; removing explicit _exit is not custody. R01 full original factories/copy/codec bounds and R04 catch108/beyond-cap original retention still require actual proof/correction. R03 hold credit remains scoped. Original Source19/image/native reconstruction/GPG/grants/clock qualification, unknown measured costs and NOT_RUN states remain separate from code. No universal SIGKILL/hostile-kernel expansion or another whole-review while known R02 open. |
 
@@ -62,25 +63,45 @@ Private current evidence/decision links:
 `/home/jericho/.jericho/grok-takeover/ASTRA-E4-SOL069-BROWSER-RESULT-RECEIVED-20261003.json`,
 `/var/tmp/friday-astra-a199-lab879-publisher-original-error-body-custody-connected-source/manifest.json`,
 `/home/jericho/.jericho/grok-takeover/ASTRA-E4-LAB880-NODE-SOURCE-RESULT-RECEIVED-20261003.json`,
-`/home/jericho/.jericho/grok-takeover/ASTRA-E4-A200-LAB880-NODE-CONNECTED-PRECHECK-20261003.json`.
+`/home/jericho/.jericho/grok-takeover/ASTRA-E4-A200-LAB880-NODE-CONNECTED-PRECHECK-20261003.json`,
+`/home/jericho/.jericho/grok-takeover/ASTRA-E4-LAB881-BROWSER-SOURCE-RESULT-RECEIVED-20261003.json`,
+`/home/jericho/.jericho/grok-takeover/ASTRA-E4-SOL070-PUBLISHER-RESULT-RECEIVED-20261003.json`,
+`/home/jericho/.jericho/grok-takeover/ASTRA-E4-LAB882-A199-SCOPED-REVIEW-RECEIVED-20261003.json`.
 Immutable failed/superseded evidence remains private and preserved; these are
 scoped evidence, not additional mutable status registers.
 
 Current existing protocol assignments: SOL069 full result received; only exact
 native item `01a0fe63-f48f-7b22-81cb-d7b2223d3c2e` consumed after Root received.
-SOL070 Publisher input SHA256
-`c3bafcb79ba1d8ca554d67401b619a1e0ec1edf2c70705503419f4dd2d9ac738`; same-TUI
-contextCompaction completed/error-null124s at00:14:22 MSK before TASK enqueue00:15:58.
-Actual turn `01a0fe79-508c-7550-910e-c4b1d87a0d8b` inProgress verified00:17;
-native queue empty, Sol goal null. No new TUI/model/guard change.
+SOL070 full62 result received after complete private pathset/SHA9 and actual134
+5changed129equal/gapless before-after checks; exact native result item
+`01a0fe85-fe3d-7c92-a3a0-5b4abd13d15b` consumed only after durable Root receipt.
+Completed00:28:08 MSK/11m59s; SourceReady/Root/runtime/gates/GO remain false/NOT_RUN.
+SOL071 Scanner input SHA256 `c3f183af6e6addbc1a748ba370c849bb2c4309f5ef61ad83fb483f00b8f5bb11`:
+actual performing original outside-native parent/callsite and both endpoints, with
+preowned body/resources/direct child relationships before bounded births; original
+roles/caps and Source-only writable/Root readonly separation unchanged. Same Sol
+TUI contextCompaction completed/error-null115.503s at00:42:02 MSK, once before
+TASK enqueue; actual turn `01a0fe91-b16a-71d3-bd4a-a896cd3e5de6` inProgress,
+queue empty/goal null verified. No new TUI/model/goal.
 LAB880 actual result received/ACKed; durable cursor
 `msg_da066764f774428da976adb134cd8149`.
-LAB881 Browser job `job_5cfbe279d6ac4805b375250f89cc7dbc` submitted00:14:27 MSK;
-actual same-visible-TUI/instance15 executor ACK00:14:38 establishes Grok available
-on October3. Its01:24:38 MSK deadline is the existing4200s profile cap,
-not measured duration. No Grok compact. Astra owns Node actual connected
-final-parent/body closure, Scanner outside native endpoint and cross-component
-consistency; only already authorized roles/topology, no private artifact reconstruction.
+LAB881 actual result received/ACKed after full225/current209 8changed201equal;
+durable cursor `msg_6650c312c40b44de904d2bcfb4fcd925`.
+Its08m58s observed duration is not a whole-root closure or release estimate.
+Grok LAB882 completed00:36:59 MSK/6m11s: full12 independent report authenticated,
+RESULT ACKed and cursor `msg_39be81b1124743a38463de9a0aefa6b7` committed. It credits
+ONLY Astra A199 original graph/partial producer/nested scope/slot-owner/once-only
+retirement/secondary cleanup/BOTH-root receiver/terminal-order mechanisms. It does
+not accept Grok's old baseline or whole Publisher. Sol070 changed dependent caller/
+receiver/meter/encoder context; rejoin credits with those bytes before whole decision.
+Grok LAB883 job `job_b4747d1467aa44059d6fa7cf9e1d3523` submitted00:45:22 MSK:
+connected Node actual Source-only preowned body/native original parent and BOTH
+ordinary publication/end paths plus original catch/domain/cost proof. Input SHA256
+`92384d9489da2ec487c79e6c7acfb456ababa3449651f3319badea2bb145e079`.
+No Grok compact; actual claim/ACK, not archival RUNNING, establishes execution.
+Astra owns Browser's actual preowned physical body/native Root receiver/end design;
+Sol implements Scanner, Grok implements Node, author changes need different-author
+acceptance. Original settings/roles/caps/cases/topology remain unchanged.
 No author self-acceptance, extra reviewer, dispatcher or parallel status register.
 
 Owner availability fallback (accepted 2026-10-02, 21:15 MSK): keep Grok usefully
@@ -95,14 +116,14 @@ required pre-task compact. No duplicate execution or hidden replacement.
 Immutable owner directive:
 `/home/jericho/.jericho/grok-takeover/ASTRA-E4-OWNER-GROK-AVAILABILITY-FALLBACK-20261002.json`.
 
-Movement this checkpoint: two full completed intakes SOL069/LAB880 and their exact
-lifecycle/ACK closure; A199 actual six-file original error/body/slot/caller correction
+Movement this checkpoint: additional full completed LAB881/SOL070 intakes and
+exact native consume/lab ACK closure, plus LAB882 independent A199 mechanism credits; A199 actual six-file original error/body/slot/caller correction
 plus finite Node actual-path classification. Browser binary/framing/work-vs-hard and
 Node conditional regular-file receiver mechanisms are genuine scoped changes,
 not independent whole-root acceptance. Scanner A198 storage credit remains
 unchanged and scoped. Independently closed roots: zero additional whole source
 roots; newly discovered product roots: zero; newly completed required execution
-layers: zero. Publisher mutation/ContextVar/native-body and Node final ordinary
+layers: zero. Publisher iterative stock fields/caller-end and Node final ordinary
 send/error paths belong to existing custody/representation/end roots. Preserve
 prior genuine credits and all original functionality/cases/resources.
 Future image/provider/grant/ABI/clock prerequisites are environment/evidence,
