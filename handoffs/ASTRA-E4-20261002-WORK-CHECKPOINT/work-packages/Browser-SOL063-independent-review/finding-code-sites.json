@@ -1,0 +1,1031 @@
+[
+  {
+    "finding": "SOL063-C01",
+    "name": "A071-CONTROLS.py",
+    "pin": {
+      "path": "/var/tmp/friday-lab866-lab864-a183-browser-whole209-all216-all29-connected-source-closure/source/A071-CONTROLS.py",
+      "bytes": 235751,
+      "sha256": "a8805047b5f5ba7c01cab4337f59b70121c318f6fe3f284d2666e9909859e69e",
+      "identity9_decimal_strings": [
+        "2050",
+        "6980306",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "235751",
+        "1790940105086327015",
+        "1790940105086327015"
+      ],
+      "stable9": true
+    },
+    "lines": [
+      874,
+      936
+    ],
+    "complete_range_sha256": "248cee9e071938390b58a6d73b4f40c3a2c61228c7a55db5a5a44b9f423fc091",
+    "raw_body_copy": false
+  },
+  {
+    "finding": "SOL063-C01",
+    "name": "A071-CONTROLS.py",
+    "pin": {
+      "path": "/var/tmp/friday-lab866-lab864-a183-browser-whole209-all216-all29-connected-source-closure/source/A071-CONTROLS.py",
+      "bytes": 235751,
+      "sha256": "a8805047b5f5ba7c01cab4337f59b70121c318f6fe3f284d2666e9909859e69e",
+      "identity9_decimal_strings": [
+        "2050",
+        "6980306",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "235751",
+        "1790940105086327015",
+        "1790940105086327015"
+      ],
+      "stable9": true
+    },
+    "lines": [
+      955,
+      1038
+    ],
+    "complete_range_sha256": "63fff7e838d7edf16b285d1994d9f34b011e36baf365923094d5802cfef270c1",
+    "raw_body_copy": false
+  },
+  {
+    "finding": "SOL063-C01",
+    "name": "A071-SUPERVISOR.py",
+    "pin": {
+      "path": "/var/tmp/friday-lab866-lab864-a183-browser-whole209-all216-all29-connected-source-closure/source/A071-SUPERVISOR.py",
+      "bytes": 54576,
+      "sha256": "a419700a042c4718245a23e27e78ee7ae9b5f1e3838f886ff3e0ced226140ce3",
+      "identity9_decimal_strings": [
+        "2050",
+        "6980307",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "54576",
+        "1790940105087327072",
+        "1790940105087327072"
+      ],
+      "stable9": true
+    },
+    "lines": [
+      970,
+      979
+    ],
+    "complete_range_sha256": "443ee8a2773466e3d00bf02f37426023d608a42bc96cd3d798207c33df989bd2",
+    "raw_body_copy": false
+  },
+  {
+    "finding": "SOL063-C01",
+    "name": "A087-PUBLIC-DRIVER.py",
+    "pin": {
+      "path": "/var/tmp/friday-lab866-lab864-a183-browser-whole209-all216-all29-connected-source-closure/source/A087-PUBLIC-DRIVER.py",
+      "bytes": 101546,
+      "sha256": "ca7fbfb013653ebae18b4b7a23c38c871579dce51c84a62d87d2bdf5bf1c17e0",
+      "identity9_decimal_strings": [
+        "2050",
+        "6980303",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "101546",
+        "1790940105083326843",
+        "1790940105083326843"
+      ],
+      "stable9": true
+    },
+    "lines": [
+      674,
+      775
+    ],
+    "complete_range_sha256": "c008b082a5a06d1ce7cef0854280f0c71eb4d8d6ee6f95aa439ae06d3125c1d1",
+    "raw_body_copy": false
+  },
+  {
+    "finding": "SOL063-C01",
+    "name": "A071-BOOTSTRAP.c",
+    "pin": {
+      "path": "/var/tmp/friday-astra-browser-a153-a156-whole216-all6-all2-connected-source-implementation-a158-g1/source/A071-BOOTSTRAP.c",
+      "bytes": 68593,
+      "sha256": "4f6495fff30d4ac4c863622a526073f0523541af79ea81b2b5a5f1305ee854e4",
+      "identity9_decimal_strings": [
+        "2050",
+        "6978878",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "68593",
+        "1790920210069855767",
+        "1790920210069855767"
+      ],
+      "stable9": true
+    },
+    "lines": [
+      565,
+      589
+    ],
+    "complete_range_sha256": "377cfbb93815abe1e90730aa5dc80f06c3cf2345e45b1c62d5f6d97efd3e7d03",
+    "raw_body_copy": false
+  },
+  {
+    "finding": "SOL063-C02",
+    "name": "A071-CONTROLS.py",
+    "pin": {
+      "path": "/var/tmp/friday-lab866-lab864-a183-browser-whole209-all216-all29-connected-source-closure/source/A071-CONTROLS.py",
+      "bytes": 235751,
+      "sha256": "a8805047b5f5ba7c01cab4337f59b70121c318f6fe3f284d2666e9909859e69e",
+      "identity9_decimal_strings": [
+        "2050",
+        "6980306",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "235751",
+        "1790940105086327015",
+        "1790940105086327015"
+      ],
+      "stable9": true
+    },
+    "lines": [
+      938,
+      953
+    ],
+    "complete_range_sha256": "132cecf5de8bafeb363195cc74dc1fb84f9f21ebb4ea13602dffef474578e773",
+    "raw_body_copy": false
+  },
+  {
+    "finding": "SOL063-C02",
+    "name": "A071-CONTROLS.py",
+    "pin": {
+      "path": "/var/tmp/friday-lab866-lab864-a183-browser-whole209-all216-all29-connected-source-closure/source/A071-CONTROLS.py",
+      "bytes": 235751,
+      "sha256": "a8805047b5f5ba7c01cab4337f59b70121c318f6fe3f284d2666e9909859e69e",
+      "identity9_decimal_strings": [
+        "2050",
+        "6980306",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "235751",
+        "1790940105086327015",
+        "1790940105086327015"
+      ],
+      "stable9": true
+    },
+    "lines": [
+      1064,
+      1090
+    ],
+    "complete_range_sha256": "4a355c5d22459467620d0ddd8a47c9b408942d4af8b4fbf639cc8a5b32771173",
+    "raw_body_copy": false
+  },
+  {
+    "finding": "SOL063-C02",
+    "name": "A071-CONTROLS.py",
+    "pin": {
+      "path": "/var/tmp/friday-lab866-lab864-a183-browser-whole209-all216-all29-connected-source-closure/source/A071-CONTROLS.py",
+      "bytes": 235751,
+      "sha256": "a8805047b5f5ba7c01cab4337f59b70121c318f6fe3f284d2666e9909859e69e",
+      "identity9_decimal_strings": [
+        "2050",
+        "6980306",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "235751",
+        "1790940105086327015",
+        "1790940105086327015"
+      ],
+      "stable9": true
+    },
+    "lines": [
+      1110,
+      1166
+    ],
+    "complete_range_sha256": "b25c1df11682704adee0c086757e2700f624d1db32366de858523747144ecb4b",
+    "raw_body_copy": false
+  },
+  {
+    "finding": "SOL063-C02",
+    "name": "A071-CONTROLS.py",
+    "pin": {
+      "path": "/var/tmp/friday-lab866-lab864-a183-browser-whole209-all216-all29-connected-source-closure/source/A071-CONTROLS.py",
+      "bytes": 235751,
+      "sha256": "a8805047b5f5ba7c01cab4337f59b70121c318f6fe3f284d2666e9909859e69e",
+      "identity9_decimal_strings": [
+        "2050",
+        "6980306",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "235751",
+        "1790940105086327015",
+        "1790940105086327015"
+      ],
+      "stable9": true
+    },
+    "lines": [
+      1388,
+      1399
+    ],
+    "complete_range_sha256": "8b3fa5cfc7d2c37eefa62765120af59cc186aadc42605aab341ed640f550bb35",
+    "raw_body_copy": false
+  },
+  {
+    "finding": "SOL063-C02",
+    "name": "A087-PUBLIC-DRIVER.py",
+    "pin": {
+      "path": "/var/tmp/friday-lab866-lab864-a183-browser-whole209-all216-all29-connected-source-closure/source/A087-PUBLIC-DRIVER.py",
+      "bytes": 101546,
+      "sha256": "ca7fbfb013653ebae18b4b7a23c38c871579dce51c84a62d87d2bdf5bf1c17e0",
+      "identity9_decimal_strings": [
+        "2050",
+        "6980303",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "101546",
+        "1790940105083326843",
+        "1790940105083326843"
+      ],
+      "stable9": true
+    },
+    "lines": [
+      709,
+      730
+    ],
+    "complete_range_sha256": "37d8cc8d349389f04fd70d2ed2e9b6eac960fffee15e92f0e861a55201b3391f",
+    "raw_body_copy": false
+  },
+  {
+    "finding": "SOL063-C03",
+    "name": "A071-CONTROLS.py",
+    "pin": {
+      "path": "/var/tmp/friday-lab866-lab864-a183-browser-whole209-all216-all29-connected-source-closure/source/A071-CONTROLS.py",
+      "bytes": 235751,
+      "sha256": "a8805047b5f5ba7c01cab4337f59b70121c318f6fe3f284d2666e9909859e69e",
+      "identity9_decimal_strings": [
+        "2050",
+        "6980306",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "235751",
+        "1790940105086327015",
+        "1790940105086327015"
+      ],
+      "stable9": true
+    },
+    "lines": [
+      1388,
+      1399
+    ],
+    "complete_range_sha256": "8b3fa5cfc7d2c37eefa62765120af59cc186aadc42605aab341ed640f550bb35",
+    "raw_body_copy": false
+  },
+  {
+    "finding": "SOL063-C03",
+    "name": "A071-CONTROLS.py",
+    "pin": {
+      "path": "/var/tmp/friday-lab866-lab864-a183-browser-whole209-all216-all29-connected-source-closure/source/A071-CONTROLS.py",
+      "bytes": 235751,
+      "sha256": "a8805047b5f5ba7c01cab4337f59b70121c318f6fe3f284d2666e9909859e69e",
+      "identity9_decimal_strings": [
+        "2050",
+        "6980306",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "235751",
+        "1790940105086327015",
+        "1790940105086327015"
+      ],
+      "stable9": true
+    },
+    "lines": [
+      938,
+      953
+    ],
+    "complete_range_sha256": "132cecf5de8bafeb363195cc74dc1fb84f9f21ebb4ea13602dffef474578e773",
+    "raw_body_copy": false
+  },
+  {
+    "finding": "SOL063-C03",
+    "name": "A071-CONTROLS.py",
+    "pin": {
+      "path": "/var/tmp/friday-lab866-lab864-a183-browser-whole209-all216-all29-connected-source-closure/source/A071-CONTROLS.py",
+      "bytes": 235751,
+      "sha256": "a8805047b5f5ba7c01cab4337f59b70121c318f6fe3f284d2666e9909859e69e",
+      "identity9_decimal_strings": [
+        "2050",
+        "6980306",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "235751",
+        "1790940105086327015",
+        "1790940105086327015"
+      ],
+      "stable9": true
+    },
+    "lines": [
+      1160,
+      1197
+    ],
+    "complete_range_sha256": "021c76c3369a7f655d4551521396b42d39b9f38f82bc2a9c96a1cf2e5bed196d",
+    "raw_body_copy": false
+  },
+  {
+    "finding": "SOL063-C03",
+    "name": "A071-EXECUTOR.py",
+    "pin": {
+      "path": "/var/tmp/friday-astra-browser-a153-a156-whole216-all6-all2-connected-source-implementation-a158-g1/source/A071-EXECUTOR.py",
+      "bytes": 46722,
+      "sha256": "869ed6b5118242e851f513424e3330b1f2c5306e5a6f163b4cc7a058134541b7",
+      "identity9_decimal_strings": [
+        "2050",
+        "6979005",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "46722",
+        "1790921121851988543",
+        "1790921121851988543"
+      ],
+      "stable9": true
+    },
+    "lines": [
+      860,
+      878
+    ],
+    "complete_range_sha256": "eb862bf14e2e8f12c6a0da86ad179c69a1f965fbf732568cba4a054ebb5957ed",
+    "raw_body_copy": false
+  },
+  {
+    "finding": "SOL063-C04",
+    "name": "A071-SUPERVISOR.py",
+    "pin": {
+      "path": "/var/tmp/friday-lab866-lab864-a183-browser-whole209-all216-all29-connected-source-closure/source/A071-SUPERVISOR.py",
+      "bytes": 54576,
+      "sha256": "a419700a042c4718245a23e27e78ee7ae9b5f1e3838f886ff3e0ced226140ce3",
+      "identity9_decimal_strings": [
+        "2050",
+        "6980307",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "54576",
+        "1790940105087327072",
+        "1790940105087327072"
+      ],
+      "stable9": true
+    },
+    "lines": [
+      554,
+      571
+    ],
+    "complete_range_sha256": "e745fb057d145817ed1bf19bfbd8fbf9d8746160fb122cd58e19ecca50c07cfb",
+    "raw_body_copy": false
+  },
+  {
+    "finding": "SOL063-C04",
+    "name": "A071-SUPERVISOR.py",
+    "pin": {
+      "path": "/var/tmp/friday-lab866-lab864-a183-browser-whole209-all216-all29-connected-source-closure/source/A071-SUPERVISOR.py",
+      "bytes": 54576,
+      "sha256": "a419700a042c4718245a23e27e78ee7ae9b5f1e3838f886ff3e0ced226140ce3",
+      "identity9_decimal_strings": [
+        "2050",
+        "6980307",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "54576",
+        "1790940105087327072",
+        "1790940105087327072"
+      ],
+      "stable9": true
+    },
+    "lines": [
+      625,
+      648
+    ],
+    "complete_range_sha256": "e964346c99cdc1b2a1f5d6fdff2789b5395aee4a888daa975f3059bf130a3f84",
+    "raw_body_copy": false
+  },
+  {
+    "finding": "SOL063-C04",
+    "name": "A071-SUPERVISOR.py",
+    "pin": {
+      "path": "/var/tmp/friday-lab866-lab864-a183-browser-whole209-all216-all29-connected-source-closure/source/A071-SUPERVISOR.py",
+      "bytes": 54576,
+      "sha256": "a419700a042c4718245a23e27e78ee7ae9b5f1e3838f886ff3e0ced226140ce3",
+      "identity9_decimal_strings": [
+        "2050",
+        "6980307",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "54576",
+        "1790940105087327072",
+        "1790940105087327072"
+      ],
+      "stable9": true
+    },
+    "lines": [
+      658,
+      719
+    ],
+    "complete_range_sha256": "d1fa49e88b0b4d8874d35b0af86a1be2cb3f5334abeafcbeafabceaa214114a9",
+    "raw_body_copy": false
+  },
+  {
+    "finding": "SOL063-C04",
+    "name": "A071-CONTROLS.py",
+    "pin": {
+      "path": "/var/tmp/friday-lab866-lab864-a183-browser-whole209-all216-all29-connected-source-closure/source/A071-CONTROLS.py",
+      "bytes": 235751,
+      "sha256": "a8805047b5f5ba7c01cab4337f59b70121c318f6fe3f284d2666e9909859e69e",
+      "identity9_decimal_strings": [
+        "2050",
+        "6980306",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "235751",
+        "1790940105086327015",
+        "1790940105086327015"
+      ],
+      "stable9": true
+    },
+    "lines": [
+      691,
+      696
+    ],
+    "complete_range_sha256": "f871f9871395b93c857c62be3888775583c286eb5673cffd23ecd9773d6bbca3",
+    "raw_body_copy": false
+  },
+  {
+    "finding": "SOL063-C04",
+    "name": "A071-CONTROLS.py",
+    "pin": {
+      "path": "/var/tmp/friday-lab866-lab864-a183-browser-whole209-all216-all29-connected-source-closure/source/A071-CONTROLS.py",
+      "bytes": 235751,
+      "sha256": "a8805047b5f5ba7c01cab4337f59b70121c318f6fe3f284d2666e9909859e69e",
+      "identity9_decimal_strings": [
+        "2050",
+        "6980306",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "235751",
+        "1790940105086327015",
+        "1790940105086327015"
+      ],
+      "stable9": true
+    },
+    "lines": [
+      815,
+      830
+    ],
+    "complete_range_sha256": "72925c1e981ea0f65b180345d1a037a6cebf605b60eb4c87dbbfa1999591310e",
+    "raw_body_copy": false
+  },
+  {
+    "finding": "SOL063-C05",
+    "name": "A071-CONTROLS.py",
+    "pin": {
+      "path": "/var/tmp/friday-lab866-lab864-a183-browser-whole209-all216-all29-connected-source-closure/source/A071-CONTROLS.py",
+      "bytes": 235751,
+      "sha256": "a8805047b5f5ba7c01cab4337f59b70121c318f6fe3f284d2666e9909859e69e",
+      "identity9_decimal_strings": [
+        "2050",
+        "6980306",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "235751",
+        "1790940105086327015",
+        "1790940105086327015"
+      ],
+      "stable9": true
+    },
+    "lines": [
+      644,
+      689
+    ],
+    "complete_range_sha256": "afa8bd79ffe073a38e27c29d6033deb8a4cfaa7b6b601275dd4c055686ed0e45",
+    "raw_body_copy": false
+  },
+  {
+    "finding": "SOL063-C05",
+    "name": "A071-CONTROLS.py",
+    "pin": {
+      "path": "/var/tmp/friday-lab866-lab864-a183-browser-whole209-all216-all29-connected-source-closure/source/A071-CONTROLS.py",
+      "bytes": 235751,
+      "sha256": "a8805047b5f5ba7c01cab4337f59b70121c318f6fe3f284d2666e9909859e69e",
+      "identity9_decimal_strings": [
+        "2050",
+        "6980306",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "235751",
+        "1790940105086327015",
+        "1790940105086327015"
+      ],
+      "stable9": true
+    },
+    "lines": [
+      874,
+      936
+    ],
+    "complete_range_sha256": "248cee9e071938390b58a6d73b4f40c3a2c61228c7a55db5a5a44b9f423fc091",
+    "raw_body_copy": false
+  },
+  {
+    "finding": "SOL063-C05",
+    "name": "A071-CONTROLS.py",
+    "pin": {
+      "path": "/var/tmp/friday-lab866-lab864-a183-browser-whole209-all216-all29-connected-source-closure/source/A071-CONTROLS.py",
+      "bytes": 235751,
+      "sha256": "a8805047b5f5ba7c01cab4337f59b70121c318f6fe3f284d2666e9909859e69e",
+      "identity9_decimal_strings": [
+        "2050",
+        "6980306",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "235751",
+        "1790940105086327015",
+        "1790940105086327015"
+      ],
+      "stable9": true
+    },
+    "lines": [
+      955,
+      1017
+    ],
+    "complete_range_sha256": "d3e6f0390a9c317c65be7128d7dcc14eff7b68236e957bd7ca5d02b510d9ee1d",
+    "raw_body_copy": false
+  },
+  {
+    "finding": "SOL063-C06",
+    "name": "A071-CONTROLS.py",
+    "pin": {
+      "path": "/var/tmp/friday-lab866-lab864-a183-browser-whole209-all216-all29-connected-source-closure/source/A071-CONTROLS.py",
+      "bytes": 235751,
+      "sha256": "a8805047b5f5ba7c01cab4337f59b70121c318f6fe3f284d2666e9909859e69e",
+      "identity9_decimal_strings": [
+        "2050",
+        "6980306",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "235751",
+        "1790940105086327015",
+        "1790940105086327015"
+      ],
+      "stable9": true
+    },
+    "lines": [
+      955,
+      1017
+    ],
+    "complete_range_sha256": "d3e6f0390a9c317c65be7128d7dcc14eff7b68236e957bd7ca5d02b510d9ee1d",
+    "raw_body_copy": false
+  },
+  {
+    "finding": "SOL063-C06",
+    "name": "A071-CONTROLS.py",
+    "pin": {
+      "path": "/var/tmp/friday-lab866-lab864-a183-browser-whole209-all216-all29-connected-source-closure/source/A071-CONTROLS.py",
+      "bytes": 235751,
+      "sha256": "a8805047b5f5ba7c01cab4337f59b70121c318f6fe3f284d2666e9909859e69e",
+      "identity9_decimal_strings": [
+        "2050",
+        "6980306",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "235751",
+        "1790940105086327015",
+        "1790940105086327015"
+      ],
+      "stable9": true
+    },
+    "lines": [
+      1019,
+      1038
+    ],
+    "complete_range_sha256": "c78b4242caef22aae84006bb9f69463473f5928f2a26529ce9c3e0cfe21d7a37",
+    "raw_body_copy": false
+  },
+  {
+    "finding": "SOL063-C06",
+    "name": "A071-CONTROLS.py",
+    "pin": {
+      "path": "/var/tmp/friday-lab866-lab864-a183-browser-whole209-all216-all29-connected-source-closure/source/A071-CONTROLS.py",
+      "bytes": 235751,
+      "sha256": "a8805047b5f5ba7c01cab4337f59b70121c318f6fe3f284d2666e9909859e69e",
+      "identity9_decimal_strings": [
+        "2050",
+        "6980306",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "235751",
+        "1790940105086327015",
+        "1790940105086327015"
+      ],
+      "stable9": true
+    },
+    "lines": [
+      1199,
+      1240
+    ],
+    "complete_range_sha256": "93b724ff354efdefa196c09bb2563e3dfccf9255bb1450097132e923a93cb69b",
+    "raw_body_copy": false
+  },
+  {
+    "finding": "SOL063-C06",
+    "name": "A071-BOOTSTRAP.c",
+    "pin": {
+      "path": "/var/tmp/friday-astra-browser-a153-a156-whole216-all6-all2-connected-source-implementation-a158-g1/source/A071-BOOTSTRAP.c",
+      "bytes": 68593,
+      "sha256": "4f6495fff30d4ac4c863622a526073f0523541af79ea81b2b5a5f1305ee854e4",
+      "identity9_decimal_strings": [
+        "2050",
+        "6978878",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "68593",
+        "1790920210069855767",
+        "1790920210069855767"
+      ],
+      "stable9": true
+    },
+    "lines": [
+      678,
+      695
+    ],
+    "complete_range_sha256": "5cb9415ce0bc5db966b7a0882a55f012c844fcdae91a871a4cf5e4f4a318135f",
+    "raw_body_copy": false
+  },
+  {
+    "finding": "SOL063-C06",
+    "name": "G1.py",
+    "pin": {
+      "path": "/home/jericho/.jericho/runtime/subagent-lifecycle/ASTRA-E4-MATERIAL-ACQUISITION-EXECUTOR-A025-G1.py",
+      "bytes": 46980,
+      "sha256": "ba70d584ab4b145195283456b17d98a8ff129a8f7bb3be3595c711fe97d6c223"
+    },
+    "lines": [
+      735,
+      786
+    ],
+    "complete_range_sha256": "0c1825e8c391bcf8878b268d03d684c07865ae28d8f3fd95844254935f1259d2",
+    "raw_body_copy": false
+  },
+  {
+    "finding": "SOL063-C06",
+    "name": "A071-EXECUTOR.py",
+    "pin": {
+      "path": "/var/tmp/friday-astra-browser-a153-a156-whole216-all6-all2-connected-source-implementation-a158-g1/source/A071-EXECUTOR.py",
+      "bytes": 46722,
+      "sha256": "869ed6b5118242e851f513424e3330b1f2c5306e5a6f163b4cc7a058134541b7",
+      "identity9_decimal_strings": [
+        "2050",
+        "6979005",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "46722",
+        "1790921121851988543",
+        "1790921121851988543"
+      ],
+      "stable9": true
+    },
+    "lines": [
+      768,
+      810
+    ],
+    "complete_range_sha256": "8f8877050526a148fa6141b5b9f5c53be03f729fff5d100e47f6be4131fa9d36",
+    "raw_body_copy": false
+  },
+  {
+    "finding": "SOL063-C07",
+    "name": "A071-CONTROLS.py",
+    "pin": {
+      "path": "/var/tmp/friday-lab866-lab864-a183-browser-whole209-all216-all29-connected-source-closure/source/A071-CONTROLS.py",
+      "bytes": 235751,
+      "sha256": "a8805047b5f5ba7c01cab4337f59b70121c318f6fe3f284d2666e9909859e69e",
+      "identity9_decimal_strings": [
+        "2050",
+        "6980306",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "235751",
+        "1790940105086327015",
+        "1790940105086327015"
+      ],
+      "stable9": true
+    },
+    "lines": [
+      628,
+      632
+    ],
+    "complete_range_sha256": "81ff840a93ac33cf2f1794b5ddb13d6ed8ec87e9c38fbb42cf4c734a06ed5936",
+    "raw_body_copy": false
+  },
+  {
+    "finding": "SOL063-C07",
+    "name": "A071-CONTROLS.py",
+    "pin": {
+      "path": "/var/tmp/friday-lab866-lab864-a183-browser-whole209-all216-all29-connected-source-closure/source/A071-CONTROLS.py",
+      "bytes": 235751,
+      "sha256": "a8805047b5f5ba7c01cab4337f59b70121c318f6fe3f284d2666e9909859e69e",
+      "identity9_decimal_strings": [
+        "2050",
+        "6980306",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "235751",
+        "1790940105086327015",
+        "1790940105086327015"
+      ],
+      "stable9": true
+    },
+    "lines": [
+      775,
+      872
+    ],
+    "complete_range_sha256": "071a5c6a37ed919ea2d7887e8654eb5c380a53a3d979e2c768855aa67acdbe38",
+    "raw_body_copy": false
+  },
+  {
+    "finding": "SOL063-C07",
+    "name": "A071-CONTROLS.py",
+    "pin": {
+      "path": "/var/tmp/friday-lab866-lab864-a183-browser-whole209-all216-all29-connected-source-closure/source/A071-CONTROLS.py",
+      "bytes": 235751,
+      "sha256": "a8805047b5f5ba7c01cab4337f59b70121c318f6fe3f284d2666e9909859e69e",
+      "identity9_decimal_strings": [
+        "2050",
+        "6980306",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "235751",
+        "1790940105086327015",
+        "1790940105086327015"
+      ],
+      "stable9": true
+    },
+    "lines": [
+      1257,
+      1298
+    ],
+    "complete_range_sha256": "fc78a4444835261a6e0103a16993e86e72c96de0ccfd500445277be3f9a085d3",
+    "raw_body_copy": false
+  },
+  {
+    "finding": "SOL063-C07",
+    "name": "A071-CONTROLS.py",
+    "pin": {
+      "path": "/var/tmp/friday-lab866-lab864-a183-browser-whole209-all216-all29-connected-source-closure/source/A071-CONTROLS.py",
+      "bytes": 235751,
+      "sha256": "a8805047b5f5ba7c01cab4337f59b70121c318f6fe3f284d2666e9909859e69e",
+      "identity9_decimal_strings": [
+        "2050",
+        "6980306",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "235751",
+        "1790940105086327015",
+        "1790940105086327015"
+      ],
+      "stable9": true
+    },
+    "lines": [
+      1518,
+      1812
+    ],
+    "complete_range_sha256": "e2f2a70b8ba7400f5b3e536ec2e9c6581fea1845c7289a7ed746490e4d03a0b2",
+    "raw_body_copy": false
+  },
+  {
+    "finding": "SOL063-C08",
+    "name": "A071-CONTROLS.py",
+    "pin": {
+      "path": "/var/tmp/friday-lab866-lab864-a183-browser-whole209-all216-all29-connected-source-closure/source/A071-CONTROLS.py",
+      "bytes": 235751,
+      "sha256": "a8805047b5f5ba7c01cab4337f59b70121c318f6fe3f284d2666e9909859e69e",
+      "identity9_decimal_strings": [
+        "2050",
+        "6980306",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "235751",
+        "1790940105086327015",
+        "1790940105086327015"
+      ],
+      "stable9": true
+    },
+    "lines": [
+      1320,
+      1379
+    ],
+    "complete_range_sha256": "d0d0b5bf1b80a44823aecc7e0e73b96d0c7d4e03f7103d38f8798607eb549001",
+    "raw_body_copy": false
+  },
+  {
+    "finding": "SOL063-C08",
+    "name": "A071-CONTROLS.py",
+    "pin": {
+      "path": "/var/tmp/friday-lab866-lab864-a183-browser-whole209-all216-all29-connected-source-closure/source/A071-CONTROLS.py",
+      "bytes": 235751,
+      "sha256": "a8805047b5f5ba7c01cab4337f59b70121c318f6fe3f284d2666e9909859e69e",
+      "identity9_decimal_strings": [
+        "2050",
+        "6980306",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "235751",
+        "1790940105086327015",
+        "1790940105086327015"
+      ],
+      "stable9": true
+    },
+    "lines": [
+      1415,
+      1500
+    ],
+    "complete_range_sha256": "5417f6bf98f8c0e89c80c74b80183aee768525f5d1cbf0b3627e032e7ab6b52e",
+    "raw_body_copy": false
+  },
+  {
+    "finding": "SOL063-C08",
+    "name": "A071-EXECUTOR.py",
+    "pin": {
+      "path": "/var/tmp/friday-astra-browser-a153-a156-whole216-all6-all2-connected-source-implementation-a158-g1/source/A071-EXECUTOR.py",
+      "bytes": 46722,
+      "sha256": "869ed6b5118242e851f513424e3330b1f2c5306e5a6f163b4cc7a058134541b7",
+      "identity9_decimal_strings": [
+        "2050",
+        "6979005",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "46722",
+        "1790921121851988543",
+        "1790921121851988543"
+      ],
+      "stable9": true
+    },
+    "lines": [
+      376,
+      458
+    ],
+    "complete_range_sha256": "b442b167f6f470d85370c562e937c7d2b3bf8640fc3e79333873473468d04ca4",
+    "raw_body_copy": false
+  },
+  {
+    "finding": "SOL063-C08",
+    "name": "A071-EXECUTOR.py",
+    "pin": {
+      "path": "/var/tmp/friday-astra-browser-a153-a156-whole216-all6-all2-connected-source-implementation-a158-g1/source/A071-EXECUTOR.py",
+      "bytes": 46722,
+      "sha256": "869ed6b5118242e851f513424e3330b1f2c5306e5a6f163b4cc7a058134541b7",
+      "identity9_decimal_strings": [
+        "2050",
+        "6979005",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "46722",
+        "1790921121851988543",
+        "1790921121851988543"
+      ],
+      "stable9": true
+    },
+    "lines": [
+      499,
+      562
+    ],
+    "complete_range_sha256": "5044259d81f00ed23282fb6b88dcf079d68ba1bc62d95e16e41c10cf9cbf2349",
+    "raw_body_copy": false
+  },
+  {
+    "finding": "SOL063-C08",
+    "name": "A071-SUPERVISOR.py",
+    "pin": {
+      "path": "/var/tmp/friday-lab866-lab864-a183-browser-whole209-all216-all29-connected-source-closure/source/A071-SUPERVISOR.py",
+      "bytes": 54576,
+      "sha256": "a419700a042c4718245a23e27e78ee7ae9b5f1e3838f886ff3e0ced226140ce3",
+      "identity9_decimal_strings": [
+        "2050",
+        "6980307",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "54576",
+        "1790940105087327072",
+        "1790940105087327072"
+      ],
+      "stable9": true
+    },
+    "lines": [
+      546,
+      610
+    ],
+    "complete_range_sha256": "8481ee1c148567474fee7e8fb9dd43864f438d06ca23efc1d05beffcc3b53a0e",
+    "raw_body_copy": false
+  },
+  {
+    "finding": "SOL063-C08",
+    "name": "R4.py",
+    "pin": {
+      "path": "/home/jericho/.jericho/runtime/subagent-lifecycle/ASTRA-E4-MATERIAL-ACQUISITION-EXECUTOR-A025-G1-R4.py",
+      "bytes": 38388,
+      "sha256": "a68f62ce16883f108992a8f237b9614d964ff0141d9002b5e714fdc2887b414c"
+    },
+    "lines": [
+      243,
+      256
+    ],
+    "complete_range_sha256": "3408c59772285803e0b7efd55caa43a55e562b3b9909525ec62bca47e4bd0c4f",
+    "raw_body_copy": false
+  },
+  {
+    "finding": "SOL063-C09",
+    "name": "A071-CONTROLS.py",
+    "pin": {
+      "path": "/var/tmp/friday-lab866-lab864-a183-browser-whole209-all216-all29-connected-source-closure/source/A071-CONTROLS.py",
+      "bytes": 235751,
+      "sha256": "a8805047b5f5ba7c01cab4337f59b70121c318f6fe3f284d2666e9909859e69e",
+      "identity9_decimal_strings": [
+        "2050",
+        "6980306",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "235751",
+        "1790940105086327015",
+        "1790940105086327015"
+      ],
+      "stable9": true
+    },
+    "lines": [
+      1456,
+      1499
+    ],
+    "complete_range_sha256": "8530fb376a71c90615fe70e8170ac915914b7454ec0ac36f985c1c2de1d845f8",
+    "raw_body_copy": false
+  }
+]

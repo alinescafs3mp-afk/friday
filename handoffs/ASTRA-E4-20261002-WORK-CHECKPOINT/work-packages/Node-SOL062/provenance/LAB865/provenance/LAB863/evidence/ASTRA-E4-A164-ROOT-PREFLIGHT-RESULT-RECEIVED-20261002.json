@@ -1,0 +1,492 @@
+{
+  "schema": "friday.astra.e4.a164.stock-provider-whole19-preflight.received.v1",
+  "assignment": "ASTRA-E4-A131-A161-STOCK-PROVIDER-WHOLE19-ROOT-PREFLIGHT-INDEPENDENT-AUDIT-A164",
+  "generation": 1,
+  "received_msk": "2026-10-02T10:14:14.226829+03:00",
+  "terminal_pin": {
+    "path": "/home/jericho/.jericho/runtime/subagent-lifecycle/ASTRA-E4-A131-A161-STOCK-PROVIDER-WHOLE19-ROOT-PREFLIGHT-INDEPENDENT-AUDIT-A164-G1-RESULT.json",
+    "bytes": 6617,
+    "sha256": "c1cc5cfd17065a463f256026d26c2d3adae28bd797a4521ea325ab7c348cc44e",
+    "identity9_decimal_strings": [
+      "2050",
+      "9177289",
+      "33152",
+      "1000",
+      "1000",
+      "1",
+      "6617",
+      "1790925040272343411",
+      "1790925040272343411"
+    ],
+    "stable9": true
+  },
+  "manifest_pin": {
+    "path": "/var/tmp/friday-astra-a131-a161-stock-provider-whole19-root-preflight-independent-audit-a164-g1/manifest.json",
+    "bytes": 7470,
+    "sha256": "c9dfe88f2b94ecc237b2fc8b8b6620d350a5be131f4b4ffe013f97af2e26df7a",
+    "identity9_decimal_strings": [
+      "2050",
+      "6979214",
+      "33152",
+      "1000",
+      "1000",
+      "1",
+      "7470",
+      "1790925040268343182",
+      "1790925040268343182"
+    ],
+    "stable9": true
+  },
+  "pathset_pin": {
+    "path": "/var/tmp/friday-astra-a131-a161-stock-provider-whole19-root-preflight-independent-audit-a164-g1/pathset.json",
+    "bytes": 734,
+    "sha256": "f47d99cbaff02c7a9bb576302d6311a9bd4f62593d9e82223274d7fa07e58dd6",
+    "identity9_decimal_strings": [
+      "2050",
+      "6979215",
+      "33152",
+      "1000",
+      "1000",
+      "1",
+      "734",
+      "1790925040269343239",
+      "1790925040269343239"
+    ],
+    "stable9": true
+  },
+  "pins": [
+    {
+      "path": "/home/jericho/.jericho/runtime/subagent-lifecycle/ASTRA-E4-A131-A161-STOCK-PROVIDER-WHOLE19-ROOT-PREFLIGHT-INDEPENDENT-AUDIT-A164-G1-RESULT.json",
+      "bytes": 6617,
+      "sha256": "c1cc5cfd17065a463f256026d26c2d3adae28bd797a4521ea325ab7c348cc44e",
+      "identity9_decimal_strings": [
+        "2050",
+        "9177289",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "6617",
+        "1790925040272343411",
+        "1790925040272343411"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-a131-a161-stock-provider-whole19-root-preflight-independent-audit-a164-g1/manifest.json",
+      "bytes": 7470,
+      "sha256": "c9dfe88f2b94ecc237b2fc8b8b6620d350a5be131f4b4ffe013f97af2e26df7a",
+      "identity9_decimal_strings": [
+        "2050",
+        "6979214",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "7470",
+        "1790925040268343182",
+        "1790925040268343182"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-a131-a161-stock-provider-whole19-root-preflight-independent-audit-a164-g1/pathset.json",
+      "bytes": 734,
+      "sha256": "f47d99cbaff02c7a9bb576302d6311a9bd4f62593d9e82223274d7fa07e58dd6",
+      "identity9_decimal_strings": [
+        "2050",
+        "6979215",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "734",
+        "1790925040269343239",
+        "1790925040269343239"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-a131-a161-stock-provider-whole19-root-preflight-independent-audit-a164-g1/all35-current-domain-summary.json",
+      "bytes": 23119,
+      "sha256": "d2d6b762ae0918c09fb0c5ee3de827c33b5cee14ba2156023fe22aee91688b64",
+      "identity9_decimal_strings": [
+        "2050",
+        "6979194",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "23119",
+        "1790924669773128876",
+        "1790924669773128876"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-a131-a161-stock-provider-whole19-root-preflight-independent-audit-a164-g1/audit_metadata.py",
+      "bytes": 21029,
+      "sha256": "844a7d26ae2d588bc986e463093e3a1b5274b35e4c3d6c6514b8213fcb11f61b",
+      "identity9_decimal_strings": [
+        "2050",
+        "6979193",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "21029",
+        "1790924815506473472",
+        "1790924815506473472"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-a131-a161-stock-provider-whole19-root-preflight-independent-audit-a164-g1/compiled-proof-current-correspondence.json",
+      "bytes": 5579,
+      "sha256": "5a1ecc0bbf9c0f9b50258ad3c198f2a5d14883e42238c1deb7dba64ac25e4770",
+      "identity9_decimal_strings": [
+        "2050",
+        "6979196",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "5579",
+        "1790924669792129964",
+        "1790924669792129964"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-a131-a161-stock-provider-whole19-root-preflight-independent-audit-a164-g1/observed-evidence-pins.json",
+      "bytes": 194664,
+      "sha256": "d754a1e889ab61e923cd2f43d7ae3cc8c6e82680bb6c5531b3e490e27dce197e",
+      "identity9_decimal_strings": [
+        "2050",
+        "6979199",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "194664",
+        "1790924669800130422",
+        "1790924669800130422"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-a131-a161-stock-provider-whole19-root-preflight-independent-audit-a164-g1/read-ledger.json",
+      "bytes": 71858,
+      "sha256": "949be13f54974662070b0c8984312f1999e18c4f3cbd16e946196abd89003a87",
+      "identity9_decimal_strings": [
+        "2050",
+        "6979200",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "71858",
+        "1790924669801130479",
+        "1790924669801130479"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-a131-a161-stock-provider-whole19-root-preflight-independent-audit-a164-g1/readiness-matrix.json",
+      "bytes": 14364,
+      "sha256": "ea9b7d886abdec8f35ff9ad3473719b3a21131e790e59bb7e475b482450530b2",
+      "identity9_decimal_strings": [
+        "2050",
+        "6979211",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "14364",
+        "1790924943696813562",
+        "1790925040225340720"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-a131-a161-stock-provider-whole19-root-preflight-independent-audit-a164-g1/resource-observation.json",
+      "bytes": 4482,
+      "sha256": "631763ca9acb0c8c42be2114d4cd2e581c2767d4e4a616acf1a156aaee0fb850",
+      "identity9_decimal_strings": [
+        "2050",
+        "6979198",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "4482",
+        "1790924669797130250",
+        "1790924669797130250"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-a131-a161-stock-provider-whole19-root-preflight-independent-audit-a164-g1/review.txt",
+      "bytes": 7844,
+      "sha256": "628d018fb6a9b09a400704cfa94c4d8bc3a13cd61060bf6db5c3bfaf7361ca79",
+      "identity9_decimal_strings": [
+        "2050",
+        "6979212",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "7844",
+        "1790924943697813619",
+        "1790925040225340720"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-a131-a161-stock-provider-whole19-root-preflight-independent-audit-a164-g1/seal_result.py",
+      "bytes": 11621,
+      "sha256": "cb44b7f3543d31ae7aed9c02707cd81928d817497e75f52d7c6588edf06c5255",
+      "identity9_decimal_strings": [
+        "2050",
+        "6979213",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "11621",
+        "1790925040168337456",
+        "1790925040225340720"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-a131-a161-stock-provider-whole19-root-preflight-independent-audit-a164-g1/stock-provider-current-join.json",
+      "bytes": 50636,
+      "sha256": "7af55932661e7bb2b335d4b06e1d2d0711c69818772e274dd08aa74e63a40c35",
+      "identity9_decimal_strings": [
+        "2050",
+        "6979195",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "50636",
+        "1790924815507473529",
+        "1790924815507473529"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-a131-a161-stock-provider-whole19-root-preflight-independent-audit-a164-g1/supplement_current9.py",
+      "bytes": 4861,
+      "sha256": "bfe0ffa3a9702519a9521f9648247d8051819f4b0f867d38b7316f01237b75bf",
+      "identity9_decimal_strings": [
+        "2050",
+        "6979201",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "4861",
+        "1790924815508473586",
+        "1790924821976843960"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-a131-a161-stock-provider-whole19-root-preflight-independent-audit-a164-g1/supplemental-supplier-current9.json",
+      "bytes": 8534,
+      "sha256": "61ccc116b76bed9c068d0a0f69ec55b55a27d409f8a8ef9e36117b0b34891b32",
+      "identity9_decimal_strings": [
+        "2050",
+        "6979202",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "8534",
+        "1790924822015846193",
+        "1790924822015846193"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-a131-a161-stock-provider-whole19-root-preflight-independent-audit-a164-g1/whole19-current-preflight.json",
+      "bytes": 12932,
+      "sha256": "59f3f1e06a791c5230cb3c74e997186ee00d7ecc473c257f21fc0def4066d922",
+      "identity9_decimal_strings": [
+        "2050",
+        "6979197",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "12932",
+        "1790924669793130021",
+        "1790924669793130021"
+      ],
+      "stable9": true
+    }
+  ],
+  "full_privateSHA9_exactpathset_acyclic": true,
+  "known_read_bytes": 446344,
+  "independent_result": {
+    "GO": false,
+    "Root_Image": false,
+    "Root_admission": false,
+    "STOP": "One finite protected terminal; assignment ends",
+    "SourceReady": false,
+    "Source_execution": 0,
+    "accepted_msk": "2026-10-02T09:59:44+03:00",
+    "accepted_resolution_seconds": 1,
+    "accepted_timestamp_first_comment_corrected_to_actual_host_clock": true,
+    "artifact_root": "/var/tmp/friday-astra-a131-a161-stock-provider-whole19-root-preflight-independent-audit-a164-g1",
+    "assignment": "ASTRA-E4-A131-A161-STOCK-PROVIDER-WHOLE19-ROOT-PREFLIGHT-INDEPENDENT-AUDIT-A164",
+    "context": "fresh",
+    "cost": {
+      "Source_and_supplied_helper_execution": 0,
+      "aggregate_assignment_RAM": "UNKNOWN_NOT_ZERO_NOT_PROVEN",
+      "audit_budget_bytes": 268435456,
+      "cost_money": "UNKNOWN_NOT_ZERO",
+      "direct_shell_views_and_model_transport_conservative_read_reservation_bytes": 33554432,
+      "exact_seal_reader_hash_bytes_before_terminal": 1383428,
+      "exact_successful_audit_hash_bytes": 6747436,
+      "exact_successful_audit_reader_bytes": 6752015,
+      "exact_supplement_hash_bytes": 160624,
+      "exact_supplement_read_bytes": 406108,
+      "external_installed_binary_analyzer_invocations": 0,
+      "final_terminal_hash_transport_read_reservation_bytes": 16777216,
+      "final_terminal_pin": "External output only, never self-reference",
+      "helper_errors": 0,
+      "implicit_interpreter_tool_and_model_transport_IO": "UNKNOWN_NOT_ZERO_NOT_PROVEN",
+      "known_total_hash_bytes_before_terminal": 8291488,
+      "known_total_reader_bytes_before_terminal": 8541551,
+      "model_children": 0,
+      "model_input_output_reasoning_cached_tokens": "UNKNOWN_NOT_ZERO",
+      "negative_effect_or_runtime_trials": 0,
+      "network": 0,
+      "own_metadata_helpers_runs_before_terminal": 3,
+      "polling": 0,
+      "resource_PASS": false,
+      "shell_selectors_and_absent_path_diagnostics_corrected_charged_to_reservation": true,
+      "waits": 0
+    },
+    "elapsed_wall_seconds": 656.272796,
+    "exact_remaining_before_effects": [
+      "Existing Astra Root native owner mandate issues NEW finite absolute900s qualified all6 scope with120s capture/seal reserve; audit/DATA/UID/pins do not grant authority.",
+      "Root freshly full-body reads/holds/revalidates all19 canonical selected files and charges72359277 bytes/pass plus complete extra preparation/capture/seal within original256MiB budget; old pins/clock/execution never transfer.",
+      "Root binds/revalidates current exact Python/PT_INTERP/ld/libc/ctypes/ffi/stock factories, namespace/cache/preload absence/no audit/custom-loader rewriting, ENV3 -I -S -B and fixed finite argv0/name producers under original explicit stock assumption.",
+      "Root supplies canonical ASCII clocks<=32, finite native/class32/path160 inputs, same caller canonical sys.argv0, exact unchanged fd3 {schema,pins}19 entries {path,size,sha256,identity9 int[9]}, no provider fields.",
+      "Root verifies original normal bash fork/wait recipe/caps/strict bootstrapFDs/complete separate stdoutstderr/unchanged rc and finite read/output/resource reserve before effects; no directexec/reset/peak subtraction/clipping.",
+      "Admit only original all6 own ordinary causes/public Node metadata GPG calls/archive digest/actual owned pidfd-generation/custody/single cleanup; all runtime outcomes and unchanged complete gates remain NOT_RUN."
+    ],
+    "finished_msk": "2026-10-02T10:10:40.272796+03:00",
+    "future_actual_caller_observed": false,
+    "gates": "NOT_RUN",
+    "generation": 1,
+    "generic_RootImage_required_for_qualified_only_route": false,
+    "generic_installed_closure_or_aggregate_RAM_IO_proof_invented": false,
+    "input_pin": {
+      "bytes": 23665,
+      "identity9_decimal_strings": [
+        "2050",
+        "8533205",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "23665",
+        "1790924248854027335",
+        "1790924248901030026"
+      ],
+      "path": "/home/jericho/.jericho/grok-takeover/ASTRA-E4-A164-INPUT-20261002.json",
+      "sha256": "265aea1df4ad1dca906a662bc36a2b0af47364fed3aaad5858af968787074b17",
+      "stable9": true
+    },
+    "manifest_pin": {
+      "bytes": 7470,
+      "identity9_decimal_strings": [
+        "2050",
+        "6979214",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "7470",
+        "1790925040268343182",
+        "1790925040268343182"
+      ],
+      "path": "/var/tmp/friday-astra-a131-a161-stock-provider-whole19-root-preflight-independent-audit-a164-g1/manifest.json",
+      "sha256": "c9dfe88f2b94ecc237b2fc8b8b6620d350a5be131f4b4ffe013f97af2e26df7a",
+      "stable9": true
+    },
+    "owner_scope": "goal",
+    "pathset_pin": {
+      "bytes": 734,
+      "identity9_decimal_strings": [
+        "2050",
+        "6979215",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "734",
+        "1790925040269343239",
+        "1790925040269343239"
+      ],
+      "path": "/var/tmp/friday-astra-a131-a161-stock-provider-whole19-root-preflight-independent-audit-a164-g1/pathset.json",
+      "sha256": "f47d99cbaff02c7a9bb576302d6311a9bd4f62593d9e82223274d7fa07e58dd6",
+      "stable9": true
+    },
+    "positive_credit": {
+      "A134_unchanged_wholeSource_accepted": true,
+      "A161_all35_current257_original_path160_392_shared900_per_record": true,
+      "C_strerror_complete_domain_max_ascii": 49,
+      "Python_PT_INTERP_normal_exec_env3_I_S_B": true,
+      "actual_capset_prctl_None_lookup_libc_alias35_ascii": true,
+      "actual_libc_ctypes_ffi_and_dependencies_match_compiled_proof": true,
+      "all198_supplier_current9_match": true,
+      "cache_current9_and_systempreload_absent": true,
+      "complete_public_upper_bytes": 2095321,
+      "corrected_actual_Root_probe_fullEOF_SHA9_and_current9_join": true,
+      "current_Source3_fresh_fullSHA9": true,
+      "current_loader_saved_proof_bytes_matched": 29120,
+      "original_fixed16_current9_match": true,
+      "public_cap_bytes": 2097152,
+      "public_margin_bytes": 1831
+    },
+    "provider_bound_gaps_found": [],
+    "readiness_matrix": "/var/tmp/friday-astra-a131-a161-stock-provider-whole19-root-preflight-independent-audit-a164-g1/readiness-matrix.json",
+    "review": "/var/tmp/friday-astra-a131-a161-stock-provider-whole19-root-preflight-independent-audit-a164-g1/review.txt",
+    "runtime": "NOT_RUN",
+    "schema": "friday.subagent.protected-result.v1",
+    "seal": {
+      "acyclic": true,
+      "complete_postseal_rehash": true,
+      "directory_files": 15,
+      "exact_pathset": true,
+      "fullSHA9": true,
+      "output_bytes_before_terminal": 439727,
+      "payload_files": 13,
+      "private700600_nlink1": true,
+      "seal_elapsed_seconds_before_terminal": 0.011614968010690063
+    },
+    "source_code_gaps_found": [],
+    "status": "CURRENT_STOCK_PROVIDER_AND_ALL35_QUALIFIED_NEW_ROOT_BEFORE_EFFECTS_BINDINGS_REQUIRED"
+  },
+  "Root_decision": "CURRENT_QUALIFIED_STOCK_DEPENDENCY_DOMAIN_AND_UNCHANGED_WHOLE_SOURCE_ACCEPTED_BEFORE_EFFECTS_NEW_ROOT900_AND_FRESH19_BINDINGS_REQUIRED",
+  "required": [
+    "Existing Astra Root native owner mandate issues NEW finite absolute900s qualified all6 scope with120s capture/seal reserve; audit/DATA/UID/pins do not grant authority.",
+    "Root freshly full-body reads/holds/revalidates all19 canonical selected files and charges72359277 bytes/pass plus complete extra preparation/capture/seal within original256MiB budget; old pins/clock/execution never transfer.",
+    "Root binds/revalidates current exact Python/PT_INTERP/ld/libc/ctypes/ffi/stock factories, namespace/cache/preload absence/no audit/custom-loader rewriting, ENV3 -I -S -B and fixed finite argv0/name producers under original explicit stock assumption.",
+    "Root supplies canonical ASCII clocks<=32, finite native/class32/path160 inputs, same caller canonical sys.argv0, exact unchanged fd3 {schema,pins}19 entries {path,size,sha256,identity9 int[9]}, no provider fields.",
+    "Root verifies original normal bash fork/wait recipe/caps/strict bootstrapFDs/complete separate stdoutstderr/unchanged rc and finite read/output/resource reserve before effects; no directexec/reset/peak subtraction/clipping.",
+    "Admit only original all6 own ordinary causes/public Node metadata GPG calls/archive digest/actual owned pidfd-generation/custody/single cleanup; all runtime outcomes and unchanged complete gates remain NOT_RUN."
+  ],
+  "SourceReady": false,
+  "Root_admission": false,
+  "Source_execution": 0,
+  "runtime": "NOT_RUN",
+  "gates": "NOT_RUN",
+  "GO": false
+}

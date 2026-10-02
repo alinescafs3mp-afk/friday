@@ -1,0 +1,88 @@
+def close_final():
+    global FD_CLOSE_ATTEMPTS, FD_CLOSE_SUCCESSES
+    # Physical phase: no str/graph/public-list construction inside firstclose.
+    # Fixed original allocation256 plus the separate independently held DATA3.
+    closed_slots = [None] * (FD_ALLOCATION_CAP + 1)
+    closed_used = 0
+    for fd in sorted(list(OWN.values()), key=int, reverse=True):
+        try:
+            close_owned(fd)
+            closed_slots[closed_used] = fd
+            closed_used += 1
+        except BaseException as exc:
+            if fd.allocation_record is not None:
+                fd.allocation_record["error_object"] = exc
+            globals()["STOP"] = True
+            # Later independent leases are still closed ONCE.
+    for record in FD_ALLOCATION_HISTORY[:FD_ALLOCATION_USED]:
+        lease = record["lease"]
+        if record["state"] != "RETURNED" or record["attempted"]:
+            continue
+        if lease is not None and OWN.get(int(lease)) is lease:
+            continue  # identity refusal cannot be bypassed by a naked integer
+        saved = signal.pthread_sigmask(signal.SIG_BLOCK, MASK)
+        try:
+            record["attempted"], record["state"] = True, "RETIRE_UNKNOWN"
+            if lease is not None:
+                lease.retired = True
+            FD_CLOSE_ATTEMPTS += 1
+            os.close(record["number"])
+            record["state"] = "CONFIRMED_CLOSED"
+            FD_CLOSE_SUCCESSES += 1
+        except BaseException as exc:
+            record["error_object"] = exc
+            globals()["STOP"] = True
+        finally:
+            signal.pthread_sigmask(signal.SIG_SETMASK, saved)
+    if SELECT_META is not None:
+        try:
+            require(full9(os.fstat(3)) == SELECT_META, "known selected DATA identity changed before closure")
+            require(not SELECT_CLOSE["attempted"], "selected DATA once-close already attempted")
+            SELECT_CLOSE["attempted"], SELECT_CLOSE["state"] = True, "RETIRE_UNKNOWN"
+            os.close(3)
+            SELECT_CLOSE["state"] = "CONFIRMED_CLOSED"
+            closed_slots[closed_used] = 3
+            closed_used += 1
+        except BaseException as exc:
+            SELECT_CLOSE["error_object"] = exc
+            globals()["STOP"] = True
+    # Publication phase: raw native owners remain if any copy/arena fails.
+    closure_errors = []
+    for record in FD_ALLOCATION_HISTORY[:FD_ALLOCATION_USED]:
+        exc = record["error_object"]
+        if exc is None:
+            continue
+        record["error"] = deferred_error(exc)
+        if record["state"] == "RETIRE_UNKNOWN":
+            lease = record["lease"]
+            row = {"fd": record["number"], "role": record["role"],
+                   "type": type(exc).__name__, "errno": getattr(exc, "errno", None),
+                   "error": record["error"]}
+            if lease is not None:
+                row["lease_generation"] = lease.lease_generation
+            else:
+                row["unpublished_returned_allocation"] = True
+            closure_errors.append(row)
+    FD_CLOSE_FAILURES[:] = closure_errors
+    if closure_errors:
+        R["descriptor_closure_errors"] = closure_errors
+    if SELECT_CLOSE["error_object"] is not None:
+        R["selected_DATA_closure_failure"] = deferred_error(SELECT_CLOSE["error_object"])
+    closed = closed_slots[:closed_used]
+    R["known_owned_fds_closed"] = closed
+    R["selected_DATA_onceclose"] = {"attempted": SELECT_CLOSE["attempted"], "state": SELECT_CLOSE["state"]}
+    R["fd_lease_closure"] = {"allocations": FD_LEASE_GENERATION,
+        "close_attempts": FD_CLOSE_ATTEMPTS, "successful_closes": FD_CLOSE_SUCCESSES,
+        "unconfirmed_closes": list(FD_CLOSE_FAILURES), "remaining_leases": len(OWN),
+        "retired_alias_never_closes_new_slot_lease": True,
+        "tracked_pidfd_procfd_retained_through_terminal": True,
+        "pidfd_poll_calls": PIDFD_POLL_CALLS, "lease_check_calls": LEASE_CHECK_CALLS,
+        "clock_calls": CLOCK_CALLS, "natural_ending_attempts": NATURAL_EXIT_ATTEMPTS,
+        "implicit_IO": "UNKNOWN_NOT_ZERO"}
+    R["all_known_owned_fds_closed"] = (len(OWN) == 0 and not FD_CLOSE_FAILURES
+        and SELECT_META is not None and 3 in closed
+        and all(r["state"] in ("PLANNED", "CONFIRMED_CLOSED")
+                for r in FD_ALLOCATION_HISTORY[:FD_ALLOCATION_USED]))
+    R["descriptor_allocation_history"] = [{k:r[k] for k in
+        ("role", "number", "state", "attempted", "error")}
+        for r in FD_ALLOCATION_HISTORY[:FD_ALLOCATION_USED]]

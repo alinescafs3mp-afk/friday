@@ -1,0 +1,62 @@
+{
+  "schema": "friday.e4.exact-release-checkpoint-external-self-seal.v1",
+  "checkpoint_pin": {
+    "path": "/home/jericho/.jericho/runtime/ASTRA-E4-CHECKPOINT-20261002T1524MSK.json",
+    "bytes": 189409,
+    "sha256": "01e035b955a6e2225511f11ceb4ccf5e8dd0851c7871c7bb1c2d9e705abcbaf9",
+    "identity9_decimal_strings": [
+      "2050",
+      "9068558",
+      "33152",
+      "1000",
+      "1000",
+      "1",
+      "189409",
+      "1790943947360511476",
+      "1790943947440578075"
+    ],
+    "stable9": true
+  },
+  "verified_msk": "2026-10-02T15:25:47.664997+03:00",
+  "accepted_current_turn_msk": "2026-10-02T14:22:48.452033+03:00",
+  "actual_elapsed_seconds_decimal": "3779.212964",
+  "protected_registry": {
+    "inherited": 3094,
+    "delta": 294,
+    "resolved": 3388,
+    "all3388_held_named9": true,
+    "fullSHA9_prior_reuse_only_exact_current9": true
+  },
+  "index_pin": {
+    "path": "/home/jericho/jericho/.git/index",
+    "bytes": 239765,
+    "sha256": "29ddfd4a8810d4396673e153fd5da301f7cf86ea00c1bf478ea2ec76fe844e4f",
+    "identity9_decimal_strings": [
+      "2050",
+      "7508342",
+      "33204",
+      "1000",
+      "1000",
+      "1",
+      "239765",
+      "1790761254447191111",
+      "1790761352816257053"
+    ],
+    "stable9": true
+  },
+  "Root_status": "PROGRESS_FULL_MISSION_INCOMPLETE",
+  "Goal": "ACTIVE",
+  "GO": false,
+  "SourceReady": false,
+  "Root_admission": false,
+  "Source_runtime_gates": "NOT_RUN",
+  "received_closed_review_trees": 4,
+  "new_author_intakes": 2,
+  "new_useful_assignments": 5,
+  "nativeSol063_actual_sameTUI_inProgress": true,
+  "GrokLAB867_actual_same_visible_TUI_executor_ACK": true,
+  "A189_terminal_manifest_only_authenticated_fullintake_pending": true,
+  "incomingSol058_exacthash_existingRootreceipt_no_duplicateexecution": true,
+  "models_reasoning_service_tier_provider_guards_locks_and_product_snapshot": "UNCHANGED",
+  "DAG": "Immutable evidence/leaves -> checkpoint -> this external selfseal. No selfpin or checkpointbackedge; final readback external proof."
+}

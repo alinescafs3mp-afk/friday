@@ -1,0 +1,751 @@
+{
+  "$id": "friday.astra.e4.lab818.wheel-metadata-observation.v1",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "archive_class": {
+      "const": "wheel",
+      "type": "string"
+    },
+    "compatibility": {
+      "additionalProperties": false,
+      "properties": {
+        "abi_tags": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "maxLength": 65535
+          },
+          "maxItems": 250000
+        },
+        "compatibility_approved": {
+          "const": false,
+          "type": "boolean"
+        },
+        "empty_string_to_null_applied": {
+          "type": "boolean"
+        },
+        "environment_marker_evaluation": {
+          "const": "NOT_RUN",
+          "type": "string"
+        },
+        "expanded_tags": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "maxLength": 65535
+          },
+          "maxItems": 250000
+        },
+        "filename_tag_inference_is_not_compatibility": {
+          "const": true,
+          "type": "boolean"
+        },
+        "literal_difference": {
+          "type": "boolean"
+        },
+        "platform_tags": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "maxLength": 65535
+          },
+          "maxItems": 250000
+        },
+        "python_tags": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "maxLength": 65535
+          },
+          "maxItems": 250000
+        },
+        "requires_dist": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "maxLength": 65535
+          },
+          "maxItems": 250000
+        },
+        "requires_python_explicit_normalization_bill": {
+          "type": [
+            "null",
+            "string"
+          ]
+        },
+        "requires_python_explicit_normalization_metadata": {
+          "type": [
+            "null",
+            "string"
+          ]
+        },
+        "requires_python_raw_bill": {
+          "type": [
+            "null",
+            "string"
+          ]
+        },
+        "requires_python_raw_metadata": {
+          "type": [
+            "null",
+            "string"
+          ]
+        }
+      },
+      "required": [
+        "abi_tags",
+        "compatibility_approved",
+        "empty_string_to_null_applied",
+        "environment_marker_evaluation",
+        "expanded_tags",
+        "filename_tag_inference_is_not_compatibility",
+        "literal_difference",
+        "platform_tags",
+        "python_tags",
+        "requires_dist",
+        "requires_python_explicit_normalization_bill",
+        "requires_python_explicit_normalization_metadata",
+        "requires_python_raw_bill",
+        "requires_python_raw_metadata"
+      ],
+      "type": "object"
+    },
+    "custody_changed": {
+      "const": false,
+      "type": "boolean"
+    },
+    "fds_opened_by_scanner": {
+      "type": "integer"
+    },
+    "filename": {
+      "type": "string"
+    },
+    "filename_fields": {
+      "additionalProperties": false,
+      "properties": {
+        "build_tag": {
+          "type": [
+            "null",
+            "string"
+          ]
+        },
+        "field_count": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "build_tag",
+        "field_count"
+      ],
+      "type": "object"
+    },
+    "filesystem_stat_performed": {
+      "type": "boolean"
+    },
+    "install_performed": {
+      "const": false,
+      "type": "boolean"
+    },
+    "member_count": {
+      "type": "integer"
+    },
+    "members": {
+      "items": {
+        "$ref": "friday.astra.e4.lab818.member-record.v1"
+      },
+      "type": "array"
+    },
+    "metadata": {
+      "additionalProperties": false,
+      "properties": {
+        "header_provenance": {
+          "additionalProperties": false,
+          "properties": {
+            "requires_python": {
+              "type": [
+                "null",
+                "string"
+              ]
+            }
+          },
+          "type": "object"
+        },
+        "metadata_version": {
+          "oneOf": [
+            {
+              "const": "1.0"
+            },
+            {
+              "const": "1.1"
+            },
+            {
+              "const": "1.2"
+            },
+            {
+              "const": "2.1"
+            },
+            {
+              "const": "2.2"
+            },
+            {
+              "const": "2.3"
+            },
+            {
+              "const": "2.4"
+            }
+          ]
+        },
+        "name": {
+          "type": "string"
+        },
+        "raw_sha256": {
+          "type": "string",
+          "minLength": 64,
+          "maxLength": 64,
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "requires_dist": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "maxLength": 65535
+          },
+          "maxItems": 250000
+        },
+        "version": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "raw_sha256",
+        "requires_dist",
+        "version"
+      ],
+      "type": "object"
+    },
+    "nested_archives_opened": {
+      "type": "integer"
+    },
+    "per_archive_custody": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "before": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "$ref": "friday.astra.e4.lab818.custody-record.v1"
+            }
+          ]
+        },
+        "opened": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "$ref": "friday.astra.e4.lab818.custody-record.v1"
+            }
+          ]
+        },
+        "after": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "$ref": "friday.astra.e4.lab818.custody-record.v1"
+            }
+          ]
+        },
+        "terminal_content_sha256": {
+          "type": [
+            "null",
+            "string"
+          ],
+          "minLength": 64,
+          "maxLength": 64,
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "expected_sha256": {
+          "type": [
+            "null",
+            "string"
+          ],
+          "minLength": 64,
+          "maxLength": 64,
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "terminal_identity": {
+          "$ref": "friday.astra.e4.lab818.scan-resource.v1#/$defs/identity"
+        },
+        "completion": {
+          "type": "string",
+          "const": "CONTENT_REHASH_BEFORE_FINAL_OUTPUT"
+        },
+        "named_path_checked": {
+          "type": "boolean",
+          "const": true
+        }
+      },
+      "required": [
+        "before",
+        "opened",
+        "after",
+        "terminal_content_sha256",
+        "expected_sha256"
+      ]
+    },
+    "publisher_evidence": {
+      "additionalProperties": false,
+      "properties": {
+        "role": {
+          "type": "string"
+        },
+        "self_approved": {
+          "const": false,
+          "type": "boolean"
+        },
+        "status": {
+          "type": "string"
+        },
+        "verified": {
+          "const": false,
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "self_approved",
+        "status",
+        "verified"
+      ],
+      "type": "object"
+    },
+    "publisher_metadata_raw_sha256": {
+      "type": [
+        "null",
+        "string"
+      ]
+    },
+    "publisher_proof": {
+      "const": false,
+      "type": "boolean"
+    },
+    "record_coverage": {
+      "const": "COMPLETE",
+      "type": "string"
+    },
+    "relative_path": {
+      "type": "string"
+    },
+    "requires_python": {
+      "additionalProperties": false,
+      "properties": {
+        "bill_normalized": {
+          "type": [
+            "null",
+            "string"
+          ]
+        },
+        "bill_raw": {
+          "type": [
+            "null",
+            "string"
+          ]
+        },
+        "compatibility_approved": {
+          "const": false,
+          "type": "boolean"
+        },
+        "empty_string_to_null_applied": {
+          "type": "boolean"
+        },
+        "historical_bytes_repinned": {
+          "const": false,
+          "type": "boolean"
+        },
+        "literal_difference": {
+          "type": "boolean"
+        },
+        "metadata_normalized": {
+          "type": [
+            "null",
+            "string"
+          ]
+        },
+        "metadata_raw": {
+          "type": [
+            "null",
+            "string"
+          ]
+        },
+        "normalization_is_not_compatibility_pass": {
+          "const": true,
+          "type": "boolean"
+        },
+        "normalized_equal": {
+          "type": "boolean"
+        },
+        "raw_equal": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "bill_normalized",
+        "bill_raw",
+        "compatibility_approved",
+        "empty_string_to_null_applied",
+        "historical_bytes_repinned",
+        "literal_difference",
+        "metadata_normalized",
+        "metadata_raw",
+        "normalization_is_not_compatibility_pass",
+        "normalized_equal",
+        "raw_equal"
+      ],
+      "type": "object"
+    },
+    "resource_permission_actual": {
+      "const": "NOT_PROVEN",
+      "type": "string"
+    },
+    "wheel": {
+      "additionalProperties": false,
+      "properties": {
+        "generator": {
+          "type": [
+            "null",
+            "string"
+          ]
+        },
+        "raw_sha256": {
+          "type": "string",
+          "minLength": 64,
+          "maxLength": 64,
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "root_is_purelib": {
+          "type": "string"
+        },
+        "tags": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "maxLength": 65535
+          },
+          "maxItems": 250000
+        }
+      },
+      "required": [
+        "generator",
+        "raw_sha256",
+        "root_is_purelib",
+        "tags"
+      ],
+      "type": "object"
+    },
+    "whole_sha256": {
+      "type": "string",
+      "minLength": 64,
+      "maxLength": 64,
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "whole_size": {
+      "type": "integer"
+    },
+    "record_rows": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "path": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 65535,
+            "pattern": "[^\\x00]+"
+          },
+          "digest": {
+            "type": "string",
+            "maxLength": 65535
+          },
+          "size": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 18446744073709551615
+              }
+            ]
+          },
+          "normalized_path": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 65535,
+            "pattern": "[^\\x00]+"
+          },
+          "binding": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "role": {
+                "type": "string",
+                "enum": [
+                  "self",
+                  "signature",
+                  "content"
+                ]
+              },
+              "member_path": {
+                "type": "string",
+                "maxLength": 65535
+              },
+              "member_type": {
+                "type": "string",
+                "enum": [
+                  "regular",
+                  "symlink"
+                ]
+              },
+              "member_sha256": {
+                "type": "string",
+                "minLength": 64,
+                "maxLength": 64,
+                "pattern": "^[0-9a-f]{64}$"
+              },
+              "content_size": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 18446744073709551615
+              },
+              "algorithm": {
+                "oneOf": [
+                  {
+                    "type": "null"
+                  },
+                  {
+                    "type": "string",
+                    "enum": [
+                      "sha256",
+                      "sha384",
+                      "sha512"
+                    ]
+                  }
+                ]
+              },
+              "computed_digest": {
+                "type": [
+                  "null",
+                  "string"
+                ],
+                "maxLength": 65535
+              }
+            },
+            "required": [
+              "role",
+              "member_path",
+              "member_type",
+              "member_sha256",
+              "content_size",
+              "algorithm",
+              "computed_digest"
+            ]
+          }
+        },
+        "required": [
+          "path",
+          "digest",
+          "size",
+          "normalized_path",
+          "binding"
+        ]
+      },
+      "minItems": 0,
+      "maxItems": 250000
+    },
+    "record_raw_utf8": {
+      "type": "string",
+      "maxLength": 1048576
+    },
+    "record_raw_sha256": {
+      "type": "string",
+      "minLength": 64,
+      "maxLength": 64,
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "zip_container": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "eocd_hex": {
+          "type": "string",
+          "maxLength": 131114,
+          "pattern": "^[0-9a-f]*$"
+        },
+        "eocd_offset": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 18446744073709551615
+        },
+        "zip64": {
+          "type": "boolean"
+        },
+        "zip64_eocd_hex": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "string",
+              "maxLength": 112,
+              "pattern": "^[0-9a-f]*$",
+              "minLength": 112
+            }
+          ]
+        },
+        "zip64_locator_hex": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "string",
+              "maxLength": 40,
+              "pattern": "^[0-9a-f]*$",
+              "minLength": 40
+            }
+          ]
+        },
+        "central_offset": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 18446744073709551615
+        },
+        "central_size": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 18446744073709551615
+        },
+        "member_count": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 18446744073709551615
+        }
+      },
+      "required": [
+        "eocd_hex",
+        "eocd_offset",
+        "zip64",
+        "zip64_eocd_hex",
+        "zip64_locator_hex",
+        "central_offset",
+        "central_size",
+        "member_count"
+      ]
+    },
+    "metadata_binding": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "publisher_raw_sha256": {
+          "type": [
+            "null",
+            "string"
+          ],
+          "minLength": 64,
+          "maxLength": 64,
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "publisher_record_ordinal": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 18446744073709551615
+            }
+          ]
+        },
+        "selected_metadata_content_sha256": {
+          "type": [
+            "null",
+            "string"
+          ],
+          "minLength": 64,
+          "maxLength": 64,
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "observed_metadata_content_sha256": {
+          "type": "string",
+          "minLength": 64,
+          "maxLength": 64,
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "selected_archive_sha256": {
+          "type": "string",
+          "minLength": 64,
+          "maxLength": 64,
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "record_raw_sha256": {
+          "type": "string",
+          "minLength": 64,
+          "maxLength": 64,
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "installed_join": {
+          "type": "string",
+          "const": "RETURNED_SOURCE_JOINS"
+        }
+      },
+      "required": [
+        "publisher_raw_sha256",
+        "publisher_record_ordinal",
+        "selected_metadata_content_sha256",
+        "observed_metadata_content_sha256",
+        "selected_archive_sha256",
+        "record_raw_sha256",
+        "installed_join"
+      ]
+    }
+  },
+  "required": [
+    "archive_class",
+    "compatibility",
+    "custody_changed",
+    "fds_opened_by_scanner",
+    "filename",
+    "filename_fields",
+    "filesystem_stat_performed",
+    "install_performed",
+    "member_count",
+    "members",
+    "metadata",
+    "nested_archives_opened",
+    "publisher_evidence",
+    "publisher_proof",
+    "record_coverage",
+    "relative_path",
+    "requires_python",
+    "resource_permission_actual",
+    "wheel",
+    "whole_sha256",
+    "whole_size",
+    "per_archive_custody",
+    "record_rows",
+    "record_raw_utf8",
+    "record_raw_sha256",
+    "zip_container",
+    "metadata_binding"
+  ],
+  "type": "object"
+}

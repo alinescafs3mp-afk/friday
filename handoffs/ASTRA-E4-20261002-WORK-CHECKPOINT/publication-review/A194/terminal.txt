@@ -1,0 +1,16 @@
+LIFECYCLE assignment=ASTRA-E4-OWNER-GITHUB-CHECKPOINT-PRIVACY-SAFETY-REVIEW-A194 generation=1 context=fresh owner_scope=turn
+REVIEW KEY: owner-publication-only
+accepted_msk=2026-10-02T16:18:23+03:00
+review_completed_msk=2026-10-02T16:27:50.889338+03:00
+decision=UNSAFE_AS_SELECTED_EXCLUDE_LISTED_ENTIRE_FILES
+remaining_publication_decision=ALLOW_INERT_CHECKPOINT_AFTER_EXACT_EXCLUSIONS
+selection_sha256=6ec6d5abf9e55734bfb58e187a68fb44d4a413cb7863d5ce624a88f083ffbf47
+coverage_entries=768 coverage_bytes=41619288 fullSHA9=768/768 final_source9_mismatches=0
+excluded_entries=5 excluded_bytes=277946 remaining_entries=763 remaining_bytes=41341342
+GO=false; publication-only; no execution/qualification/gate/release acceptance
+Complete pathset, observed identity9 and SHA256: manifest.json
+Necessary whole-file exclusions (paths/categories/hashes only): review.json
+No source mutation. No supplied execution/import/compiler/tests/archive handling/network/native queue/model/service effects.
+wholeRAM=UNKNOWN_NOT_ZERO wholeIO=UNKNOWN_NOT_ZERO tokens=UNKNOWN_NOT_ZERO
+Two focused shell-tail errors (extra delimiter) did not affect successful text/hash reads.
+END

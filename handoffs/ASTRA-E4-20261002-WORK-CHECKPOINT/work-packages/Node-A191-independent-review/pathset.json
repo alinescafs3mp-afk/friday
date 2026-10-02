@@ -1,0 +1,20 @@
+{
+  "schema": "friday.a191.output.exact-pathset.v1",
+  "root": "/var/tmp/friday-astra-sol062-node-whole6-all35-all6-all3-independent-source-review-a191-g1",
+  "relative_files": [
+    "authentication.json",
+    "costs.json",
+    "manifest.json",
+    "pathset.json",
+    "review.txt",
+    "source-derived-matrices.json",
+    "source-final-recheck.json",
+    "whole-producer-consumer-matrices.json"
+  ],
+  "relative_directories": [
+    "."
+  ],
+  "no_recursive_pins": true,
+  "private": "dirs700 files600 uidgid1000 regular nlink1 no symlinks",
+  "DAG": "payloads/pathset -> manifest -> protected external RESULT; manifest no selfhash"
+}

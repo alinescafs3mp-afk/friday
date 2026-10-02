@@ -1,0 +1,274 @@
+{
+  "schema": "friday.e4.independent-source-review.Root-received.v1",
+  "assignment": "ASTRA-E4-SOL060-NODE-WHOLE6-ALL35-ALL6-RAW-ERROR-BOUND-INDEPENDENT-SOURCE-REVIEW-A182",
+  "generation": 1,
+  "received_msk": "2026-10-02T13:58:17.046664+03:00",
+  "root_decision": "ACCEPT_REVIEW_NOT_SOURCE",
+  "source_decision": "REJECT_CURRENT_SOURCE_PROTOCOL",
+  "review_pins": [
+    {
+      "path": "/home/jericho/.jericho/runtime/subagent-lifecycle/ASTRA-E4-SOL060-NODE-WHOLE6-ALL35-ALL6-RAW-ERROR-BOUND-INDEPENDENT-SOURCE-REVIEW-A182-G1-RESULT.json",
+      "bytes": 17200,
+      "sha256": "3f552f52be6157137822aa9177b5546b37a1d923979821737ab6e0c0021d6f85",
+      "identity9_decimal_strings": [
+        "2050",
+        "9177329",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "17200",
+        "1790938226282750068",
+        "1790938226335753103"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-sol060-node-whole6-all35-all6-raw-error-bound-independent-source-review-a182-g1/manifest.json",
+      "bytes": 3628,
+      "sha256": "5716a8fdc5ba7e03d31620b13d5bb28399c4e58a39ff072d31e543fe473d1f4f",
+      "identity9_decimal_strings": [
+        "2050",
+        "4073884",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "3628",
+        "1790938152902548233",
+        "1790938152953551153"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-sol060-node-whole6-all35-all6-raw-error-bound-independent-source-review-a182-g1/authentication.json",
+      "bytes": 34921,
+      "sha256": "b4e0d3ff36f33167c44599893135b62b84709d41da5c455d2c8935578d9fd351",
+      "identity9_decimal_strings": [
+        "2050",
+        "4073877",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "34921",
+        "1790937311221352638",
+        "1790937311270355445"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-sol060-node-whole6-all35-all6-raw-error-bound-independent-source-review-a182-g1/costs.json",
+      "bytes": 3036,
+      "sha256": "a9291485c9c5c584cf10b1c802933573d486a8d04b28867a0c492464807d0e00",
+      "identity9_decimal_strings": [
+        "2050",
+        "4073882",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "3036",
+        "1790938084166612341",
+        "1790938084217615261"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-sol060-node-whole6-all35-all6-raw-error-bound-independent-source-review-a182-g1/delta-method-all35.json",
+      "bytes": 56335,
+      "sha256": "431a68623ef1b1d03b2fc382e220765e279442ff44448b6f16e2520051f0b1b7",
+      "identity9_decimal_strings": [
+        "2050",
+        "4073878",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "56335",
+        "1790937501758262998",
+        "1790937501811266033"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-sol060-node-whole6-all35-all6-raw-error-bound-independent-source-review-a182-g1/pathset.json",
+      "bytes": 458,
+      "sha256": "396781586b7bbb49bc7a74277769b399a2fe5f0ccb24b81554cabadfb17af972",
+      "identity9_decimal_strings": [
+        "2050",
+        "4073883",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "458",
+        "1790938152706537009",
+        "1790938152761540158"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-sol060-node-whole6-all35-all6-raw-error-bound-independent-source-review-a182-g1/review.txt",
+      "bytes": 14959,
+      "sha256": "8fcb23942154fe4110710d26e1faf65b97fd513941086f3a828b32e7cc565150",
+      "identity9_decimal_strings": [
+        "2050",
+        "4073879",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "14959",
+        "1790937792711923321",
+        "1790937792768926585"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-sol060-node-whole6-all35-all6-raw-error-bound-independent-source-review-a182-g1/source-final-recheck.json",
+      "bytes": 15255,
+      "sha256": "f99124429788e7ac1b360b7406dcace7e8d44c953e9e4516e10ef51681b49839",
+      "identity9_decimal_strings": [
+        "2050",
+        "4073881",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "15255",
+        "1790937939621335519",
+        "1790937939670338325"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-sol060-node-whole6-all35-all6-raw-error-bound-independent-source-review-a182-g1/whole-matrices.json",
+      "bytes": 21416,
+      "sha256": "a98e5b9903b067fb73e60de63224ec68cb36b84f3a05653b56b3c3bca02c9572",
+      "identity9_decimal_strings": [
+        "2050",
+        "4073880",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "21416",
+        "1790937906589444078",
+        "1790937906639446942"
+      ],
+      "stable9": true
+    }
+  ],
+  "source_current9_unchanged": 62,
+  "source_full_SHA9_authenticated_at_original_intake": true,
+  "independent_review_whole_scope": {
+    "source62_full_SHA9_private_pathset_DAG": true,
+    "new_physical19_actual_hashes": true,
+    "original_normative_pins": true,
+    "current6_full_bodies_and_transitive_producer_receiver_graph": true,
+    "source_actor_lines": 6015,
+    "method_text_sections": 224,
+    "changed5_equal1_full_beforeafter": true,
+    "equal_plaintext_null_base64_absence_preserved": true,
+    "original_all6_case_order_and_cases_equal": true,
+    "all35": 35,
+    "all6": 6,
+    "GPG6": 6,
+    "all3": 3,
+    "F1_F2_D1_D2": true,
+    "prior_bound_acceptance_or_runtime_carried": false
+  },
+  "artifact_private_exact_pathset_SHA9": true,
+  "DAG": "protected terminal -> input + manifest; manifest -> seven payloads excluding itself; pathset = eight relative names, no recursive pins",
+  "findings": [
+    {
+      "id": "E01",
+      "kind": "DEFINITE_SOURCE_SCHEMA_CONTRADICTION",
+      "severity": "HIGH",
+      "fact": "All exact_error producers return graph.v2, supervisor.check_inner:1526 reads old top-level type/message, caller:2095/:2146 compares old dictionaries. Two startup controls and two supervisor-entry controls conflict with unchanged original oracles.",
+      "refs": [
+        "verifier.py:158",
+        "verifier.py:1420",
+        "supervisor.py:103",
+        "supervisor.py:1526",
+        "supervisor.py:1846",
+        "caller.py:467",
+        "caller.py:2095",
+        "caller.py:2146"
+      ],
+      "missing_new_grant_is_cause": false
+    },
+    {
+      "id": "E02",
+      "kind": "ORIGINAL_STOCK_ERROR_PREFIX_CONTINUATION_GAP",
+      "severity": "HIGH",
+      "fact": "Fallible secondary exact_error projection can exit call/capture/finalizer continuations before later required raw and known-FD work and replace the original rethrown firstfault. Prospective owners do not make projection infallible.",
+      "refs": [
+        "verifier.py:828",
+        "verifier.py:840",
+        "verifier.py:854",
+        "caller.py:1871",
+        "supervisor.py:1910"
+      ],
+      "actual_failure_observed": false,
+      "universal_custom_or_C_heap_requirement": false
+    },
+    {
+      "id": "E03",
+      "kind": "NEW_COMPLETE_SOURCE_BOUND_AND_DELIVERY_OPEN",
+      "severity": "HIGH",
+      "fact": "New graph/cause/args/state/frame/default/optional/alias/history/raw pending and duplicated preimage bodies lack rejoined width/count/producer proof under original32KiB/64KiB/2MiB. Raw-only outer1669337 partition is not a full new graph bound. Overflow native exit leaves no admitted durable fullraw receiver. Caller:680 also evaluates duplicate error key twice.",
+      "refs": [
+        "caller.py:562",
+        "caller.py:680",
+        "caller.py:2237",
+        "caller.py:2528",
+        "verifier.py:335",
+        "verifier.py:1448",
+        "verifier.py:1464",
+        "supervisor.py:280",
+        "supervisor.py:1939"
+      ],
+      "caps_alone_base64_65536": 87384,
+      "fixed_pinned_GPG_actually_emits65536_claimed": false,
+      "old2095321_margin1831_carried": false
+    },
+    {
+      "id": "E04",
+      "kind": "MANDATORY_ORIGINAL_RAW_PREFIX_COMPLETENESS_OPEN",
+      "severity": "HIGH",
+      "fact": "Unknown fstat/unsettled/short/drift/read/quota/capture/projection/encoding prefixes retain lossless returned chunks and honest partial status, but unread produced bytes are not fullraw and incomplete cells can close/native-end before complete delivery. Both receivers correctly reject those cells.",
+      "refs": [
+        "verifier.py:583",
+        "verifier.py:720",
+        "verifier.py:820",
+        "supervisor.py:819",
+        "caller.py:1549",
+        "caller.py:1850"
+      ],
+      "actual_native_run": false,
+      "no_partial_or_hashonly_as_fullraw": true
+    }
+  ],
+  "genuine_source_credits": [
+    "Undefined retirement globals and numeric-slot caches removed; exact allocation generation before acquisition and prospective once retirement.",
+    "Both pipe returns and partial wrapper/map/fstat native allocations stay owned; caller selected-DATA once state.",
+    "Call raw/error owners before prefix, actual known reap rc, capture attempts even after reap refusal.",
+    "Writable full base64 and original strict-decode byte preimages; normal retained flag corrected; produced versus returned charges.",
+    "Both-side raw/count/SHA/fullidentity/charge checks and actual reversible canonical same-object preimage consumer.",
+    "No smaller hash-summary overflow substitution; all3 typed phase/keyring/terminal-proc joins preserved.",
+    "D1 actual CPU20/wall30/dynamic quota<=21845 and D2 new physical19/read buckets correctly recorded."
+  ],
+  "original_stock_domain_decision": {
+    "full_interpreter_C_heap_custom_native_frame_local_arbitrary_tuple_cycle_reconstruction_automatically_required": false,
+    "mandatory_original_stock_error_fullraw_cause_alias_optional_and_ownership_preserved": true,
+    "NOT_QUALIFIED_native_reconstruction_label_alone_CODE": false,
+    "invented_host_adversary": false
+  },
+  "SourceReady": false,
+  "Root_admission": false,
+  "runtime": "NOT_RUN",
+  "gates": "NOT_RUN",
+  "GO": false
+}

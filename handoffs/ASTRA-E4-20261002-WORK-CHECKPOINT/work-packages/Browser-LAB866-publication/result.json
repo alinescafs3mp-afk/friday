@@ -1,0 +1,94 @@
+{
+  "GO": false,
+  "Root_Image": false,
+  "Root_admission": false,
+  "SourceReady": false,
+  "accepted": false,
+  "assignment": "ASTRA-E4-LAB864-A183-BROWSER-WHOLE209-ALL216-ALL29-CONNECTED-SOURCE-CLOSURE-LAB-866",
+  "changed_count": 2,
+  "code_open": [
+    "HISTORICAL_OPERATIONAL_BODY_ABSTRACT_REQUIRED_NOT_RUN: benign exact29 obligations are not token-blocked, and the historical operational seams are not copied.",
+    "DEADLINE_GUARD_HASH_RELATION_NOT_MANUFACTURED: Run.guard is called and exact3 or stage hashes are not invented.",
+    "WRITE_ALL_REAL_SYMBOL_THREE_WORKER_HISTORICAL_ABSTRACT: module write_all is the route, and the three-worker acceptance is not invented.",
+    "REGISTRATION_ACTUAL_SUPERVISE_FIXTURE_CAUSE_NOT_MANUFACTURED: supervise_owned runs and fixture causes are not invented.",
+    "OUTPUT_DISK_ABOVE_UNCHANGED_FSIZE_NOT_ATTEMPTED: ftruncate above the unchanged FSIZE soft limit stays unattempted.",
+    "RESOURCE_POSITIVE_ADMISSION_DEPENDS_ON_FUTURE_ROOT_GRANT: the original observers run before join, and a missing grant is not a passing marker.",
+    "NOT_RUN: no Source execution, Root image, compiler, runtime, or gates."
+  ],
+  "compiler_ELF_ABI": "NOT_RUN",
+  "completed_msk": "2026-10-02T14:21:45.043999+03:00",
+  "costs": {
+    "cgroup_memory_current": "3295088640",
+    "cumulative_bytes": 19388354,
+    "implicit_IO": "UNKNOWN_NOT_ZERO_NOT_PROVEN",
+    "meminfo_present": true,
+    "memory_hash_bytes": 6250234,
+    "physical_read_bytes": 6884085,
+    "proc_read_bytes": 3315,
+    "proc_write_bytes": 0,
+    "sealed_tree_bytes": 6254035,
+    "transport_write_bytes": 6254035,
+    "vm_rss_kib": "29188",
+    "whole_RAM": "UNKNOWN_NOT_ZERO_NOT_PROVEN"
+  },
+  "delivery_id": "del_7f1c0bdae7464588a3e20c62c4b2256b",
+  "elapsed_seconds": 1002.028096,
+  "equal_count": 6,
+  "equal_source": [
+    "A071-BILL.json",
+    "A071-BUILD-RECIPE.json",
+    "A071-SCHEMA.json",
+    "A087-PUBLIC-DRIVER.py",
+    "A104-ORDINARY-CONTRACTS.json",
+    "A118-CONNECTED-CONTRACT.json"
+  ],
+  "gates": "NOT_RUN",
+  "input_bytes": 232070,
+  "input_sha256": "20f328c5cb68d124e122bcf897b08fd7cdf1bc9e5e58c6e97afddaa3ec46f418",
+  "job_id": "job_d82899c502104e9eb9e2de6b6bfd0ad7",
+  "pins_verified": 50,
+  "run_message_id": "msg_7a582265a71a4650af3762a520c1d532",
+  "runtime": "NOT_RUN",
+  "schema": "friday.grok.lab866.browser-whole209-all216-all29-connected-source-closure.v1",
+  "sizes": {
+    "A071-BILL.json": {
+      "bytes": 149014,
+      "sha256": "eb9cc38144f33e25a6a5dc5630fd8b38565d0c75a87a31d69a0a44d1587157cc"
+    },
+    "A071-BUILD-RECIPE.json": {
+      "bytes": 10204,
+      "sha256": "9828a63746715ad4e753b269aeacbaab6b9b9c9aec2e98f35c819aa93abcee2e"
+    },
+    "A071-CONTROLS.py": {
+      "bytes": 235751,
+      "sha256": "a8805047b5f5ba7c01cab4337f59b70121c318f6fe3f284d2666e9909859e69e"
+    },
+    "A071-SCHEMA.json": {
+      "bytes": 18931,
+      "sha256": "a1ace93c26eca44eaf2f6b623d010bb2da70fc3a74fb086f746721840a636639"
+    },
+    "A071-SUPERVISOR.py": {
+      "bytes": 54576,
+      "sha256": "a419700a042c4718245a23e27e78ee7ae9b5f1e3838f886ff3e0ced226140ce3"
+    },
+    "A087-PUBLIC-DRIVER.py": {
+      "bytes": 101546,
+      "sha256": "ca7fbfb013653ebae18b4b7a23c38c871579dce51c84a62d87d2bdf5bf1c17e0"
+    },
+    "A104-ORDINARY-CONTRACTS.json": {
+      "bytes": 89618,
+      "sha256": "d891b6302ca3f4c662b8188fed60ce443600966aee1f9927b51b14ce0d825cc1"
+    },
+    "A118-CONNECTED-CONTRACT.json": {
+      "bytes": 19606,
+      "sha256": "e655ed2c859cad06a3dd629d3b0a28bc130d83e988fde74289c03f1c92619b52"
+    }
+  },
+  "source_changed": [
+    "A071-CONTROLS.py",
+    "A071-SUPERVISOR.py"
+  ],
+  "source_execution": 0,
+  "verdict": "A183_FIVE_ROUTES_CONNECTED_SOURCE_CLOSURE_AUTHORED_NOT_RUN",
+  "whole_assignment_RAM_and_implicit_IO": "UNKNOWN_NOT_ZERO_NOT_PROVEN"
+}

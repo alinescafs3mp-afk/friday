@@ -1,0 +1,253 @@
+{
+  "schema": "friday.a155.independent-whole-connected-producer-custody-consumer-graph.v1",
+  "nodes": [
+    {
+      "id": "outside-native-root",
+      "role": "Existing independently invoking outside actor; no new model/root worker",
+      "ownership": "Actual independently held native PID generation and FD transfer/acceptance are required code edges; current live grant remains future."
+    },
+    {
+      "id": "Root-launcher",
+      "path": "/var/tmp/friday-astra-quality-a137-a144-whole54-all32-original-actor-connected-source-repair-a147-g1/source/root_native_launcher.py",
+      "role": "Existing Root collector/read meter/lifetime/held ledger/final tail"
+    },
+    {
+      "id": "caller-sender",
+      "paths": [
+        "/var/tmp/friday-astra-quality-a137-a144-whole54-all32-original-actor-connected-source-repair-a147-g1/source/caller.py",
+        "/var/tmp/friday-astra-quality-a137-a144-whole54-all32-original-actor-connected-source-repair-a147-g1/source/staged_sender.py"
+      ],
+      "role": "Same Source caller process; strict entry/bootstrap then pinned Sender with original32MiB read/native262144/softAS64MiB"
+    },
+    {
+      "id": "controller-receiver",
+      "paths": [
+        "/var/tmp/friday-astra-quality-a137-a144-whole54-all32-original-actor-connected-source-repair-a147-g1/source/controller.py",
+        "/var/tmp/friday-astra-quality-a137-a144-whole54-all32-original-actor-connected-source-repair-a147-g1/Source54/tests/admission_custodian.py"
+      ],
+      "role": "Same actual Source process; shared receipt owner/read meter and original16MiB read ceiling"
+    },
+    {
+      "id": "dispatcher",
+      "path": "/var/tmp/friday-astra-quality-a137-a144-whole54-all32-original-actor-connected-source-repair-a147-g1/Source54/tests/execute_pair.py",
+      "role": "Original dispatcher; four canonical workers, retained exclusive stdout/stderr files"
+    },
+    {
+      "id": "workers",
+      "path": "/var/tmp/friday-astra-quality-a137-a144-whole54-all32-original-actor-connected-source-repair-a147-g1/Source54/tests/run_tests.py",
+      "role": "Original four worker roles; exact14 product modules/10 tests/control/helpers, inert effect fence"
+    },
+    {
+      "id": "selfcheck",
+      "path": "/var/tmp/friday-astra-quality-a137-a144-whole54-all32-original-actor-connected-source-repair-a147-g1/Source54/tests/harness_selfcheck.py",
+      "role": "Original96 mandatory harness selfcheck controls"
+    },
+    {
+      "id": "reports",
+      "path": "/var/tmp/friday-astra-quality-a137-a144-whole54-all32-original-actor-connected-source-repair-a147-g1/Source54/fixtures/coordination/finalize_reports.py",
+      "role": "Original report coordination and all30/F0-F11 categories"
+    },
+    {
+      "id": "terminal",
+      "path": "/var/tmp/friday-astra-quality-a137-a144-whole54-all32-original-actor-connected-source-repair-a147-g1/Source54/tests/close_package.py",
+      "role": "Original exact final byte closure, no grant"
+    },
+    {
+      "id": "shared-receipts",
+      "path": "/var/tmp/friday-astra-quality-a137-a144-whole54-all32-original-actor-connected-source-repair-a147-g1/Source54/tests/receipt_contract.py",
+      "role": "Same owned receipt instance, generational fullbytes, actual SourceGraphOwner, typed evidence consumers"
+    },
+    {
+      "id": "Source54-full-bytes",
+      "members": 54,
+      "bytes": 5231149,
+      "role": "All mandatory exact current files, changed6/equal48; control4,139,478 B unprojected"
+    },
+    {
+      "id": "producer",
+      "role": "Raw-first Source Producer event/result/error slots + fd196 sideband under original ends"
+    },
+    {
+      "id": "Root-held-sideband",
+      "role": "Held raw read bytes, complete frame chunks, read/EOF/error/denial recipe"
+    },
+    {
+      "id": "Root-held-ledger",
+      "role": "Held immutable ledger with actual recipient/Source events; failed-prefix distinct partial state"
+    },
+    {
+      "id": "Root-full-byte-objects",
+      "role": "Same-held exact immutable complete bytes/current9, not digest-only commitment"
+    },
+    {
+      "id": "Root-final-tail",
+      "role": "Existing fsynced raw first-cause/seal/export/close/adoption/native tail"
+    },
+    {
+      "id": "ordinary-consumer",
+      "path": "/var/tmp/friday-astra-quality-a137-a144-whole54-all32-original-actor-connected-source-repair-a147-g1/source/ordinary_root_consumers.py",
+      "role": "All32 chronology/inputs/12 purpose variables/actual producer streams/pure grammar/first-fault/native joins"
+    },
+    {
+      "id": "native-grammar",
+      "path": "/var/tmp/friday-astra-quality-a137-a144-whole54-all32-original-actor-connected-source-repair-a147-g1/source/native_grammar.py",
+      "role": "Original typed/native domain/case/prefix/worker byte consumer"
+    },
+    {
+      "id": "pure-grammar",
+      "path": "/var/tmp/friday-astra-quality-a137-a144-whole54-all32-original-actor-connected-source-repair-a147-g1/source/source_grammar.py",
+      "role": "Exact same16 pure Sender function texts +132 frozen literal predicate sites"
+    }
+  ],
+  "edges": [
+    {
+      "from": "outside-native-root",
+      "to": "Root-launcher",
+      "protocol": "Future independently issued invocation/admission/actual stage inputs",
+      "status": "FUTURE_QUALIFIER_NOT_SOURCE_BUG"
+    },
+    {
+      "from": "Root-launcher",
+      "to": "caller-sender",
+      "protocol": "Owned subprocess, source pipefd196, full actual Root read/relay/native/stderr observations",
+      "status": "PARTIAL_REAL_CODE"
+    },
+    {
+      "from": "caller-sender",
+      "to": "controller-receiver",
+      "protocol": "Pinned same-version source/index/controller; owned child/tree/held objects and original wire",
+      "status": "F01_STATIC_REPAIRED_OTHER_OBLIGATIONS_OPEN"
+    },
+    {
+      "from": "controller-receiver",
+      "to": "shared-receipts",
+      "protocol": "Shared exact module identity/read meter/cached full54 held bytes",
+      "status": "GENUINE_REPAIR_INCOMPLETE_METER_PATHS"
+    },
+    {
+      "from": "controller-receiver",
+      "to": "dispatcher",
+      "protocol": "Independently supplied receiver task/admission and actual original subprocess",
+      "status": "REAL_CODE_FUTURE_AUTHORITY"
+    },
+    {
+      "from": "dispatcher",
+      "to": "workers",
+      "protocol": "Canonical4 concurrent workers and exclusive retained stdout/stderr refs",
+      "status": "ORIGINAL_TOPOLOGY_RETAINED"
+    },
+    {
+      "from": "workers",
+      "to": "shared-receipts",
+      "protocol": "Observed canonical loader/shared ordinary adapters/inert effect fence",
+      "status": "POST_ATTACH_PARTIAL_WHOLE_INTERNALS_OPEN"
+    },
+    {
+      "from": "selfcheck",
+      "to": "shared-receipts",
+      "protocol": "Shared owner loader/driver/closer/support, original96",
+      "status": "GENUINE_REPAIR_NOT_RUN"
+    },
+    {
+      "from": "reports",
+      "to": "shared-receipts",
+      "protocol": "Observed closer uses same receipt instance; report categories retained",
+      "status": "GENUINE_REPAIR_NOT_RUN"
+    },
+    {
+      "from": "terminal",
+      "to": "shared-receipts",
+      "protocol": "Same receipt module and original context ends, final code closure",
+      "status": "GENUINE_REPAIR_NOT_RUN"
+    },
+    {
+      "from": "Source54-full-bytes",
+      "to": "shared-receipts",
+      "protocol": "Full raw generation-owned bytes/hash/currentheld+named9 before parse/reuse",
+      "status": "LEGAL_CUSTODY_CACHE_ASSESSED_NO_ARBITRARY_WRITER_PREMISE"
+    },
+    {
+      "from": "shared-receipts",
+      "to": "producer",
+      "protocol": "Full raw ordinary event slots including current newly loaded modules",
+      "status": "RAW_FIRST_REAL_CAPACITY_DURABILITY_OPEN"
+    },
+    {
+      "from": "caller-sender",
+      "to": "producer",
+      "protocol": "Full event/require/error/native intended-body chronology",
+      "status": "PARTIAL_BOOTSTRAP_QUOTED_DEFECT"
+    },
+    {
+      "from": "producer",
+      "to": "Root-held-sideband",
+      "protocol": "Raw actual original sideband bytes, before parse, original fixed ends",
+      "status": "PARTIAL_DAMAGE_CAPACITY_OPEN"
+    },
+    {
+      "from": "Root-held-sideband",
+      "to": "Root-held-ledger",
+      "protocol": "Validate/commit then consume frame; raw checkpoint and EOF/errors/denials",
+      "status": "GENUINE_REPAIR_FAILED_PREFIX_CONSUMER_OPEN"
+    },
+    {
+      "from": "Root-held-ledger",
+      "to": "Root-full-byte-objects",
+      "protocol": "Full owned Source return-byte refs, not hash-only data",
+      "status": "REAL_CODE_WHOLE_CAPACITY_OPEN"
+    },
+    {
+      "from": "Root-held-ledger",
+      "to": "ordinary-consumer",
+      "protocol": "Actual Source + Root chronology/replay/current inputs",
+      "status": "PARTIAL_EXACT_TYPED_JOINS"
+    },
+    {
+      "from": "ordinary-consumer",
+      "to": "pure-grammar",
+      "protocol": "16 equal pure function texts;132 exact actual expression sites",
+      "status": "GENUINE_SCOPED_REPAIR_NOT_WHOLE_METHOD_REPLAY"
+    },
+    {
+      "from": "ordinary-consumer",
+      "to": "native-grammar",
+      "protocol": "Now calls original TypedOrdinaryContract.consume for all32",
+      "status": "GENUINE_REPAIR_ARTIFACT_NEGATIVE_VETO_CONFLICT"
+    },
+    {
+      "from": "Root-launcher",
+      "to": "ordinary-consumer",
+      "protocol": "caller.stderr.received raw value bytes",
+      "status": "CONFIRMED_SHA256_SCHEMA_MISMATCH"
+    },
+    {
+      "from": "Root-held-ledger",
+      "to": "Root-final-tail",
+      "protocol": "Fsynced raw seal/export/final-close/error entries and partial custody offers",
+      "status": "GENUINE_REPAIR_INDEPENDENT_END_OPEN"
+    },
+    {
+      "from": "Root-final-tail",
+      "to": "outside-native-root",
+      "protocol": "Actual same-held FD transfer/acceptance/adopted generation/actual native wait/final closes",
+      "status": "MISSING_PERFORMING_CODE_EDGE_NOT_MISSING_GRANT"
+    }
+  ],
+  "original_scopes": {
+    "caller_sender_same_process": true,
+    "controller_receiver_same_process": true,
+    "Source_mandatory54": 54,
+    "canonical_workers": 4,
+    "additional_root_model_or_worker": false
+  },
+  "fences": "Only existing approved ordinary Source/stock modules/inert adapters; no malicious interpreter/kernel/arbitrary writer premise, no fake Root grant, no Source execution by reviewer.",
+  "future_facts_not_source_bugs": [
+    "Actual current Root grant/admission/sealed inputs",
+    "Actual current PID/ticks/clocks/native exit",
+    "Actual installed/live/final gate observations"
+  ],
+  "missing_code_edges_are_source_residuals": true,
+  "SourceReady": false,
+  "GO": false
+}
+

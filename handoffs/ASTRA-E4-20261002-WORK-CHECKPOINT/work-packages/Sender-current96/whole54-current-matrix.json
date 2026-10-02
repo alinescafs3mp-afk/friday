@@ -1,0 +1,3526 @@
+{
+  "GO": false,
+  "accepted49": true,
+  "all30_F0F11": "REQUIRED_NOT_RUN",
+  "all_independent_live_final_gates": "REQUIRED_NOT_RUN",
+  "count": 54,
+  "fixed63": true,
+  "full56": true,
+  "full_original_control_inventory": {
+    "bytes": 4139478,
+    "gid": 1000,
+    "identity9_decimal_strings": [
+      "2050",
+      "4225235",
+      "33152",
+      "1000",
+      "1000",
+      "1",
+      "4139478",
+      "1790922522591189876",
+      "1790922522594190047"
+    ],
+    "mode": "600",
+    "nlink": 1,
+    "path": "schemas/control-inventory.v1.json",
+    "sha256": "e7255f04bc4fa806960fcca79b6b37b67202417170ed59c3b9101863e3e91224",
+    "source_path": "/var/tmp/friday-sol056-sol055-whole54-all32-remaining-connected-source-implementation/Source54/schemas/control-inventory.v1.json",
+    "stable9": true,
+    "uid": 1000
+  },
+  "members": [
+    {
+      "GO": false,
+      "changed": false,
+      "current": {
+        "bytes": 8936,
+        "identity9_decimal_strings": [
+          "2050",
+          "4225221",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "8936",
+          "1790922522299173157",
+          "1790922522300173215"
+        ],
+        "path": "/var/tmp/friday-sol056-sol055-whole54-all32-remaining-connected-source-implementation/Source54/README.contract.md",
+        "sha256": "7a6f9736ccad60983f1b27d377873431ef17ac20bf258cbc8d795f9c286a6170",
+        "stable9": true
+      },
+      "current_semantic_independent_review": "REQUIRED_NOT_RUN",
+      "full_partitions": [
+        {
+          "equal": true,
+          "new_bytes": 8936,
+          "new_sha256": "7a6f9736ccad60983f1b27d377873431ef17ac20bf258cbc8d795f9c286a6170",
+          "offset": 0,
+          "old_bytes": 8936,
+          "old_sha256": "7a6f9736ccad60983f1b27d377873431ef17ac20bf258cbc8d795f9c286a6170"
+        }
+      ],
+      "original": {
+        "bytes": 8936,
+        "identity9_decimal_strings": [
+          "2050",
+          "4073875",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "8936",
+          "1790919933353021067",
+          "1790919933354021124"
+        ],
+        "path": "/var/tmp/friday-sol055-a147-a155-whole54-all32-connected-source-repair/Source54/README.contract.md",
+        "sha256": "7a6f9736ccad60983f1b27d377873431ef17ac20bf258cbc8d795f9c286a6170",
+        "stable9": true
+      },
+      "relative": "Source54/README.contract.md",
+      "runtime": "NOT_RUN",
+      "transitive_required": true
+    },
+    {
+      "GO": false,
+      "changed": false,
+      "current": {
+        "bytes": 406,
+        "identity9_decimal_strings": [
+          "2050",
+          "4225223",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "406",
+          "1790922522316174131",
+          "1790922522317174188"
+        ],
+        "path": "/var/tmp/friday-sol056-sol055-whole54-all32-remaining-connected-source-implementation/Source54/effects/download-only-provenance.v1.json",
+        "sha256": "5e3cee8f577ab81df7152e331fe7790c0fade27f4ee09c4e452d7cfbdc2a227e",
+        "stable9": true
+      },
+      "current_semantic_independent_review": "REQUIRED_NOT_RUN",
+      "full_partitions": [
+        {
+          "equal": true,
+          "new_bytes": 406,
+          "new_sha256": "5e3cee8f577ab81df7152e331fe7790c0fade27f4ee09c4e452d7cfbdc2a227e",
+          "offset": 0,
+          "old_bytes": 406,
+          "old_sha256": "5e3cee8f577ab81df7152e331fe7790c0fade27f4ee09c4e452d7cfbdc2a227e"
+        }
+      ],
+      "original": {
+        "bytes": 406,
+        "identity9_decimal_strings": [
+          "2050",
+          "4885328",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "406",
+          "1790919933370022040",
+          "1790919933371022097"
+        ],
+        "path": "/var/tmp/friday-sol055-a147-a155-whole54-all32-connected-source-repair/Source54/effects/download-only-provenance.v1.json",
+        "sha256": "5e3cee8f577ab81df7152e331fe7790c0fade27f4ee09c4e452d7cfbdc2a227e",
+        "stable9": true
+      },
+      "relative": "Source54/effects/download-only-provenance.v1.json",
+      "runtime": "NOT_RUN",
+      "transitive_required": true
+    },
+    {
+      "GO": false,
+      "changed": false,
+      "current": {
+        "bytes": 516,
+        "identity9_decimal_strings": [
+          "2050",
+          "4225224",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "516",
+          "1790922522332175047",
+          "1790922522334175161"
+        ],
+        "path": "/var/tmp/friday-sol056-sol055-whole54-all32-remaining-connected-source-implementation/Source54/effects/live-one-attempt.v1.json",
+        "sha256": "d805e38f99482bd430280f7605f9af0e1ac69017493b2402a429b91389f28049",
+        "stable9": true
+      },
+      "current_semantic_independent_review": "REQUIRED_NOT_RUN",
+      "full_partitions": [
+        {
+          "equal": true,
+          "new_bytes": 516,
+          "new_sha256": "d805e38f99482bd430280f7605f9af0e1ac69017493b2402a429b91389f28049",
+          "offset": 0,
+          "old_bytes": 516,
+          "old_sha256": "d805e38f99482bd430280f7605f9af0e1ac69017493b2402a429b91389f28049"
+        }
+      ],
+      "original": {
+        "bytes": 516,
+        "identity9_decimal_strings": [
+          "2050",
+          "4885329",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "516",
+          "1790919933386022956",
+          "1790919933387023013"
+        ],
+        "path": "/var/tmp/friday-sol055-a147-a155-whole54-all32-connected-source-repair/Source54/effects/live-one-attempt.v1.json",
+        "sha256": "d805e38f99482bd430280f7605f9af0e1ac69017493b2402a429b91389f28049",
+        "stable9": true
+      },
+      "relative": "Source54/effects/live-one-attempt.v1.json",
+      "runtime": "NOT_RUN",
+      "transitive_required": true
+    },
+    {
+      "GO": false,
+      "changed": false,
+      "current": {
+        "bytes": 368,
+        "identity9_decimal_strings": [
+          "2050",
+          "4225225",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "368",
+          "1790922522349176020",
+          "1790922522350176077"
+        ],
+        "path": "/var/tmp/friday-sol056-sol055-whole54-all32-remaining-connected-source-implementation/Source54/effects/private-source-preparation.v1.json",
+        "sha256": "bd08daf3e720ff54bfc93fa0509230dcb96dda8d2206dd76af851db8dc6b3a5b",
+        "stable9": true
+      },
+      "current_semantic_independent_review": "REQUIRED_NOT_RUN",
+      "full_partitions": [
+        {
+          "equal": true,
+          "new_bytes": 368,
+          "new_sha256": "bd08daf3e720ff54bfc93fa0509230dcb96dda8d2206dd76af851db8dc6b3a5b",
+          "offset": 0,
+          "old_bytes": 368,
+          "old_sha256": "bd08daf3e720ff54bfc93fa0509230dcb96dda8d2206dd76af851db8dc6b3a5b"
+        }
+      ],
+      "original": {
+        "bytes": 368,
+        "identity9_decimal_strings": [
+          "2050",
+          "4885330",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "368",
+          "1790919933402023871",
+          "1790919933403023928"
+        ],
+        "path": "/var/tmp/friday-sol055-a147-a155-whole54-all32-connected-source-repair/Source54/effects/private-source-preparation.v1.json",
+        "sha256": "bd08daf3e720ff54bfc93fa0509230dcb96dda8d2206dd76af851db8dc6b3a5b",
+        "stable9": true
+      },
+      "relative": "Source54/effects/private-source-preparation.v1.json",
+      "runtime": "NOT_RUN",
+      "transitive_required": true
+    },
+    {
+      "GO": false,
+      "changed": false,
+      "current": {
+        "bytes": 459,
+        "identity9_decimal_strings": [
+          "2050",
+          "4225226",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "459",
+          "1790922522367177050",
+          "1790922522369177165"
+        ],
+        "path": "/var/tmp/friday-sol056-sol055-whole54-all32-remaining-connected-source-implementation/Source54/effects/revoke-remove.v1.json",
+        "sha256": "0eb6bc5e2cd8ddf66ad150a030c111852bb29198087c60ad1f81a5b2476764c6",
+        "stable9": true
+      },
+      "current_semantic_independent_review": "REQUIRED_NOT_RUN",
+      "full_partitions": [
+        {
+          "equal": true,
+          "new_bytes": 459,
+          "new_sha256": "0eb6bc5e2cd8ddf66ad150a030c111852bb29198087c60ad1f81a5b2476764c6",
+          "offset": 0,
+          "old_bytes": 459,
+          "old_sha256": "0eb6bc5e2cd8ddf66ad150a030c111852bb29198087c60ad1f81a5b2476764c6"
+        }
+      ],
+      "original": {
+        "bytes": 459,
+        "identity9_decimal_strings": [
+          "2050",
+          "4885331",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "459",
+          "1790919933419024844",
+          "1790919933420024901"
+        ],
+        "path": "/var/tmp/friday-sol055-a147-a155-whole54-all32-connected-source-repair/Source54/effects/revoke-remove.v1.json",
+        "sha256": "0eb6bc5e2cd8ddf66ad150a030c111852bb29198087c60ad1f81a5b2476764c6",
+        "stable9": true
+      },
+      "relative": "Source54/effects/revoke-remove.v1.json",
+      "runtime": "NOT_RUN",
+      "transitive_required": true
+    },
+    {
+      "GO": false,
+      "changed": false,
+      "current": {
+        "bytes": 593,
+        "identity9_decimal_strings": [
+          "2050",
+          "4225227",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "593",
+          "1790922522386178139",
+          "1790922522388178253"
+        ],
+        "path": "/var/tmp/friday-sol056-sol055-whole54-all32-remaining-connected-source-implementation/Source54/effects/root-install.v1.json",
+        "sha256": "c298d52846b89373eb8930b1fc7225ffaa8307f7fba0c85b31ba471bf48e6bc0",
+        "stable9": true
+      },
+      "current_semantic_independent_review": "REQUIRED_NOT_RUN",
+      "full_partitions": [
+        {
+          "equal": true,
+          "new_bytes": 593,
+          "new_sha256": "c298d52846b89373eb8930b1fc7225ffaa8307f7fba0c85b31ba471bf48e6bc0",
+          "offset": 0,
+          "old_bytes": 593,
+          "old_sha256": "c298d52846b89373eb8930b1fc7225ffaa8307f7fba0c85b31ba471bf48e6bc0"
+        }
+      ],
+      "original": {
+        "bytes": 593,
+        "identity9_decimal_strings": [
+          "2050",
+          "4885332",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "593",
+          "1790919933435025760",
+          "1790919933436025817"
+        ],
+        "path": "/var/tmp/friday-sol055-a147-a155-whole54-all32-connected-source-repair/Source54/effects/root-install.v1.json",
+        "sha256": "c298d52846b89373eb8930b1fc7225ffaa8307f7fba0c85b31ba471bf48e6bc0",
+        "stable9": true
+      },
+      "relative": "Source54/effects/root-install.v1.json",
+      "runtime": "NOT_RUN",
+      "transitive_required": true
+    },
+    {
+      "GO": false,
+      "changed": false,
+      "current": {
+        "bytes": 7077,
+        "identity9_decimal_strings": [
+          "2050",
+          "4225230",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "7077",
+          "1790922522404179169",
+          "1790922522405179226"
+        ],
+        "path": "/var/tmp/friday-sol056-sol055-whole54-all32-remaining-connected-source-implementation/Source54/fixtures/coordination/finalize_reports.py",
+        "sha256": "abd305b3985096fafa7e6ab5299ae1a49cdd94edd188e4acd3cde8594d28d68b",
+        "stable9": true
+      },
+      "current_semantic_independent_review": "REQUIRED_NOT_RUN",
+      "full_partitions": [
+        {
+          "equal": true,
+          "new_bytes": 7077,
+          "new_sha256": "abd305b3985096fafa7e6ab5299ae1a49cdd94edd188e4acd3cde8594d28d68b",
+          "offset": 0,
+          "old_bytes": 7077,
+          "old_sha256": "abd305b3985096fafa7e6ab5299ae1a49cdd94edd188e4acd3cde8594d28d68b"
+        }
+      ],
+      "original": {
+        "bytes": 7077,
+        "identity9_decimal_strings": [
+          "2050",
+          "5135283",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "7077",
+          "1790919933452026733",
+          "1790919933453026790"
+        ],
+        "path": "/var/tmp/friday-sol055-a147-a155-whole54-all32-connected-source-repair/Source54/fixtures/coordination/finalize_reports.py",
+        "sha256": "abd305b3985096fafa7e6ab5299ae1a49cdd94edd188e4acd3cde8594d28d68b",
+        "stable9": true
+      },
+      "relative": "Source54/fixtures/coordination/finalize_reports.py",
+      "runtime": "NOT_RUN",
+      "transitive_required": true
+    },
+    {
+      "GO": false,
+      "changed": false,
+      "current": {
+        "bytes": 9912,
+        "identity9_decimal_strings": [
+          "2050",
+          "4225232",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "9912",
+          "1790922522421180142",
+          "1790922522422180199"
+        ],
+        "path": "/var/tmp/friday-sol056-sol055-whole54-all32-remaining-connected-source-implementation/Source54/schemas/affected-check-plan.v1.json",
+        "sha256": "4555a0cd305d799abe32d9243af9f20264c75db361bc44f31188b266a68f653f",
+        "stable9": true
+      },
+      "current_semantic_independent_review": "REQUIRED_NOT_RUN",
+      "full_partitions": [
+        {
+          "equal": true,
+          "new_bytes": 9912,
+          "new_sha256": "4555a0cd305d799abe32d9243af9f20264c75db361bc44f31188b266a68f653f",
+          "offset": 0,
+          "old_bytes": 9912,
+          "old_sha256": "4555a0cd305d799abe32d9243af9f20264c75db361bc44f31188b266a68f653f"
+        }
+      ],
+      "original": {
+        "bytes": 9912,
+        "identity9_decimal_strings": [
+          "2050",
+          "5266260",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "9912",
+          "1790919933471027820",
+          "1790919933473027934"
+        ],
+        "path": "/var/tmp/friday-sol055-a147-a155-whole54-all32-connected-source-repair/Source54/schemas/affected-check-plan.v1.json",
+        "sha256": "4555a0cd305d799abe32d9243af9f20264c75db361bc44f31188b266a68f653f",
+        "stable9": true
+      },
+      "relative": "Source54/schemas/affected-check-plan.v1.json",
+      "runtime": "NOT_RUN",
+      "transitive_required": true
+    },
+    {
+      "GO": false,
+      "changed": false,
+      "current": {
+        "bytes": 3499,
+        "identity9_decimal_strings": [
+          "2050",
+          "4225233",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "3499",
+          "1790922522439181173",
+          "1790922522441181288"
+        ],
+        "path": "/var/tmp/friday-sol056-sol055-whole54-all32-remaining-connected-source-implementation/Source54/schemas/attempt-runtime.v1.md",
+        "sha256": "191d2c0b2f73c380d995e24276e66fadb26cf8d9f655a3bc84329ee15a341377",
+        "stable9": true
+      },
+      "current_semantic_independent_review": "REQUIRED_NOT_RUN",
+      "full_partitions": [
+        {
+          "equal": true,
+          "new_bytes": 3499,
+          "new_sha256": "191d2c0b2f73c380d995e24276e66fadb26cf8d9f655a3bc84329ee15a341377",
+          "offset": 0,
+          "old_bytes": 3499,
+          "old_sha256": "191d2c0b2f73c380d995e24276e66fadb26cf8d9f655a3bc84329ee15a341377"
+        }
+      ],
+      "original": {
+        "bytes": 3499,
+        "identity9_decimal_strings": [
+          "2050",
+          "5266261",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "3499",
+          "1790919933489028850",
+          "1790919933490028907"
+        ],
+        "path": "/var/tmp/friday-sol055-a147-a155-whole54-all32-connected-source-repair/Source54/schemas/attempt-runtime.v1.md",
+        "sha256": "191d2c0b2f73c380d995e24276e66fadb26cf8d9f655a3bc84329ee15a341377",
+        "stable9": true
+      },
+      "relative": "Source54/schemas/attempt-runtime.v1.md",
+      "runtime": "NOT_RUN",
+      "transitive_required": true
+    },
+    {
+      "GO": false,
+      "changed": false,
+      "current": {
+        "bytes": 1783,
+        "identity9_decimal_strings": [
+          "2050",
+          "4225234",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "1783",
+          "1790922522456182146",
+          "1790922522457182204"
+        ],
+        "path": "/var/tmp/friday-sol056-sol055-whole54-all32-remaining-connected-source-implementation/Source54/schemas/consumed-attempt.v1.md",
+        "sha256": "ba17e96bc2101232439d4e94b8dec3e852907b4d2cacd6c63f4ca00e08316ea7",
+        "stable9": true
+      },
+      "current_semantic_independent_review": "REQUIRED_NOT_RUN",
+      "full_partitions": [
+        {
+          "equal": true,
+          "new_bytes": 1783,
+          "new_sha256": "ba17e96bc2101232439d4e94b8dec3e852907b4d2cacd6c63f4ca00e08316ea7",
+          "offset": 0,
+          "old_bytes": 1783,
+          "old_sha256": "ba17e96bc2101232439d4e94b8dec3e852907b4d2cacd6c63f4ca00e08316ea7"
+        }
+      ],
+      "original": {
+        "bytes": 1783,
+        "identity9_decimal_strings": [
+          "2050",
+          "5266262",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "1783",
+          "1790919933505029765",
+          "1790919933506029823"
+        ],
+        "path": "/var/tmp/friday-sol055-a147-a155-whole54-all32-connected-source-repair/Source54/schemas/consumed-attempt.v1.md",
+        "sha256": "ba17e96bc2101232439d4e94b8dec3e852907b4d2cacd6c63f4ca00e08316ea7",
+        "stable9": true
+      },
+      "relative": "Source54/schemas/consumed-attempt.v1.md",
+      "runtime": "NOT_RUN",
+      "transitive_required": true
+    },
+    {
+      "GO": false,
+      "changed": false,
+      "current": {
+        "bytes": 4139478,
+        "identity9_decimal_strings": [
+          "2050",
+          "4225235",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "4139478",
+          "1790922522591189876",
+          "1790922522594190047"
+        ],
+        "path": "/var/tmp/friday-sol056-sol055-whole54-all32-remaining-connected-source-implementation/Source54/schemas/control-inventory.v1.json",
+        "sha256": "e7255f04bc4fa806960fcca79b6b37b67202417170ed59c3b9101863e3e91224",
+        "stable9": true
+      },
+      "current_semantic_independent_review": "REQUIRED_NOT_RUN",
+      "full_partitions": [
+        {
+          "equal": true,
+          "new_bytes": 65536,
+          "new_sha256": "15929cb70100789dbdba840476c6820743a8dbb0ac4f065164fdbca6d514f7b1",
+          "offset": 0,
+          "old_bytes": 65536,
+          "old_sha256": "15929cb70100789dbdba840476c6820743a8dbb0ac4f065164fdbca6d514f7b1"
+        },
+        {
+          "equal": true,
+          "new_bytes": 65536,
+          "new_sha256": "d82c69d41befc33ec5b13cd759a4ad7b863bd0828f56fac80fc4239f49785496",
+          "offset": 65536,
+          "old_bytes": 65536,
+          "old_sha256": "d82c69d41befc33ec5b13cd759a4ad7b863bd0828f56fac80fc4239f49785496"
+        },
+        {
+          "equal": true,
+          "new_bytes": 65536,
+          "new_sha256": "1ac91c471f9ca8db31fd05afb98457cbc4117e668dbfac8081a038e75b5032fb",
+          "offset": 131072,
+          "old_bytes": 65536,
+          "old_sha256": "1ac91c471f9ca8db31fd05afb98457cbc4117e668dbfac8081a038e75b5032fb"
+        },
+        {
+          "equal": true,
+          "new_bytes": 65536,
+          "new_sha256": "c33f8153634e3c2fadbf58ae361b72be69ef66c265406a08550e42b0512770bf",
+          "offset": 196608,
+          "old_bytes": 65536,
+          "old_sha256": "c33f8153634e3c2fadbf58ae361b72be69ef66c265406a08550e42b0512770bf"
+        },
+        {
+          "equal": true,
+          "new_bytes": 65536,
+          "new_sha256": "667631711024104db8a874f010f00ed328ab4f34371ba7a2eee94ce837d411f1",
+          "offset": 262144,
+          "old_bytes": 65536,
+          "old_sha256": "667631711024104db8a874f010f00ed328ab4f34371ba7a2eee94ce837d411f1"
+        },
+        {
+          "equal": true,
+          "new_bytes": 65536,
+          "new_sha256": "38b2f7a7713ad9f92c917c50e61614b5a153f69081fbb7e3fe69a6b00aaeda85",
+          "offset": 327680,
+          "old_bytes": 65536,
+          "old_sha256": "38b2f7a7713ad9f92c917c50e61614b5a153f69081fbb7e3fe69a6b00aaeda85"
+        },
+        {
+          "equal": true,
+          "new_bytes": 65536,
+          "new_sha256": "da8954805107245f8af17648e8100c71cefcab36a755f7142c3e2f3f19a04abf",
+          "offset": 393216,
+          "old_bytes": 65536,
+          "old_sha256": "da8954805107245f8af17648e8100c71cefcab36a755f7142c3e2f3f19a04abf"
+        },
+        {
+          "equal": true,
+          "new_bytes": 65536,
+          "new_sha256": "b246214a5abd311362ce7c9174f6176f72cd492c672573986b04fa96a55835c5",
+          "offset": 458752,
+          "old_bytes": 65536,
+          "old_sha256": "b246214a5abd311362ce7c9174f6176f72cd492c672573986b04fa96a55835c5"
+        },
+        {
+          "equal": true,
+          "new_bytes": 65536,
+          "new_sha256": "28273ca0e1e6dc4434832f72df4ba5e8bdd87e692709c8055103f52a16319cff",
+          "offset": 524288,
+          "old_bytes": 65536,
+          "old_sha256": "28273ca0e1e6dc4434832f72df4ba5e8bdd87e692709c8055103f52a16319cff"
+        },
+        {
+          "equal": true,
+          "new_bytes": 65536,
+          "new_sha256": "276a449e32136eea2cb6d6afd60d339cbc344b3954a138c3170a119142ec1589",
+          "offset": 589824,
+          "old_bytes": 65536,
+          "old_sha256": "276a449e32136eea2cb6d6afd60d339cbc344b3954a138c3170a119142ec1589"
+        },
+        {
+          "equal": true,
+          "new_bytes": 65536,
+          "new_sha256": "27d5685b3ea5476680cac07657ce488a6a2ecda177eb77e0539459dc2649103d",
+          "offset": 655360,
+          "old_bytes": 65536,
+          "old_sha256": "27d5685b3ea5476680cac07657ce488a6a2ecda177eb77e0539459dc2649103d"
+        },
+        {
+          "equal": true,
+          "new_bytes": 65536,
+          "new_sha256": "db128d4d95693e2b1f211eb76524c31b4fc3741d069e8f5bd04fd0a889f594a9",
+          "offset": 720896,
+          "old_bytes": 65536,
+          "old_sha256": "db128d4d95693e2b1f211eb76524c31b4fc3741d069e8f5bd04fd0a889f594a9"
+        },
+        {
+          "equal": true,
+          "new_bytes": 65536,
+          "new_sha256": "61c1821d403e7fe477aeb84b8e1a0b4dfd822e336b07d4d9fbae87dd7f9c0b10",
+          "offset": 786432,
+          "old_bytes": 65536,
+          "old_sha256": "61c1821d403e7fe477aeb84b8e1a0b4dfd822e336b07d4d9fbae87dd7f9c0b10"
+        },
+        {
+          "equal": true,
+          "new_bytes": 65536,
+          "new_sha256": "b81ae88905d599dd13581a3ff2cf494a70b337d807da82d4e864c03fc636614f",
+          "offset": 851968,
+          "old_bytes": 65536,
+          "old_sha256": "b81ae88905d599dd13581a3ff2cf494a70b337d807da82d4e864c03fc636614f"
+        },
+        {
+          "equal": true,
+          "new_bytes": 65536,
+          "new_sha256": "9a26bfccbc46cbdc0bfe5cbb90e5165b6f9afc98d4a300adedf6fd84e028fdda",
+          "offset": 917504,
+          "old_bytes": 65536,
+          "old_sha256": "9a26bfccbc46cbdc0bfe5cbb90e5165b6f9afc98d4a300adedf6fd84e028fdda"
+        },
+        {
+          "equal": true,
+          "new_bytes": 65536,
+          "new_sha256": "021027f64da74043466ce75ee3e3d8aac61242c94a43019795c0fb65eb94b259",
+          "offset": 983040,
+          "old_bytes": 65536,
+          "old_sha256": "021027f64da74043466ce75ee3e3d8aac61242c94a43019795c0fb65eb94b259"
+        },
+        {
+          "equal": true,
+          "new_bytes": 65536,
+          "new_sha256": "8464d8964be02d09743f111aa1483e72c5fdf6b6ec139cad13d26152add8cc57",
+          "offset": 1048576,
+          "old_bytes": 65536,
+          "old_sha256": "8464d8964be02d09743f111aa1483e72c5fdf6b6ec139cad13d26152add8cc57"
+        },
+        {
+          "equal": true,
+          "new_bytes": 65536,
+          "new_sha256": "1d1a75e3d37deab97d821092f2d2471028e730eb1771df8d9f982b015e4b117d",
+          "offset": 1114112,
+          "old_bytes": 65536,
+          "old_sha256": "1d1a75e3d37deab97d821092f2d2471028e730eb1771df8d9f982b015e4b117d"
+        },
+        {
+          "equal": true,
+          "new_bytes": 65536,
+          "new_sha256": "7ad9deb1332df4e596951ec7cc5c1da6964cc3d471aa56e2b860731dbb5591a1",
+          "offset": 1179648,
+          "old_bytes": 65536,
+          "old_sha256": "7ad9deb1332df4e596951ec7cc5c1da6964cc3d471aa56e2b860731dbb5591a1"
+        },
+        {
+          "equal": true,
+          "new_bytes": 65536,
+          "new_sha256": "0f09183b4b8f749fff28f3a1335baacaf8b5d4829cb351d4d6e3fc8ba0b69920",
+          "offset": 1245184,
+          "old_bytes": 65536,
+          "old_sha256": "0f09183b4b8f749fff28f3a1335baacaf8b5d4829cb351d4d6e3fc8ba0b69920"
+        },
+        {
+          "equal": true,
+          "new_bytes": 65536,
+          "new_sha256": "640553126999b1d352d74a140398140a53263d7b56688dc1b58e4418acdbf4ff",
+          "offset": 1310720,
+          "old_bytes": 65536,
+          "old_sha256": "640553126999b1d352d74a140398140a53263d7b56688dc1b58e4418acdbf4ff"
+        },
+        {
+          "equal": true,
+          "new_bytes": 65536,
+          "new_sha256": "2dc17341d8bc6eebc77c45d73597d12f0ab704086c9cf61c25093a684780b164",
+          "offset": 1376256,
+          "old_bytes": 65536,
+          "old_sha256": "2dc17341d8bc6eebc77c45d73597d12f0ab704086c9cf61c25093a684780b164"
+        },
+        {
+          "equal": true,
+          "new_bytes": 65536,
+          "new_sha256": "f0916f7f46ccb9945f8bc24d117d37267d0b666d6e7b8d68a89db88c14bcdb34",
+          "offset": 1441792,
+          "old_bytes": 65536,
+          "old_sha256": "f0916f7f46ccb9945f8bc24d117d37267d0b666d6e7b8d68a89db88c14bcdb34"
+        },
+        {
+          "equal": true,
+          "new_bytes": 65536,
+          "new_sha256": "9837df340fe3b5a27630a0a5f0625aba773e06b29940eb2bd562c62037e11998",
+          "offset": 1507328,
+          "old_bytes": 65536,
+          "old_sha256": "9837df340fe3b5a27630a0a5f0625aba773e06b29940eb2bd562c62037e11998"
+        },
+        {
+          "equal": true,
+          "new_bytes": 65536,
+          "new_sha256": "ab9b48e75cbcf09975c41b0b0294e1b0683a003dabdf6fba68defa1fbfab0e66",
+          "offset": 1572864,
+          "old_bytes": 65536,
+          "old_sha256": "ab9b48e75cbcf09975c41b0b0294e1b0683a003dabdf6fba68defa1fbfab0e66"
+        },
+        {
+          "equal": true,
+          "new_bytes": 65536,
+          "new_sha256": "5a40e017f6d183f893198953bba0ffc105cf621be00880147de13eb80734bfd7",
+          "offset": 1638400,
+          "old_bytes": 65536,
+          "old_sha256": "5a40e017f6d183f893198953bba0ffc105cf621be00880147de13eb80734bfd7"
+        },
+        {
+          "equal": true,
+          "new_bytes": 65536,
+          "new_sha256": "5f8032b0295f70d7c673310c818488a8187a5aba3c36463019a2210507cd45fa",
+          "offset": 1703936,
+          "old_bytes": 65536,
+          "old_sha256": "5f8032b0295f70d7c673310c818488a8187a5aba3c36463019a2210507cd45fa"
+        },
+        {
+          "equal": true,
+          "new_bytes": 65536,
+          "new_sha256": "f3ade2b9b57b474b21f44d6335119694e54b12c5c035890e4dc969bbb0f5201a",
+          "offset": 1769472,
+          "old_bytes": 65536,
+          "old_sha256": "f3ade2b9b57b474b21f44d6335119694e54b12c5c035890e4dc969bbb0f5201a"
+        },
+        {
+          "equal": true,
+          "new_bytes": 65536,
+          "new_sha256": "83ccde841322a293fa4cf27693fff401feda9c09ff4e5f32438e3ac2370fd71b",
+          "offset": 1835008,
+          "old_bytes": 65536,
+          "old_sha256": "83ccde841322a293fa4cf27693fff401feda9c09ff4e5f32438e3ac2370fd71b"
+        },
+        {
+          "equal": true,
+          "new_bytes": 65536,
+          "new_sha256": "ac74808b72e2b25bb4053d12ec6502ceb9ed17466a4f5a376ece8a949c12c684",
+          "offset": 1900544,
+          "old_bytes": 65536,
+          "old_sha256": "ac74808b72e2b25bb4053d12ec6502ceb9ed17466a4f5a376ece8a949c12c684"
+        },
+        {
+          "equal": true,
+          "new_bytes": 65536,
+          "new_sha256": "7ffa5bf346d0dde6ffc629abc3d03c355a155514a74740dbb99b640a64bceea5",
+          "offset": 1966080,
+          "old_bytes": 65536,
+          "old_sha256": "7ffa5bf346d0dde6ffc629abc3d03c355a155514a74740dbb99b640a64bceea5"
+        },
+        {
+          "equal": true,
+          "new_bytes": 65536,
+          "new_sha256": "4ba122ac4748a57eeb09c665e7eb343a90364b93db59abde92fa79696e061ff9",
+          "offset": 2031616,
+          "old_bytes": 65536,
+          "old_sha256": "4ba122ac4748a57eeb09c665e7eb343a90364b93db59abde92fa79696e061ff9"
+        },
+        {
+          "equal": true,
+          "new_bytes": 65536,
+          "new_sha256": "3c5ba0ea39a5340bc583f5d969a33db3598c0b825b75919ea8fbb5bf984611e1",
+          "offset": 2097152,
+          "old_bytes": 65536,
+          "old_sha256": "3c5ba0ea39a5340bc583f5d969a33db3598c0b825b75919ea8fbb5bf984611e1"
+        },
+        {
+          "equal": true,
+          "new_bytes": 65536,
+          "new_sha256": "0b759ad1ffffb7b6e7b576f62b291689733dadcc3e1ec70b05acce8409d2056e",
+          "offset": 2162688,
+          "old_bytes": 65536,
+          "old_sha256": "0b759ad1ffffb7b6e7b576f62b291689733dadcc3e1ec70b05acce8409d2056e"
+        },
+        {
+          "equal": true,
+          "new_bytes": 65536,
+          "new_sha256": "28603317ba0035ea168dbfb2485eee6843f30e5b22b6599742304e025f1307b5",
+          "offset": 2228224,
+          "old_bytes": 65536,
+          "old_sha256": "28603317ba0035ea168dbfb2485eee6843f30e5b22b6599742304e025f1307b5"
+        },
+        {
+          "equal": true,
+          "new_bytes": 65536,
+          "new_sha256": "ed289448e8dde2dc7df39e5d3765024bf7f839d548a274a26a10d5b454334bc3",
+          "offset": 2293760,
+          "old_bytes": 65536,
+          "old_sha256": "ed289448e8dde2dc7df39e5d3765024bf7f839d548a274a26a10d5b454334bc3"
+        },
+        {
+          "equal": true,
+          "new_bytes": 65536,
+          "new_sha256": "59beb9821f00f954a48cb1cd9600ebb72a52bb83577bd76c493127cafd3c4f1c",
+          "offset": 2359296,
+          "old_bytes": 65536,
+          "old_sha256": "59beb9821f00f954a48cb1cd9600ebb72a52bb83577bd76c493127cafd3c4f1c"
+        },
+        {
+          "equal": true,
+          "new_bytes": 65536,
+          "new_sha256": "d666e03b73e8538476a96c00368a42b3f9bac9f39fdcb8ea0e25fcf9d6116fc8",
+          "offset": 2424832,
+          "old_bytes": 65536,
+          "old_sha256": "d666e03b73e8538476a96c00368a42b3f9bac9f39fdcb8ea0e25fcf9d6116fc8"
+        },
+        {
+          "equal": true,
+          "new_bytes": 65536,
+          "new_sha256": "3ddb4c4b310f835ad628a928daa66eb308dc95f144d4784769a492e1234e3b10",
+          "offset": 2490368,
+          "old_bytes": 65536,
+          "old_sha256": "3ddb4c4b310f835ad628a928daa66eb308dc95f144d4784769a492e1234e3b10"
+        },
+        {
+          "equal": true,
+          "new_bytes": 65536,
+          "new_sha256": "cc10291d215f51c8d6d12b1c51fe4e32b75d8003496be66cf68d6889fc6b656d",
+          "offset": 2555904,
+          "old_bytes": 65536,
+          "old_sha256": "cc10291d215f51c8d6d12b1c51fe4e32b75d8003496be66cf68d6889fc6b656d"
+        },
+        {
+          "equal": true,
+          "new_bytes": 65536,
+          "new_sha256": "c3b1053d08f1bb40b7d0ef51bad68d1efeffe4171adb65b91e4a268239576846",
+          "offset": 2621440,
+          "old_bytes": 65536,
+          "old_sha256": "c3b1053d08f1bb40b7d0ef51bad68d1efeffe4171adb65b91e4a268239576846"
+        },
+        {
+          "equal": true,
+          "new_bytes": 65536,
+          "new_sha256": "70e196480a6344261b573fdf680fecf1ef7c23b431d0e17c67fddc0cc9d7948e",
+          "offset": 2686976,
+          "old_bytes": 65536,
+          "old_sha256": "70e196480a6344261b573fdf680fecf1ef7c23b431d0e17c67fddc0cc9d7948e"
+        },
+        {
+          "equal": true,
+          "new_bytes": 65536,
+          "new_sha256": "09b81f5906c7324d9c7405092f0d0e9e1741b078c38741a73e918edd17c18e2e",
+          "offset": 2752512,
+          "old_bytes": 65536,
+          "old_sha256": "09b81f5906c7324d9c7405092f0d0e9e1741b078c38741a73e918edd17c18e2e"
+        },
+        {
+          "equal": true,
+          "new_bytes": 65536,
+          "new_sha256": "ced1126b4f9997b0c3a9f5513d6de33cb4601af039813b9ac442a3f5babc65f4",
+          "offset": 2818048,
+          "old_bytes": 65536,
+          "old_sha256": "ced1126b4f9997b0c3a9f5513d6de33cb4601af039813b9ac442a3f5babc65f4"
+        },
+        {
+          "equal": true,
+          "new_bytes": 65536,
+          "new_sha256": "ed2d5813049e61c3ccdc06edb8ce3728e48293ac4d9a40988a28fec4f93764f5",
+          "offset": 2883584,
+          "old_bytes": 65536,
+          "old_sha256": "ed2d5813049e61c3ccdc06edb8ce3728e48293ac4d9a40988a28fec4f93764f5"
+        },
+        {
+          "equal": true,
+          "new_bytes": 65536,
+          "new_sha256": "5917159940f94850d8849e13fbb3e42c83a16492e30077b43861cae098caa705",
+          "offset": 2949120,
+          "old_bytes": 65536,
+          "old_sha256": "5917159940f94850d8849e13fbb3e42c83a16492e30077b43861cae098caa705"
+        },
+        {
+          "equal": true,
+          "new_bytes": 65536,
+          "new_sha256": "148e80ddeff4feb283b707aaa9d54ec8a130a1607c0101216045acc648df55ca",
+          "offset": 3014656,
+          "old_bytes": 65536,
+          "old_sha256": "148e80ddeff4feb283b707aaa9d54ec8a130a1607c0101216045acc648df55ca"
+        },
+        {
+          "equal": true,
+          "new_bytes": 65536,
+          "new_sha256": "192d684e0f91cec82acf2d6e2bea75ceab8bdc4447cdd5e9d61c7e233155c5dd",
+          "offset": 3080192,
+          "old_bytes": 65536,
+          "old_sha256": "192d684e0f91cec82acf2d6e2bea75ceab8bdc4447cdd5e9d61c7e233155c5dd"
+        },
+        {
+          "equal": true,
+          "new_bytes": 65536,
+          "new_sha256": "227a0a9a68c5b51d538c659fc889dd5e8774f71d5aa88e6d1402d260c90ae3d6",
+          "offset": 3145728,
+          "old_bytes": 65536,
+          "old_sha256": "227a0a9a68c5b51d538c659fc889dd5e8774f71d5aa88e6d1402d260c90ae3d6"
+        },
+        {
+          "equal": true,
+          "new_bytes": 65536,
+          "new_sha256": "acbfaed9b043b1b9f6d1957f7d491e7d30f9da205d6a5736f37c7bf02805233f",
+          "offset": 3211264,
+          "old_bytes": 65536,
+          "old_sha256": "acbfaed9b043b1b9f6d1957f7d491e7d30f9da205d6a5736f37c7bf02805233f"
+        },
+        {
+          "equal": true,
+          "new_bytes": 65536,
+          "new_sha256": "d3ad691ef7ae899df3ea691fa5aba4eb67e2e2ed6c480be762296d24dccccf03",
+          "offset": 3276800,
+          "old_bytes": 65536,
+          "old_sha256": "d3ad691ef7ae899df3ea691fa5aba4eb67e2e2ed6c480be762296d24dccccf03"
+        },
+        {
+          "equal": true,
+          "new_bytes": 65536,
+          "new_sha256": "5a0486cba7fa2efed1cfe1e87a186613a4240c86470e1dbcedd53ff2bf8bb6a1",
+          "offset": 3342336,
+          "old_bytes": 65536,
+          "old_sha256": "5a0486cba7fa2efed1cfe1e87a186613a4240c86470e1dbcedd53ff2bf8bb6a1"
+        },
+        {
+          "equal": true,
+          "new_bytes": 65536,
+          "new_sha256": "7c0e8a846991dfbedbf7678276b8efb9a6a1463a8bfda8e86a213b3ad55625af",
+          "offset": 3407872,
+          "old_bytes": 65536,
+          "old_sha256": "7c0e8a846991dfbedbf7678276b8efb9a6a1463a8bfda8e86a213b3ad55625af"
+        },
+        {
+          "equal": true,
+          "new_bytes": 65536,
+          "new_sha256": "14a6c9acf9956994f980635a30342bbcfced22d2e1584396914a4b44b1e89598",
+          "offset": 3473408,
+          "old_bytes": 65536,
+          "old_sha256": "14a6c9acf9956994f980635a30342bbcfced22d2e1584396914a4b44b1e89598"
+        },
+        {
+          "equal": true,
+          "new_bytes": 65536,
+          "new_sha256": "a745a115fca7e64043bffcdba49c794d34ff6dbf24fee6e6e08fd4503fbe1bfe",
+          "offset": 3538944,
+          "old_bytes": 65536,
+          "old_sha256": "a745a115fca7e64043bffcdba49c794d34ff6dbf24fee6e6e08fd4503fbe1bfe"
+        },
+        {
+          "equal": true,
+          "new_bytes": 65536,
+          "new_sha256": "f41a8d8d57c56a4d624fd0745b61a4123e3d196e182c0a57d10a4d2326acd3d1",
+          "offset": 3604480,
+          "old_bytes": 65536,
+          "old_sha256": "f41a8d8d57c56a4d624fd0745b61a4123e3d196e182c0a57d10a4d2326acd3d1"
+        },
+        {
+          "equal": true,
+          "new_bytes": 65536,
+          "new_sha256": "d5b4a739c6f2aec681b3b6ed7b7ad3cf6dbe55f4bf2b2e9ab7ecc6ed1e982067",
+          "offset": 3670016,
+          "old_bytes": 65536,
+          "old_sha256": "d5b4a739c6f2aec681b3b6ed7b7ad3cf6dbe55f4bf2b2e9ab7ecc6ed1e982067"
+        },
+        {
+          "equal": true,
+          "new_bytes": 65536,
+          "new_sha256": "31d483c4bd5bbb00576fa592699a17d67e8cd269721e16518a8bf2d512cd6a3c",
+          "offset": 3735552,
+          "old_bytes": 65536,
+          "old_sha256": "31d483c4bd5bbb00576fa592699a17d67e8cd269721e16518a8bf2d512cd6a3c"
+        },
+        {
+          "equal": true,
+          "new_bytes": 65536,
+          "new_sha256": "a3b55660330f79372fcc98770cf22b236bd5db395abddcacb55dfeac6a692b0f",
+          "offset": 3801088,
+          "old_bytes": 65536,
+          "old_sha256": "a3b55660330f79372fcc98770cf22b236bd5db395abddcacb55dfeac6a692b0f"
+        },
+        {
+          "equal": true,
+          "new_bytes": 65536,
+          "new_sha256": "714db5fe50da5dac21a877ee394867a960b5f96831dbfeef6608d329530c66f3",
+          "offset": 3866624,
+          "old_bytes": 65536,
+          "old_sha256": "714db5fe50da5dac21a877ee394867a960b5f96831dbfeef6608d329530c66f3"
+        },
+        {
+          "equal": true,
+          "new_bytes": 65536,
+          "new_sha256": "a82554b9805a58f987dc82393853dc79fad5c6e9bf6adc2cf5a9304316352127",
+          "offset": 3932160,
+          "old_bytes": 65536,
+          "old_sha256": "a82554b9805a58f987dc82393853dc79fad5c6e9bf6adc2cf5a9304316352127"
+        },
+        {
+          "equal": true,
+          "new_bytes": 65536,
+          "new_sha256": "623b5910f05a933ba4b93fde369521bbdc21093e67e237a305082d422ed0181e",
+          "offset": 3997696,
+          "old_bytes": 65536,
+          "old_sha256": "623b5910f05a933ba4b93fde369521bbdc21093e67e237a305082d422ed0181e"
+        },
+        {
+          "equal": true,
+          "new_bytes": 65536,
+          "new_sha256": "f84c1d04cc3458d6451b36b0a1f5ee26881ff04ef6ee5089819118a0cf7ab46e",
+          "offset": 4063232,
+          "old_bytes": 65536,
+          "old_sha256": "f84c1d04cc3458d6451b36b0a1f5ee26881ff04ef6ee5089819118a0cf7ab46e"
+        },
+        {
+          "equal": true,
+          "new_bytes": 10710,
+          "new_sha256": "c24819b44cb2c7a94a594daddd2a21f513190d8ca402609086674ddd3c3db83f",
+          "offset": 4128768,
+          "old_bytes": 10710,
+          "old_sha256": "c24819b44cb2c7a94a594daddd2a21f513190d8ca402609086674ddd3c3db83f"
+        }
+      ],
+      "original": {
+        "bytes": 4139478,
+        "identity9_decimal_strings": [
+          "2050",
+          "5266263",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "4139478",
+          "1790919933629036862",
+          "1790919933632037033"
+        ],
+        "path": "/var/tmp/friday-sol055-a147-a155-whole54-all32-connected-source-repair/Source54/schemas/control-inventory.v1.json",
+        "sha256": "e7255f04bc4fa806960fcca79b6b37b67202417170ed59c3b9101863e3e91224",
+        "stable9": true
+      },
+      "relative": "Source54/schemas/control-inventory.v1.json",
+      "runtime": "NOT_RUN",
+      "transitive_required": true
+    },
+    {
+      "GO": false,
+      "changed": false,
+      "current": {
+        "bytes": 17092,
+        "identity9_decimal_strings": [
+          "2050",
+          "4225236",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "17092",
+          "1790922522611191020",
+          "1790922522612191078"
+        ],
+        "path": "/var/tmp/friday-sol056-sol055-whole54-all32-remaining-connected-source-implementation/Source54/schemas/inherited-evidence-pins.v1.json",
+        "sha256": "22a2b9e35f00115a9d5e4b854504544b48df863d83edfaf40ac158ddc5abb8e4",
+        "stable9": true
+      },
+      "current_semantic_independent_review": "REQUIRED_NOT_RUN",
+      "full_partitions": [
+        {
+          "equal": true,
+          "new_bytes": 17092,
+          "new_sha256": "22a2b9e35f00115a9d5e4b854504544b48df863d83edfaf40ac158ddc5abb8e4",
+          "offset": 0,
+          "old_bytes": 17092,
+          "old_sha256": "22a2b9e35f00115a9d5e4b854504544b48df863d83edfaf40ac158ddc5abb8e4"
+        }
+      ],
+      "original": {
+        "bytes": 17092,
+        "identity9_decimal_strings": [
+          "2050",
+          "5266264",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "17092",
+          "1790919933651038121",
+          "1790919933652038178"
+        ],
+        "path": "/var/tmp/friday-sol055-a147-a155-whole54-all32-connected-source-repair/Source54/schemas/inherited-evidence-pins.v1.json",
+        "sha256": "22a2b9e35f00115a9d5e4b854504544b48df863d83edfaf40ac158ddc5abb8e4",
+        "stable9": true
+      },
+      "relative": "Source54/schemas/inherited-evidence-pins.v1.json",
+      "runtime": "NOT_RUN",
+      "transitive_required": true
+    },
+    {
+      "GO": false,
+      "changed": false,
+      "current": {
+        "bytes": 5235,
+        "identity9_decimal_strings": [
+          "2050",
+          "4225237",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "5235",
+          "1790922522627191936",
+          "1790922522628191994"
+        ],
+        "path": "/var/tmp/friday-sol056-sol055-whole54-all32-remaining-connected-source-implementation/Source54/schemas/install-grant.v1.md",
+        "sha256": "9a4f1eaa41f8c2ce9f31bc28cbdaf8cd1468a6a3561853861bac3b90466557d9",
+        "stable9": true
+      },
+      "current_semantic_independent_review": "REQUIRED_NOT_RUN",
+      "full_partitions": [
+        {
+          "equal": true,
+          "new_bytes": 5235,
+          "new_sha256": "9a4f1eaa41f8c2ce9f31bc28cbdaf8cd1468a6a3561853861bac3b90466557d9",
+          "offset": 0,
+          "old_bytes": 5235,
+          "old_sha256": "9a4f1eaa41f8c2ce9f31bc28cbdaf8cd1468a6a3561853861bac3b90466557d9"
+        }
+      ],
+      "original": {
+        "bytes": 5235,
+        "identity9_decimal_strings": [
+          "2050",
+          "5266265",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "5235",
+          "1790919933668039093",
+          "1790919933669039150"
+        ],
+        "path": "/var/tmp/friday-sol055-a147-a155-whole54-all32-connected-source-repair/Source54/schemas/install-grant.v1.md",
+        "sha256": "9a4f1eaa41f8c2ce9f31bc28cbdaf8cd1468a6a3561853861bac3b90466557d9",
+        "stable9": true
+      },
+      "relative": "Source54/schemas/install-grant.v1.md",
+      "runtime": "NOT_RUN",
+      "transitive_required": true
+    },
+    {
+      "GO": false,
+      "changed": false,
+      "current": {
+        "bytes": 6965,
+        "identity9_decimal_strings": [
+          "2050",
+          "4225238",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "6965",
+          "1790922522645192967",
+          "1790922522646193024"
+        ],
+        "path": "/var/tmp/friday-sol056-sol055-whole54-all32-remaining-connected-source-implementation/Source54/schemas/install-journal.v1.md",
+        "sha256": "6d1a0aa7e77598fec73b4c594a712a679026d16313a5cd78dd0f1d8c839c476a",
+        "stable9": true
+      },
+      "current_semantic_independent_review": "REQUIRED_NOT_RUN",
+      "full_partitions": [
+        {
+          "equal": true,
+          "new_bytes": 6965,
+          "new_sha256": "6d1a0aa7e77598fec73b4c594a712a679026d16313a5cd78dd0f1d8c839c476a",
+          "offset": 0,
+          "old_bytes": 6965,
+          "old_sha256": "6d1a0aa7e77598fec73b4c594a712a679026d16313a5cd78dd0f1d8c839c476a"
+        }
+      ],
+      "original": {
+        "bytes": 6965,
+        "identity9_decimal_strings": [
+          "2050",
+          "5266266",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "6965",
+          "1790919933684040009",
+          "1790919933685040067"
+        ],
+        "path": "/var/tmp/friday-sol055-a147-a155-whole54-all32-connected-source-repair/Source54/schemas/install-journal.v1.md",
+        "sha256": "6d1a0aa7e77598fec73b4c594a712a679026d16313a5cd78dd0f1d8c839c476a",
+        "stable9": true
+      },
+      "relative": "Source54/schemas/install-journal.v1.md",
+      "runtime": "NOT_RUN",
+      "transitive_required": true
+    },
+    {
+      "GO": false,
+      "changed": false,
+      "current": {
+        "bytes": 2175,
+        "identity9_decimal_strings": [
+          "2050",
+          "4225239",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "2175",
+          "1790922522662193940",
+          "1790922522663193998"
+        ],
+        "path": "/var/tmp/friday-sol056-sol055-whole54-all32-remaining-connected-source-implementation/Source54/schemas/installed-authority.v1.md",
+        "sha256": "a4b8666e141c5376aba230c8df01c9b59f9b3eb8a58c34d3277e612a34d7002a",
+        "stable9": true
+      },
+      "current_semantic_independent_review": "REQUIRED_NOT_RUN",
+      "full_partitions": [
+        {
+          "equal": true,
+          "new_bytes": 2175,
+          "new_sha256": "a4b8666e141c5376aba230c8df01c9b59f9b3eb8a58c34d3277e612a34d7002a",
+          "offset": 0,
+          "old_bytes": 2175,
+          "old_sha256": "a4b8666e141c5376aba230c8df01c9b59f9b3eb8a58c34d3277e612a34d7002a"
+        }
+      ],
+      "original": {
+        "bytes": 2175,
+        "identity9_decimal_strings": [
+          "2050",
+          "5266267",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "2175",
+          "1790919933703041097",
+          "1790919933704041154"
+        ],
+        "path": "/var/tmp/friday-sol055-a147-a155-whole54-all32-connected-source-repair/Source54/schemas/installed-authority.v1.md",
+        "sha256": "a4b8666e141c5376aba230c8df01c9b59f9b3eb8a58c34d3277e612a34d7002a",
+        "stable9": true
+      },
+      "relative": "Source54/schemas/installed-authority.v1.md",
+      "runtime": "NOT_RUN",
+      "transitive_required": true
+    },
+    {
+      "GO": false,
+      "changed": false,
+      "current": {
+        "bytes": 1811,
+        "identity9_decimal_strings": [
+          "2050",
+          "4225240",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "1811",
+          "1790922522680194971",
+          "1790922522681195028"
+        ],
+        "path": "/var/tmp/friday-sol056-sol055-whole54-all32-remaining-connected-source-implementation/Source54/schemas/live-grant.v1.md",
+        "sha256": "4203704d06e50d19ecf2eadd41cdbf143a85c9ddd02d0ef6701b3d6999d3e792",
+        "stable9": true
+      },
+      "current_semantic_independent_review": "REQUIRED_NOT_RUN",
+      "full_partitions": [
+        {
+          "equal": true,
+          "new_bytes": 1811,
+          "new_sha256": "4203704d06e50d19ecf2eadd41cdbf143a85c9ddd02d0ef6701b3d6999d3e792",
+          "offset": 0,
+          "old_bytes": 1811,
+          "old_sha256": "4203704d06e50d19ecf2eadd41cdbf143a85c9ddd02d0ef6701b3d6999d3e792"
+        }
+      ],
+      "original": {
+        "bytes": 1811,
+        "identity9_decimal_strings": [
+          "2050",
+          "5266268",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "1811",
+          "1790919933719042012",
+          "1790919933720042069"
+        ],
+        "path": "/var/tmp/friday-sol055-a147-a155-whole54-all32-connected-source-repair/Source54/schemas/live-grant.v1.md",
+        "sha256": "4203704d06e50d19ecf2eadd41cdbf143a85c9ddd02d0ef6701b3d6999d3e792",
+        "stable9": true
+      },
+      "relative": "Source54/schemas/live-grant.v1.md",
+      "runtime": "NOT_RUN",
+      "transitive_required": true
+    },
+    {
+      "GO": false,
+      "changed": false,
+      "current": {
+        "bytes": 2771,
+        "identity9_decimal_strings": [
+          "2050",
+          "4225241",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "2771",
+          "1790922522696195887",
+          "1790922522698196002"
+        ],
+        "path": "/var/tmp/friday-sol056-sol055-whole54-all32-remaining-connected-source-implementation/Source54/schemas/material-provenance.v1.md",
+        "sha256": "9b1b072b51669e53d675455af8c7fb60cd8d8b9fcc38b05c2a366e0071488170",
+        "stable9": true
+      },
+      "current_semantic_independent_review": "REQUIRED_NOT_RUN",
+      "full_partitions": [
+        {
+          "equal": true,
+          "new_bytes": 2771,
+          "new_sha256": "9b1b072b51669e53d675455af8c7fb60cd8d8b9fcc38b05c2a366e0071488170",
+          "offset": 0,
+          "old_bytes": 2771,
+          "old_sha256": "9b1b072b51669e53d675455af8c7fb60cd8d8b9fcc38b05c2a366e0071488170"
+        }
+      ],
+      "original": {
+        "bytes": 2771,
+        "identity9_decimal_strings": [
+          "2050",
+          "5266269",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "2771",
+          "1790919933736042985",
+          "1790919933738043099"
+        ],
+        "path": "/var/tmp/friday-sol055-a147-a155-whole54-all32-connected-source-repair/Source54/schemas/material-provenance.v1.md",
+        "sha256": "9b1b072b51669e53d675455af8c7fb60cd8d8b9fcc38b05c2a366e0071488170",
+        "stable9": true
+      },
+      "relative": "Source54/schemas/material-provenance.v1.md",
+      "runtime": "NOT_RUN",
+      "transitive_required": true
+    },
+    {
+      "GO": false,
+      "changed": false,
+      "current": {
+        "bytes": 1683,
+        "identity9_decimal_strings": [
+          "2050",
+          "4225242",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "1683",
+          "1790922522714196918",
+          "1790922522715196975"
+        ],
+        "path": "/var/tmp/friday-sol056-sol055-whole54-all32-remaining-connected-source-implementation/Source54/schemas/package-index.v1.md",
+        "sha256": "324c00248959483497c1f905951c303043d764b214168b94a367bb8c82bc7904",
+        "stable9": true
+      },
+      "current_semantic_independent_review": "REQUIRED_NOT_RUN",
+      "full_partitions": [
+        {
+          "equal": true,
+          "new_bytes": 1683,
+          "new_sha256": "324c00248959483497c1f905951c303043d764b214168b94a367bb8c82bc7904",
+          "offset": 0,
+          "old_bytes": 1683,
+          "old_sha256": "324c00248959483497c1f905951c303043d764b214168b94a367bb8c82bc7904"
+        }
+      ],
+      "original": {
+        "bytes": 1683,
+        "identity9_decimal_strings": [
+          "2050",
+          "5266270",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "1683",
+          "1790919933754044015",
+          "1790919933755044072"
+        ],
+        "path": "/var/tmp/friday-sol055-a147-a155-whole54-all32-connected-source-repair/Source54/schemas/package-index.v1.md",
+        "sha256": "324c00248959483497c1f905951c303043d764b214168b94a367bb8c82bc7904",
+        "stable9": true
+      },
+      "relative": "Source54/schemas/package-index.v1.md",
+      "runtime": "NOT_RUN",
+      "transitive_required": true
+    },
+    {
+      "GO": false,
+      "changed": false,
+      "current": {
+        "bytes": 6494,
+        "identity9_decimal_strings": [
+          "2050",
+          "4225243",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "6494",
+          "1790922522731197891",
+          "1790922522733198005"
+        ],
+        "path": "/var/tmp/friday-sol056-sol055-whole54-all32-remaining-connected-source-implementation/Source54/schemas/run-context.v1.md",
+        "sha256": "4c9ce9e7ae4eb467286cb0ccef921a87d9e7b436698564bd9dc8715ec2cf763a",
+        "stable9": true
+      },
+      "current_semantic_independent_review": "REQUIRED_NOT_RUN",
+      "full_partitions": [
+        {
+          "equal": true,
+          "new_bytes": 6494,
+          "new_sha256": "4c9ce9e7ae4eb467286cb0ccef921a87d9e7b436698564bd9dc8715ec2cf763a",
+          "offset": 0,
+          "old_bytes": 6494,
+          "old_sha256": "4c9ce9e7ae4eb467286cb0ccef921a87d9e7b436698564bd9dc8715ec2cf763a"
+        }
+      ],
+      "original": {
+        "bytes": 6494,
+        "identity9_decimal_strings": [
+          "2050",
+          "5266271",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "6494",
+          "1790919933771044988",
+          "1790919933773045102"
+        ],
+        "path": "/var/tmp/friday-sol055-a147-a155-whole54-all32-connected-source-repair/Source54/schemas/run-context.v1.md",
+        "sha256": "4c9ce9e7ae4eb467286cb0ccef921a87d9e7b436698564bd9dc8715ec2cf763a",
+        "stable9": true
+      },
+      "relative": "Source54/schemas/run-context.v1.md",
+      "runtime": "NOT_RUN",
+      "transitive_required": true
+    },
+    {
+      "GO": false,
+      "changed": false,
+      "current": {
+        "bytes": 3097,
+        "identity9_decimal_strings": [
+          "2050",
+          "4225244",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "3097",
+          "1790922522747198807",
+          "1790922522748198864"
+        ],
+        "path": "/var/tmp/friday-sol056-sol055-whole54-all32-remaining-connected-source-implementation/Source54/schemas/snapshot-manifest.v1.md",
+        "sha256": "976a28d2364d58738593007746716d744febb0c5c335da80791be00a194b9313",
+        "stable9": true
+      },
+      "current_semantic_independent_review": "REQUIRED_NOT_RUN",
+      "full_partitions": [
+        {
+          "equal": true,
+          "new_bytes": 3097,
+          "new_sha256": "976a28d2364d58738593007746716d744febb0c5c335da80791be00a194b9313",
+          "offset": 0,
+          "old_bytes": 3097,
+          "old_sha256": "976a28d2364d58738593007746716d744febb0c5c335da80791be00a194b9313"
+        }
+      ],
+      "original": {
+        "bytes": 3097,
+        "identity9_decimal_strings": [
+          "2050",
+          "5266272",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "3097",
+          "1790919933788045961",
+          "1790919933790046075"
+        ],
+        "path": "/var/tmp/friday-sol055-a147-a155-whole54-all32-connected-source-repair/Source54/schemas/snapshot-manifest.v1.md",
+        "sha256": "976a28d2364d58738593007746716d744febb0c5c335da80791be00a194b9313",
+        "stable9": true
+      },
+      "relative": "Source54/schemas/snapshot-manifest.v1.md",
+      "runtime": "NOT_RUN",
+      "transitive_required": true
+    },
+    {
+      "GO": false,
+      "changed": false,
+      "current": {
+        "bytes": 6903,
+        "identity9_decimal_strings": [
+          "2050",
+          "4225245",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "6903",
+          "1790922522764199780",
+          "1790922522766199895"
+        ],
+        "path": "/var/tmp/friday-sol056-sol055-whole54-all32-remaining-connected-source-implementation/Source54/schemas/terminal-evidence.v1.md",
+        "sha256": "ddc74ba41279d9067c5196514cf64c656ef581e7ffc919ac5dc5bfe2f2319ea0",
+        "stable9": true
+      },
+      "current_semantic_independent_review": "REQUIRED_NOT_RUN",
+      "full_partitions": [
+        {
+          "equal": true,
+          "new_bytes": 6903,
+          "new_sha256": "ddc74ba41279d9067c5196514cf64c656ef581e7ffc919ac5dc5bfe2f2319ea0",
+          "offset": 0,
+          "old_bytes": 6903,
+          "old_sha256": "ddc74ba41279d9067c5196514cf64c656ef581e7ffc919ac5dc5bfe2f2319ea0"
+        }
+      ],
+      "original": {
+        "bytes": 6903,
+        "identity9_decimal_strings": [
+          "2050",
+          "5266273",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "6903",
+          "1790919933805046934",
+          "1790919933807047048"
+        ],
+        "path": "/var/tmp/friday-sol055-a147-a155-whole54-all32-connected-source-repair/Source54/schemas/terminal-evidence.v1.md",
+        "sha256": "ddc74ba41279d9067c5196514cf64c656ef581e7ffc919ac5dc5bfe2f2319ea0",
+        "stable9": true
+      },
+      "relative": "Source54/schemas/terminal-evidence.v1.md",
+      "runtime": "NOT_RUN",
+      "transitive_required": true
+    },
+    {
+      "GO": false,
+      "changed": false,
+      "current": {
+        "bytes": 19305,
+        "identity9_decimal_strings": [
+          "2050",
+          "4225247",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "19305",
+          "1790922522783200868",
+          "1790922522785200983"
+        ],
+        "path": "/var/tmp/friday-sol056-sol055-whole54-all32-remaining-connected-source-implementation/Source54/src/archive.py",
+        "sha256": "2822df686a34ae2af042e04720600d1b6e5aecac023aa242878e62aaec1db1cf",
+        "stable9": true
+      },
+      "current_semantic_independent_review": "REQUIRED_NOT_RUN",
+      "full_partitions": [
+        {
+          "equal": true,
+          "new_bytes": 19305,
+          "new_sha256": "2822df686a34ae2af042e04720600d1b6e5aecac023aa242878e62aaec1db1cf",
+          "offset": 0,
+          "old_bytes": 19305,
+          "old_sha256": "2822df686a34ae2af042e04720600d1b6e5aecac023aa242878e62aaec1db1cf"
+        }
+      ],
+      "original": {
+        "bytes": 19305,
+        "identity9_decimal_strings": [
+          "2050",
+          "5404483",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "19305",
+          "1790919933824048021",
+          "1790919933826048136"
+        ],
+        "path": "/var/tmp/friday-sol055-a147-a155-whole54-all32-connected-source-repair/Source54/src/archive.py",
+        "sha256": "2822df686a34ae2af042e04720600d1b6e5aecac023aa242878e62aaec1db1cf",
+        "stable9": true
+      },
+      "relative": "Source54/src/archive.py",
+      "runtime": "NOT_RUN",
+      "transitive_required": true
+    },
+    {
+      "GO": false,
+      "changed": false,
+      "current": {
+        "bytes": 5879,
+        "identity9_decimal_strings": [
+          "2050",
+          "4225248",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "5879",
+          "1790922522801201899",
+          "1790922522802201956"
+        ],
+        "path": "/var/tmp/friday-sol056-sol055-whole54-all32-remaining-connected-source-implementation/Source54/src/assemble.py",
+        "sha256": "48a1ee891a42bf99ec365de40d7db956c3239ccf993b1786dca7db29861836c8",
+        "stable9": true
+      },
+      "current_semantic_independent_review": "REQUIRED_NOT_RUN",
+      "full_partitions": [
+        {
+          "equal": true,
+          "new_bytes": 5879,
+          "new_sha256": "48a1ee891a42bf99ec365de40d7db956c3239ccf993b1786dca7db29861836c8",
+          "offset": 0,
+          "old_bytes": 5879,
+          "old_sha256": "48a1ee891a42bf99ec365de40d7db956c3239ccf993b1786dca7db29861836c8"
+        }
+      ],
+      "original": {
+        "bytes": 5879,
+        "identity9_decimal_strings": [
+          "2050",
+          "5404484",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "5879",
+          "1790919933840048937",
+          "1790919933841048994"
+        ],
+        "path": "/var/tmp/friday-sol055-a147-a155-whole54-all32-connected-source-repair/Source54/src/assemble.py",
+        "sha256": "48a1ee891a42bf99ec365de40d7db956c3239ccf993b1786dca7db29861836c8",
+        "stable9": true
+      },
+      "relative": "Source54/src/assemble.py",
+      "runtime": "NOT_RUN",
+      "transitive_required": true
+    },
+    {
+      "GO": false,
+      "changed": false,
+      "current": {
+        "bytes": 29243,
+        "identity9_decimal_strings": [
+          "2050",
+          "4225249",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "29243",
+          "1790922522819202929",
+          "1790922522820202987"
+        ],
+        "path": "/var/tmp/friday-sol056-sol055-whole54-all32-remaining-connected-source-implementation/Source54/src/broker_bootstrap.py",
+        "sha256": "c2c0e5bc9933321cb876201ee617aed05f071a71d373c2e0db5ce0498e4f7057",
+        "stable9": true
+      },
+      "current_semantic_independent_review": "REQUIRED_NOT_RUN",
+      "full_partitions": [
+        {
+          "equal": true,
+          "new_bytes": 29243,
+          "new_sha256": "c2c0e5bc9933321cb876201ee617aed05f071a71d373c2e0db5ce0498e4f7057",
+          "offset": 0,
+          "old_bytes": 29243,
+          "old_sha256": "c2c0e5bc9933321cb876201ee617aed05f071a71d373c2e0db5ce0498e4f7057"
+        }
+      ],
+      "original": {
+        "bytes": 29243,
+        "identity9_decimal_strings": [
+          "2050",
+          "5404485",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "29243",
+          "1790919933857049909",
+          "1790919933858049967"
+        ],
+        "path": "/var/tmp/friday-sol055-a147-a155-whole54-all32-connected-source-repair/Source54/src/broker_bootstrap.py",
+        "sha256": "c2c0e5bc9933321cb876201ee617aed05f071a71d373c2e0db5ce0498e4f7057",
+        "stable9": true
+      },
+      "relative": "Source54/src/broker_bootstrap.py",
+      "runtime": "NOT_RUN",
+      "transitive_required": true
+    },
+    {
+      "GO": false,
+      "changed": false,
+      "current": {
+        "bytes": 34872,
+        "identity9_decimal_strings": [
+          "2050",
+          "4225250",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "34872",
+          "1790922522836203903",
+          "1790922522838204017"
+        ],
+        "path": "/var/tmp/friday-sol056-sol055-whole54-all32-remaining-connected-source-implementation/Source54/src/broker_runtime.py",
+        "sha256": "225f8443684ad884f25088bb94cd1d3e02765a41a440d2e5840298595a4788aa",
+        "stable9": true
+      },
+      "current_semantic_independent_review": "REQUIRED_NOT_RUN",
+      "full_partitions": [
+        {
+          "equal": true,
+          "new_bytes": 34872,
+          "new_sha256": "225f8443684ad884f25088bb94cd1d3e02765a41a440d2e5840298595a4788aa",
+          "offset": 0,
+          "old_bytes": 34872,
+          "old_sha256": "225f8443684ad884f25088bb94cd1d3e02765a41a440d2e5840298595a4788aa"
+        }
+      ],
+      "original": {
+        "bytes": 34872,
+        "identity9_decimal_strings": [
+          "2050",
+          "5404486",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "34872",
+          "1790919933874050882",
+          "1790919933875050939"
+        ],
+        "path": "/var/tmp/friday-sol055-a147-a155-whole54-all32-connected-source-repair/Source54/src/broker_runtime.py",
+        "sha256": "225f8443684ad884f25088bb94cd1d3e02765a41a440d2e5840298595a4788aa",
+        "stable9": true
+      },
+      "relative": "Source54/src/broker_runtime.py",
+      "runtime": "NOT_RUN",
+      "transitive_required": true
+    },
+    {
+      "GO": false,
+      "changed": false,
+      "current": {
+        "bytes": 7703,
+        "identity9_decimal_strings": [
+          "2050",
+          "4225251",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "7703",
+          "1790922522853204876",
+          "1790922522854204933"
+        ],
+        "path": "/var/tmp/friday-sol056-sol055-whole54-all32-remaining-connected-source-implementation/Source54/src/canonical.py",
+        "sha256": "94c4a2dbb31991bdd942a6baf366f19d286c3aa052c3031fd827f01c9340596b",
+        "stable9": true
+      },
+      "current_semantic_independent_review": "REQUIRED_NOT_RUN",
+      "full_partitions": [
+        {
+          "equal": true,
+          "new_bytes": 7703,
+          "new_sha256": "94c4a2dbb31991bdd942a6baf366f19d286c3aa052c3031fd827f01c9340596b",
+          "offset": 0,
+          "old_bytes": 7703,
+          "old_sha256": "94c4a2dbb31991bdd942a6baf366f19d286c3aa052c3031fd827f01c9340596b"
+        }
+      ],
+      "original": {
+        "bytes": 7703,
+        "identity9_decimal_strings": [
+          "2050",
+          "5404487",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "7703",
+          "1790919933890051798",
+          "1790919933892051913"
+        ],
+        "path": "/var/tmp/friday-sol055-a147-a155-whole54-all32-connected-source-repair/Source54/src/canonical.py",
+        "sha256": "94c4a2dbb31991bdd942a6baf366f19d286c3aa052c3031fd827f01c9340596b",
+        "stable9": true
+      },
+      "relative": "Source54/src/canonical.py",
+      "runtime": "NOT_RUN",
+      "transitive_required": true
+    },
+    {
+      "GO": false,
+      "changed": false,
+      "current": {
+        "bytes": 51535,
+        "identity9_decimal_strings": [
+          "2050",
+          "4225252",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "51535",
+          "1790922522872205964",
+          "1790922522874206078"
+        ],
+        "path": "/var/tmp/friday-sol056-sol055-whole54-all32-remaining-connected-source-implementation/Source54/src/custody_linux.py",
+        "sha256": "01713b1a5b0e38d0e33d45b23c4cfc5d449fb1bfcba48f0c87b42d57315b78e7",
+        "stable9": true
+      },
+      "current_semantic_independent_review": "REQUIRED_NOT_RUN",
+      "full_partitions": [
+        {
+          "equal": true,
+          "new_bytes": 51535,
+          "new_sha256": "01713b1a5b0e38d0e33d45b23c4cfc5d449fb1bfcba48f0c87b42d57315b78e7",
+          "offset": 0,
+          "old_bytes": 51535,
+          "old_sha256": "01713b1a5b0e38d0e33d45b23c4cfc5d449fb1bfcba48f0c87b42d57315b78e7"
+        }
+      ],
+      "original": {
+        "bytes": 51535,
+        "identity9_decimal_strings": [
+          "2050",
+          "5404488",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "51535",
+          "1790919933909052885",
+          "1790919933910052943"
+        ],
+        "path": "/var/tmp/friday-sol055-a147-a155-whole54-all32-connected-source-repair/Source54/src/custody_linux.py",
+        "sha256": "01713b1a5b0e38d0e33d45b23c4cfc5d449fb1bfcba48f0c87b42d57315b78e7",
+        "stable9": true
+      },
+      "relative": "Source54/src/custody_linux.py",
+      "runtime": "NOT_RUN",
+      "transitive_required": true
+    },
+    {
+      "GO": false,
+      "changed": false,
+      "current": {
+        "bytes": 85227,
+        "identity9_decimal_strings": [
+          "2050",
+          "4225253",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "85227",
+          "1790922522893207166",
+          "1790922522894207223"
+        ],
+        "path": "/var/tmp/friday-sol056-sol055-whole54-all32-remaining-connected-source-implementation/Source54/src/install.py",
+        "sha256": "9bccaedf309d7fc1f0eeb9de5a3856a83e6236f431a060ef037936c60c2bb9d2",
+        "stable9": true
+      },
+      "current_semantic_independent_review": "REQUIRED_NOT_RUN",
+      "full_partitions": [
+        {
+          "equal": true,
+          "new_bytes": 65536,
+          "new_sha256": "2ce95db2a949e1cf05bfa4419dac1c74037268ec52cb0948e1c3de74f899667d",
+          "offset": 0,
+          "old_bytes": 65536,
+          "old_sha256": "2ce95db2a949e1cf05bfa4419dac1c74037268ec52cb0948e1c3de74f899667d"
+        },
+        {
+          "equal": true,
+          "new_bytes": 19691,
+          "new_sha256": "cb8e6b1f29090f71a12a9bbb548d912be8f3fe7029c9a88a3c20c15199e1c16f",
+          "offset": 65536,
+          "old_bytes": 19691,
+          "old_sha256": "cb8e6b1f29090f71a12a9bbb548d912be8f3fe7029c9a88a3c20c15199e1c16f"
+        }
+      ],
+      "original": {
+        "bytes": 85227,
+        "identity9_decimal_strings": [
+          "2050",
+          "5404489",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "85227",
+          "1790919933926053858",
+          "1790919933928053973"
+        ],
+        "path": "/var/tmp/friday-sol055-a147-a155-whole54-all32-connected-source-repair/Source54/src/install.py",
+        "sha256": "9bccaedf309d7fc1f0eeb9de5a3856a83e6236f431a060ef037936c60c2bb9d2",
+        "stable9": true
+      },
+      "relative": "Source54/src/install.py",
+      "runtime": "NOT_RUN",
+      "transitive_required": true
+    },
+    {
+      "GO": false,
+      "changed": false,
+      "current": {
+        "bytes": 40651,
+        "identity9_decimal_strings": [
+          "2050",
+          "4225254",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "40651",
+          "1790922522910208139",
+          "1790922522912208254"
+        ],
+        "path": "/var/tmp/friday-sol056-sol055-whole54-all32-remaining-connected-source-implementation/Source54/src/install_bootstrap.py",
+        "sha256": "a8a488c43287dd8c990dc2fd4a16d6285afcd0d2fec34a19448228e8fb1d48fb",
+        "stable9": true
+      },
+      "current_semantic_independent_review": "REQUIRED_NOT_RUN",
+      "full_partitions": [
+        {
+          "equal": true,
+          "new_bytes": 40651,
+          "new_sha256": "a8a488c43287dd8c990dc2fd4a16d6285afcd0d2fec34a19448228e8fb1d48fb",
+          "offset": 0,
+          "old_bytes": 40651,
+          "old_sha256": "a8a488c43287dd8c990dc2fd4a16d6285afcd0d2fec34a19448228e8fb1d48fb"
+        }
+      ],
+      "original": {
+        "bytes": 40651,
+        "identity9_decimal_strings": [
+          "2050",
+          "5404490",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "40651",
+          "1790919933943054831",
+          "1790919933944054888"
+        ],
+        "path": "/var/tmp/friday-sol055-a147-a155-whole54-all32-connected-source-repair/Source54/src/install_bootstrap.py",
+        "sha256": "a8a488c43287dd8c990dc2fd4a16d6285afcd0d2fec34a19448228e8fb1d48fb",
+        "stable9": true
+      },
+      "relative": "Source54/src/install_bootstrap.py",
+      "runtime": "NOT_RUN",
+      "transitive_required": true
+    },
+    {
+      "GO": false,
+      "changed": false,
+      "current": {
+        "bytes": 8224,
+        "identity9_decimal_strings": [
+          "2050",
+          "4225255",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "8224",
+          "1790922522928209170",
+          "1790922522929209227"
+        ],
+        "path": "/var/tmp/friday-sol056-sol055-whole54-all32-remaining-connected-source-implementation/Source54/src/ledger.py",
+        "sha256": "0d37911c174e323d1e68ac046da0e03d7558bb46f0426a2ce25f15ef34d957f1",
+        "stable9": true
+      },
+      "current_semantic_independent_review": "REQUIRED_NOT_RUN",
+      "full_partitions": [
+        {
+          "equal": true,
+          "new_bytes": 8224,
+          "new_sha256": "0d37911c174e323d1e68ac046da0e03d7558bb46f0426a2ce25f15ef34d957f1",
+          "offset": 0,
+          "old_bytes": 8224,
+          "old_sha256": "0d37911c174e323d1e68ac046da0e03d7558bb46f0426a2ce25f15ef34d957f1"
+        }
+      ],
+      "original": {
+        "bytes": 8224,
+        "identity9_decimal_strings": [
+          "2050",
+          "5404491",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "8224",
+          "1790919933958055689",
+          "1790919933960055804"
+        ],
+        "path": "/var/tmp/friday-sol055-a147-a155-whole54-all32-connected-source-repair/Source54/src/ledger.py",
+        "sha256": "0d37911c174e323d1e68ac046da0e03d7558bb46f0426a2ce25f15ef34d957f1",
+        "stable9": true
+      },
+      "relative": "Source54/src/ledger.py",
+      "runtime": "NOT_RUN",
+      "transitive_required": true
+    },
+    {
+      "GO": false,
+      "changed": false,
+      "current": {
+        "bytes": 24342,
+        "identity9_decimal_strings": [
+          "2050",
+          "4225256",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "24342",
+          "1790922522946210201",
+          "1790922522947210258"
+        ],
+        "path": "/var/tmp/friday-sol056-sol055-whole54-all32-remaining-connected-source-implementation/Source54/src/manifest.py",
+        "sha256": "12a666597c02e77ed42e5f799d3b909ea3fb90378d749a36d71520c1c5ae52f5",
+        "stable9": true
+      },
+      "current_semantic_independent_review": "REQUIRED_NOT_RUN",
+      "full_partitions": [
+        {
+          "equal": true,
+          "new_bytes": 24342,
+          "new_sha256": "12a666597c02e77ed42e5f799d3b909ea3fb90378d749a36d71520c1c5ae52f5",
+          "offset": 0,
+          "old_bytes": 24342,
+          "old_sha256": "12a666597c02e77ed42e5f799d3b909ea3fb90378d749a36d71520c1c5ae52f5"
+        }
+      ],
+      "original": {
+        "bytes": 24342,
+        "identity9_decimal_strings": [
+          "2050",
+          "5404492",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "24342",
+          "1790919933975056662",
+          "1790919933976056720"
+        ],
+        "path": "/var/tmp/friday-sol055-a147-a155-whole54-all32-connected-source-repair/Source54/src/manifest.py",
+        "sha256": "12a666597c02e77ed42e5f799d3b909ea3fb90378d749a36d71520c1c5ae52f5",
+        "stable9": true
+      },
+      "relative": "Source54/src/manifest.py",
+      "runtime": "NOT_RUN",
+      "transitive_required": true
+    },
+    {
+      "GO": false,
+      "changed": false,
+      "current": {
+        "bytes": 36129,
+        "identity9_decimal_strings": [
+          "2050",
+          "4225257",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "36129",
+          "1790922522964211231",
+          "1790922522965211288"
+        ],
+        "path": "/var/tmp/friday-sol056-sol055-whole54-all32-remaining-connected-source-implementation/Source54/src/pinned_fs.py",
+        "sha256": "da0d681df4cf1eb69851c183fa23061b2f928743be7b785b16859f5ff8747bcc",
+        "stable9": true
+      },
+      "current_semantic_independent_review": "REQUIRED_NOT_RUN",
+      "full_partitions": [
+        {
+          "equal": true,
+          "new_bytes": 36129,
+          "new_sha256": "da0d681df4cf1eb69851c183fa23061b2f928743be7b785b16859f5ff8747bcc",
+          "offset": 0,
+          "old_bytes": 36129,
+          "old_sha256": "da0d681df4cf1eb69851c183fa23061b2f928743be7b785b16859f5ff8747bcc"
+        }
+      ],
+      "original": {
+        "bytes": 36129,
+        "identity9_decimal_strings": [
+          "2050",
+          "5404493",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "36129",
+          "1790919933992057635",
+          "1790919933993057692"
+        ],
+        "path": "/var/tmp/friday-sol055-a147-a155-whole54-all32-connected-source-repair/Source54/src/pinned_fs.py",
+        "sha256": "da0d681df4cf1eb69851c183fa23061b2f928743be7b785b16859f5ff8747bcc",
+        "stable9": true
+      },
+      "relative": "Source54/src/pinned_fs.py",
+      "runtime": "NOT_RUN",
+      "transitive_required": true
+    },
+    {
+      "GO": false,
+      "changed": false,
+      "current": {
+        "bytes": 23701,
+        "identity9_decimal_strings": [
+          "2050",
+          "4225258",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "23701",
+          "1790922522982212261",
+          "1790922522983212319"
+        ],
+        "path": "/var/tmp/friday-sol056-sol055-whole54-all32-remaining-connected-source-implementation/Source54/src/provenance.py",
+        "sha256": "2f4614a31fca46a27604680bf6d5b08ba8b9b3bdd9061a0ea9fcefef867721e4",
+        "stable9": true
+      },
+      "current_semantic_independent_review": "REQUIRED_NOT_RUN",
+      "full_partitions": [
+        {
+          "equal": true,
+          "new_bytes": 23701,
+          "new_sha256": "2f4614a31fca46a27604680bf6d5b08ba8b9b3bdd9061a0ea9fcefef867721e4",
+          "offset": 0,
+          "old_bytes": 23701,
+          "old_sha256": "2f4614a31fca46a27604680bf6d5b08ba8b9b3bdd9061a0ea9fcefef867721e4"
+        }
+      ],
+      "original": {
+        "bytes": 23701,
+        "identity9_decimal_strings": [
+          "2050",
+          "5404494",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "23701",
+          "1790919934009058608",
+          "1790919934010058665"
+        ],
+        "path": "/var/tmp/friday-sol055-a147-a155-whole54-all32-connected-source-repair/Source54/src/provenance.py",
+        "sha256": "2f4614a31fca46a27604680bf6d5b08ba8b9b3bdd9061a0ea9fcefef867721e4",
+        "stable9": true
+      },
+      "relative": "Source54/src/provenance.py",
+      "runtime": "NOT_RUN",
+      "transitive_required": true
+    },
+    {
+      "GO": false,
+      "changed": false,
+      "current": {
+        "bytes": 905,
+        "identity9_decimal_strings": [
+          "2050",
+          "4225259",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "905",
+          "1790922522998213178",
+          "1790922522999213235"
+        ],
+        "path": "/var/tmp/friday-sol056-sol055-whole54-all32-remaining-connected-source-implementation/Source54/src/recover.py",
+        "sha256": "a4a419493f9b546926051c7f98a51bb0f1f824d95c1a5f907e4bf2ccd1031b4a",
+        "stable9": true
+      },
+      "current_semantic_independent_review": "REQUIRED_NOT_RUN",
+      "full_partitions": [
+        {
+          "equal": true,
+          "new_bytes": 905,
+          "new_sha256": "a4a419493f9b546926051c7f98a51bb0f1f824d95c1a5f907e4bf2ccd1031b4a",
+          "offset": 0,
+          "old_bytes": 905,
+          "old_sha256": "a4a419493f9b546926051c7f98a51bb0f1f824d95c1a5f907e4bf2ccd1031b4a"
+        }
+      ],
+      "original": {
+        "bytes": 905,
+        "identity9_decimal_strings": [
+          "2050",
+          "5404495",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "905",
+          "1790919934025059524",
+          "1790919934026059581"
+        ],
+        "path": "/var/tmp/friday-sol055-a147-a155-whole54-all32-connected-source-repair/Source54/src/recover.py",
+        "sha256": "a4a419493f9b546926051c7f98a51bb0f1f824d95c1a5f907e4bf2ccd1031b4a",
+        "stable9": true
+      },
+      "relative": "Source54/src/recover.py",
+      "runtime": "NOT_RUN",
+      "transitive_required": true
+    },
+    {
+      "GO": false,
+      "changed": false,
+      "current": {
+        "bytes": 11133,
+        "identity9_decimal_strings": [
+          "2050",
+          "4225260",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "11133",
+          "1790922523014214094",
+          "1790922523015214151"
+        ],
+        "path": "/var/tmp/friday-sol056-sol055-whole54-all32-remaining-connected-source-implementation/Source54/src/uninstall.py",
+        "sha256": "e124b9dbbb32716a521185bb53c6a7d834e0e2c416efb4cea80abb53cc98d366",
+        "stable9": true
+      },
+      "current_semantic_independent_review": "REQUIRED_NOT_RUN",
+      "full_partitions": [
+        {
+          "equal": true,
+          "new_bytes": 11133,
+          "new_sha256": "e124b9dbbb32716a521185bb53c6a7d834e0e2c416efb4cea80abb53cc98d366",
+          "offset": 0,
+          "old_bytes": 11133,
+          "old_sha256": "e124b9dbbb32716a521185bb53c6a7d834e0e2c416efb4cea80abb53cc98d366"
+        }
+      ],
+      "original": {
+        "bytes": 11133,
+        "identity9_decimal_strings": [
+          "2050",
+          "5404496",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "11133",
+          "1790919934041060439",
+          "1790919934042060497"
+        ],
+        "path": "/var/tmp/friday-sol055-a147-a155-whole54-all32-connected-source-repair/Source54/src/uninstall.py",
+        "sha256": "e124b9dbbb32716a521185bb53c6a7d834e0e2c416efb4cea80abb53cc98d366",
+        "stable9": true
+      },
+      "relative": "Source54/src/uninstall.py",
+      "runtime": "NOT_RUN",
+      "transitive_required": true
+    },
+    {
+      "GO": false,
+      "changed": false,
+      "current": {
+        "bytes": 160,
+        "identity9_decimal_strings": [
+          "2050",
+          "4225262",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "160",
+          "1790922523030215010",
+          "1790922523031215067"
+        ],
+        "path": "/var/tmp/friday-sol056-sol055-whole54-all32-remaining-connected-source-implementation/Source54/templates/friday-quality-gate.sudoers.in",
+        "sha256": "c750a01854e0905fef54b28871008b37447d08a4c63bebdac1633be4d5f875cd",
+        "stable9": true
+      },
+      "current_semantic_independent_review": "REQUIRED_NOT_RUN",
+      "full_partitions": [
+        {
+          "equal": true,
+          "new_bytes": 160,
+          "new_sha256": "c750a01854e0905fef54b28871008b37447d08a4c63bebdac1633be4d5f875cd",
+          "offset": 0,
+          "old_bytes": 160,
+          "old_sha256": "c750a01854e0905fef54b28871008b37447d08a4c63bebdac1633be4d5f875cd"
+        }
+      ],
+      "original": {
+        "bytes": 160,
+        "identity9_decimal_strings": [
+          "2050",
+          "5527340",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "160",
+          "1790919934059061469",
+          "1790919934060061527"
+        ],
+        "path": "/var/tmp/friday-sol055-a147-a155-whole54-all32-connected-source-repair/Source54/templates/friday-quality-gate.sudoers.in",
+        "sha256": "c750a01854e0905fef54b28871008b37447d08a4c63bebdac1633be4d5f875cd",
+        "stable9": true
+      },
+      "relative": "Source54/templates/friday-quality-gate.sudoers.in",
+      "runtime": "NOT_RUN",
+      "transitive_required": true
+    },
+    {
+      "GO": false,
+      "changed": false,
+      "current": {
+        "bytes": 9574,
+        "identity9_decimal_strings": [
+          "2050",
+          "4225264",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "9574",
+          "1790922523046215926",
+          "1790922523047215983"
+        ],
+        "path": "/var/tmp/friday-sol056-sol055-whole54-all32-remaining-connected-source-implementation/Source54/tests/admission_custodian.py",
+        "sha256": "bd83161d5d2b75aeedb50b6d1b887f9f78ef169eb5d9ab66ead370b0789d6864",
+        "stable9": true
+      },
+      "current_semantic_independent_review": "REQUIRED_NOT_RUN",
+      "full_partitions": [
+        {
+          "equal": true,
+          "new_bytes": 9574,
+          "new_sha256": "bd83161d5d2b75aeedb50b6d1b887f9f78ef169eb5d9ab66ead370b0789d6864",
+          "offset": 0,
+          "old_bytes": 9574,
+          "old_sha256": "bd83161d5d2b75aeedb50b6d1b887f9f78ef169eb5d9ab66ead370b0789d6864"
+        }
+      ],
+      "original": {
+        "bytes": 9574,
+        "identity9_decimal_strings": [
+          "2050",
+          "5657757",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "9574",
+          "1790919934075062385",
+          "1790919934076062442"
+        ],
+        "path": "/var/tmp/friday-sol055-a147-a155-whole54-all32-connected-source-repair/Source54/tests/admission_custodian.py",
+        "sha256": "bd83161d5d2b75aeedb50b6d1b887f9f78ef169eb5d9ab66ead370b0789d6864",
+        "stable9": true
+      },
+      "relative": "Source54/tests/admission_custodian.py",
+      "runtime": "NOT_RUN",
+      "transitive_required": true
+    },
+    {
+      "GO": false,
+      "changed": false,
+      "current": {
+        "bytes": 43302,
+        "identity9_decimal_strings": [
+          "2050",
+          "4225265",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "43302",
+          "1790922523064216956",
+          "1790922523065217013"
+        ],
+        "path": "/var/tmp/friday-sol056-sol055-whole54-all32-remaining-connected-source-implementation/Source54/tests/close_package.py",
+        "sha256": "e975a65d3e85d48af334d4598dcb672f3a0b7ea146d269353d37847b28ccaea9",
+        "stable9": true
+      },
+      "current_semantic_independent_review": "REQUIRED_NOT_RUN",
+      "full_partitions": [
+        {
+          "equal": true,
+          "new_bytes": 43302,
+          "new_sha256": "e975a65d3e85d48af334d4598dcb672f3a0b7ea146d269353d37847b28ccaea9",
+          "offset": 0,
+          "old_bytes": 43302,
+          "old_sha256": "e975a65d3e85d48af334d4598dcb672f3a0b7ea146d269353d37847b28ccaea9"
+        }
+      ],
+      "original": {
+        "bytes": 43302,
+        "identity9_decimal_strings": [
+          "2050",
+          "5657758",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "43302",
+          "1790919934092063358",
+          "1790919934093063415"
+        ],
+        "path": "/var/tmp/friday-sol055-a147-a155-whole54-all32-connected-source-repair/Source54/tests/close_package.py",
+        "sha256": "e975a65d3e85d48af334d4598dcb672f3a0b7ea146d269353d37847b28ccaea9",
+        "stable9": true
+      },
+      "relative": "Source54/tests/close_package.py",
+      "runtime": "NOT_RUN",
+      "transitive_required": true
+    },
+    {
+      "GO": false,
+      "changed": false,
+      "current": {
+        "bytes": 25268,
+        "identity9_decimal_strings": [
+          "2050",
+          "4225266",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "25268",
+          "1790922523080217873",
+          "1790922523082217987"
+        ],
+        "path": "/var/tmp/friday-sol056-sol055-whole54-all32-remaining-connected-source-implementation/Source54/tests/execute_pair.py",
+        "sha256": "9c51275d386cbc7c13b5300603a54f051779c5c6ef4b7a055847120b2d8c1cb3",
+        "stable9": true
+      },
+      "current_semantic_independent_review": "REQUIRED_NOT_RUN",
+      "full_partitions": [
+        {
+          "equal": true,
+          "new_bytes": 25268,
+          "new_sha256": "9c51275d386cbc7c13b5300603a54f051779c5c6ef4b7a055847120b2d8c1cb3",
+          "offset": 0,
+          "old_bytes": 25268,
+          "old_sha256": "9c51275d386cbc7c13b5300603a54f051779c5c6ef4b7a055847120b2d8c1cb3"
+        }
+      ],
+      "original": {
+        "bytes": 25268,
+        "identity9_decimal_strings": [
+          "2050",
+          "5657759",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "25268",
+          "1790919934109064331",
+          "1790919934110064388"
+        ],
+        "path": "/var/tmp/friday-sol055-a147-a155-whole54-all32-connected-source-repair/Source54/tests/execute_pair.py",
+        "sha256": "9c51275d386cbc7c13b5300603a54f051779c5c6ef4b7a055847120b2d8c1cb3",
+        "stable9": true
+      },
+      "relative": "Source54/tests/execute_pair.py",
+      "runtime": "NOT_RUN",
+      "transitive_required": true
+    },
+    {
+      "GO": false,
+      "changed": false,
+      "current": {
+        "bytes": 47038,
+        "identity9_decimal_strings": [
+          "2050",
+          "4225267",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "47038",
+          "1790922523098218903",
+          "1790922523099218960"
+        ],
+        "path": "/var/tmp/friday-sol056-sol055-whole54-all32-remaining-connected-source-implementation/Source54/tests/harness_selfcheck.py",
+        "sha256": "20cf1bf2d232a8093306c720cc1c75e3adbc9e3dd67fc159960f26482f5a4295",
+        "stable9": true
+      },
+      "current_semantic_independent_review": "REQUIRED_NOT_RUN",
+      "full_partitions": [
+        {
+          "equal": true,
+          "new_bytes": 47038,
+          "new_sha256": "20cf1bf2d232a8093306c720cc1c75e3adbc9e3dd67fc159960f26482f5a4295",
+          "offset": 0,
+          "old_bytes": 47038,
+          "old_sha256": "20cf1bf2d232a8093306c720cc1c75e3adbc9e3dd67fc159960f26482f5a4295"
+        }
+      ],
+      "original": {
+        "bytes": 47038,
+        "identity9_decimal_strings": [
+          "2050",
+          "5657760",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "47038",
+          "1790919934126760194",
+          "1790919934127065361"
+        ],
+        "path": "/var/tmp/friday-sol055-a147-a155-whole54-all32-connected-source-repair/Source54/tests/harness_selfcheck.py",
+        "sha256": "20cf1bf2d232a8093306c720cc1c75e3adbc9e3dd67fc159960f26482f5a4295",
+        "stable9": true
+      },
+      "relative": "Source54/tests/harness_selfcheck.py",
+      "runtime": "NOT_RUN",
+      "transitive_required": true
+    },
+    {
+      "GO": false,
+      "changed": false,
+      "current": {
+        "bytes": 21530,
+        "identity9_decimal_strings": [
+          "2050",
+          "4225268",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "21530",
+          "1790922523115219876",
+          "1790922523116219933"
+        ],
+        "path": "/var/tmp/friday-sol056-sol055-whole54-all32-remaining-connected-source-implementation/Source54/tests/install_controls.py",
+        "sha256": "542e5f8580a1eaeb7d7b5991fbeb67d2a855372075325ea13e42da866d9c450e",
+        "stable9": true
+      },
+      "current_semantic_independent_review": "REQUIRED_NOT_RUN",
+      "full_partitions": [
+        {
+          "equal": true,
+          "new_bytes": 21530,
+          "new_sha256": "542e5f8580a1eaeb7d7b5991fbeb67d2a855372075325ea13e42da866d9c450e",
+          "offset": 0,
+          "old_bytes": 21530,
+          "old_sha256": "542e5f8580a1eaeb7d7b5991fbeb67d2a855372075325ea13e42da866d9c450e"
+        }
+      ],
+      "original": {
+        "bytes": 21530,
+        "identity9_decimal_strings": [
+          "2050",
+          "5657761",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "21530",
+          "1790919934142066219",
+          "1790919934143066276"
+        ],
+        "path": "/var/tmp/friday-sol055-a147-a155-whole54-all32-connected-source-repair/Source54/tests/install_controls.py",
+        "sha256": "542e5f8580a1eaeb7d7b5991fbeb67d2a855372075325ea13e42da866d9c450e",
+        "stable9": true
+      },
+      "relative": "Source54/tests/install_controls.py",
+      "runtime": "NOT_RUN",
+      "transitive_required": true
+    },
+    {
+      "GO": false,
+      "changed": true,
+      "current": {
+        "bytes": 114599,
+        "identity9_decimal_strings": [
+          "2050",
+          "4225269",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "114599",
+          "1790924119484619723",
+          "1790924119484619723"
+        ],
+        "path": "/var/tmp/friday-sol056-sol055-whole54-all32-remaining-connected-source-implementation/Source54/tests/receipt_contract.py",
+        "sha256": "00745e1fc34e8752656ecd95c9d6c81a3eb3ee20b2b0eb41c49e785d8835faa4",
+        "stable9": true
+      },
+      "current_semantic_independent_review": "REQUIRED_NOT_RUN",
+      "full_partitions": [
+        {
+          "equal": false,
+          "new_bytes": 65536,
+          "new_sha256": "a79a58128a31ce9177b0f6ef6447834130e755f7873f659ab33adbbbd2d8fd94",
+          "offset": 0,
+          "old_bytes": 65536,
+          "old_sha256": "5f0083b86ab40eb27fc19397c65d6bb4b97868b61625218afd71e4087c6ea6c7"
+        },
+        {
+          "equal": false,
+          "new_bytes": 49063,
+          "new_sha256": "0a3e58f7d05f6b54bef3d72837cb8224c45b15e7ef89b17cc9f8ccec46a42ebf",
+          "offset": 65536,
+          "old_bytes": 36284,
+          "old_sha256": "9bb30a86146c457caebe5f344295366a044a17185cc7ce9bd72d9ce1d266d4ac"
+        }
+      ],
+      "original": {
+        "bytes": 101820,
+        "identity9_decimal_strings": [
+          "2050",
+          "5657762",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "101820",
+          "1790920248550057411",
+          "1790920248550057411"
+        ],
+        "path": "/var/tmp/friday-sol055-a147-a155-whole54-all32-connected-source-repair/Source54/tests/receipt_contract.py",
+        "sha256": "d6fdd4a35e56c6971669f9f58e5f4070665ebc6414d87b2b77364df9be524a9c",
+        "stable9": true
+      },
+      "relative": "Source54/tests/receipt_contract.py",
+      "runtime": "NOT_RUN",
+      "transitive_required": true
+    },
+    {
+      "GO": false,
+      "changed": false,
+      "current": {
+        "bytes": 30194,
+        "identity9_decimal_strings": [
+          "2050",
+          "4225270",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "30194",
+          "1790922523151221937",
+          "1790922523152221995"
+        ],
+        "path": "/var/tmp/friday-sol056-sol055-whole54-all32-remaining-connected-source-implementation/Source54/tests/run_tests.py",
+        "sha256": "835e63251186fb0f27a891af14d97d15486f00817aedb52e752b93056fdd8f47",
+        "stable9": true
+      },
+      "current_semantic_independent_review": "REQUIRED_NOT_RUN",
+      "full_partitions": [
+        {
+          "equal": true,
+          "new_bytes": 30194,
+          "new_sha256": "835e63251186fb0f27a891af14d97d15486f00817aedb52e752b93056fdd8f47",
+          "offset": 0,
+          "old_bytes": 30194,
+          "old_sha256": "835e63251186fb0f27a891af14d97d15486f00817aedb52e752b93056fdd8f47"
+        }
+      ],
+      "original": {
+        "bytes": 30194,
+        "identity9_decimal_strings": [
+          "2050",
+          "5657763",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "30194",
+          "1790919934177068222",
+          "1790919934178068279"
+        ],
+        "path": "/var/tmp/friday-sol055-a147-a155-whole54-all32-connected-source-repair/Source54/tests/run_tests.py",
+        "sha256": "835e63251186fb0f27a891af14d97d15486f00817aedb52e752b93056fdd8f47",
+        "stable9": true
+      },
+      "relative": "Source54/tests/run_tests.py",
+      "runtime": "NOT_RUN",
+      "transitive_required": true
+    },
+    {
+      "GO": false,
+      "changed": false,
+      "current": {
+        "bytes": 9623,
+        "identity9_decimal_strings": [
+          "2050",
+          "4225271",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "9623",
+          "1790922523167222853",
+          "1790922523169222968"
+        ],
+        "path": "/var/tmp/friday-sol056-sol055-whole54-all32-remaining-connected-source-implementation/Source54/tests/support.py",
+        "sha256": "286d38accc22fafd92c8bf5a2c60849c14f31c96ab62047f3266038dddf0c151",
+        "stable9": true
+      },
+      "current_semantic_independent_review": "REQUIRED_NOT_RUN",
+      "full_partitions": [
+        {
+          "equal": true,
+          "new_bytes": 9623,
+          "new_sha256": "286d38accc22fafd92c8bf5a2c60849c14f31c96ab62047f3266038dddf0c151",
+          "offset": 0,
+          "old_bytes": 9623,
+          "old_sha256": "286d38accc22fafd92c8bf5a2c60849c14f31c96ab62047f3266038dddf0c151"
+        }
+      ],
+      "original": {
+        "bytes": 9623,
+        "identity9_decimal_strings": [
+          "2050",
+          "5657764",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "9623",
+          "1790919934193069138",
+          "1790919934194069195"
+        ],
+        "path": "/var/tmp/friday-sol055-a147-a155-whole54-all32-connected-source-repair/Source54/tests/support.py",
+        "sha256": "286d38accc22fafd92c8bf5a2c60849c14f31c96ab62047f3266038dddf0c151",
+        "stable9": true
+      },
+      "relative": "Source54/tests/support.py",
+      "runtime": "NOT_RUN",
+      "transitive_required": true
+    },
+    {
+      "GO": false,
+      "changed": false,
+      "current": {
+        "bytes": 25422,
+        "identity9_decimal_strings": [
+          "2050",
+          "4225272",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "25422",
+          "1790922523185223884",
+          "1790922523186223941"
+        ],
+        "path": "/var/tmp/friday-sol056-sol055-whole54-all32-remaining-connected-source-implementation/Source54/tests/test_archive.py",
+        "sha256": "ed4996cb5dc3865b231702ee81b7751260b6d428b1af4b9a680fde410d318546",
+        "stable9": true
+      },
+      "current_semantic_independent_review": "REQUIRED_NOT_RUN",
+      "full_partitions": [
+        {
+          "equal": true,
+          "new_bytes": 25422,
+          "new_sha256": "ed4996cb5dc3865b231702ee81b7751260b6d428b1af4b9a680fde410d318546",
+          "offset": 0,
+          "old_bytes": 25422,
+          "old_sha256": "ed4996cb5dc3865b231702ee81b7751260b6d428b1af4b9a680fde410d318546"
+        }
+      ],
+      "original": {
+        "bytes": 25422,
+        "identity9_decimal_strings": [
+          "2050",
+          "5657765",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "25422",
+          "1790919934209070054",
+          "1790919934210070111"
+        ],
+        "path": "/var/tmp/friday-sol055-a147-a155-whole54-all32-connected-source-repair/Source54/tests/test_archive.py",
+        "sha256": "ed4996cb5dc3865b231702ee81b7751260b6d428b1af4b9a680fde410d318546",
+        "stable9": true
+      },
+      "relative": "Source54/tests/test_archive.py",
+      "runtime": "NOT_RUN",
+      "transitive_required": true
+    },
+    {
+      "GO": false,
+      "changed": false,
+      "current": {
+        "bytes": 45495,
+        "identity9_decimal_strings": [
+          "2050",
+          "4225273",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "45495",
+          "1790922523203224915",
+          "1790922523205225029"
+        ],
+        "path": "/var/tmp/friday-sol056-sol055-whole54-all32-remaining-connected-source-implementation/Source54/tests/test_broker.py",
+        "sha256": "39f6f12ef1b2f49ea0a115139de47035477e79df8291d4c110de5e832cb88c4a",
+        "stable9": true
+      },
+      "current_semantic_independent_review": "REQUIRED_NOT_RUN",
+      "full_partitions": [
+        {
+          "equal": true,
+          "new_bytes": 45495,
+          "new_sha256": "39f6f12ef1b2f49ea0a115139de47035477e79df8291d4c110de5e832cb88c4a",
+          "offset": 0,
+          "old_bytes": 45495,
+          "old_sha256": "39f6f12ef1b2f49ea0a115139de47035477e79df8291d4c110de5e832cb88c4a"
+        }
+      ],
+      "original": {
+        "bytes": 45495,
+        "identity9_decimal_strings": [
+          "2050",
+          "5657766",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "45495",
+          "1790919934229071198",
+          "1790919934230071255"
+        ],
+        "path": "/var/tmp/friday-sol055-a147-a155-whole54-all32-connected-source-repair/Source54/tests/test_broker.py",
+        "sha256": "39f6f12ef1b2f49ea0a115139de47035477e79df8291d4c110de5e832cb88c4a",
+        "stable9": true
+      },
+      "relative": "Source54/tests/test_broker.py",
+      "runtime": "NOT_RUN",
+      "transitive_required": true
+    },
+    {
+      "GO": false,
+      "changed": false,
+      "current": {
+        "bytes": 10495,
+        "identity9_decimal_strings": [
+          "2050",
+          "4225274",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "10495",
+          "1790922523222226002",
+          "1790922523223226060"
+        ],
+        "path": "/var/tmp/friday-sol056-sol055-whole54-all32-remaining-connected-source-implementation/Source54/tests/test_canonical.py",
+        "sha256": "173717c84586c05c6b943d9d29b6aa52faa82f6279341cee27f54a33746c3125",
+        "stable9": true
+      },
+      "current_semantic_independent_review": "REQUIRED_NOT_RUN",
+      "full_partitions": [
+        {
+          "equal": true,
+          "new_bytes": 10495,
+          "new_sha256": "173717c84586c05c6b943d9d29b6aa52faa82f6279341cee27f54a33746c3125",
+          "offset": 0,
+          "old_bytes": 10495,
+          "old_sha256": "173717c84586c05c6b943d9d29b6aa52faa82f6279341cee27f54a33746c3125"
+        }
+      ],
+      "original": {
+        "bytes": 10495,
+        "identity9_decimal_strings": [
+          "2050",
+          "5657767",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "10495",
+          "1790919934247072228",
+          "1790919934248072285"
+        ],
+        "path": "/var/tmp/friday-sol055-a147-a155-whole54-all32-connected-source-repair/Source54/tests/test_canonical.py",
+        "sha256": "173717c84586c05c6b943d9d29b6aa52faa82f6279341cee27f54a33746c3125",
+        "stable9": true
+      },
+      "relative": "Source54/tests/test_canonical.py",
+      "runtime": "NOT_RUN",
+      "transitive_required": true
+    },
+    {
+      "GO": false,
+      "changed": false,
+      "current": {
+        "bytes": 54731,
+        "identity9_decimal_strings": [
+          "2050",
+          "4225275",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "54731",
+          "1790922523239226976",
+          "1790922523241227090"
+        ],
+        "path": "/var/tmp/friday-sol056-sol055-whole54-all32-remaining-connected-source-implementation/Source54/tests/test_custody.py",
+        "sha256": "ad256871e5299bbf7b28c5dbb89f9cbc8e596b0eff865457796aef90cce2cc52",
+        "stable9": true
+      },
+      "current_semantic_independent_review": "REQUIRED_NOT_RUN",
+      "full_partitions": [
+        {
+          "equal": true,
+          "new_bytes": 54731,
+          "new_sha256": "ad256871e5299bbf7b28c5dbb89f9cbc8e596b0eff865457796aef90cce2cc52",
+          "offset": 0,
+          "old_bytes": 54731,
+          "old_sha256": "ad256871e5299bbf7b28c5dbb89f9cbc8e596b0eff865457796aef90cce2cc52"
+        }
+      ],
+      "original": {
+        "bytes": 54731,
+        "identity9_decimal_strings": [
+          "2050",
+          "5657768",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "54731",
+          "1790919934264376406",
+          "1790919934265073258"
+        ],
+        "path": "/var/tmp/friday-sol055-a147-a155-whole54-all32-connected-source-repair/Source54/tests/test_custody.py",
+        "sha256": "ad256871e5299bbf7b28c5dbb89f9cbc8e596b0eff865457796aef90cce2cc52",
+        "stable9": true
+      },
+      "relative": "Source54/tests/test_custody.py",
+      "runtime": "NOT_RUN",
+      "transitive_required": true
+    },
+    {
+      "GO": false,
+      "changed": false,
+      "current": {
+        "bytes": 4158,
+        "identity9_decimal_strings": [
+          "2050",
+          "4225276",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "4158",
+          "1790922523257228006",
+          "1790922523258228064"
+        ],
+        "path": "/var/tmp/friday-sol056-sol055-whole54-all32-remaining-connected-source-implementation/Source54/tests/test_effect_bills.py",
+        "sha256": "513caa87e90749cd686a1a3c32edbf9704ea65c78dc1e26bcd351f22d47a420c",
+        "stable9": true
+      },
+      "current_semantic_independent_review": "REQUIRED_NOT_RUN",
+      "full_partitions": [
+        {
+          "equal": true,
+          "new_bytes": 4158,
+          "new_sha256": "513caa87e90749cd686a1a3c32edbf9704ea65c78dc1e26bcd351f22d47a420c",
+          "offset": 0,
+          "old_bytes": 4158,
+          "old_sha256": "513caa87e90749cd686a1a3c32edbf9704ea65c78dc1e26bcd351f22d47a420c"
+        }
+      ],
+      "original": {
+        "bytes": 4158,
+        "identity9_decimal_strings": [
+          "2050",
+          "5657769",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "4158",
+          "1790919934281074174",
+          "1790919934282074231"
+        ],
+        "path": "/var/tmp/friday-sol055-a147-a155-whole54-all32-connected-source-repair/Source54/tests/test_effect_bills.py",
+        "sha256": "513caa87e90749cd686a1a3c32edbf9704ea65c78dc1e26bcd351f22d47a420c",
+        "stable9": true
+      },
+      "relative": "Source54/tests/test_effect_bills.py",
+      "runtime": "NOT_RUN",
+      "transitive_required": true
+    },
+    {
+      "GO": false,
+      "changed": false,
+      "current": {
+        "bytes": 79615,
+        "identity9_decimal_strings": [
+          "2050",
+          "4225277",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "79615",
+          "1790922523275229037",
+          "1790922523277229151"
+        ],
+        "path": "/var/tmp/friday-sol056-sol055-whole54-all32-remaining-connected-source-implementation/Source54/tests/test_install_recovery.py",
+        "sha256": "b9d7a634f1e63b077cbfcf561e3e081e169579f702c871a48b6b6ba394c49673",
+        "stable9": true
+      },
+      "current_semantic_independent_review": "REQUIRED_NOT_RUN",
+      "full_partitions": [
+        {
+          "equal": true,
+          "new_bytes": 65536,
+          "new_sha256": "560f943dd045a6af3b66b995badf93c84359606628dd85c19f4ef4430587e9c5",
+          "offset": 0,
+          "old_bytes": 65536,
+          "old_sha256": "560f943dd045a6af3b66b995badf93c84359606628dd85c19f4ef4430587e9c5"
+        },
+        {
+          "equal": true,
+          "new_bytes": 14079,
+          "new_sha256": "75019f554b308ba0cc94a14a79ad8487f694370e69fac10d416f76c3b3559ef8",
+          "offset": 65536,
+          "old_bytes": 14079,
+          "old_sha256": "75019f554b308ba0cc94a14a79ad8487f694370e69fac10d416f76c3b3559ef8"
+        }
+      ],
+      "original": {
+        "bytes": 79615,
+        "identity9_decimal_strings": [
+          "2050",
+          "5657770",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "79615",
+          "1790919934298075147",
+          "1790919934300075261"
+        ],
+        "path": "/var/tmp/friday-sol055-a147-a155-whole54-all32-connected-source-repair/Source54/tests/test_install_recovery.py",
+        "sha256": "b9d7a634f1e63b077cbfcf561e3e081e169579f702c871a48b6b6ba394c49673",
+        "stable9": true
+      },
+      "relative": "Source54/tests/test_install_recovery.py",
+      "runtime": "NOT_RUN",
+      "transitive_required": true
+    },
+    {
+      "GO": false,
+      "changed": false,
+      "current": {
+        "bytes": 8721,
+        "identity9_decimal_strings": [
+          "2050",
+          "4225278",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "8721",
+          "1790922523294230125",
+          "1790922523295230182"
+        ],
+        "path": "/var/tmp/friday-sol056-sol055-whole54-all32-remaining-connected-source-implementation/Source54/tests/test_ledger.py",
+        "sha256": "9e09199ab34217859416b25a451dd659fe873cf3d9f2f01e59e09b3ba1c85766",
+        "stable9": true
+      },
+      "current_semantic_independent_review": "REQUIRED_NOT_RUN",
+      "full_partitions": [
+        {
+          "equal": true,
+          "new_bytes": 8721,
+          "new_sha256": "9e09199ab34217859416b25a451dd659fe873cf3d9f2f01e59e09b3ba1c85766",
+          "offset": 0,
+          "old_bytes": 8721,
+          "old_sha256": "9e09199ab34217859416b25a451dd659fe873cf3d9f2f01e59e09b3ba1c85766"
+        }
+      ],
+      "original": {
+        "bytes": 8721,
+        "identity9_decimal_strings": [
+          "2050",
+          "5657771",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "8721",
+          "1790919934314076062",
+          "1790919934316076177"
+        ],
+        "path": "/var/tmp/friday-sol055-a147-a155-whole54-all32-connected-source-repair/Source54/tests/test_ledger.py",
+        "sha256": "9e09199ab34217859416b25a451dd659fe873cf3d9f2f01e59e09b3ba1c85766",
+        "stable9": true
+      },
+      "relative": "Source54/tests/test_ledger.py",
+      "runtime": "NOT_RUN",
+      "transitive_required": true
+    },
+    {
+      "GO": false,
+      "changed": false,
+      "current": {
+        "bytes": 47844,
+        "identity9_decimal_strings": [
+          "2050",
+          "4225279",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "47844",
+          "1790922523312231155",
+          "1790922523313231213"
+        ],
+        "path": "/var/tmp/friday-sol056-sol055-whole54-all32-remaining-connected-source-implementation/Source54/tests/test_manifest.py",
+        "sha256": "1202130c8f44bc4288cb3df77f70fce0a4e5f0be4f1b71bf62b01a8ca1cd21bc",
+        "stable9": true
+      },
+      "current_semantic_independent_review": "REQUIRED_NOT_RUN",
+      "full_partitions": [
+        {
+          "equal": true,
+          "new_bytes": 47844,
+          "new_sha256": "1202130c8f44bc4288cb3df77f70fce0a4e5f0be4f1b71bf62b01a8ca1cd21bc",
+          "offset": 0,
+          "old_bytes": 47844,
+          "old_sha256": "1202130c8f44bc4288cb3df77f70fce0a4e5f0be4f1b71bf62b01a8ca1cd21bc"
+        }
+      ],
+      "original": {
+        "bytes": 47844,
+        "identity9_decimal_strings": [
+          "2050",
+          "5657772",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "47844",
+          "1790919934331077035",
+          "1790919934332077093"
+        ],
+        "path": "/var/tmp/friday-sol055-a147-a155-whole54-all32-connected-source-repair/Source54/tests/test_manifest.py",
+        "sha256": "1202130c8f44bc4288cb3df77f70fce0a4e5f0be4f1b71bf62b01a8ca1cd21bc",
+        "stable9": true
+      },
+      "relative": "Source54/tests/test_manifest.py",
+      "runtime": "NOT_RUN",
+      "transitive_required": true
+    },
+    {
+      "GO": false,
+      "changed": false,
+      "current": {
+        "bytes": 27508,
+        "identity9_decimal_strings": [
+          "2050",
+          "4225280",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "27508",
+          "1790922523329232129",
+          "1790922523330232186"
+        ],
+        "path": "/var/tmp/friday-sol056-sol055-whole54-all32-remaining-connected-source-implementation/Source54/tests/test_provenance.py",
+        "sha256": "699c6da03710b9360009a46e2b06acdc9a9ce047994de2bc5d9dfbfc40958e99",
+        "stable9": true
+      },
+      "current_semantic_independent_review": "REQUIRED_NOT_RUN",
+      "full_partitions": [
+        {
+          "equal": true,
+          "new_bytes": 27508,
+          "new_sha256": "699c6da03710b9360009a46e2b06acdc9a9ce047994de2bc5d9dfbfc40958e99",
+          "offset": 0,
+          "old_bytes": 27508,
+          "old_sha256": "699c6da03710b9360009a46e2b06acdc9a9ce047994de2bc5d9dfbfc40958e99"
+        }
+      ],
+      "original": {
+        "bytes": 27508,
+        "identity9_decimal_strings": [
+          "2050",
+          "5657773",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "27508",
+          "1790919934347077951",
+          "1790919934348078008"
+        ],
+        "path": "/var/tmp/friday-sol055-a147-a155-whole54-all32-connected-source-repair/Source54/tests/test_provenance.py",
+        "sha256": "699c6da03710b9360009a46e2b06acdc9a9ce047994de2bc5d9dfbfc40958e99",
+        "stable9": true
+      },
+      "relative": "Source54/tests/test_provenance.py",
+      "runtime": "NOT_RUN",
+      "transitive_required": true
+    },
+    {
+      "GO": false,
+      "changed": false,
+      "current": {
+        "bytes": 33094,
+        "identity9_decimal_strings": [
+          "2050",
+          "4225281",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "33094",
+          "1790922523348233216",
+          "1790922523349233273"
+        ],
+        "path": "/var/tmp/friday-sol056-sol055-whole54-all32-remaining-connected-source-implementation/Source54/tests/test_uninstall.py",
+        "sha256": "15681dd81c69082c4c8536e69dfe86eb0019efd62487c3ed804e247f23b38511",
+        "stable9": true
+      },
+      "current_semantic_independent_review": "REQUIRED_NOT_RUN",
+      "full_partitions": [
+        {
+          "equal": true,
+          "new_bytes": 33094,
+          "new_sha256": "15681dd81c69082c4c8536e69dfe86eb0019efd62487c3ed804e247f23b38511",
+          "offset": 0,
+          "old_bytes": 33094,
+          "old_sha256": "15681dd81c69082c4c8536e69dfe86eb0019efd62487c3ed804e247f23b38511"
+        }
+      ],
+      "original": {
+        "bytes": 33094,
+        "identity9_decimal_strings": [
+          "2050",
+          "5657774",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "33094",
+          "1790919934363078866",
+          "1790919934364078924"
+        ],
+        "path": "/var/tmp/friday-sol055-a147-a155-whole54-all32-connected-source-repair/Source54/tests/test_uninstall.py",
+        "sha256": "15681dd81c69082c4c8536e69dfe86eb0019efd62487c3ed804e247f23b38511",
+        "stable9": true
+      },
+      "relative": "Source54/tests/test_uninstall.py",
+      "runtime": "NOT_RUN",
+      "transitive_required": true
+    }
+  ],
+  "original_scope_counts": {
+    "actual_test_id_count": 464,
+    "actual_test_id_distinct_count": 464,
+    "all_keys_counts_sha256": "4edc448ceb92180a601d0089e5165833eaaa83224b7fe55fda81387e586c66f5",
+    "all_strings_sha256_ordered": "8033ee8f20c06f12ade8b4f55d1695769ee6358c6e19c55390778b8365184411",
+    "baseline_declarations": {
+      "cases": 462,
+      "collection_path": "/var/tmp/friday-sol020-final-source-closure/sol020-quality-toolchain-v1/fixtures/official-runs/final-focus03-collect/collection.json",
+      "collection_sha256": "cebda764bd348a58302c6fb9ebec1e4de84064b8e9c00e41d8b7e702df003340",
+      "credit": "INHERITED_OLD_EVIDENCE/NOT_NEW_CREDIT",
+      "matrices": 373,
+      "required_keys": 642,
+      "rows": 11807
+    },
+    "collection_per_module_counts": {
+      "test_archive": 10,
+      "test_broker": 12,
+      "test_canonical": 7,
+      "test_custody": 17,
+      "test_effect_bills": 4,
+      "test_install_recovery": 355,
+      "test_ledger": 4,
+      "test_manifest": 17,
+      "test_provenance": 8,
+      "test_uninstall": 30
+    },
+    "common_key_counts": {
+      "outcome": 12318,
+      "test_id": 12318
+    },
+    "contract_shapes": {
+      "declared_modules": {
+        "length": 10,
+        "scalar": null,
+        "type": "list"
+      },
+      "matrices": {
+        "length": 374,
+        "scalar": null,
+        "type": "dict"
+      },
+      "matrix_owners": {
+        "length": 374,
+        "scalar": null,
+        "type": "dict"
+      },
+      "observation_semantics": {
+        "length": 10514,
+        "scalar": null,
+        "type": "dict"
+      },
+      "required_observations": {
+        "length": 657,
+        "scalar": null,
+        "type": "list"
+      }
+    },
+    "decoded_string_count": 37994,
+    "every_string_utf8_total_bytes": 2446218,
+    "matrix_value_shape_counts": {
+      "dict": 0,
+      "int": 0,
+      "list": 374,
+      "str": 0
+    },
+    "physical_read_bytes": 4139478,
+    "pin": {
+      "before_opened_held_after_named_after_stable": true,
+      "bytes": 4139478,
+      "gid": 1000,
+      "identity9_decimal_strings": [
+        "2050",
+        "4225142",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "4139478",
+        "1790911179040333168",
+        "1790911179040333168"
+      ],
+      "mode": "600",
+      "nlink": 1,
+      "path": "/var/tmp/friday-astra-quality-a137-a144-whole54-all32-original-actor-connected-source-repair-a147-g1/Source54/schemas/control-inventory.v1.json",
+      "sha256": "e7255f04bc4fa806960fcca79b6b37b67202417170ed59c3b9101863e3e91224",
+      "stable9": true,
+      "uid": 1000
+    },
+    "semantic_admission": false,
+    "top": {
+      "additions": {
+        "keys": [
+          "case_ids",
+          "required_keys",
+          "matrices"
+        ],
+        "length": 3,
+        "type": "dict"
+      },
+      "baseline": {
+        "keys": [
+          "collection_path",
+          "collection_sha256",
+          "cases",
+          "required_keys",
+          "matrices",
+          "rows",
+          "credit"
+        ],
+        "length": 7,
+        "type": "dict"
+      },
+      "collection": {
+        "keys": [
+          "test_archive",
+          "test_broker",
+          "test_canonical",
+          "test_custody",
+          "test_effect_bills",
+          "test_install_recovery",
+          "test_ledger",
+          "test_manifest",
+          "test_provenance",
+          "test_uninstall"
+        ],
+        "length": 10,
+        "type": "dict"
+      },
+      "control_contract": {
+        "keys": [
+          "matrices",
+          "observation_semantics",
+          "declared_modules",
+          "required_observations",
+          "matrix_owners"
+        ],
+        "length": 5,
+        "type": "dict"
+      },
+      "derivation": "INHERITED_AUTHENTICATED_DECLARATIONS_PLUS_EXPLICIT_CURRENT_SOURCE_ADDITIONS; NOT_RUNTIME_COLLECTION",
+      "schema": "friday.a049.static-control-inventory.v1",
+      "test_ids": {
+        "keys": null,
+        "length": 464,
+        "type": "list"
+      }
+    },
+    "whole_decoded_node_type_counts": {
+      "dict": 12327,
+      "int": 14,
+      "list": 10894,
+      "str": 37994
+    },
+    "whole_distinct_keys": 10919
+  },
+  "selfcheck96": true,
+  "unsafe_history": "ABSTRACTION_ONLY_REQUIRED_NOT_RUN"
+}

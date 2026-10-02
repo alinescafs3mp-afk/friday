@@ -1,0 +1,46 @@
+{
+  "schema": "friday.sol062.received.v1",
+  "assignment": "ASTRA-E4-LAB865-A182-NODE-WHOLE6-ALL35-ALL6-STOCK-RAW-BOUND-CONNECTED-SOURCE-CLOSURE-SOL062",
+  "generation": 1,
+  "event_id": "ASTRA-SOL-E4-SOL062-T1",
+  "ref": "/home/jericho/.jericho/grok-takeover/ASTRA-E4-SOL062-TASK.txt",
+  "sha256": "3941b5f8d3aa40f72660a6c386c20132c0a5bdb1a8ec4ebb623e8b8898b1052a",
+  "input": {
+    "path": "/home/jericho/.jericho/grok-takeover/ASTRA-E4-SOL062-INPUT-20261002.json",
+    "bytes": 50277,
+    "sha256": "e4cbf8ef5a96d90564bb17d324155170c876f8ae08e44907d70ce05ddf41c624",
+    "identity9_decimal_strings": [
+      "2050",
+      "8533914",
+      "33152",
+      "1000",
+      "1000",
+      "1",
+      "50277",
+      "1790939685776322273",
+      "1790939685870327656"
+    ],
+    "stable9": true
+  },
+  "accepted_msk": "2026-10-02T14:17:39+03:00",
+  "accepted_epoch_seconds": 1790939859,
+  "pre_task_compact": {
+    "path": "/home/jericho/.jericho/grok-takeover/ASTRA-E4-SOL062-PRE-TASK-COMPACT-20261002.json",
+    "bytes": 1929,
+    "sha256": "67c904382c606404edeb88e856fb75b37d0b0939636da8e625b87380a28edbb8",
+    "identity9_decimal_strings": [
+      "2050",
+      "8533917",
+      "33152",
+      "1000",
+      "1000",
+      "1",
+      "1929",
+      "1790939788627211638",
+      "1790939788627211638"
+    ],
+    "stable9": true
+  },
+  "no_repeated_compact": true,
+  "model_children": 0
+}

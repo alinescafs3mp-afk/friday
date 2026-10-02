@@ -1,0 +1,278 @@
+{
+  "schema": "friday.e4.node.ordinary-case-expectations.sol062.v1",
+  "authority": "NONE_ORDINARY_DATA",
+  "lifetime_memory_source_contract": {
+    "schema": "friday.sol042.retained-lease-natural-ending.v1",
+    "materialization_path": "/var/tmp/friday-lab868-sol062-a191-node-whole6-all35-all6-all3-connected-source-closure",
+    "numeric_slot_is_not_allocation_lease": true,
+    "retire_launch_aliases_at_first_close": true,
+    "tracked_leases_retained_through_terminal": true,
+    "strict_exit_requires_POLLIN": true,
+    "optional_exit_bits": [
+      "POLLHUP"
+    ],
+    "closed_ERR_NVAL_HUP_only_exit": false,
+    "status_X_Z_is_only_potential_ending": true,
+    "natural_exit_bound_ns": 50000000,
+    "natural_exit_max_checks": 6,
+    "max_ending_attempts_whole_caller": 32,
+    "phase_shared_deadline_never_extended": true,
+    "signals_or_reopen_for_ending_proof": false,
+    "fabricated_live_memory": false,
+    "observed_credential_parent_tick_resource_errors_sticky": true,
+    "first_last_genuine_live_samples_preserved": true,
+    "unresolved_ending_is_original_sticky_refusal": true,
+    "execution_authority": false,
+    "simultaneous_nofile_is_not_lifetime_history": true,
+    "confirmed_close_reclaims_live_slot_only": true,
+    "unread_prefix_hold_skips_userspace_onceclose": true
+  },
+  "publication_source_contract": {
+    "schema": "friday.sol060.lossless-raw-preimage-publication.v1",
+    "fixed_metadata_bound_bytes": 489472,
+    "case_payload_bound_bytes": [
+      196644,
+      196644,
+      196644,
+      196644,
+      196644,
+      196644
+    ],
+    "all_case_payload_bound_bytes": 1179864,
+    "complete_bound_with_newline_bytes": 1669337,
+    "inner_complete_producer_cap_bytes": 32768,
+    "every_raw_stdout_and_stderr_reserved": true,
+    "overflow_byte_reserved_on_every_stream": true,
+    "whole_metadata_reserved_once": true,
+    "past_payloads_measured_future_payloads_reserved": true,
+    "field_removal_or_peak_subtraction": false,
+    "fixed_producer_encoding": "full raw once; exact canonical same-object preimage refs, checked reversible before emission",
+    "execution_authority": false,
+    "bound_scope": "JOINED_MEASURED_GRAPH_CEILING_LIVE_FD_HISTORY_NOT_A_RUN",
+    "stock_graph_public_max_bytes": 8192,
+    "inner_non_graph_reserve_bytes": 24576,
+    "supervisor_non_inner_reserve_bytes": 24576,
+    "joined_inner_bytes": 32768,
+    "joined_supervisor_bytes": 57344,
+    "base64_of_full_65536_exceeds_65536": true,
+    "simultaneous_nofile_cap": 256,
+    "lifetime_history_reclaimed_after_confirmed_close": true
+  },
+  "case_order": [
+    "startup-env-negative",
+    "startup-as-negative",
+    "verify-node",
+    "supervisor-entry-fd7",
+    "supervisor-entry-fd127",
+    "verifier-entry-fd7"
+  ],
+  "cases": [
+    {
+      "case": "startup-env-negative",
+      "consumer": "fixed supervisor -> fixed verifier",
+      "outer_exit": 0,
+      "outer_status": "STARTUP_CONTROL_CAUSE_CONFIRMED",
+      "inner_exit": 2,
+      "inner_status": "NOT_PROVEN",
+      "cause_type": "Refusal",
+      "cause": "nonroot exact three-variable startup environment required",
+      "preexec_ENV": {
+        "PATH": "/usr/bin:/bin",
+        "LANG": "C"
+      },
+      "actual_ENV": "PATH/LANG exact, LC_ALL absent, optional actually observed nonempty LC_CTYPE retained",
+      "GPG_calls": 0,
+      "private_home_intent": "NOT_ATTEMPTED",
+      "private_home_absence": null,
+      "complete_inner_and_outer_receipts": true
+    },
+    {
+      "case": "startup-as-negative",
+      "consumer": "fixed supervisor -> fixed verifier",
+      "outer_exit": 0,
+      "outer_status": "STARTUP_CONTROL_CAUSE_CONFIRMED",
+      "inner_exit": 2,
+      "inner_status": "NOT_PROVEN",
+      "cause_type": "Refusal",
+      "cause": "pre-interpreter inherited limit mismatch",
+      "inner_AS_soft_hard": [
+        67108864,
+        67108864
+      ],
+      "GPG_calls": 0,
+      "private_home_intent": "NOT_ATTEMPTED",
+      "private_home_absence": null,
+      "complete_inner_and_outer_receipts": true
+    },
+    {
+      "case": "verify-node",
+      "consumer": "fixed supervisor -> fixed verifier -> six fixed GPG calls",
+      "outer_exit": 0,
+      "outer_status": "QUALIFIED_SUPERVISED_NODE_RAW_PUBLISHER_CHAIN_PROVEN",
+      "inner_exit": 0,
+      "inner_status": "QUALIFIED_NODE_RAW_PUBLISHER_CHAIN_PROVEN",
+      "calls": [
+        "show-raw-key",
+        "dearmor",
+        "check-self-signatures-and-bindings",
+        "positive-gpg",
+        "positive-gpgv-body",
+        "negative-same-path-changed-row"
+      ],
+      "independently_expected_primary": "CC68F5A3106FF448322E48ED27F5E38D5B0A215F",
+      "archive": "node-v22.23.2-linux-x64.tar.xz",
+      "archive_sha256": "d60acfe00a2932254bb0ad20e01b0d74397a0875595de719654b214f4b03f307",
+      "archive_bytes": 31058332,
+      "strict_signed_body_equals_gpgv_body": true,
+      "same_actual_gpg_signer": true,
+      "changed_row_exact_BADSIG_not_generic_failure": true,
+      "same_held_archive_inert_digest_mismatch": true,
+      "complete_inner_and_outer_receipts": true
+    },
+    {
+      "case": "supervisor-entry-fd7",
+      "consumer": "fixed supervisor strict pre-ctypes inherited0..5 guard",
+      "own_extra": {
+        "fd": 7,
+        "role": "ordinary-surplus.txt",
+        "readonly": true
+      },
+      "outer_exit": 2,
+      "outer_status": "NOT_PROVEN",
+      "cause_type": "Refusal",
+      "cause": "unknown bootstrap inherited descriptor",
+      "fork_state": "NOT_ATTEMPTED",
+      "GPG_calls": 0,
+      "runtime_callback": "NOT_PREPARED",
+      "complete_supervisor_receipt": true,
+      "inner_receipt": null
+    },
+    {
+      "case": "supervisor-entry-fd127",
+      "consumer": "fixed supervisor strict pre-ctypes inherited0..5 guard",
+      "own_extra": {
+        "fd": 127,
+        "role": "ordinary-surplus.txt",
+        "readonly": true
+      },
+      "outer_exit": 2,
+      "outer_status": "NOT_PROVEN",
+      "cause_type": "Refusal",
+      "cause": "unknown bootstrap inherited descriptor",
+      "fork_state": "NOT_ATTEMPTED",
+      "GPG_calls": 0,
+      "runtime_callback": "NOT_PREPARED",
+      "complete_supervisor_receipt": true,
+      "inner_receipt": null
+    },
+    {
+      "case": "verifier-entry-fd7",
+      "consumer": "fixed verifier strict inherited0..6 guard before general imports",
+      "own_extra": {
+        "fd": 7,
+        "role": "ordinary-surplus.txt",
+        "readonly": true
+      },
+      "exit": 1,
+      "stdout_bytes": 0,
+      "stderr": "complete bounded actual traceback ending RuntimeError: unknown bootstrap inherited descriptor newline",
+      "GPG_calls": 0,
+      "private_home": "externally planned absent name; no mkdir",
+      "inner_receipt": null,
+      "inner_resources": null,
+      "inner_resources_reason": "guard precedes general imports and JSON/resource initialization; unknown, never zero"
+    }
+  ],
+  "common_receipt_contract": {
+    "complete_transport": "exact wait4 + full raw usage + stdout EOF<=65536 + stderr EOF<=32768, no truncation",
+    "custody": "Root independent full9/hash selection, NOFOLLOW all components and readonly leaves, named-before/opened/after, full SHA, retained through actual terminal/postexit",
+    "source_pins": "Exact NEW caller/supervisor/verifier/contract bytes require independent WHOLE review and NEW actual Root materialization/admission. Old accepted/materialized fixed pins remain historical inert DATA, not acceptance of these bytes.",
+    "ownership": "direct own gate, full PID/pidfd/proc-start registration before one-byte release, bounded actual descendant reconciliation/subreaper adoption, exact owned cleanup only; the numeric slot leaves its owner before os.close, and an unconfirmed close is sticky and is not retried",
+    "resources": "outer current VmSize/VmRSS/VmHWM/VmPeak plus all raw self/wait4 fields, unknown stays null+reason; no peak subtraction; original target caps preserved",
+    "refusal": "complete observed raw and parsed receipts survive validation refusal; missing/partial/unknown transport or cleanup cannot qualify; stdout, stderr, status and writable bytes already produced stay counted and hashed on timeout, live-resource, read, decode and cleanup prefixes, and a short or capped capture stays partial",
+    "scope": "only qualified exact Node publisher chain and own intended-cause controls; no generic crypto/gate/GO/image/RAMIO/native-Root authority proof",
+    "held_proc_lease": "Acquired immutable inputs retain ALL9. Only exact registered detached pidfd-ended proc generations get terminal ALL9 retirement tokens before any tracked first close; same dev/ino/mode and independently qualified owner transition; once-close stickyunknown unchanged."
+  },
+  "future_selection": {
+    "schema": "friday.e4.node.ordinary-root-selection-data.a082.v1",
+    "fields": [
+      "schema",
+      "pins"
+    ],
+    "all_pin_fields": [
+      "path",
+      "size",
+      "sha256",
+      "identity9"
+    ],
+    "full9_order": [
+      "dev",
+      "ino",
+      "mode",
+      "uid",
+      "gid",
+      "nlink",
+      "size",
+      "mtime_ns",
+      "ctime_ns"
+    ],
+    "required_names": [
+      "prlimit",
+      "python",
+      "gpg",
+      "gpgv",
+      "ffi",
+      "supervisor",
+      "verifier",
+      "contract",
+      "bill",
+      "receipts",
+      "raw",
+      "key",
+      "archive",
+      "original_archive",
+      "accepted",
+      "materialized",
+      "caller",
+      "expectations",
+      "plain"
+    ],
+    "identity_values": "NEW independent current Root observations, numeric integers; no unissued fixture values",
+    "execution_authority": false
+  },
+  "resource_receipt_schemas": {
+    "supervisor": "friday.e4.node.supervisor-resources.a172.v1",
+    "verifier": "friday.e4.node.verifier-resources.a172.v1"
+  },
+  "sol062_stock_error_raw_qualification": {
+    "schema": "friday.sol060.same-raw-object.v1",
+    "new_error_graph": "friday.sol060.error-graph.v2",
+    "mandatory_fullraw": true,
+    "raw_truncation_or_hashonly_proof": false,
+    "closed_all35_metadata_and_history_bound": "CODE_OPEN",
+    "inner32KiB_and_supervisor64KiB_fit": "CODE_OPEN",
+    "old_A175_bound_transfer": false,
+    "consumer_join": "validate_stock_error_graph(full nodes/values/bytes/aliases) then actual nodes[root] stock cause",
+    "stale_top_level_failure_equality": false,
+    "startup_controls_joined": [
+      "startup-env-negative",
+      "startup-as-negative"
+    ],
+    "supervisor_entry_controls_joined": [
+      "supervisor-entry-fd7",
+      "supervisor-entry-fd127"
+    ],
+    "prefunded_descriptor_history_cap": 256,
+    "prefunded_descriptor_history_cap_meaning": "simultaneous live unretired cap; confirmed close reclaims the live slot; lifetime acquisitions are an audit digest",
+    "prefunded_error_object_cap": 256,
+    "prefunded_exception_node_cap": 128,
+    "publication_over_inner_cap": "exit_without_smaller_substitute",
+    "inner32KiB_complete_graph_fit": "NOT_PROVEN",
+    "native_object_reconstruction": "NOT_QUALIFIED",
+    "private_error_journal": "fixed original256; no graph or str in catch; complete v2 only at publication boundary",
+    "exception_error_ref": "original error aliases in args/state/notes/groups; joint error/value frontiers",
+    "projection_failure_before_later_raw_or_knownclose": "moved outside designated loops; full stock capacity/implicit allocation proof CODE_OPEN",
+    "actual_complete_factory_bound": "CODE_OPEN",
+    "original_domain": "qualified stock32/path160/clock32/shared900; not universal C heap/frame-local/nativecustom"
+  }
+}

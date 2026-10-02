@@ -1,0 +1,227 @@
+{
+  "schema": "friday.a061.source-and-wire-contract.v1",
+  "status": "SOURCE_INCOMPLETE_UNEXECUTED_DO_NOT_LOAD",
+  "ABI": "Linux x86_64, little-endian, packed C, no pointer fields",
+  "capsule": {
+    "fd": 100,
+    "magic": "FRA061C1",
+    "bytes": 848,
+    "layout": [
+      "8s magic",
+      "6u32 version,mode,generation,uid,gid,sources",
+      "10u64 start_ns,work_ns,hard_ns,root_dev,root_ino,mount_ns,outer_dev,outer_ino,inner_dev,inner_ino",
+      "32s session",
+      "32s image_sha",
+      "32s manifest_sha",
+      "32s os_sha",
+      "19x32s source pins"
+    ],
+    "pins_offset": 240,
+    "contract_pin_offset": 752,
+    "roles": [
+      [
+        101,
+        "executor"
+      ],
+      [
+        102,
+        "controls"
+      ],
+      [
+        103,
+        "supervisor"
+      ],
+      [
+        104,
+        "bill"
+      ],
+      [
+        105,
+        "G1"
+      ],
+      [
+        106,
+        "R4"
+      ],
+      [
+        107,
+        "owner"
+      ],
+      [
+        108,
+        "inventory"
+      ],
+      [
+        109,
+        "CA"
+      ],
+      [
+        110,
+        "static native binary"
+      ],
+      [
+        112,
+        "worker"
+      ],
+      [
+        113,
+        "owned shared binary"
+      ],
+      [
+        114,
+        "producer"
+      ],
+      [
+        115,
+        "schema"
+      ],
+      [
+        116,
+        "OS capsule"
+      ],
+      [
+        117,
+        "runtime input manifest"
+      ],
+      [
+        118,
+        "contract"
+      ],
+      [
+        119,
+        "benign fixture"
+      ],
+      [
+        127,
+        "owned consumer"
+      ]
+    ],
+    "modes": {
+      "1": "legacy216 controls",
+      "2": "preflight",
+      "3": "exact3 production GET",
+      "4": "owned benign complete consumer"
+    },
+    "authority": "Externally supplied root-owned kernel-sealed capsule plus pinned actual native start; no selfapproved status/hash"
+  },
+  "image": {
+    "fd": 111,
+    "root_fd": 122,
+    "magic": "FRA061I1",
+    "header_bytes": 56,
+    "record_bytes": 1088,
+    "max_records": 8192,
+    "max_total_file_bytes": 134217728,
+    "record": [
+      "u32 kind,u32 mode",
+      "u64 size,u64 dev,u64 ino",
+      "32s SHA",
+      "512s logical absolute path",
+      "512s raw alias target"
+    ],
+    "kinds": {
+      "1": "sealed same-inode FILE",
+      "2": "complete DIR",
+      "3": "closed alias",
+      "4": "fixed kernel/data portal /proc,/sys,/var/tmp"
+    },
+    "same_view": "Root-held complete sorted index is consumed by native openat2 RESOLVE_IN_ROOT and chroot; interpreter/loader/imports/ctypes bridge all consume those indexed sealed files.",
+    "mutable_named_host_reopen": false,
+    "runtime_logical_grammar": "Original friday.browser3.trusted-runtime.v1 interpreter/stdlib/files/sonames/loader_alias preserved inside independently pinned producer input v1.",
+    "cache": "All original cache policy and complete stdlib memberships checked; no generated pyc writes."
+  },
+  "os": {
+    "fd": 116,
+    "magic": "FRA061O1",
+    "bytes": 208,
+    "values": [
+      "boot UUID",
+      "uname release[64]",
+      "mount/pid/cgroup namespace inode",
+      "outer/inner cgroup dev/ino",
+      "kernel_min,uid,gid,version",
+      "actual CapInh/Prm/Eff/Bnd/Amb",
+      "securebits",
+      "zero supplementary groups"
+    ],
+    "status": "NOT_PROVEN; complete independent OS/root admission still requires review"
+  },
+  "transport": {
+    "fd": 123,
+    "kind": "owned SOCK_SEQPACKET",
+    "bytes": 96,
+    "magic": "FRA061P1",
+    "layout": [
+      "8s magic",
+      "32s session",
+      "4u32 version,type,sequence,role",
+      "4i32 pid,owner,status,detail",
+      "3u64 birth,owner_birth,deadline_ns"
+    ],
+    "kernel_credentials": "Exactly one SCM_CREDENTIALS; root ACK sender actual parent PID UID0; coordinator sender exact registered owner/start UID1000; GID matched too",
+    "fd_transfer": "At most one SCM_RIGHTS, only REGISTER allows actual pidfd; all other attached descriptors refused/closed",
+    "creation": "Actual clone3(CLONE_PIDFD) return stored in durable native record BEFORE generation/proc/transport checks; barrier releases only after authoritative root acknowledgement",
+    "types": {
+      "1": "START",
+      "2": "INTENT",
+      "3": "INTENT_ACK",
+      "4": "REGISTER",
+      "5": "REGISTER_ACK",
+      "6": "ABORT",
+      "7": "REAP",
+      "8": "REAP_ACK",
+      "9": "FINISH",
+      "10": "FINISH_ACK",
+      "11": "STOP",
+      "12": "DRAIN",
+      "13": "DRAIN_ACK",
+      "14": "ABORT_ACK"
+    },
+    "unknown": "Sticky STOP_UNCONFIRMED; no foreign PID adoption or signalling; no callback ownership assertion"
+  },
+  "resources": {
+    "outer_cgroup_fd": 120,
+    "inner_cgroup_fd": 121,
+    "outer_bytes": 67108864,
+    "inner_bytes": 201326592,
+    "coordinator_AS": 50331648,
+    "worker_AS_each": 50331648,
+    "workers": 3,
+    "inner_processes": 4,
+    "aggregate_raw_RSS": 268435456,
+    "wall_production": 1200,
+    "work_production": 1140,
+    "reserve_production": 60,
+    "wall_controls": 180,
+    "work_controls": 170,
+    "reserve_controls": 10,
+    "request": 300,
+    "connect": 15,
+    "body_sum": 956301312,
+    "disk": 2147483648,
+    "headers": 65536,
+    "stdout": 1048576,
+    "stderr": 1048576,
+    "raw_historical_RSS": "No reset/subtraction/reinterpretation; inherited366080KiB remains overcap NOT_PROVEN"
+  },
+  "current_effects": {
+    "native_compile": 0,
+    "source_import": 0,
+    "source_exec": 0,
+    "controls": 0,
+    "GET": 0,
+    "root_or_namespace_or_cgroup_creation": 0
+  },
+  "all_future_observations": "NOT_RUN",
+  "native_ABI": {
+    "recv": "7 args including UID and GID",
+    "spawn": "9 args including bounded gate FD128",
+    "runtime_verify": "same held complete view, bounded cache/ELF DATA before loader",
+    "stage": "native primitive_stage emitted before interpreter"
+  },
+  "current_source_remaining": [
+    "independent complete safe DATA delta corpus",
+    "authoritative owned registry same-public-graph positive/negative consumers",
+    "all216 future exact fixture execution integration not proven"
+  ]
+}

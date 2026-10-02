@@ -1,0 +1,641 @@
+{
+  "schema": "friday.a192.independent.phases-native21-error16-bothends.v1",
+  "native21": [
+    {
+      "index": 0,
+      "name": "snapshot",
+      "producer": "actual _friday_source_owner bound builtin in current native methods table",
+      "consumer": "tools.native_support.selected_owner exact NativeHandle tuple; Source worker and Root real receivers both use this SAME shared constructor",
+      "default_boundary": "No native fixture route gives performing credit; no manual stale19 tuple on realreceivers",
+      "ownership": "original actual native/transport/FD/directwait relation",
+      "runtime": "NOT_RUN"
+    },
+    {
+      "index": 1,
+      "name": "begin_terminal",
+      "producer": "actual _friday_source_owner bound builtin in current native methods table",
+      "consumer": "tools.native_support.selected_owner exact NativeHandle tuple; Source worker and Root real receivers both use this SAME shared constructor",
+      "default_boundary": "No native fixture route gives performing credit; no manual stale19 tuple on realreceivers",
+      "ownership": "original actual native/transport/FD/directwait relation",
+      "runtime": "NOT_RUN"
+    },
+    {
+      "index": 2,
+      "name": "recv_packet",
+      "producer": "actual _friday_source_owner bound builtin in current native methods table",
+      "consumer": "tools.native_support.selected_owner exact NativeHandle tuple; Source worker and Root real receivers both use this SAME shared constructor",
+      "default_boundary": "No native fixture route gives performing credit; no manual stale19 tuple on realreceivers",
+      "ownership": "original actual native/transport/FD/directwait relation",
+      "runtime": "NOT_RUN"
+    },
+    {
+      "index": 3,
+      "name": "send_packet",
+      "producer": "actual _friday_source_owner bound builtin in current native methods table",
+      "consumer": "tools.native_support.selected_owner exact NativeHandle tuple; Source worker and Root real receivers both use this SAME shared constructor",
+      "default_boundary": "No native fixture route gives performing credit; no manual stale19 tuple on realreceivers",
+      "ownership": "original actual native/transport/FD/directwait relation",
+      "runtime": "NOT_RUN"
+    },
+    {
+      "index": 4,
+      "name": "spawn_source",
+      "producer": "actual _friday_source_owner bound builtin in current native methods table",
+      "consumer": "tools.native_support.selected_owner exact NativeHandle tuple; Source worker and Root real receivers both use this SAME shared constructor",
+      "default_boundary": "No native fixture route gives performing credit; no manual stale19 tuple on realreceivers",
+      "ownership": "original actual native/transport/FD/directwait relation",
+      "runtime": "NOT_RUN"
+    },
+    {
+      "index": 5,
+      "name": "close_fd",
+      "producer": "actual _friday_source_owner bound builtin in current native methods table",
+      "consumer": "tools.native_support.selected_owner exact NativeHandle tuple; Source worker and Root real receivers both use this SAME shared constructor",
+      "default_boundary": "No native fixture route gives performing credit; no manual stale19 tuple on realreceivers",
+      "ownership": "original actual native/transport/FD/directwait relation",
+      "runtime": "NOT_RUN"
+    },
+    {
+      "index": 6,
+      "name": "send_root_completion",
+      "producer": "actual _friday_source_owner bound builtin in current native methods table",
+      "consumer": "tools.native_support.selected_owner exact NativeHandle tuple; Source worker and Root real receivers both use this SAME shared constructor",
+      "default_boundary": "No native fixture route gives performing credit; no manual stale19 tuple on realreceivers",
+      "ownership": "original actual native/transport/FD/directwait relation",
+      "runtime": "NOT_RUN"
+    },
+    {
+      "index": 7,
+      "name": "capture_root_ledger",
+      "producer": "actual _friday_source_owner bound builtin in current native methods table",
+      "consumer": "tools.native_support.selected_owner exact NativeHandle tuple; Source worker and Root real receivers both use this SAME shared constructor",
+      "default_boundary": "No native fixture route gives performing credit; no manual stale19 tuple on realreceivers",
+      "ownership": "original actual native/transport/FD/directwait relation",
+      "runtime": "NOT_RUN"
+    },
+    {
+      "index": 8,
+      "name": "direct_source_wait",
+      "producer": "actual _friday_source_owner bound builtin in current native methods table",
+      "consumer": "tools.native_support.selected_owner exact NativeHandle tuple; Source worker and Root real receivers both use this SAME shared constructor",
+      "default_boundary": "No native fixture route gives performing credit; no manual stale19 tuple on realreceivers",
+      "ownership": "original actual native/transport/FD/directwait relation",
+      "runtime": "NOT_RUN"
+    },
+    {
+      "index": 9,
+      "name": "direct_root_wait",
+      "producer": "actual _friday_source_owner bound builtin in current native methods table",
+      "consumer": "tools.native_support.selected_owner exact NativeHandle tuple; Source worker and Root real receivers both use this SAME shared constructor",
+      "default_boundary": "No native fixture route gives performing credit; no manual stale19 tuple on realreceivers",
+      "ownership": "original actual native/transport/FD/directwait relation",
+      "runtime": "NOT_RUN"
+    },
+    {
+      "index": 10,
+      "name": "claim_existing_parent_custody",
+      "producer": "actual _friday_source_owner bound builtin in current native methods table",
+      "consumer": "tools.native_support.selected_owner exact NativeHandle tuple; Source worker and Root real receivers both use this SAME shared constructor",
+      "default_boundary": "No native fixture route gives performing credit; no manual stale19 tuple on realreceivers",
+      "ownership": "original preowned existing native caller relation",
+      "runtime": "NOT_RUN"
+    },
+    {
+      "index": 11,
+      "name": "accept_existing_parent_delivery",
+      "producer": "actual _friday_source_owner bound builtin in current native methods table",
+      "consumer": "tools.native_support.selected_owner exact NativeHandle tuple; Source worker and Root real receivers both use this SAME shared constructor",
+      "default_boundary": "No native fixture route gives performing credit; no manual stale19 tuple on realreceivers",
+      "ownership": "original preowned existing native caller relation",
+      "runtime": "NOT_RUN"
+    },
+    {
+      "index": 12,
+      "name": "accept_existing_parent_result",
+      "producer": "actual _friday_source_owner bound builtin in current native methods table",
+      "consumer": "tools.native_support.selected_owner exact NativeHandle tuple; Source worker and Root real receivers both use this SAME shared constructor",
+      "default_boundary": "No native fixture route gives performing credit; no manual stale19 tuple on realreceivers",
+      "ownership": "original preowned existing native caller relation",
+      "runtime": "NOT_RUN"
+    },
+    {
+      "index": 13,
+      "name": "bind_observed_root",
+      "producer": "actual _friday_source_owner bound builtin in current native methods table",
+      "consumer": "tools.native_support.selected_owner exact NativeHandle tuple; Source worker and Root real receivers both use this SAME shared constructor",
+      "default_boundary": "No native fixture route gives performing credit; no manual stale19 tuple on realreceivers",
+      "ownership": "original preowned existing native caller relation",
+      "runtime": "NOT_RUN"
+    },
+    {
+      "index": 14,
+      "name": "lock_canonical_slot",
+      "producer": "actual _friday_source_owner bound builtin in current native methods table",
+      "consumer": "tools.native_support.selected_owner exact NativeHandle tuple; Source worker and Root real receivers both use this SAME shared constructor",
+      "default_boundary": "No native fixture route gives performing credit; no manual stale19 tuple on realreceivers",
+      "ownership": "original preowned existing native caller relation",
+      "runtime": "NOT_RUN"
+    },
+    {
+      "index": 15,
+      "name": "unlock_canonical_slots",
+      "producer": "actual _friday_source_owner bound builtin in current native methods table",
+      "consumer": "tools.native_support.selected_owner exact NativeHandle tuple; Source worker and Root real receivers both use this SAME shared constructor",
+      "default_boundary": "No native fixture route gives performing credit; no manual stale19 tuple on realreceivers",
+      "ownership": "original preowned existing native caller relation",
+      "runtime": "NOT_RUN"
+    },
+    {
+      "index": 16,
+      "name": "received_history",
+      "producer": "actual _friday_source_owner bound builtin in current native methods table",
+      "consumer": "tools.native_support.selected_owner exact NativeHandle tuple; Source worker and Root real receivers both use this SAME shared constructor",
+      "default_boundary": "No native fixture route gives performing credit; no manual stale19 tuple on realreceivers",
+      "ownership": "original preowned existing native caller relation",
+      "runtime": "NOT_RUN"
+    },
+    {
+      "index": 17,
+      "name": "bind_original_consumer_end",
+      "producer": "actual _friday_source_owner bound builtin in current native methods table",
+      "consumer": "tools.native_support.selected_owner exact NativeHandle tuple; Source worker and Root real receivers both use this SAME shared constructor",
+      "default_boundary": "No native fixture route gives performing credit; no manual stale19 tuple on realreceivers",
+      "ownership": "original preowned existing native caller relation",
+      "runtime": "NOT_RUN"
+    },
+    {
+      "index": 18,
+      "name": "retire_direct_children",
+      "producer": "actual _friday_source_owner bound builtin in current native methods table",
+      "consumer": "tools.native_support.selected_owner exact NativeHandle tuple; Source worker and Root real receivers both use this SAME shared constructor",
+      "default_boundary": "No native fixture route gives performing credit; no manual stale19 tuple on realreceivers",
+      "ownership": "original preowned existing native caller relation",
+      "runtime": "NOT_RUN"
+    },
+    {
+      "index": 19,
+      "name": "source_raw_custody",
+      "producer": "actual _friday_source_owner bound builtin in current native methods table",
+      "consumer": "tools.native_support.selected_owner exact NativeHandle tuple; Source worker and Root real receivers both use this SAME shared constructor",
+      "default_boundary": "No native fixture route gives performing credit; no manual stale19 tuple on realreceivers",
+      "ownership": "same actual registered raw root / exact fixed16 error lane",
+      "runtime": "NOT_RUN"
+    },
+    {
+      "index": 20,
+      "name": "retain_source_raw_exception",
+      "producer": "actual _friday_source_owner bound builtin in current native methods table",
+      "consumer": "tools.native_support.selected_owner exact NativeHandle tuple; Source worker and Root real receivers both use this SAME shared constructor",
+      "default_boundary": "No native fixture route gives performing credit; no manual stale19 tuple on realreceivers",
+      "ownership": "same actual registered raw root / exact fixed16 error lane",
+      "runtime": "NOT_RUN"
+    }
+  ],
+  "caller_error_lane": 16,
+  "phase_rows": [
+    {
+      "id": "PREINIT-ORIGINAL-BOUND",
+      "actual_site": "native/source_owner.c:1737..1772",
+      "producer": "Original selected native issuer/callsite",
+      "actual_consumer": "run_selected_existing_caller immutable original start/end/generation before caps/init",
+      "normal_branch": "Original interval retained; selected entry only.",
+      "error_or_cutoff_branch": "Invalid/expired/guard setup prefixes honestly _exit125, no native credit.",
+      "raw_custody_and_parenthood": "Same selected TGID only; no accepted outside full graph before loss.",
+      "FD_alias_relation": "Original incoming directRoot/pidfd stored preinit; no new pidfd_open.",
+      "phase_and_original_end": "INGRESS; actual original minimum end; no refresh.",
+      "current_CODE_dependencies": [
+        "A192-C1-FINAL-ORIGINAL-ROOT-CUSTODY-PARENTHOOD-UNACCEPTED"
+      ],
+      "runtime": "NOT_RUN"
+    },
+    {
+      "id": "DISTINCT-ROLE-CAPS",
+      "actual_site": "native/source_owner.c:1429..1509; tools/native_owner.py:85..132",
+      "producer": "Original held sealed caps/bootstrap/runtime/image",
+      "actual_consumer": "initialize_native_owner and NativeRootOwner constructors",
+      "normal_branch": "Source16, global4, Root distinct B+220 exact independently issued ceilings.",
+      "error_or_cutoff_branch": "Missing selected/grant/caps refused, not invented; prefix finalRoot owner unaccepted.",
+      "raw_custody_and_parenthood": "Actual prescribed original role caps; author read budget is not Source authority.",
+      "FD_alias_relation": "FD_MAX4096 table not permission; original holder206/207 plus overlaps.",
+      "phase_and_original_end": "INGRESS original same phase and caps.",
+      "current_CODE_dependencies": [
+        "A192-C1-FINAL-ORIGINAL-ROOT-CUSTODY-PARENTHOOD-UNACCEPTED"
+      ],
+      "runtime": "NOT_RUN"
+    },
+    {
+      "id": "RAW-PARTIAL-CONSTRUCTOR",
+      "actual_site": "tools/native_support.py:47..63; native/source_owner.c:1370..1400",
+      "producer": "SourceRawOwner.__new__ and new_meter actual factories",
+      "actual_consumer": "Native global source_raw_root then __init__, fixed16 exception lane",
+      "normal_branch": "Exact partial owner C-rooted before init, meter/ResultOwner borrow same.",
+      "error_or_cutoff_branch": "Factory failure lane owns exact exc before reraise; exhaustion honest failed/threadstate.",
+      "raw_custody_and_parenthood": "Prospective original Source registered graph, no universal heap claim.",
+      "FD_alias_relation": "Constructor/snapshot/input FD aliases remain charged original samearena.",
+      "phase_and_original_end": "INGRESS before any meter/native snapshot fallible projection.",
+      "current_CODE_dependencies": [
+        "A192-C2-SOURCE-NATIVE-RAW-REGISTRY-NOT-RETIRED"
+      ],
+      "runtime": "NOT_RUN"
+    },
+    {
+      "id": "METER-CONTEXT",
+      "actual_site": "source/bounds.py:175..252; tools/native_support.py:66..96; tools/state_binding.py",
+      "producer": "Actual Source root and ContextVar.set token",
+      "actual_consumer": "new_meter, source_raw_state_matches, loaded_globals_cause",
+      "normal_branch": "Same actual native object; copied context len1; exact registered root and nodes.",
+      "error_or_cutoff_branch": "Factory fails root.capture before tokenreset/reraise; no broad mutable whitelist.",
+      "raw_custody_and_parenthood": "Meter/terminal/token/traceback/native handle are same graph aliases.",
+      "FD_alias_relation": "No extra fd; ContextVar/set/copy/validation allocations charged.",
+      "phase_and_original_end": "INGRESS/all/error; original work/tail, no fresh grant.",
+      "current_CODE_dependencies": [
+        "A192-C2-SOURCE-NATIVE-RAW-REGISTRY-NOT-RETIRED"
+      ],
+      "runtime": "NOT_RUN"
+    },
+    {
+      "id": "GENERIC-FIRST-CATCH",
+      "actual_site": "source/public.py:940..980; zip_wheel.py:415; deb_archive.py:1095",
+      "producer": "Reached actual host/policy/decoder primary",
+      "actual_consumer": "retain_source_origin -> exception_owned_result -> source_exception_detail",
+      "normal_branch": "Raw captured before normally returned typed refusal/detail.",
+      "error_or_cutoff_branch": "Recorder captured separately; outer BaseException exact primary retained before rethrow.",
+      "raw_custody_and_parenthood": "SourceRawOwner.head/pending/pending_recorder same actual objects; no fabricated host for pure policy.",
+      "FD_alias_relation": "Scratch release becomes nonrefund once raw traceback aliases.",
+      "phase_and_original_end": "DECODE/PARSE/METADATA/RESULT original budgets.",
+      "current_CODE_dependencies": [
+        "A192-C2-SOURCE-NATIVE-RAW-REGISTRY-NOT-RETIRED"
+      ],
+      "runtime": "NOT_RUN"
+    },
+    {
+      "id": "DEFAULT-NORMAL-RETURN",
+      "actual_site": "source/canonical.py; compression.py:222; schema_validate.py; raw_relations.py; controls.py; digests.py; public.py:1111",
+      "producer": "Reached default helpers resources=None/meter=None",
+      "actual_consumer": "retain_source_origin(None,exc) via ContextVar/current C root",
+      "normal_branch": "Normally returning actualcaught error owned before cause/string/return.",
+      "error_or_cutoff_branch": "No native selected fixture lane earns performing credit; performing call uses exact native root.",
+      "raw_custody_and_parenthood": "No substituted typed marker or synthetic exception; defaults inherit registered Source root.",
+      "FD_alias_relation": "No default Source16 override/read permission granted.",
+      "phase_and_original_end": "Defaults retained within original finite DATA or actual performing caller.",
+      "current_CODE_dependencies": [
+        "A192-C2-SOURCE-NATIVE-RAW-REGISTRY-NOT-RETIRED"
+      ],
+      "runtime": "NOT_RUN"
+    },
+    {
+      "id": "CLEANUP-SECONDARY-RECORDER",
+      "actual_site": "source/public.py:1039..1108; source/causes.py:249..end",
+      "producer": "Cleanup/release/encoder/schema/projection error",
+      "actual_consumer": "Retain actual secondary before cleanup list/detail; projection recorder retained",
+      "normal_branch": "Primary successor remains typed cause relation; all reached exact exception graphs retained.",
+      "error_or_cutoff_branch": "SourceRawOwner.pending first, recorder slot before raising fromprimary; fixed16 if next origin whilepending.",
+      "raw_custody_and_parenthood": "Same primary does not suppress different secondary/recorder.",
+      "FD_alias_relation": "HeldRanges, decoder buffers, result, terminal meters remain graph aliased; no guessedfree.",
+      "phase_and_original_end": "Original prepaid terminal capacities, no wall extension.",
+      "current_CODE_dependencies": [
+        "A192-C2-SOURCE-NATIVE-RAW-REGISTRY-NOT-RETIRED",
+        "A192-C1-FINAL-ORIGINAL-ROOT-CUSTODY-PARENTHOOD-UNACCEPTED"
+      ],
+      "runtime": "NOT_RUN"
+    },
+    {
+      "id": "ERROR-LANE16",
+      "actual_site": "native/source_owner.c:171..179,1385..1400; tools/native_support.py:23..45",
+      "producer": "Native Source trusted-entry / Python constructor/recorder failures",
+      "actual_consumer": "Fixed preinitialized caller_errors[16], PyErr_Fetch/type/exc refs",
+      "normal_branch": "Each actual origin retained strongly before subsequent projection.",
+      "error_or_cutoff_branch": "At full lane failed+exhausted; same current threadstate error remains; no success/retirement claimed.",
+      "raw_custody_and_parenthood": "Root warm clears only if complete confirmed resources; Source main neverclears new lane.",
+      "FD_alias_relation": "No retry or extra domain created by lane; allobject costsnonzero.",
+      "phase_and_original_end": "All normal/error/startup; original end still physical.",
+      "current_CODE_dependencies": [
+        "A192-C2-SOURCE-NATIVE-RAW-REGISTRY-NOT-RETIRED",
+        "A192-C1-FINAL-ORIGINAL-ROOT-CUSTODY-PARENTHOOD-UNACCEPTED"
+      ],
+      "runtime": "NOT_RUN"
+    },
+    {
+      "id": "R2-ORIGINAL-SEVEN",
+      "actual_site": "source/custody.py original retainOriginFailure catches",
+      "producer": "Original host open/fstat/readlink/mount/named/read/close firstcatch",
+      "actual_consumer": "Original meter owned_origin_exceptions + full causal leaf successor",
+      "normal_branch": "Genuine original raw object retention remains; not reopened.",
+      "error_or_cutoff_branch": "Actual secondary leaf origin joined before schema/encoder; uncertain close staysowned.",
+      "raw_custody_and_parenthood": "Current generic root supplements—not replaces—original scoped ownership.",
+      "FD_alias_relation": "Once-close, actual FD alias/mount/named9/held fullbytes preserved.",
+      "phase_and_original_end": "CUSTODY/RESULT; same original grant/end.",
+      "current_CODE_dependencies": [
+        "A192-C2-SOURCE-NATIVE-RAW-REGISTRY-NOT-RETIRED",
+        "A192-C1-FINAL-ORIGINAL-ROOT-CUSTODY-PARENTHOOD-UNACCEPTED"
+      ],
+      "runtime": "NOT_RUN"
+    },
+    {
+      "id": "ROOT202-PRE-BIRTH",
+      "actual_site": "tools/root_holder.py:124..220,458..510; tools/native_owner.py:274..319",
+      "producer": "Actual full original202 already held by Root",
+      "actual_consumer": "ExistingParentCaller.claim+bind minend -> RootRetainedCapsule -> Source spawn",
+      "normal_branch": "Preowned Caller/Capsule before __init__/holder/birth; complete202 withinsameRoot.",
+      "error_or_cutoff_branch": "Partial constructor/retention recorder exact graphs preserved in preownedCaller.",
+      "raw_custody_and_parenthood": "Root remains genuine direct Source parent; no pidfd-only adoption.",
+      "FD_alias_relation": "202+scope dir206/207 held descriptions; duplicates/transientFD overlaps counted.",
+      "phase_and_original_end": "CUSTODY prior boundedSource birth; original Root B+220.",
+      "current_CODE_dependencies": [
+        "A192-C1-FINAL-ORIGINAL-ROOT-CUSTODY-PARENTHOOD-UNACCEPTED"
+      ],
+      "runtime": "NOT_RUN"
+    },
+    {
+      "id": "SOURCE-BIRTH-PREFIX",
+      "actual_site": "native/source_owner.c:1181..1275",
+      "producer": "clone3 actual child/pidfd into reserved fixedstorage",
+      "actual_consumer": "Native Source parent state before Py_BuildValue/return",
+      "normal_branch": "Actual pidfd scalar commit before fallible Python result.",
+      "error_or_cutoff_branch": "Interrupted missingPID recovery uses genuine waitid exit observation, not guessedPID; uncommittedwait failure remains.",
+      "raw_custody_and_parenthood": "Same native TGID actual parent until loss; outside acceptance notimplemented.",
+      "FD_alias_relation": "Reserved FDslot prebirth; captured pidfd never guessed/free.",
+      "phase_and_original_end": "CUSTODY original phase/end; no extraRootprocess.",
+      "current_CODE_dependencies": [
+        "A192-C1-FINAL-ORIGINAL-ROOT-CUSTODY-PARENTHOOD-UNACCEPTED"
+      ],
+      "runtime": "NOT_RUN"
+    },
+    {
+      "id": "PACKET-RAW-CONTROL-RIGHTS",
+      "actual_site": "native/source_owner.c recv_packet/consume_native_packets; source/custody.py RootHolderClient",
+      "producer": "Actual packet body/control/SCMrights before Python projection",
+      "actual_consumer": "Prospective native packet linkedowner and registered FDslots; caller errorroots",
+      "normal_branch": "Raw native acceptance before packetdestruction; receipts match real bytes.",
+      "error_or_cutoff_branch": "Allocation/rejection retains complete raw/control/right history; errortriplets scoped.",
+      "raw_custody_and_parenthood": "Credit preserved; byteACK not complete externalPython Source graph.",
+      "FD_alias_relation": "Allreceived aliases samefixed FDregistry; closeonce uncertainty sticky.",
+      "phase_and_original_end": "CUSTODY/minimum transport end, no fresh clock.",
+      "current_CODE_dependencies": [
+        "A192-C1-FINAL-ORIGINAL-ROOT-CUSTODY-PARENTHOOD-UNACCEPTED",
+        "A192-C2-SOURCE-NATIVE-RAW-REGISTRY-NOT-RETIRED"
+      ],
+      "runtime": "NOT_RUN"
+    },
+    {
+      "id": "SLOT-COMMIT",
+      "actual_site": "native/source_owner.c lock_canonical_slot/unlock_canonical_slots",
+      "producer": "Actual original canonical slot flock effect",
+      "actual_consumer": "Fixed identity/generation before flock, scalaracquired beforeprojection",
+      "normal_branch": "Actual4 global slots; bornworker within canonical original topology.",
+      "error_or_cutoff_branch": "Uncertain unlock sticky, once attempted and retained; no retry/freecount.",
+      "raw_custody_and_parenthood": "Scalarcommit retained separately from fallible projection.",
+      "FD_alias_relation": "Actual open description and flock ownership sameRoot untilconfirmedretire.",
+      "phase_and_original_end": "CUSTODY/TASK/TERMINAL; original noextra allowance.",
+      "current_CODE_dependencies": [
+        "A192-C1-FINAL-ORIGINAL-ROOT-CUSTODY-PARENTHOOD-UNACCEPTED"
+      ],
+      "runtime": "NOT_RUN"
+    },
+    {
+      "id": "COMMIT-MINEND",
+      "actual_site": "source/custody.py RootHolderClient.commit",
+      "producer": "Actual selectedSource/Root operation budget",
+      "actual_consumer": "_recv_checked(... operation_end_ns) plus native producer/consumer ends",
+      "normal_branch": "Called COMMIT respects actualminimumends; no ended-role operation.",
+      "error_or_cutoff_branch": "Missing ACK/EOF/native/trailer/wait staysfailed; cannotrenewtimer.",
+      "raw_custody_and_parenthood": "Exactcredential/generation/start/end/bodyhash ACK joins genuine delivery not fullrawadoption.",
+      "FD_alias_relation": "Borrowed selected onehelddescription hash/named9/mountsamegeneration.",
+      "phase_and_original_end": "CUSTODY minworktail ends.",
+      "current_CODE_dependencies": [
+        "A192-C1-FINAL-ORIGINAL-ROOT-CUSTODY-PARENTHOOD-UNACCEPTED",
+        "A192-C2-SOURCE-NATIVE-RAW-REGISTRY-NOT-RETIRED"
+      ],
+      "runtime": "NOT_RUN"
+    },
+    {
+      "id": "SOURCE-DIRECT-WAIT",
+      "actual_site": "native/source_owner.c:1032..1061,1090..1130; native_owner.py:372,514..545",
+      "producer": "Actual own Source generation+heldpidfd",
+      "actual_consumer": "Finite wait4 directSource relation and exactstatus/rusagecommit",
+      "normal_branch": "Only returned exactchild wait4 setsreaped; pollreadinessnotproof.",
+      "error_or_cutoff_branch": "Once heldpidfd-scoped cancel; wait0/ECHILD/error remainunconfirmed untilfiniteend.",
+      "raw_custody_and_parenthood": "Actualdirectparent beforebirth; observerofRootdoesnotadoptgrandchild.",
+      "FD_alias_relation": "Unreaped Source pidfd retained, not guessedclosedasreap.",
+      "phase_and_original_end": "Original nativeconsumer minend/worktail; no broadkill.",
+      "current_CODE_dependencies": [
+        "A192-C1-FINAL-ORIGINAL-ROOT-CUSTODY-PARENTHOOD-UNACCEPTED"
+      ],
+      "runtime": "NOT_RUN"
+    },
+    {
+      "id": "ROOT-DIRECT-WAIT",
+      "actual_site": "native/source_owner.c:1063..1090,1130..1170; native_owner.py:1067,1084",
+      "producer": "Actual native preinit selected directRoot child+heldpidfd",
+      "actual_consumer": "Python RootCompletionObserver matches pair, native finitewait4",
+      "normal_branch": "Onlyexactwait4status/rusagecommit accepted; two-sided actual relation.",
+      "error_or_cutoff_branch": "No blanket Root kill while innerSource/raw202 acceptanceunknown; failuresretainfullchargedstate.",
+      "raw_custody_and_parenthood": "RealRootdirectparent only; receivedpidfdnumericfieldnot newparenthood.",
+      "FD_alias_relation": "UnreapeddirectRootpidfd remainsregistered; no guessedrelease.",
+      "phase_and_original_end": "Original selected minend; no late expiredparking.",
+      "current_CODE_dependencies": [
+        "A192-C1-FINAL-ORIGINAL-ROOT-CUSTODY-PARENTHOOD-UNACCEPTED"
+      ],
+      "runtime": "NOT_RUN"
+    },
+    {
+      "id": "SOURCE-REAL-RECEIVER",
+      "actual_site": "tools/native_owner.py:396..488,660..850; native/source_owner.c:1843..1880",
+      "producer": "Source actual stdout/stderr+finalcanonicalbytes/native120",
+      "actual_consumer": "Original nativeRoot sourceparent ->consumeSelectedSourceCapsule ->ExistingParentCaller.accept",
+      "normal_branch": "Both own bytebody/hash/generation/end, realEOF/directwait and eligible validated final.",
+      "error_or_cutoff_branch": "Forensic cap+1/fragments preowned; exactvalid REFUSED negative legitimate; malformed/finalizationfailure refusals.",
+      "raw_custody_and_parenthood": "RawSource graph not transferred by bytes/native120. Worker-onlyR4 phasecosts distinct.",
+      "FD_alias_relation": "Actualpipe/socket/stdin/native sourceFDslots afterclear/finalization stillresourceowned.",
+      "phase_and_original_end": "Source nativeend/end211 distinct from Root later216; no prereeturnsample.",
+      "current_CODE_dependencies": [
+        "A192-C2-SOURCE-NATIVE-RAW-REGISTRY-NOT-RETIRED",
+        "A192-C1-FINAL-ORIGINAL-ROOT-CUSTODY-PARENTHOOD-UNACCEPTED"
+      ],
+      "runtime": "NOT_RUN"
+    },
+    {
+      "id": "ROOT-REAL-RECEIVER",
+      "actual_site": "tools/root_holder.py:515..end; native_owner.py:850..1250",
+      "producer": "Original Root completiontransport+native216 stdout/stderr EOF",
+      "actual_consumer": "Existing original observer/finalkind2 calledreceiver actual preinitpair",
+      "normal_branch": "Credential/generation/start/end/bodyhash and ACK on bothproducerreceiver; actual216/EOF/directwait.",
+      "error_or_cutoff_branch": "Missing/malformed/failedprefix retained as failure; finalkind2 noinventedown futuretrailer.",
+      "raw_custody_and_parenthood": "Raw202/Sourceparenthood still not adopted merely viaRootterminalpayload.",
+      "FD_alias_relation": "ConsumedsourceFDaliases whileRawRootcapsule preowned; sameoriginalobservercaps.",
+      "phase_and_original_end": "Root nativeend then observerconsumer originalminimumend.",
+      "current_CODE_dependencies": [
+        "A192-C1-FINAL-ORIGINAL-ROOT-CUSTODY-PARENTHOOD-UNACCEPTED"
+      ],
+      "runtime": "NOT_RUN"
+    },
+    {
+      "id": "ROOT-TARGETED-ERROR-GRAPHS",
+      "actual_site": "tools/native_support.py ExistingParentCaller; native_owner.py/root_holder.py all original targeted Root catches",
+      "producer": "Budgetbegin/release,unlock,receivehistory,cancel/reap,selector/close,recorder errors",
+      "actual_consumer": "Prospective CallerRawOrigin before producer; pending slot before fallible projection",
+      "normal_branch": "Complete primary+secondary retained; existingprimary does not suppresssecondary.",
+      "error_or_cutoff_branch": "Partialcapsule/fallback rawacceptfailure fixedslots; no generic STOP text replacement.",
+      "raw_custody_and_parenthood": "Genuine oldRootlocalfix separate from newSource genericrawroot.",
+      "FD_alias_relation": "Allheldraw202/FD/slot/rootsecondaryframes in samecaller.",
+      "phase_and_original_end": "All originalphases withinsameRootcaps.",
+      "current_CODE_dependencies": [
+        "A192-C1-FINAL-ORIGINAL-ROOT-CUSTODY-PARENTHOOD-UNACCEPTED"
+      ],
+      "runtime": "NOT_RUN"
+    },
+    {
+      "id": "ROOT-WARM-CONFIRMED",
+      "actual_site": "native/source_owner.c:1520..1619",
+      "producer": "Actual nativeRoot normal/typed-error completedinterpreter",
+      "actual_consumer": "native_caller_destruct ->bothchild/slotretire ->FDclose ->rawPy_CLEAR ->Py_FinalizeEx",
+      "normal_branch": "New warmclosebeforeclear and SourceRawOwner+caller_errors clearing are real onthisroute.",
+      "error_or_cutoff_branch": "Typed/recorderfailure canwarmretire only complete resourcesconfirmed; errorsremainfailed125.",
+      "raw_custody_and_parenthood": "No wholegreen fromrefusal orpartialledger; confirmedlocalretirement credit.",
+      "FD_alias_relation": "AllknownactiveFDs except stderr closedbeforegraphclear; laterknownfinalizationFDlooponce.",
+      "phase_and_original_end": "Original end not reached; finite warm allconfirmedtail.",
+      "current_CODE_dependencies": [],
+      "runtime": "NOT_RUN"
+    },
+    {
+      "id": "ROOT-WARM-UNCERTAIN",
+      "actual_site": "native/source_owner.c:1520..1619",
+      "producer": "Unreaped/FDuncertain/slotuncertain/exhaustedlane/hardend nativeRoot",
+      "actual_consumer": "can_finalize=false rawgraphs stayin sameoriginalTGID",
+      "normal_branch": "NoPyFinalizeorrawerase claimedifuncertain.",
+      "error_or_cutoff_branch": "Returnsfailed125/emits failedfinalized-1 ifinsideend then processloss.",
+      "raw_custody_and_parenthood": "Keeping rawgraph onlyin dyingTGID notacceptedoutsidecustody.",
+      "FD_alias_relation": "Unreapedpidfdnotclosedasreap; uncertaincloseneverretry.",
+      "phase_and_original_end": "Original finiteend; no newparkdomain.",
+      "current_CODE_dependencies": [
+        "A192-C1-FINAL-ORIGINAL-ROOT-CUSTODY-PARENTHOOD-UNACCEPTED"
+      ],
+      "runtime": "NOT_RUN"
+    },
+    {
+      "id": "SOURCE-WARM-RAW-END",
+      "actual_site": "native/source_owner.c:1843..1880",
+      "producer": "Newsource_raw_root/exacterrorlane16 and packet origins",
+      "actual_consumer": "main clears onlypacketerrortriplets ->Py_FinalizeEx ->registeredFDclose ->native120 ->_exit",
+      "normal_branch": "Generic normallyreturnedtypedrefusal canholdactual rawgraph while sourceentryreturnssuccess.",
+      "error_or_cutoff_branch": "Reached trustedentry loader/factory/return origin capturednative16 butnevercleared; no acceptedfullrawreceiver.",
+      "raw_custody_and_parenthood": "NewCglobalSourceRoot+lane externalstrongrefs not explicitlyretired; RootwarmPy_CLEAR code NOT CALLED.",
+      "FD_alias_relation": "CloseafterFinalize and noSource can_finalize uncertaintyguard do notconstituteconfirmedrawaliasretirement.",
+      "phase_and_original_end": "Source originalnativeend; no off-process aliasadoptionclaimed.",
+      "current_CODE_dependencies": [
+        "A192-C2-SOURCE-NATIVE-RAW-REGISTRY-NOT-RETIRED"
+      ],
+      "runtime": "NOT_RUN"
+    },
+    {
+      "id": "SOURCE-INIT-PREFIX",
+      "actual_site": "native/source_owner.c:1429..1516,1844..1851",
+      "producer": "NativeSource caps/runtime initialization beforetrustedentry",
+      "actual_consumer": "main returns refusal oninit/import/fdopenprefix",
+      "normal_branch": "No SourceReadyclaim whenprefixfails.",
+      "error_or_cutoff_branch": "Actualreachedimportfailure canenter C16lane then mainreturn withoutcommonwarmconsumer.",
+      "raw_custody_and_parenthood": "OutsideactualRootstillholds Sourcegeneration; rawSourceprefixnotacceptedcomplete merelybywait.",
+      "FD_alias_relation": "PartialnativeFD/arena/caps charged Source sameactualrole.",
+      "phase_and_original_end": "Original Source hardend, no sourceissuedrefresh.",
+      "current_CODE_dependencies": [
+        "A192-C2-SOURCE-NATIVE-RAW-REGISTRY-NOT-RETIRED",
+        "A192-C1-FINAL-ORIGINAL-ROOT-CUSTODY-PARENTHOOD-UNACCEPTED"
+      ],
+      "runtime": "NOT_RUN"
+    },
+    {
+      "id": "TASK-CUTOFF-LOCAL",
+      "actual_site": "native/source_owner.c:278..291,1644..1700,1791..1825",
+      "producer": "Original inprocessRoot interpretertask",
+      "actual_consumer": "Scoped pthread generation signal ->actual kernel clear_tid ->sameoriginalcoldCcaller",
+      "normal_branch": "Nativecaller ownsstack/storage BEFOREtaskbirth; waitstarted>0&&clear_tid0 only.",
+      "error_or_cutoff_branch": "Flag/killsuccess/ESRCH alone notproof; no unsafeinterpreterunwind; failureactualprocessend125.",
+      "raw_custody_and_parenthood": "Genuine tasklocalretirement; same TGIDactual kernelparent/rawowner survivesonlyuntilprocessend.",
+      "FD_alias_relation": "NoSource/RootbroadnumericPIDkill; NPTL/TLS bookkeepingnotfreed/refunded.",
+      "phase_and_original_end": "Earlierwork_end=originalend-terminalreserve; waitendminactualoriginalend.",
+      "current_CODE_dependencies": [
+        "A192-C1-FINAL-ORIGINAL-ROOT-CUSTODY-PARENTHOOD-UNACCEPTED"
+      ],
+      "runtime": "NOT_RUN"
+    },
+    {
+      "id": "COLD-NATIVE-CONSUMER",
+      "actual_site": "native/source_owner.c:1701..1727",
+      "producer": "Complete sameRoot rawVM/threadstate/stack/202/packet/slot/FD",
+      "actual_consumer": "native_cold_original_caller_consume afterconfirmedtaskexit",
+      "normal_branch": "NoPyFinalizeoninterruptedheap; native packet/child/slot/FD finiteattempts.",
+      "error_or_cutoff_branch": "finalized=-1/failed125 honest; retainedgraphs remainuntilRootexit.",
+      "raw_custody_and_parenthood": "No externalacceptedfullrawowner or confirmedwholeRootretirement beforefinalTGIDloss.",
+      "FD_alias_relation": "CompleteactualFDtables retained; uncertainty/unreaped no guessedfree.",
+      "phase_and_original_end": "Original tail/end only.",
+      "current_CODE_dependencies": [
+        "A192-C1-FINAL-ORIGINAL-ROOT-CUSTODY-PARENTHOOD-UNACCEPTED"
+      ],
+      "runtime": "NOT_RUN"
+    },
+    {
+      "id": "HARD-MINIMUM-END",
+      "actual_site": "native/source_owner.c:233..277",
+      "producer": "ActualoriginalSource/Root hard/minend signal",
+      "actual_consumer": "Physical _exit125; no expired writes/cleanupcallback",
+      "normal_branch": "Originalphysical stoprepair genuine.",
+      "error_or_cutoff_branch": "OncecancelSource andsinglewaitstatus0/errornotadoption/reap; rawcurrentownerlosesfinalstate.",
+      "raw_custody_and_parenthood": "BothRooterror/coldprefix C1; Source errorlane lifetime C2 where reached.",
+      "FD_alias_relation": "KernelFDcloseatprocessend not pre-loss accepteddescription/parenthood.",
+      "phase_and_original_end": "Actualoriginalminimumend exactly no grace.",
+      "current_CODE_dependencies": [
+        "A192-C1-FINAL-ORIGINAL-ROOT-CUSTODY-PARENTHOOD-UNACCEPTED",
+        "A192-C2-SOURCE-NATIVE-RAW-REGISTRY-NOT-RETIRED"
+      ],
+      "runtime": "NOT_RUN"
+    },
+    {
+      "id": "NATIVE-END-OBSERVATIONS",
+      "actual_site": "native/source_owner.c:187..232; native_owner.py consume/observerreceipts",
+      "producer": "ActualSource120/Root216 C-native trailer thenonlyexit",
+      "actual_consumer": "RealoutsideEOF/directwait and independentworker-onlyR4 measuredend",
+      "normal_branch": "Original role/pid/finalization/read/output/generation/end ledger joinscalled.",
+      "error_or_cutoff_branch": "Expiredend emitsnothing; partial/missingfailed prefixnotpass; cold-1 distinct.",
+      "raw_custody_and_parenthood": "Record+hash+exit125/ACK notrawowner or actualoutsideparenthood.",
+      "FD_alias_relation": "BeforetrailerstderrknownonlylastFD; resources/trailerwrites chargedoriginaldomain.",
+      "phase_and_original_end": "No laterlibc/atexitproducers advertisedasalreadyobservednativeend.",
+      "current_CODE_dependencies": [
+        "A192-C1-FINAL-ORIGINAL-ROOT-CUSTODY-PARENTHOOD-UNACCEPTED",
+        "A192-C2-SOURCE-NATIVE-RAW-REGISTRY-NOT-RETIRED"
+      ],
+      "runtime": "NOT_RUN"
+    },
+    {
+      "id": "FULL-RESOURCE-COST",
+      "actual_site": "all28 actual performingcode/schema14/ref61/full202",
+      "producer": "Actual byte/hash/copy/rawrecord/ContextVar/allocator/IPC/native cleanup",
+      "actual_consumer": "Source budget/meter +Root budget/nativephysicaloutsideRSS/directwait +bothreceivers",
+      "normal_branch": "Whole actualunknown totalsnotzero; no old/authorgrant.",
+      "error_or_cutoff_branch": "HistoricalNOTFIT retained; changingcandidate requiresnewexact fullqualification.",
+      "raw_custody_and_parenthood": "Allrawaliases/capturedscratch remain sameoriginal chargedarena.",
+      "FD_alias_relation": "Holder13500416/descriptions206/207 andSource16/RootB+220/global4 unchanged.",
+      "phase_and_original_end": "Work/terminal/native/receiver minends allcosted separately.",
+      "current_CODE_dependencies": [
+        "A192-C1-FINAL-ORIGINAL-ROOT-CUSTODY-PARENTHOOD-UNACCEPTED",
+        "A192-C2-SOURCE-NATIVE-RAW-REGISTRY-NOT-RETIRED"
+      ],
+      "runtime": "NOT_RUN"
+    }
+  ],
+  "raw_alias_set": [
+    "Exact primary/secondary/recorder exception and cause/context/notes/body identity",
+    "Actual traceback/frame/locals reachable under original reviewed-stock registered records",
+    "SourceRawOwner.pending/pending_recorder/head",
+    "C-global source_raw_root / fixed16 caller_errors / parent-error triplets",
+    "ContextVar/token/copy_context/meter/terminalmeter/ResultOwner sameactualowner",
+    "Decoder/chunks/rawrange/partialresult/finalbytes/custodyleases/retainedFD reachablealiases",
+    "Root CallerRawOrigin/capsule/raw202/received packet/control/right/slot/actual directchild/pidfd"
+  ],
+  "root_warm_confirmed_credit_only": true,
+  "source_main_not_root_warm_consumer": true,
+  "SourceReady": false,
+  "Root_admission": false,
+  "runtime": "NOT_RUN",
+  "gates": "REQUIRED_NOT_RUN",
+  "GO": false
+}

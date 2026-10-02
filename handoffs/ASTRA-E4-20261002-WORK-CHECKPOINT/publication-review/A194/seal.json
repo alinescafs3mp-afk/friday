@@ -1,0 +1,71 @@
+{
+  "lifecycle": "LIFECYCLE assignment=ASTRA-E4-OWNER-GITHUB-CHECKPOINT-PRIVACY-SAFETY-REVIEW-A194 generation=1 context=fresh owner_scope=turn",
+  "schema": "friday.owner.github.checkpoint-publication-review-seal.v1",
+  "assignment": "ASTRA-E4-OWNER-GITHUB-CHECKPOINT-PRIVACY-SAFETY-REVIEW-A194",
+  "generation": 1,
+  "selection_sha256": "6ec6d5abf9e55734bfb58e187a68fb44d4a413cb7863d5ce624a88f083ffbf47",
+  "coverage_entries": 768,
+  "coverage_bytes": 41619288,
+  "fullSHA9": "PASS_768_OF_768",
+  "exclusion_count": 5,
+  "excluded_bytes": 277946,
+  "GO": false,
+  "artifacts": [
+    {
+      "path": "/var/tmp/friday-astra-owner-github-checkpoint-privacy-safety-review-a194-g1/review.json",
+      "bytes": 6363,
+      "sha256": "06d0221eda3d3d3c2361ccf55a8c0cc34cda12c7b43de7a3121533f922bce02c",
+      "identity9_decimal_strings": [
+        "2050",
+        "3556558",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "6363",
+        "1790947858769692138",
+        "1790947858852696887"
+      ],
+      "mode": "0o600"
+    },
+    {
+      "path": "/var/tmp/friday-astra-owner-github-checkpoint-privacy-safety-review-a194-g1/manifest.json",
+      "bytes": 427936,
+      "sha256": "a90986e5126657f2761a8583ec11ed13f07adb29b466a2dee43d0723d9ceef37",
+      "identity9_decimal_strings": [
+        "2050",
+        "3558279",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "427936",
+        "1790947858770692195",
+        "1790947858852696887"
+      ],
+      "mode": "0o600"
+    },
+    {
+      "path": "/var/tmp/friday-astra-owner-github-checkpoint-privacy-safety-review-a194-g1/terminal.txt",
+      "bytes": 1158,
+      "sha256": "d10b0f82e9edff05b4c3dbb5a0da0ffb4c537bfe285d7512de3a70d89997c52e",
+      "identity9_decimal_strings": [
+        "2050",
+        "3558282",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "1158",
+        "1790947858771692253",
+        "1790947858852696887"
+      ],
+      "mode": "0o600"
+    }
+  ],
+  "directory_mode": "0o700",
+  "validation": "PASS",
+  "completed_msk": "2026-10-02T16:31:48.492034+03:00",
+  "elapsed_seconds": 805.492034,
+  "pathset_sha256": "20bd1d7855f693f9bfd7bf4d7bfa836ecf89f9623e61a1684cc3c0a3df6d1c41"
+}

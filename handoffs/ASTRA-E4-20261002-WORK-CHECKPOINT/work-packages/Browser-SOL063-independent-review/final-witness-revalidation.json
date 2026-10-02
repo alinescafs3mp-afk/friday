@@ -1,0 +1,8 @@
+{
+  "status": "ALL_FULLBYTE_WITNESSES_SHA9_STILL_MATCH",
+  "distinct": 341,
+  "physical_read_bytes_this_phase": 19950789,
+  "source_execution": "NOT_RUN",
+  "private_originals_not_modified": true,
+  "own_helper": true
+}

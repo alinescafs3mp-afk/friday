@@ -1,0 +1,10 @@
+phase	read_scope	conservative_explicit_upper_bytes	note
+contract_pins	A079 exact contract; A071 task/result/receipt/manifest	1048576	complete relevant text; SHA checks
+whole_current_native_callers	A071 native header/common/owned/bootstrap/runtime/contract/main/owner/public mappings	2097152	whole involved functions and exact changed bodies; no load
+new63fresh_chain	FULL-CONTROLS/PRODUCER/runtime_preflight/input contracts	2097152	whole63/9 DATA and public fresh chain; unchanged expectations retained
+snapshot_hash_copy	all78 input members, private copy, original manifest SHA	8388608	static exact copies and byte hashes only
+new_source_reconciliation	current diff, Source/schema/ordinary DATA and relevant frozen R4	4194304	static text/diff/JSON only; no AST or execution
+terminal_seal_and_complement	all new member metadata/hash, exact old complements, final rehash reserve	15728640	reserved conservative bound includes repeated hash passes
+additional_safety_margin	tool implicit text scans and author metadata reads	16777216	bounded allowance; not measured physical IO
+TOTAL	all allowed explicit Source/DATA reads	50331648	conservative upper bound below67108864; not actual physical IO
+UNKNOWN	RAM peak/physical IO/implicit IO/CPU-affinity-pressure	UNKNOWN_NOT_ZERO	no kernel probes permitted; no false zero or measured resource proof

@@ -1,0 +1,73 @@
+{
+  "explicit_bytes": 292670,
+  "reads": [
+    {
+      "bytes": 65329,
+      "identity9_decimal_strings": [
+        "2050",
+        "4225289",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "65329",
+        "1790922917086774774",
+        "1790922917086774774"
+      ],
+      "path": "/var/tmp/friday-sol056-sol055-whole54-all32-remaining-connected-source-implementation/source/staged_sender.py",
+      "sha256": "a829513c13ebc242817b20553670f99f7d66bc90b9b96a1098fb20f367ffbe10",
+      "stable9": true
+    },
+    {
+      "bytes": 62153,
+      "identity9_decimal_strings": [
+        "2050",
+        "4225283",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "62153",
+        "1790922917088774889",
+        "1790922917088774889"
+      ],
+      "path": "/var/tmp/friday-sol056-sol055-whole54-all32-remaining-connected-source-implementation/source/caller.py",
+      "sha256": "5ba70163558e7bbc97a9d29ba9e5695ea3d4ccee92da6127551666f85c2a8f6e",
+      "stable9": true
+    },
+    {
+      "bytes": 73107,
+      "identity9_decimal_strings": [
+        "2050",
+        "4225288",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "73107",
+        "1790922523461239686",
+        "1790922523462239743"
+      ],
+      "path": "/var/tmp/friday-sol056-sol055-whole54-all32-remaining-connected-source-implementation/source/source_grammar.py",
+      "sha256": "06243f93c0674a077020071da48c039c2045047ef6f318eca3bb4d45c71032fe",
+      "stable9": true
+    },
+    {
+      "bytes": 92081,
+      "identity9_decimal_strings": [
+        "2050",
+        "4225293",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "92081",
+        "1790922523549244724",
+        "1790922523551244839"
+      ],
+      "path": "/var/tmp/friday-sol056-sol055-whole54-all32-remaining-connected-source-implementation/inherited-contracts/ordered-predicate-table.json",
+      "sha256": "f9a500ea7dfbfa106c352abd4e115d287eca450cf6ae9e42830e13352b621cc7",
+      "stable9": true
+    }
+  ]
+}

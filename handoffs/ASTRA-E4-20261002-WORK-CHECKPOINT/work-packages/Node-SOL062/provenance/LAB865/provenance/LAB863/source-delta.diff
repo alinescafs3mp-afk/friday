@@ -1,0 +1,687 @@
+--- a/caller.py
++++ b/caller.py
+@@ -22,15 +22,15 @@
+ import time
+ 
+ # Future package path only. This source does not create that directory.
+-PACKAGE = "/var/tmp/friday-astra-node-a169-all6-all3-connected-source-implementation-a172-g1"
++PACKAGE = "/var/tmp/friday-lab863-a172-node-whole6-all35-error-raw-onceclose-source-closure"
+ SOURCE = PACKAGE
+ BASE = "/var/tmp/friday-astra-material-acquisition-20261001-a023-g1"
+ TARGET = "node-v22.23.2-linux-x64.tar.xz"
+ PRIMARY = "CC68F5A3106FF448322E48ED27F5E38D5B0A215F"
+ ARCHIVE = "d60acfe00a2932254bb0ad20e01b0d74397a0875595de719654b214f4b03f307"
+-VHASH = "eb90a069cda4d2a92f9febcbefe511a8b6f144b2579d5b55ae4fd582eecbd452"
+-CHASH = "143948088777a5fe84e66856b3c9f0bab9e6b40b955de18a084234929b79d9ca"
+-SHASH = "2805437080e34e7a806ae9b14e95dcbe737482943968f107898169309452e4c1"
++VHASH = "9d906e5e6fb2c8f54929da2ef50399138afceef1fb16a1092ca965fcb3efa8d9"
++CHASH = "587b0beeb6b2b45980463c1d1032efc5c4430d7798f36c42d0e54279c8fd6418"
++SHASH = "bcd0fb9f0c5d68468aa896b4a6f9a36f5e32a5d62dc11c6c3bc3787cfa128d10"
+ ENV = {"PATH": "/usr/bin:/bin", "LANG": "C", "LC_ALL": "C"}
+ AS_OUTER = 134217728
+ READ_CAP, PUBLIC_CAP = 268435456, 2097152
+@@ -47,9 +47,9 @@
+     "gpg": ("/usr/bin/gpg", 1186456, "c8f3dc07a34ab0a0a081368b482724b79a2a6d6b7aa856741c09edf7af854754", 0, 0o755),
+     "gpgv": ("/usr/bin/gpgv", 302296, "95ecd00d02b79d091f103af175b1dbf95b5b0c66503104bfcea447cca7e3829d", 0, 0o755),
+     "ffi": ("/usr/lib/x86_64-linux-gnu/libffi.so.8.2.0", 64184, "1a0dc86f787f73e025a6e521056360afcbe70f2a82cd808132fefc2b4ee95daa", 0, 0o644),
+-    "supervisor": (SOURCE + "/supervisor.py", 86210, SHASH, 1000, 0o600),
+-    "verifier": (SOURCE + "/verifier.py", 56720, VHASH, 1000, 0o600),
+-    "contract": (SOURCE + "/launch-contract.json", 47640, CHASH, 1000, 0o600),
++    "supervisor": (SOURCE + "/supervisor.py", 89782, SHASH, 1000, 0o600),
++    "verifier": (SOURCE + "/verifier.py", 62097, VHASH, 1000, 0o600),
++    "contract": (SOURCE + "/launch-contract.json", 48250, CHASH, 1000, 0o600),
+     "bill": ("/home/jericho/.jericho/runtime/subagent-lifecycle/ASTRA-E4-ACQUISITION-INPUT-DRIFT-SUCCESSOR-A032-G1-BILL.json", 466956, "cd973b83717015b985055482c9835e7ac1cf8311120c71461d4c0f17ad2d50a2", 1000, 0o600),
+     "receipts": (BASE + "/transport-receipts.ndjson", 400979, "180c44ad4439a96f89335a62e35a5668327a228ce164d1f31b503b867b05fe9b", 1000, 0o600),
+     "raw": (BASE + "/metadata/node/SHASUMS256.txt.asc", 4696, "cfcf12eb3146d641be185d08ca018166b98495b1d8e5f7f94ab77f9965b651d2", 1000, 0o600),
+@@ -1594,7 +1594,26 @@
+             record["pid"] = os.fork()
+             if record["pid"] == 0:
+                 try:
+-                    os.close(gate[1])  # child-only fork table; no parent lease retirement
++                    closed_child = set()
++                    uncertain_child = set()
++
++                    def child_close_once(fd, sweep=False):
++                        number = int(fd)
++                        if number in uncertain_child:
++                            os._exit(125)
++                        if number in closed_child:
++                            return
++                        try:
++                            os.close(number)
++                        except OSError as exc:
++                            if sweep and exc.errno == errno.EBADF:
++                                closed_child.add(number)
++                                return
++                            uncertain_child.add(number)
++                            raise
++                        closed_child.add(number)
++
++                    child_close_once(gate[1])  # child fork table only; parent lease stays for parent retirement
+                     while now() < gate_end:
+                         try:
+                             token = os.read(gate[0], 1)
+@@ -1632,11 +1651,7 @@
+                     # high duplicates even after effective source NOFILE64.
+                     for fd in range(6 if not verifier_control else 7, 256):
+                         if fd not in allowed:
+-                            try:
+-                                os.close(fd)
+-                            except OSError as exc:
+-                                if exc.errno != errno.EBADF:
+-                                    raise
++                            child_close_once(fd, sweep=True)
+                     require(entry_fds() == allowed, "actual pre-interpreter exact fd set mismatch")
+                     for fd, name in zip((3, 4, 5, 6), role_names):
+                         require(full9(os.fstat(fd)) == HELD[name]["identity9"] and
+--- a/supervisor.py
++++ b/supervisor.py
+@@ -18,13 +18,13 @@
+ import time
+ 
+ ASSIGNMENT = "ASTRA-E4-NODE-LAUNCH-OWNERSHIP-EVIDENCE-CLOSURE-A048"
+-PREFIX = "/var/tmp/friday-astra-node-a169-all6-all3-connected-source-implementation-a172-g1"
++PREFIX = "/var/tmp/friday-lab863-a172-node-whole6-all35-error-raw-onceclose-source-closure"
+ BASE = "/var/tmp/friday-astra-material-acquisition-20261001-a023-g1"
+ TARGET = "node-v22.23.2-linux-x64.tar.xz"
+ EXPECTED = "CC68F5A3106FF448322E48ED27F5E38D5B0A215F"
+ ARCHIVE_SHA = "d60acfe00a2932254bb0ad20e01b0d74397a0875595de719654b214f4b03f307"
+-SOURCE_SHA = "eb90a069cda4d2a92f9febcbefe511a8b6f144b2579d5b55ae4fd582eecbd452"
+-CONTRACT_SHA = "143948088777a5fe84e66856b3c9f0bab9e6b40b955de18a084234929b79d9ca"
++SOURCE_SHA = "9d906e5e6fb2c8f54929da2ef50399138afceef1fb16a1092ca965fcb3efa8d9"
++CONTRACT_SHA = "587b0beeb6b2b45980463c1d1032efc5c4430d7798f36c42d0e54279c8fd6418"
+ ENV = {"PATH": "/usr/bin:/bin", "LANG": "C", "LC_ALL": "C"}
+ SUP_AS, PARENT_AS, GPG_AS = 33554432, 117440512, 67108864
+ STREAM, OUTPUT = 32768, 65536
+@@ -39,6 +39,8 @@
+ REGISTRATION_SIGNALS = set(signal.valid_signals()) - {signal.SIGKILL, signal.SIGSTOP}
+ LAUNCH_RESERVE = {"null": None, "copies": [None, None, None, None],
+                   "gate": [None, None], "probe": None, "gate_identity": None}
++CLOSED_NUMBERS = set()
++UNCERTAIN_NUMBERS = set()
+ EMPTY_PRE_FORK = False
+ CLEANUP_END = None
+ CONTRACT_HASH_BINDING = {"fixed_binding": "sealed_contract_full_sha256",
+@@ -60,8 +62,8 @@
+ PINS = {
+     "prlimit": ("/usr/bin/prlimit", 27616, "cb28811cb3902773c1a0f3ac0ea554c7a1e232724e9d4cae055ede54b65a7bc4", 65536, True),
+     "python": ("/usr/bin/python3.14", 7477160, "52e0a13e60a981d8c4b6478be2ba5176f69da07948a056bf49cf6f077e30cb41", 8388608, True),
+-    "source": (PREFIX + "/verifier.py", 56720, SOURCE_SHA, 262144, False),
+-    "contract": (PREFIX + "/launch-contract.json", 47640, CONTRACT_SHA, 262144, False),
++    "source": (PREFIX + "/verifier.py", 62097, SOURCE_SHA, 262144, False),
++    "contract": (PREFIX + "/launch-contract.json", 48250, CONTRACT_SHA, 262144, False),
+     "gpg": ("/usr/bin/gpg", 1186456, "c8f3dc07a34ab0a0a081368b482724b79a2a6d6b7aa856741c09edf7af854754", 2097152, True),
+     "gpgv": ("/usr/bin/gpgv", 302296, "95ecd00d02b79d091f103af175b1dbf95b5b0c66503104bfcea447cca7e3829d", 1048576, True),
+     "bill": ("/home/jericho/.jericho/runtime/subagent-lifecycle/ASTRA-E4-ACQUISITION-INPUT-DRIFT-SUCCESSOR-A032-G1-BILL.json", 466956, "cd973b83717015b985055482c9835e7ac1cf8311120c71461d4c0f17ad2d50a2", 1048576, False),
+@@ -128,7 +130,10 @@
+             require(ident(os.stat(name, dir_fd=pfd, follow_symlinks=False), True)
+                     == ident(os.fstat(fd), True), "component open race")
+         except BaseException:
+-            os.close(fd)
++            try:
++                close_taken(fd, "component_unpublished")
++            except BaseException:
++                STOP = True
+             raise
+     DIRS[path] = (fd, ident(os.fstat(fd), True))
+     return fd
+@@ -144,7 +149,10 @@
+                 and ident(before) == ident(os.stat(name, dir_fd=pfd, follow_symlinks=False)),
+                 "leaf type/link/identity race")
+     except BaseException:
+-        os.close(fd)
++        try:
++            close_taken(fd, "regular_unpublished")
++        except BaseException:
++            STOP = True
+         raise
+     return fd
+ 
+@@ -414,8 +422,8 @@
+             after = starttime(pid, probe)
+             require(before == after and pidfd_number(record["pidfd"]) == pid,
+                     "current enumeration changed generation during reconciliation")
+-            os.close(probe)
+             LAUNCH_RESERVE["probe"] = None
++            close_taken(probe, "reconcile_probe")
+             if expected_ppid not in record["evidence"]["parent_history"]:
+                 require(expected_ppid == os.getpid() and EMPTY_PRE_FORK
+                         and R["kernel_policy"]["child_subreaper"] is True,
+@@ -425,9 +433,7 @@
+         verify_generation(record, expected_ppid)
+         return record
+     finally:
+-        if LAUNCH_RESERVE["probe"] is not None:
+-            os.close(LAUNCH_RESERVE["probe"])
+-            LAUNCH_RESERVE["probe"] = None
++        close_taken(take_reserved("probe"), "reconcile_probe_finally")
+         signal.pthread_sigmask(signal.SIG_SETMASK, saved)
+ 
+ 
+@@ -562,21 +568,93 @@
+                    for item in TRANSPORT}
+ 
+ 
++def take_reserved(key, index=None):
++    if index is None:
++        fd = LAUNCH_RESERVE[key]
++        LAUNCH_RESERVE[key] = None
++        return fd
++    fd = LAUNCH_RESERVE[key][index]
++    LAUNCH_RESERVE[key][index] = None
++    return fd
++
++
++def close_taken(fd, where):
++    if fd is None:
++        return
++    number = int(fd)
++    if number in UNCERTAIN_NUMBERS:
++        raise Refusal("earlier descriptor close unconfirmed; no retry")
++    if number in CLOSED_NUMBERS:
++        return
++    try:
++        os.close(number)
++    except BaseException as exc:
++        global STOP
++        STOP = True
++        UNCERTAIN_NUMBERS.add(number)
++        bucket = R.setdefault("close_uncertain", [])
++        if len(bucket) < 64:
++            bucket.append({"where": where, "fd": number, "type": type(exc).__name__,
++                           "errno": getattr(exc, "errno", None)})
++        raise
++    CLOSED_NUMBERS.add(number)
++
++
+ def close_launch_reserve():
+     saved = signal.pthread_sigmask(signal.SIG_BLOCK, REGISTRATION_SIGNALS)
+     try:
+         for key in ("null", "probe"):
+-            fd = LAUNCH_RESERVE[key]
+-            if fd is not None:
+-                os.close(fd)
+-                LAUNCH_RESERVE[key] = None
++            close_taken(take_reserved(key), "launch_reserve:" + key)
+         for key in ("copies", "gate"):
+-            for index, fd in enumerate(LAUNCH_RESERVE[key]):
+-                if fd is not None:
+-                    os.close(fd)
+-                    LAUNCH_RESERVE[key][index] = None
++            for index in range(len(LAUNCH_RESERVE[key])):
++                close_taken(take_reserved(key, index), "launch_reserve:" + key)
+     finally:
+         signal.pthread_sigmask(signal.SIG_SETMASK, saved)
++
++
++def retain_produced_transport():
++    # Bytes already in the memfd stay in the owner buffer before any close.
++    # A complete drain is left untouched. A short prefix is partial, not success.
++    total = sum(len(item["data"]) for item in TRANSPORT)
++    for item in TRANSPORT:
++        if item.get("fd") is None:
++            continue
++        try:
++            size = os.fstat(item["fd"]).st_size
++        except BaseException as exc:
++            item["partial"] = True
++            item["retain_error"] = type(exc).__name__
++            size = None
++        item["produced_bytes"] = size
++        if size is None:
++            continue
++        while item["offset"] < size and len(item["data"]) < STREAM and total < OUTPUT:
++            room = min(4096, STREAM - len(item["data"]), OUTPUT - total, size - item["offset"])
++            if room <= 0:
++                break
++            try:
++                chunk = os.pread(item["fd"], room, item["offset"])
++            except BaseException as exc:
++                item["partial"] = True
++                item["retain_error"] = type(exc).__name__
++                break
++            if not chunk:
++                item["partial"] = True
++                item["retain_error"] = "short transport"
++                break
++            item["data"].extend(chunk)
++            item["offset"] += len(chunk)
++            total += len(chunk)
++        if item["offset"] < size:
++            item["partial"] = True
++        current = R.setdefault("output", {}).get(item["label"])
++        if item.get("partial") or not isinstance(current, dict):
++            R["output"][item["label"]] = {
++                "bytes": len(item["data"]),
++                "sha256": hashlib.sha256(bytes(item["data"])).hexdigest(),
++                "produced_bytes": size,
++                "partial": bool(item.get("partial")),
++            }
+ 
+ 
+ def register_parent(origin):
+@@ -632,8 +710,11 @@
+ def child_startup_gate(end, saved_mask):
+     # No verifier exec or input/archive/tool effect precedes the sole one-byte
+     # parent release after stable exact PID/pidfd/proc registration.
+-    os.close(LAUNCH_RESERVE["gate"][1])
+-    readfd = LAUNCH_RESERVE["gate"][0]
++    # This child address space clears its own slot copy before close. The
++    # parent table is a separate reference and retires through close_launch_reserve.
++    write_end = take_reserved("gate", 1)
++    close_taken(write_end, "child_gate_write")
++    readfd = take_reserved("gate", 0)
+     while time.monotonic_ns() < end:
+         try:
+             token = os.read(readfd, 1)
+@@ -642,7 +723,7 @@
+             continue
+         charge_child_runtime(len(token))
+         if token == b"\x01":
+-            os.close(readfd)
++            close_taken(readfd, "child_gate_read")
+             return
+         os._exit(125)  # EOF/refused release; still an exact reapable direct child
+     os._exit(125)
+@@ -1543,28 +1624,41 @@
+             R["inner_evidence_capture_failure"] = {
+                 "type": type(exc).__name__, "message": str(exc)}
+     try:
++        retain_produced_transport()
+         for item in TRANSPORT:
+-            os.close(item["fd"])
++            fd = item["fd"]
++            item["fd"] = None
++            close_taken(fd, "transport:" + str(item.get("label")))
+         close_launch_reserve()
+         for item in TRACKED:
+-            if item["pidfd"] is not None:
+-                os.close(item["pidfd"])
+-            if item["procfd"] is not None:
+-                os.close(item["procfd"])
++            pidfd = item["pidfd"]
++            item["pidfd"] = None
++            close_taken(pidfd, "tracked_pidfd")
++            procfd = item["procfd"]
++            item["procfd"] = None
++            close_taken(procfd, "tracked_procfd")
+         if CHILD is not None:
+-            if CHILD["pidfd"] is not None:
+-                os.close(CHILD["pidfd"])
+-            if CHILD["procfd"] is not None:
+-                os.close(CHILD["procfd"])
++            pidfd = CHILD["pidfd"]
++            CHILD["pidfd"] = None
++            close_taken(pidfd, "child_pidfd")
++            procfd = CHILD["procfd"]
++            CHILD["procfd"] = None
++            close_taken(procfd, "child_procfd")
+         for item in HELD.values():
+-            os.close(item["fd"])
+-        for fd, _ in DIRS.values():
+-            os.close(fd)
++            fd = item["fd"]
++            item["fd"] = None
++            close_taken(fd, "held")
++        pending_dirs = []
++        for path, pair in list(DIRS.items()):
++            pending_dirs.append(pair[0])
++            DIRS[path] = (None, pair[1])
++        for fd in pending_dirs:
++            close_taken(fd, "directory")
+         if RUNTIME is not None and RUNTIME.get("own_new") and not RUNTIME["closed"]:
+-            os.close(RUNTIME["fd"])
+             RUNTIME["closed"] = True
++            close_taken(RUNTIME["fd"], "runtime")
+         for fd in (3, 4, 5):
+-            os.close(fd)
++            close_taken(fd, "inherited_low")
+         R["all_supervisor_owned_descriptors_closed"] = True
+         R["own_runtime_descriptor_closed"] = RUNTIME["closed"] if RUNTIME else None
+         R["runtime_explicit_read_bytes"] = RUNTIME_READS
+--- a/verifier.py
++++ b/verifier.py
+@@ -90,7 +90,7 @@
+ VERIFIER_RUNTIME = None
+ 
+ ASSIGNMENT = "ASTRA-E4-NODE-LAUNCH-OWNERSHIP-EVIDENCE-CLOSURE-A048"
+-PREFIX = "/var/tmp/friday-astra-node-a169-all6-all3-connected-source-implementation-a172-g1"
++PREFIX = "/var/tmp/friday-lab863-a172-node-whole6-all35-error-raw-onceclose-source-closure"
+ BASE = "/var/tmp/friday-astra-material-acquisition-20261001-a023-g1"
+ EXPECTED = "CC68F5A3106FF448322E48ED27F5E38D5B0A215F"
+ TARGET = "node-v22.23.2-linux-x64.tar.xz"
+@@ -185,7 +185,10 @@
+             require(identity(os.stat(name, dir_fd=pfd, follow_symlinks=False), True)
+                     == identity(os.fstat(fd), True), "directory open race")
+         except BaseException:
+-            os.close(fd)
++            try:
++                close_once(fd, "directory_unpublished")
++            except BaseException:
++                STOP = True
+             raise
+     s = os.fstat(fd)
+     require(stat.S_ISDIR(s.st_mode), "component is not a directory")
+@@ -216,7 +219,10 @@
+         require(identity(s) == identity(os.stat(name, dir_fd=pfd, follow_symlinks=False)),
+                 "file open race")
+     except BaseException:
+-        os.close(fd)
++        try:
++            close_once(fd, "regular_unpublished")
++        except BaseException:
++            STOP = True
+         raise
+     return fd
+ 
+@@ -285,7 +291,7 @@
+             require(hh == ph == item["expected"] and hn == pn,
+                     "input byte drift: " + name)
+         finally:
+-            os.close(reopened)
++            close_once(reopened, "custody_reopen")
+     components()
+ 
+ 
+@@ -361,9 +367,105 @@
+                 | fcntl.F_SEAL_SHRINK | fcntl.F_SEAL_SEAL)
+ 
+ 
++def close_once(fd, where):
++    if fd is None:
++        return
++    number = int(fd)
++    if number in UNCERTAIN_FDS:
++        stop("earlier owned descriptor close unconfirmed; no retry")
++    if number in RETIRED_FDS:
++        return
++    try:
++        os.close(number)
++    except BaseException as exc:
++        UNCERTAIN_FDS.add(number)
++        bucket = R.setdefault("close_uncertain", [])
++        if len(bucket) < 64:
++            bucket.append({"where": where, "fd": number, "type": type(exc).__name__,
++                           "errno": getattr(exc, "errno", None)})
++        raise
++    RETIRED_FDS.add(number)
++
++
+ def close_own(fd):
+-    os.close(fd)
++    if fd in UNCERTAIN_FDS:
++        stop("earlier owned descriptor close unconfirmed; no retry")
++    require(fd in OWN, "close of an unowned numeric descriptor refused")
+     OWN.remove(fd)
++    close_once(fd, "own")
++
++
++def retain_stream(item, name, fd, quota):
++    global TOTAL_OUTPUT
++    if isinstance(item.get(name), dict) and item[name].get("retained"):
++        return
++    parts = []
++    partial = False
++    reason = None
++    produced = None
++    try:
++        before = identity(os.fstat(fd))
++        produced = before["size"]
++        if type(produced) is not int or produced < 0:
++            partial = True
++            reason = "unreadable size"
++        else:
++            want = produced if produced <= quota else quota
++            if produced > quota:
++                partial = True
++            pos = 0
++            while pos < want:
++                amount = min(65536, want - pos)
++                _read_room(amount)
++                chunk = os.pread(fd, amount, pos)
++                _charge_content(len(chunk))
++                if not chunk:
++                    partial = True
++                    reason = "short read"
++                    break
++                parts.append(chunk)
++                pos += len(chunk)
++            if not partial:
++                _read_room(1)
++                tail = os.pread(fd, 1, pos)
++                _charge_content(len(tail))
++                if tail or identity(os.fstat(fd)) != before:
++                    partial = True
++                    reason = "length or identity changed"
++    except BaseException as exc:
++        partial = True
++        reason = type(exc).__name__
++    data = b"".join(parts)
++    TOTAL_OUTPUT += len(data)
++    record = {"bytes": len(data), "sha256": hashlib.sha256(data).hexdigest(),
++              "produced_bytes": produced, "partial": partial, "retained": True,
++              "text": None, "encoding": None}
++    if reason is not None:
++        record["retain_error"] = reason
++    item[name] = record
++    try:
++        record["text"] = data.decode("utf-8", "strict")
++        record["encoding"] = "utf-8"
++    except UnicodeError as exc:
++        record["encoding"] = "base64"
++        record["raw_base64"] = base64.b64encode(data).decode("ascii")
++        record["decode_error"] = type(exc).__name__
++
++
++def retain_writable(item, fd, quota):
++    global TOTAL_OUTPUT
++    produced = os.fstat(fd).st_size
++    partial = type(produced) is not int or produced < 0 or produced > quota
++    want = 0 if type(produced) is not int or produced < 0 else min(produced, quota)
++    _read_room(want if want else 1)
++    data = os.pread(fd, want, 0) if want else b""
++    _charge_content(len(data))
++    if len(data) != want:
++        partial = True
++    TOTAL_OUTPUT += len(data)
++    item.setdefault("written_data", []).append({
++        "fd": fd, "bytes": len(data), "sha256": hashlib.sha256(data).hexdigest(),
++        "produced_bytes": produced, "partial": partial})
+ 
+ 
+ def armor(raw, label):
+@@ -507,25 +609,40 @@
+         item["rc"], item["reaped"] = p.returncode, True
+         ACTIVE = None
+         for name, fd in zip(("stdout", "stderr", "status"), streams):
+-            h, n, data = read_fd(fd, quota)
+-            TOTAL_OUTPUT += n
+-            item[name] = {"bytes": n, "sha256": h, "text": data.decode("utf-8", "strict")}
++            retain_stream(item, name, fd, quota)
+         item["written_data"] = []
+         for fd in writable:
+-            h, n, _ = read_fd(fd, min(quota, RAW), False)
+-            TOTAL_OUTPUT += n
+-            item["written_data"].append({"fd": fd, "bytes": n, "sha256": h})
++            retain_writable(item, fd, min(quota, RAW))
+         require(TOTAL_OUTPUT <= OUTPUT, "aggregate output cap")
++        require(all(isinstance(item.get(name), dict) and item[name].get("encoding") == "utf-8"
++                    and not item[name].get("partial")
++                    for name in ("stdout", "stderr", "status")),
++                "complete utf-8 stream required on the normal return")
+         scratch()
+         custody()
+         return item
+     finally:
+-        if p is not None and not item["reaped"]:
+-            reap(p)
+-            item["reaped"] = True
+-        item["elapsed_seconds"] = (time.monotonic_ns() - start) / 1e9
+-        for fd in streams:
+-            close_own(fd)
++        try:
++            if p is not None and not item["reaped"]:
++                reap(p)
++                item["reaped"] = True
++            item["elapsed_seconds"] = (time.monotonic_ns() - start) / 1e9
++            for name, fd in zip(("stdout", "stderr", "status"), streams):
++                if not (isinstance(item.get(name), dict) and item[name].get("retained")):
++                    retain_stream(item, name, fd, quota)
++            seen = {row.get("fd") for row in item.get("written_data") or [] if isinstance(row, dict)}
++            item.setdefault("written_data", [])
++            for fd in writable:
++                if fd in seen:
++                    continue
++                try:
++                    retain_writable(item, fd, min(quota, RAW))
++                except BaseException as exc:
++                    item["written_data"].append({"fd": int(fd), "partial": True,
++                                                 "retain_error": type(exc).__name__})
++        finally:
++            for fd in streams:
++                close_own(fd)
+ 
+ 
+ def statuses(c):
+@@ -711,8 +828,9 @@
+             HOME_INTENT.update(state="CONFIRMED_REMOVED", absence=True)
+         else:
+             stop("private removal absence not confirmed")
+-        os.close(HOME_FD)
++        fd = HOME_FD
+         HOME_FD = None
++        close_once(fd, "home")
+     elif state.startswith("DEFINITELY_NOT_CREATED"):
+         # No deletion of EEXIST/unowned target. Observation is about exact name,
+         # and never about HOME being None. Presence may belong to someone else.
+@@ -730,14 +848,20 @@
+     for fd in list(OWN):
+         close_own(fd)
+     for item in FILES.values():
+-        os.close(item["fd"])
+-    for fd, _ in DIRECTORIES.values():
+-        os.close(fd)
++        fd = item["fd"]
++        item["fd"] = None
++        close_once(fd, "file")
++    pending_dirs = []
++    for path, pair in list(DIRECTORIES.items()):
++        pending_dirs.append(pair[0])
++        DIRECTORIES[path] = (None, pair[1])
++    for fd in pending_dirs:
++        close_once(fd, "directory")
+     if VERIFIER_RUNTIME is not None and VERIFIER_RUNTIME.get("own_new") and not VERIFIER_RUNTIME["closed"]:
+-        os.close(VERIFIER_RUNTIME["fd"])
+         VERIFIER_RUNTIME["closed"] = True
++        close_once(VERIFIER_RUNTIME["fd"], "runtime")
+     for fd in (3, 4, 5, 6):
+-        os.close(fd)
++        close_once(fd, "inherited_role")
+     R["own_runtime_descriptor_closed"] = VERIFIER_RUNTIME["closed"] if VERIFIER_RUNTIME else None
+     R["cleanup"] = {"exact_owned_child_reaped": True,
+                     "private_home_absent": HOME_INTENT["absence"],
+@@ -1103,17 +1227,26 @@
+     data = encode_bounded(R)
+ except BaseException as exc:
+     verified = False
++    produced = []
++    for call_item in list(R.get("calls") or []):
++        summary = {"label": call_item.get("label"), "reaped": call_item.get("reaped")}
++        for name in ("stdout", "stderr", "status"):
++            slot = call_item.get(name)
++            if isinstance(slot, dict):
++                summary[name] = {"bytes": slot.get("bytes"), "sha256": slot.get("sha256"),
++                                 "partial": slot.get("partial"), "encoding": slot.get("encoding")}
++        produced.append(summary)
+     R = {"assignment": ASSIGNMENT, "generation": 1,
+          "status": "STOP_UNCONFIRMED" if STOP else "NOT_PROVEN",
+          "failure": "deadline or bounded whole public serialization failed",
+          "cause": type(exc).__name__, "private_home_intent": HOME_INTENT,
+          "owned_child_pid": ACTIVE.pid if ACTIVE is not None else None,
+-         "all_recorded_owned_children_reaped": all(c["reaped"] for c in R["calls"]),
++         "all_recorded_owned_children_reaped": all(c["reaped"] for c in R["calls"]) if False else all(item.get("reaped") for item in (R.get("calls") or [])),
++         "produced_stream_summaries": produced,
+          "runtime_explicit_read_bytes": RUNTIME_READS,
+          "runtime_read_reset_or_subtracted": False,
+          "explicit_read_accounting": R.get("explicit_read_accounting"),
+          "known_whole_content_charge_bytes": WHOLE_READS, "implicit_io": "UNKNOWN_NOT_ZERO"}
+-    # Static small refusal; deadline exhaustion can still prevent its emission.
+     data = json.dumps(R, ensure_ascii=True, separators=(",", ":")).encode("ascii") + b"\n"
+ try:
+     emit(data)
+--- a/launch-contract.json
++++ b/launch-contract.json
+@@ -3,11 +3,12 @@
+   "assignment": "ASTRA-E4-NODE-LAUNCH-OWNERSHIP-EVIDENCE-CLOSURE-A048",
+   "generation": 1,
+   "disposition": "INERT_CONNECTED_SOURCE_PENDING_WHOLE_REVIEW_AND_NEW_ROOT_ADMISSION",
++  "error_raw_onceclose": "Owned numeric slots are cleared before os.close on supervisor, verifier and caller paths. A failed close is sticky and is not retried, so a recycled number is not closed as the old owner. Verifier call retains stdout, stderr, status and writable count, sha256 and either complete utf-8 text or raw base64 before those memfds close, including timeout, live-resource, read, decode and cleanup prefixes. Partial output stays partial. Supervisor transport bytes already produced are retained with count and sha256 before the terminal close. No new role, budget, GPG route, or extended end.",
+   "execution_authority": "NONE in A048. SOURCE ONLY. Independent source review, independent trust admission of host bootstrap/dependencies and a separate finite execution assignment are mandatory.",
+   "source": {
+-    "path": "/var/tmp/friday-astra-node-a169-all6-all3-connected-source-implementation-a172-g1/verifier.py",
+-    "sha256": "eb90a069cda4d2a92f9febcbefe511a8b6f144b2579d5b55ae4fd582eecbd452",
+-    "bytes": 56720,
++    "path": "/var/tmp/friday-lab863-a172-node-whole6-all35-error-raw-onceclose-source-closure/verifier.py",
++    "sha256": "9d906e5e6fb2c8f54929da2ef50399138afceef1fb16a1092ca965fcb3efa8d9",
++    "bytes": 62097,
+     "mode": "0600",
+     "nlink": 1,
+     "generated_source_executed_compiled_imported_or_tested": false
+@@ -103,12 +104,12 @@
+         "sha256": "52e0a13e60a981d8c4b6478be2ba5176f69da07948a056bf49cf6f077e30cb41"
+       },
+       "5": {
+-        "path": "/var/tmp/friday-astra-node-a169-all6-all3-connected-source-implementation-a172-g1/verifier.py",
+-        "sha256": "eb90a069cda4d2a92f9febcbefe511a8b6f144b2579d5b55ae4fd582eecbd452",
+-        "bytes": 56720
++        "path": "/var/tmp/friday-lab863-a172-node-whole6-all35-error-raw-onceclose-source-closure/verifier.py",
++        "sha256": "9d906e5e6fb2c8f54929da2ef50399138afceef1fb16a1092ca965fcb3efa8d9",
++        "bytes": 62097
+       },
+       "6": {
+-        "path": "/var/tmp/friday-astra-node-a169-all6-all3-connected-source-implementation-a172-g1/launch-contract.json",
++        "path": "/var/tmp/friday-lab863-a172-node-whole6-all35-error-raw-onceclose-source-closure/launch-contract.json",
+         "sha256_binding": {
+           "fixed_binding": "sealed_contract_full_sha256",
+           "provider": "supervisor.CONTRACT_SHA",
+@@ -139,7 +140,7 @@
+       "-B",
+       "/proc/self/fd/5",
+       "--reviewed-source-sha256",
+-      "eb90a069cda4d2a92f9febcbefe511a8b6f144b2579d5b55ae4fd582eecbd452",
++      "9d906e5e6fb2c8f54929da2ef50399138afceef1fb16a1092ca965fcb3efa8d9",
+       "--reviewed-contract-sha256",
+       {
+         "fixed_binding": "sealed_contract_full_sha256",
+@@ -488,7 +489,7 @@
+     "only_new_exact_source_contract_result_files": true
+   },
+   "supervisor": {
+-    "path": "/var/tmp/friday-astra-node-a169-all6-all3-connected-source-implementation-a172-g1/supervisor.py",
++    "path": "/var/tmp/friday-lab863-a172-node-whole6-all35-error-raw-onceclose-source-closure/supervisor.py",
+     "whole_byte_pin_authority": "Acyclic exact chain: full verifier bytes -> this full contract -> literal SOURCE_SHA/CONTRACT_SHA plus sizes in full supervisor -> RESULT and independent review exact supervisor pin. No own SHA literal is embedded in its own file; all binding objects are non-overridable fixed rules resolved by the real launcher, never caller-provided placeholders.",
+     "bootstrap_pre_python_profile": {
+       "executable": "held /usr/bin/prlimit fd3",
+--- a/expectations.json
++++ b/expectations.json
+@@ -3,7 +3,7 @@
+   "authority": "NONE_ORDINARY_DATA",
+   "lifetime_memory_source_contract": {
+     "schema": "friday.sol042.retained-lease-natural-ending.v1",
+-    "materialization_path": "/var/tmp/friday-astra-node-a169-all6-all3-connected-source-implementation-a172-g1",
++    "materialization_path": "/var/tmp/friday-lab863-a172-node-whole6-all35-error-raw-onceclose-source-closure",
+     "numeric_slot_is_not_allocation_lease": true,
+     "retire_launch_aliases_at_first_close": true,
+     "tracked_leases_retained_through_terminal": true,
+@@ -175,9 +175,9 @@
+     "complete_transport": "exact wait4 + full raw usage + stdout EOF<=65536 + stderr EOF<=32768, no truncation",
+     "custody": "Root independent full9/hash selection, NOFOLLOW all components and readonly leaves, named-before/opened/after, full SHA, retained through actual terminal/postexit",
+     "source_pins": "Exact NEW caller/supervisor/verifier/contract bytes require independent WHOLE review and NEW actual Root materialization/admission. Old accepted/materialized fixed pins remain historical inert DATA, not acceptance of these bytes.",
+-    "ownership": "direct own gate, full PID/pidfd/proc-start registration before one-byte release, bounded actual descendant reconciliation/subreaper adoption, exact owned cleanup only",
++    "ownership": "direct own gate, full PID/pidfd/proc-start registration before one-byte release, bounded actual descendant reconciliation/subreaper adoption, exact owned cleanup only; the numeric slot leaves its owner before os.close, and an unconfirmed close is sticky and is not retried",
+     "resources": "outer current VmSize/VmRSS/VmHWM/VmPeak plus all raw self/wait4 fields, unknown stays null+reason; no peak subtraction; original target caps preserved",
+-    "refusal": "complete observed raw and parsed receipts survive validation refusal; missing/partial/unknown transport or cleanup cannot qualify",
++    "refusal": "complete observed raw and parsed receipts survive validation refusal; missing/partial/unknown transport or cleanup cannot qualify; stdout, stderr, status and writable bytes already produced stay counted and hashed on timeout, live-resource, read, decode and cleanup prefixes, and a short or capped capture stays partial",
+     "scope": "only qualified exact Node publisher chain and own intended-cause controls; no generic crypto/gate/GO/image/RAMIO/native-Root authority proof",
+     "held_proc_lease": "Acquired immutable inputs retain ALL9. Only exact registered detached pidfd-ended proc generations get terminal ALL9 retirement tokens before any tracked first close; same dev/ino/mode and independently qualified owner transition; once-close stickyunknown unchanged."
+   },

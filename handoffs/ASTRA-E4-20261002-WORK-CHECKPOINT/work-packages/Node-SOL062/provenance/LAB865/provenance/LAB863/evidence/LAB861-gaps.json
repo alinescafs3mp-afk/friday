@@ -1,0 +1,21 @@
+{
+  "gaps": [
+    {
+      "id": 1,
+      "statement": "show-keys and dearmor were not executed with --no-keyring. The manual states that --no-keyring uses no keyring at all. Non-creation of pubring.kbx is that stated effect, not a new observation."
+    },
+    {
+      "id": 2,
+      "statement": "check-sigs, both gpg verifies, and gpgv already name one explicit keyring. The manual says that combination avoids the default keyring. It does not prove that trustdb, common.conf, lock files, or an already-running agent stay untouched in a mode 0500 home."
+    },
+    {
+      "id": 3,
+      "statement": "--no-use-agent is documented as a dummy because gpg always requires the agent. --no-autostart skips starting gpg-agent and dirmngr when their service is required. It does not say an already-running agent is never contacted."
+    },
+    {
+      "id": 4,
+      "statement": "The common.conf use-keyboxd creation sentence names the default ~/.gnupg home. Stock /etc and /usr common.conf are absent. Behavior inside an explicit empty --homedir remains unobserved. /proc/self/fd arguments contain a slash, so the bare-name homedir lookup does not apply; the manual does not name that path."
+    }
+  ],
+  "schema": "friday.grok.lab861.gaps.v1"
+}

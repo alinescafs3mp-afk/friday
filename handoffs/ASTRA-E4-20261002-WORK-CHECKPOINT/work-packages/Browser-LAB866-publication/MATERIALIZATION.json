@@ -1,0 +1,254 @@
+{
+  "schema": "friday.a171.materialization-metadata.v1",
+  "original_literal_table_generated_from_pinned_JSON": true,
+  "bytes": {
+    "A071-CONTROLS.py": 205784,
+    "A087-PUBLIC-DRIVER.py": 98959,
+    "A071-SUPERVISOR.py": 53719,
+    "A071-BILL.json": 149014,
+    "A071-SCHEMA.json": 18931,
+    "A071-BUILD-RECIPE.json": 10204,
+    "A118-CONNECTED-CONTRACT.json": 19606,
+    "A104-ORDINARY-CONTRACTS.json": 89372
+  },
+  "sha256": {
+    "A071-CONTROLS.py": "ad0ea4381cacabe82df17a6398b49a2188996dcbddaf170aef39c61216b7b20a",
+    "A087-PUBLIC-DRIVER.py": "2dcc23f30488b76ebc03722268f6aa9895f2e246a67c41076aacfe7f2772ea79",
+    "A071-SUPERVISOR.py": "38594b1893fde17afd7b7d5e58244dfaac014e4efb8008982932b2ef0ee45a6f",
+    "A071-BILL.json": "eb9cc38144f33e25a6a5dc5630fd8b38565d0c75a87a31d69a0a44d1587157cc",
+    "A071-SCHEMA.json": "a1ace93c26eca44eaf2f6b623d010bb2da70fc3a74fb086f746721840a636639",
+    "A071-BUILD-RECIPE.json": "9828a63746715ad4e753b269aeacbaab6b9b9c9aec2e98f35c819aa93abcee2e",
+    "A118-CONNECTED-CONTRACT.json": "e655ed2c859cad06a3dd629d3b0a28bc130d83e988fde74289c03f1c92619b52",
+    "A104-ORDINARY-CONTRACTS.json": "f7f469cc88e71c5bf1f42c6029e35f82be62c2af8aded5b76299286abbc21616"
+  },
+  "original_limits_equal": true,
+  "original_outer_supervision_equal": true,
+  "original_full8_equal": true,
+  "original_control_bindings_equal": true,
+  "original_build_semantics_equal": true,
+  "physical_read_bytes": 1220585,
+  "entries": [
+    {
+      "path": "/var/tmp/friday-astra-browser-a153-a156-whole216-all6-all2-connected-source-implementation-a158-g1/SOURCE-REFERENCE-MANIFEST.json",
+      "bytes": 325791,
+      "sha256": "bbf60fdb1c6f83e28d96f828beab7d43be35119258a588c28927ac030af1570d",
+      "identity9_decimal_strings": [
+        "2050",
+        "4370894",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "325791",
+        "1790921985928471737",
+        "1790921985928471737"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-browser-a153-a156-whole216-all6-all2-connected-source-implementation-a158-g1/source/A071-CONTROLS.py",
+      "bytes": 166614,
+      "sha256": "df2bf8ef75a2d3781d69e0886c906d579a38eeedf2edf4efb9fc8c61b935eb3f",
+      "identity9_decimal_strings": [
+        "2050",
+        "6978880",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "166614",
+        "1790921254723625955",
+        "1790921254723625955"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-browser-a153-a156-whole216-all6-all2-connected-source-implementation-a158-g1/source/A087-PUBLIC-DRIVER.py",
+      "bytes": 93286,
+      "sha256": "c512f57b3074c0bbe49c1d2ceda14b62fa13c41e6b2cbb1381c312c585786c14",
+      "identity9_decimal_strings": [
+        "2050",
+        "6978884",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "93286",
+        "1790921985744461206",
+        "1790921985744461206"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-browser-a153-a156-whole216-all6-all2-connected-source-implementation-a158-g1/source/A071-SUPERVISOR.py",
+      "bytes": 52965,
+      "sha256": "4c20a0f5586ef5cdfc3fe55991f6a09d9fa10ca36cbead9204d46e775e4a943a",
+      "identity9_decimal_strings": [
+        "2050",
+        "6978881",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "52965",
+        "1790920803650817483",
+        "1790920803650817483"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-browser-a153-a156-whole216-all6-all2-connected-source-implementation-a158-g1/source/A071-BILL.json",
+      "bytes": 112123,
+      "sha256": "1a8ebe881c32d9e53a44f85d29a5a3cfc1f77aedbe8171b212aa8a0410603155",
+      "identity9_decimal_strings": [
+        "2050",
+        "6978886",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "112123",
+        "1790921339945424982",
+        "1790921339945424982"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-browser-a153-a156-whole216-all6-all2-connected-source-implementation-a158-g1/source/A071-SCHEMA.json",
+      "bytes": 18232,
+      "sha256": "dbbf9ee5a0aca6998c1988b87bbc2fbb3ca95c8e2965fc410a0bfde6482d8473",
+      "identity9_decimal_strings": [
+        "2050",
+        "6978885",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "18232",
+        "1790921339945424982",
+        "1790921339945424982"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-browser-a153-a156-whole216-all6-all2-connected-source-implementation-a158-g1/source/A071-BUILD-RECIPE.json",
+      "bytes": 5646,
+      "sha256": "e5ff4e766ee49d7b9936241f7ab22967b1faee54e3f4b85570c176ce4752e81f",
+      "identity9_decimal_strings": [
+        "2050",
+        "6978887",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "5646",
+        "1790921339945503077",
+        "1790921339945503077"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-browser-a153-a156-whole216-all6-all2-connected-source-implementation-a158-g1/source/A118-CONNECTED-CONTRACT.json",
+      "bytes": 19382,
+      "sha256": "6a999478d85ef87c19688ef3cb67368d6b00b9e2232ae27e13b36e573661b1e7",
+      "identity9_decimal_strings": [
+        "2050",
+        "6978890",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "19382",
+        "1790921339946503134",
+        "1790921339946503134"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-browser-a153-a156-whole216-all6-all2-connected-source-implementation-a158-g1/source/A104-ORDINARY-CONTRACTS.json",
+      "bytes": 89000,
+      "sha256": "033c63ced1b0e4731fb0af83f70ccff5ec4ae58548f43fe308e0357632b7c32d",
+      "identity9_decimal_strings": [
+        "2050",
+        "6978891",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "89000",
+        "1790921339947503192",
+        "1790921339947503192"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-lab858-sol057-whole209-all216-actual-source-implementation-a171-g1/A171-OPERATIONS.txt",
+      "bytes": 28444,
+      "sha256": "51815317ba6d47b3c73aa10affd486d2504e26fff4c37d313d91a96f9445450c",
+      "identity9_decimal_strings": [
+        "2050",
+        "4371003",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "28444",
+        "1790928909552848630",
+        "1790929001795128528"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-lab858-sol057-whole209-all216-actual-source-implementation-a171-g1/A171-INPUT.txt",
+      "bytes": 2602,
+      "sha256": "8327f418d81f3ede5ac84b7b44287e9e2a8a59f94cf13306085143712e887ab0",
+      "identity9_decimal_strings": [
+        "2050",
+        "4371004",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "2602",
+        "1790928671782238764",
+        "1790929001795128528"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-browser-a153-a156-whole216-all6-all2-connected-source-implementation-a158-g1/TYPED216-CONTRACTS.json",
+      "bytes": 151746,
+      "sha256": "4d9129f65848e13f09ef25ff4f72be0bfe34604002016ac5171962f1b38e171e",
+      "identity9_decimal_strings": [
+        "2050",
+        "4370886",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "151746",
+        "1790921121805020664",
+        "1790921121805020664"
+      ],
+      "stable9": true
+    },
+    {
+      "path": "/var/tmp/friday-astra-lab858-sol057-whole209-all216-actual-source-implementation-a171-g1/ORIGINAL216-EXPECTATIONS.json",
+      "bytes": 154754,
+      "sha256": "105216d21a6f4ee47afa818ecbdf5164b8a48e8c98e0a1587380d10ff85e6421",
+      "identity9_decimal_strings": [
+        "2050",
+        "4370987",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "154754",
+        "1790927717862636890",
+        "1790927717862636890"
+      ],
+      "stable9": true
+    }
+  ],
+  "Source_import_AST_compile_execution": "NOT_RUN"
+}

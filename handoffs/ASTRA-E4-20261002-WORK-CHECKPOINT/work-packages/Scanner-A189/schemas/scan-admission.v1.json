@@ -1,0 +1,309 @@
+{
+  "$id": "friday.astra.e4.lab821.scan-admission.v1",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "assert_document": {
+      "type": "string"
+    },
+    "context": {
+      "additionalProperties": false,
+      "properties": {
+        "authority": {
+          "type": [
+            "boolean",
+            "null",
+            "string"
+          ]
+        },
+        "bill_sha256": {
+          "type": "string",
+          "minLength": 64,
+          "maxLength": 64,
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "codecs": {
+          "type": "object"
+        },
+        "content_pins": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "relative_path": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 65535,
+                "pattern": "[^\\x00]+"
+              },
+              "publisher_raw_sha256": {
+                "type": [
+                  "null",
+                  "string"
+                ],
+                "minLength": 64,
+                "maxLength": 64,
+                "pattern": "^[0-9a-f]{64}$"
+              },
+              "metadata_content_sha256": {
+                "type": [
+                  "null",
+                  "string"
+                ],
+                "minLength": 64,
+                "maxLength": 64,
+                "pattern": "^[0-9a-f]{64}$"
+              }
+            },
+            "required": [
+              "relative_path",
+              "publisher_raw_sha256",
+              "metadata_content_sha256"
+            ]
+          },
+          "minItems": 0,
+          "maxItems": 202
+        },
+        "grant_sha256": {
+          "type": "string",
+          "minLength": 64,
+          "maxLength": 64,
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "held_root": {
+          "type": "string"
+        },
+        "index_sha256": {
+          "type": "string",
+          "minLength": 64,
+          "maxLength": 64,
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "index_size": {
+          "type": "integer"
+        },
+        "output": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "schema": {
+              "type": "string",
+              "const": "friday.astra.e4.lab821.scan-result.v1"
+            },
+            "expected_output_sha256": {
+              "type": "string",
+              "minLength": 64,
+              "maxLength": 64,
+              "pattern": "^[0-9a-f]{64}$"
+            }
+          },
+          "required": [
+            "schema",
+            "expected_output_sha256"
+          ]
+        },
+        "plan": {
+          "type": "object"
+        },
+        "recipe": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "sha256": {
+              "type": "string",
+              "minLength": 64,
+              "maxLength": 64,
+              "pattern": "^[0-9a-f]{64}$"
+            }
+          },
+          "required": [
+            "sha256"
+          ]
+        },
+        "roster_sha256": {
+          "type": "string",
+          "minLength": 64,
+          "maxLength": 64,
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "selected_bodies": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "bill": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "sha256": {
+                  "type": "string",
+                  "minLength": 64,
+                  "maxLength": 64,
+                  "pattern": "^[0-9a-f]{64}$"
+                }
+              },
+              "required": [
+                "sha256"
+              ]
+            },
+            "raw_selector": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "sha256": {
+                  "type": "string",
+                  "minLength": 64,
+                  "maxLength": 64,
+                  "pattern": "^[0-9a-f]{64}$"
+                }
+              },
+              "required": [
+                "sha256"
+              ]
+            },
+            "roster": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "sha256": {
+                  "type": "string",
+                  "minLength": 64,
+                  "maxLength": 64,
+                  "pattern": "^[0-9a-f]{64}$"
+                }
+              },
+              "required": [
+                "sha256"
+              ]
+            },
+            "runtime": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "sha256": {
+                  "type": "string",
+                  "minLength": 64,
+                  "maxLength": 64,
+                  "pattern": "^[0-9a-f]{64}$"
+                }
+              },
+              "required": [
+                "sha256"
+              ]
+            },
+            "source": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "sha256": {
+                  "type": "string",
+                  "minLength": 64,
+                  "maxLength": 64,
+                  "pattern": "^[0-9a-f]{64}$"
+                }
+              },
+              "required": [
+                "sha256"
+              ]
+            },
+            "recipe": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "sha256": {
+                  "type": "string",
+                  "minLength": 64,
+                  "maxLength": 64,
+                  "pattern": "^[0-9a-f]{64}$"
+                }
+              },
+              "required": [
+                "sha256"
+              ]
+            },
+            "output": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "sha256": {
+                  "type": "string",
+                  "minLength": 64,
+                  "maxLength": 64,
+                  "pattern": "^[0-9a-f]{64}$"
+                }
+              },
+              "required": [
+                "sha256"
+              ]
+            }
+          },
+          "required": [
+            "bill",
+            "raw_selector",
+            "roster",
+            "runtime",
+            "source",
+            "recipe",
+            "output"
+          ]
+        }
+      },
+      "type": "object",
+      "required": [
+        "authority",
+        "bill_sha256",
+        "codecs",
+        "grant_sha256",
+        "held_root",
+        "index_sha256",
+        "index_size",
+        "output",
+        "plan",
+        "recipe",
+        "roster_sha256",
+        "selected_bodies"
+      ]
+    },
+    "future_plan_sha256": {
+      "type": "string"
+    },
+    "held_role": {
+      "type": "string"
+    },
+    "index_role": {
+      "type": "string"
+    },
+    "oracle_id": {
+      "type": "string"
+    },
+    "publisher_evidence": {
+      "type": [
+        "null",
+        "object"
+      ]
+    },
+    "resources": {
+      "oneOf": [
+        {
+          "type": "null"
+        },
+        {
+          "$ref": "friday.astra.e4.lab818.scan-resource.v1"
+        }
+      ]
+    },
+    "scanner_role": {
+      "type": "string"
+    },
+    "schema": {
+      "const": "friday.astra.e4.lab821.scan-admission.v1",
+      "type": "string"
+    }
+  },
+  "required": [
+    "publisher_evidence",
+    "resources",
+    "schema"
+  ],
+  "type": "object"
+}

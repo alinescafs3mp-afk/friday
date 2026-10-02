@@ -1,0 +1,126 @@
+def call(label, tool, args, inputs, writable=()):
+    global ACTIVE
+    # Complete owner graph/slots before ANY call prefix, including constructor.
+    stream_cells = [raw_cell(name) for name in ("stdout", "stderr", "status")]
+    write_cells = [raw_cell("written", fd) for fd in writable]
+    streams = [None, None, None]
+    secondary_objects = []
+    item = {"label": label, "rc": None, "reaped": False, "pid": None,
+            "spawn_state": "NOT_ATTEMPTED", "failure": None,
+            "secondary_errors": [], "capture_complete": False,
+            "stdout": None, "stderr": None, "status": None, "written_data": [],
+            "output_charge_unknown": True, "elapsed_seconds": None,
+            "child_proc_status_sample": None,
+            "child_proc_status_missing_reason": "child not yet observed alive",
+            "complete_child_samples": 0}
+    start, p, primary, primary_tb, quota = time.monotonic_ns(), None, None, None, None
+    R["calls"].append(item)
+    # Nonserialized exact objects are owned by a separate same-lifetime graph.
+    owner = {"record": item, "streams": stream_cells, "written": write_cells,
+             "primary": None, "primary_tb": None, "secondary": secondary_objects,
+             "popen": None}
+    CALL_OWNERS.append(owner)
+    try:
+        due()
+        require(ACTIVE is None and len(R["calls"]) <= 8, "child concurrency/call cap")
+        custody()
+        resources("before_call_" + str(len(R["calls"])))
+        scratch()
+        remaining = OUTPUT - TOTAL_OUTPUT
+        quota = remaining // (3 + len(writable))
+        require(quota > 0, "aggregate GPG output budget exhausted")
+        item.update(per_file_output_cap=quota, all_output_slots=3 + len(writable),
+                    timeout_seconds=30, preexec_hard_and_soft_as=AS_CHILD)
+        for i, suffix in enumerate(("-stdout", "-stderr", "-status")):
+            streams[i] = new_mem(label + suffix)
+            stream_cells[i]["fd"] = streams[i]
+        out, err, statusfd = streams
+        expanded = [str(statusfd) if value == "{STATUS}" else value for value in args]
+        pfd, tfd = FILES["prlimit"]["fd"], FILES[tool]["fd"]
+        limits = ["--as=67108864:67108864", "--cpu=20:20",
+                  "--fsize=" + str(quota) + ":" + str(quota),
+                  "--nofile=128:128", "--core=0:0", "--nproc=0:0"]
+        command = ["prlimit"] + limits + ["--", "/proc/self/fd/" + str(tfd)] + expanded
+        passed = tuple(sorted(set([pfd, tfd, statusfd] + list(inputs) + list(writable))))
+        item.update(executable="/proc/self/fd/" + str(pfd), argv=command,
+                    tool_fd=tfd, shell=False, env=dict(ENV, HOME=HOME, GNUPGHOME=HOME),
+                    pass_fds=list(passed))
+        item["spawn_state"] = "UNKNOWN_BEFORE_POPEN"
+        p = subprocess.Popen(command, executable="/proc/self/fd/" + str(pfd),
+                             env=item["env"], stdin=subprocess.DEVNULL,
+                             stdout=out, stderr=err, pass_fds=passed,
+                             close_fds=True, shell=False,
+                             preexec_fn=lambda: child_limits(quota))
+        owner["popen"] = p
+        ACTIVE = p
+        item["pid"], item["spawn_state"] = p.pid, "RETURNED_EXACT_POPEN"
+        while p.poll() is None:
+            due()
+            require(time.monotonic_ns() - start < 30000000000, "GPG child wall timeout")
+            try:
+                sample = mm(p.pid)
+                item["child_proc_status_sample"] = sample
+                item["child_proc_status_missing_reason"] = None
+                item["complete_child_samples"] += 1
+                require(all(sample[k] <= AS_PARENT // 1024 for k in
+                            ("VmSize_kib", "VmRSS_kib", "VmHWM_kib", "VmPeak_kib")),
+                        "child transient memory budget exceeded")
+            except (FileNotFoundError, ProcessLookupError, MissingMemoryObservation) as exc:
+                item["child_proc_status_sample"] = None
+                item["child_proc_status_missing_reason"] = type(exc).__name__ + ": " + str(exc)
+                if p.poll() is None:
+                    raise Refusal("mandatory live-child complete memory sample unavailable")
+            p.wait(timeout=0.05) if p.poll() is not None else select.select([], [], [], 0.02)
+        if item["complete_child_samples"] == 0 and item["child_proc_status_missing_reason"] == "child not yet observed alive":
+            item["child_proc_status_missing_reason"] = "child exited before any complete live sample; kernel caps and actual child high-water remain separate"
+        item["rc"], item["reaped"] = p.returncode, True
+        ACTIVE = None
+    except BaseException as exc:
+        primary, primary_tb = exc, exc.__traceback__
+        owner["primary"], owner["primary_tb"] = primary, primary_tb
+        item["failure"] = exact_error(exc)
+    finally:
+        if p is not None and not item["reaped"]:
+            try:
+                reap(p)
+                item["rc"], item["reaped"] = p.returncode, True
+            except BaseException as exc:
+                secondary_objects.append(exc)
+                item["secondary_errors"].append(exact_error(exc))
+        elif item["spawn_state"] == "NOT_ATTEMPTED":
+            item["reaped"] = True  # no creation attempt, not a fabricated child rc
+        item["elapsed_seconds"] = (time.monotonic_ns() - start) / 1e9
+        # EVERY prefix captures ALL existing buffers before ANY stream firstclose.
+        for cell in stream_cells + write_cells:
+            try:
+                if cell["fd"] is not None:
+                    retain_cell(cell, quota if quota is not None else 0,
+                                item["reaped"], written=cell["name"] == "written")
+            except BaseException as exc:
+                secondary_objects.append(exc)
+                item["secondary_errors"].append(exact_error(exc))
+        for name, cell in zip(("stdout", "stderr", "status"), stream_cells):
+            item[name] = published_cell(cell)
+        item["written_data"] = [published_cell(cell) for cell in write_cells]
+        cells = stream_cells + write_cells
+        item["capture_complete"] = all(c["retained"] and not c["partial"] for c in cells)
+        item["output_charge_unknown"] = any(c["output_charge_bytes"] is None for c in cells)
+        for fd in streams:
+            if fd is None:
+                continue
+            try:
+                close_own(fd)
+            except BaseException as exc:
+                secondary_objects.append(exc)
+                item["secondary_errors"].append(exact_error(exc))
+    if primary is not None:
+        raise primary.with_traceback(primary_tb)  # original firstfault, not cleanup replacement
+    if secondary_objects:
+        raise secondary_objects[0]
+    require(item["capture_complete"] and not item["output_charge_unknown"] and not OUTPUT_UNKNOWN,
+            "complete actual output/count/charge required")
+    require(all(item[name]["encoding"] == "utf-8" for name in ("stdout", "stderr", "status")),
+            "complete utf-8 stream required on the normal return")
+    scratch()
+    custody()
+    return item

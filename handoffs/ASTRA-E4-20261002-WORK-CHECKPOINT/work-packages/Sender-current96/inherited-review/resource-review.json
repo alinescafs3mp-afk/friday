@@ -1,0 +1,963 @@
+{
+  "schema": "friday.a155.whole-original-resource-and-review-physical-charge-ledger.v1",
+  "accepted_msk": "2026-10-02T07:59:43+03:00",
+  "accepted_time_precision": "seconds, actual first wall-clock tool; incorrect initial chat time12:44 corrected to parent immediately",
+  "substantive_review_frozen_msk": "2026-10-02T08:26:04+0300",
+  "freeze_deadline_msk": "2026-10-02T09:39:43+03:00",
+  "hard_end_msk": "2026-10-02T09:49:43+03:00",
+  "wall_seconds": 6600,
+  "seal_reserve_seconds": 600,
+  "original_Source_caps": {
+    "source_literal_bytes_each": 65536,
+    "caller_current_bytes": 57981,
+    "caller_slack_bytes": 7555,
+    "sender_current_bytes": 65390,
+    "sender_slack_bytes": 146,
+    "sender_checked_read_bytes": 33554432,
+    "same_process_controller_and_receiver_actual_read_bytes": 16777216,
+    "native_envelope_bytes": 262144,
+    "Source_soft_RLIMIT_AS_bytes": 67108864,
+    "canonical_workers": 4,
+    "worker_and_dispatcher_AS_bytes_each": 1610612736,
+    "whole_memory_bill_bytes": 8589934592,
+    "original64MiB_regular_artifact_fence_retained": true,
+    "CPU_wall_end_semantics": "Original fixed original ends/no refresh/no Source retry, workerCPU300/dispatcherCPU7200; no cap raise."
+  },
+  "static_current_costs": {
+    "mandatory_Source54_bytes": 5231149,
+    "full_control_inventory_bytes": 4139478,
+    "three_full54_physical_scans_bytes": 15693447,
+    "other_sameprocess_read_remaining_after_inventory_only": 1083769,
+    "two_Sender_full54_scans_bytes": 10462298,
+    "seven_old_current_size_scans_bytes": 36618043,
+    "old_seven_scan_model_no_longer_unconditional": "Generation-owned fullbytes/current9 cache and actual meter wiring changed; do not carry old36,440,376 result unchanged.",
+    "generation_reuse": "Legal reviewed Source-code proof: immutable complete raw bytes/fullSHA/held+named current9, original write fence; no malicious kernel/interpreter/arbitrary writer requirement."
+  },
+  "whole_Source_resource_verdict": {
+    "status": "NOT_PROVEN",
+    "read_meter_holes": [
+      "OwnedStream read/readinto/readline/read1/etc generic branch, not SourceReadMeter",
+      "readv/preadv hooked but only os.read/os.pread dispatched to meter",
+      "pre-attachment startup/import/loader paths and suppressed recorder/internal IO"
+    ],
+    "capacity_lifetimes": "Complete damage/event/raw54 generations/control decode/hex JSON/transport temporary/first-error/final-tail CPU AS/wall storage capacity not derived from original whole contract. No invented event cap or fixture projection.",
+    "nominal_workers_plus_dispatcher_AS_bytes": 8053063680,
+    "nominal_plus_three_small64MiB_process_envelopes": 8254390272,
+    "nominal_remaining_before_unquantified_shared_kernel_ledger_event_overhead": 335544320,
+    "aggregate_RAM": "UNKNOWN_NOT_ZERO_NOT_PROVEN",
+    "implicit_IO": "UNKNOWN_NOT_ZERO_NOT_PROVEN",
+    "no_aggregate_PASS": true,
+    "Source_cap_increase": false,
+    "new_Root_model_or_worker": false,
+    "separate_future_existing_Root_read_allowance": "May be separately typed/independently granted; never moves original Source reads toRoot or becomes current authority."
+  },
+  "review_physical_charge": {
+    "declared_read_hash_transport_cap_bytes": 268435456,
+    "operations": [
+      {
+        "operation": "full-pin-verify",
+        "content_bytes": 7605444,
+        "passes": 2,
+        "repeat_because": "First full result was forwarded before durable artifact capture; one repeat captures same finite proof, no Source execution.",
+        "transport_bytes": 121937
+      },
+      {
+        "operation": "full-text",
+        "path": "/var/tmp/friday-astra-quality-a137-a144-whole54-all32-original-actor-connected-source-repair-a147-g1/metadata/closure-matrix.json",
+        "content_bytes": 14026,
+        "transport_bytes": 15392
+      },
+      {
+        "operation": "full-text",
+        "path": "/var/tmp/friday-astra-quality-a137-a144-whole54-all32-original-actor-connected-source-repair-a147-g1/metadata/consumer-graph.json",
+        "content_bytes": 2537,
+        "transport_bytes": 3324
+      },
+      {
+        "operation": "full-text",
+        "path": "/var/tmp/friday-astra-quality-a137-a144-whole54-all32-original-actor-connected-source-repair-a147-g1/metadata/wholepath-cost.json",
+        "content_bytes": 5744,
+        "transport_bytes": 6723
+      },
+      {
+        "operation": "full-text",
+        "path": "/var/tmp/friday-astra-quality-a137-a144-whole54-all32-original-actor-connected-source-repair-a147-g1/contracts/connected-evidence-protocol.md",
+        "content_bytes": 3761,
+        "transport_bytes": 4322
+      },
+      {
+        "operation": "text",
+        "path": "/var/tmp/friday-astra-quality-a137-a144-whole54-all32-original-actor-connected-source-repair-a147-g1/source/controller.py",
+        "range": [
+          1,
+          500
+        ],
+        "content_bytes": 19850,
+        "transport_bytes": 22053
+      },
+      {
+        "operation": "text",
+        "path": "/var/tmp/friday-astra-quality-a137-a144-whole54-all32-original-actor-connected-source-repair-a147-g1/Source54/tests/receipt_contract.py",
+        "range": [
+          1,
+          320
+        ],
+        "content_bytes": 101275,
+        "transport_bytes": 18565
+      },
+      {
+        "operation": "full-json",
+        "path": "/var/tmp/friday-astra-quality-a137-a144-whole54-all32-original-actor-connected-source-repair-a147-g1/index/full-source.json",
+        "content_bytes": 44400,
+        "transport_bytes": 47714
+      },
+      {
+        "operation": "full-json",
+        "path": "/var/tmp/friday-astra-quality-a137-a144-whole54-all32-original-actor-connected-source-repair-a147-g1/metadata/whole54-current-matrix.json",
+        "content_bytes": 276446,
+        "transport_bytes": 290325
+      },
+      {
+        "operation": "full-json",
+        "path": "/var/tmp/friday-astra-quality-a137-a144-whole54-all32-original-actor-connected-source-repair-a147-g1/metadata/all32-current-matrix.json",
+        "content_bytes": 224691,
+        "transport_bytes": 234284
+      },
+      {
+        "operation": "full-json",
+        "path": "/var/tmp/friday-astra-quality-a137-a144-whole54-all32-original-actor-connected-source-repair-a147-g1/contracts/all32-contract-bindings.json",
+        "content_bytes": 569581,
+        "transport_bytes": 593054
+      },
+      {
+        "operation": "full-json",
+        "path": "/var/tmp/friday-astra-quality-a137-a144-whole54-all32-original-actor-connected-source-repair-a147-g1/contracts/ordered-predicate-table.json",
+        "content_bytes": 92081,
+        "transport_bytes": 96127
+      },
+      {
+        "operation": "full-json",
+        "path": "/var/tmp/friday-astra-quality-a137-a144-whole54-all32-original-actor-connected-source-repair-a147-g1/metadata/original32-input-pins.json",
+        "content_bytes": 15041,
+        "transport_bytes": 16774
+      },
+      {
+        "operation": "text",
+        "path": "/var/tmp/friday-astra-quality-a137-a144-whole54-all32-original-actor-connected-source-repair-a147-g1/Source54/tests/receipt_contract.py",
+        "range": [
+          1080,
+          1460
+        ],
+        "content_bytes": 101275,
+        "transport_bytes": 20096
+      },
+      {
+        "operation": "text",
+        "path": "/var/tmp/friday-astra-quality-a137-a144-whole54-all32-original-actor-connected-source-repair-a147-g1/Source54/tests/admission_custodian.py",
+        "range": [
+          1,
+          260
+        ],
+        "content_bytes": 9574,
+        "transport_bytes": 10772
+      },
+      {
+        "operation": "text",
+        "path": "/var/tmp/friday-astra-quality-a137-a144-whole54-all32-original-actor-connected-source-repair-a147-g1/Source54/tests/receipt_contract.py",
+        "range": [
+          1020,
+          1089
+        ],
+        "content_bytes": 101275,
+        "transport_bytes": 4740
+      },
+      {
+        "operation": "text",
+        "path": "/var/tmp/friday-astra-quality-a137-a144-whole54-all32-original-actor-connected-source-repair-a147-g1/Source54/tests/receipt_contract.py",
+        "range": [
+          1460,
+          2030
+        ],
+        "content_bytes": 101275,
+        "transport_bytes": 15877
+      },
+      {
+        "operation": "text",
+        "path": "/var/tmp/friday-astra-quality-a137-a144-whole54-all32-original-actor-connected-source-repair-a147-g1/source/staged_sender.py",
+        "range": [
+          1,
+          265
+        ],
+        "content_bytes": 65390,
+        "transport_bytes": 15571
+      },
+      {
+        "operation": "text",
+        "path": "/var/tmp/friday-astra-quality-a137-a144-whole54-all32-original-actor-connected-source-repair-a147-g1/Source54/tests/receipt_contract.py",
+        "range": [
+          317,
+          450
+        ],
+        "content_bytes": 101275,
+        "transport_bytes": 9646
+      },
+      {
+        "operation": "text",
+        "path": "/var/tmp/friday-astra-quality-a137-a144-whole54-all32-original-actor-connected-source-repair-a147-g1/source/staged_sender.py",
+        "range": [
+          340,
+          560
+        ],
+        "content_bytes": 65390,
+        "transport_bytes": 11327
+      },
+      {
+        "operation": "text",
+        "path": "/var/tmp/friday-astra-quality-a137-a144-whole54-all32-original-actor-connected-source-repair-a147-g1/source/staged_sender.py",
+        "range": [
+          1000,
+          1390
+        ],
+        "content_bytes": 65390,
+        "transport_bytes": 18148
+      },
+      {
+        "operation": "text",
+        "path": "/var/tmp/friday-astra-quality-a137-a144-whole54-all32-original-actor-connected-source-repair-a147-g1/source/caller.py",
+        "range": [
+          1,
+          175
+        ],
+        "content_bytes": 57981,
+        "transport_bytes": 8689
+      },
+      {
+        "operation": "full-byte-54-delta",
+        "content_bytes": 10481317,
+        "transport_bytes": 80848
+      },
+      {
+        "operation": "whole-seven-actors-text-outline",
+        "content_bytes": 394667,
+        "transport_bytes": 216055
+      },
+      {
+        "operation": "text",
+        "path": "/var/tmp/friday-astra-quality-a137-a144-whole54-all32-original-actor-connected-source-repair-a147-g1/source/ordinary_root_consumers.py",
+        "range": [
+          1,
+          280
+        ],
+        "content_bytes": 50808,
+        "transport_bytes": 19164
+      },
+      {
+        "operation": "text",
+        "path": "/var/tmp/friday-astra-quality-a137-a144-whole54-all32-original-actor-connected-source-repair-a147-g1/source/ordinary_root_consumers.py",
+        "range": [
+          280,
+          497
+        ],
+        "content_bytes": 50808,
+        "transport_bytes": 16554
+      },
+      {
+        "operation": "text",
+        "path": "/var/tmp/friday-astra-quality-a137-a144-whole54-all32-original-actor-connected-source-repair-a147-g1/source/ordinary_root_consumers.py",
+        "range": [
+          555,
+          761
+        ],
+        "content_bytes": 50808,
+        "transport_bytes": 15899
+      },
+      {
+        "operation": "text",
+        "path": "/var/tmp/friday-astra-quality-a137-a144-whole54-all32-original-actor-connected-source-repair-a147-g1/source/native_grammar.py",
+        "range": [
+          1,
+          277
+        ],
+        "content_bytes": 36043,
+        "transport_bytes": 19436
+      },
+      {
+        "operation": "text",
+        "path": "/var/tmp/friday-astra-quality-a137-a144-whole54-all32-original-actor-connected-source-repair-a147-g1/source/ordinary_root_consumers.py",
+        "range": [
+          497,
+          554
+        ],
+        "content_bytes": 50808,
+        "transport_bytes": 5001
+      },
+      {
+        "operation": "text",
+        "path": "/var/tmp/friday-astra-quality-a137-a144-whole54-all32-original-actor-connected-source-repair-a147-g1/source/ordinary_root_consumers.py",
+        "range": [
+          604,
+          705
+        ],
+        "content_bytes": 50808,
+        "transport_bytes": 7959
+      },
+      {
+        "operation": "text",
+        "path": "/var/tmp/friday-astra-quality-a137-a144-whole54-all32-original-actor-connected-source-repair-a147-g1/source/native_grammar.py",
+        "range": [
+          541,
+          583
+        ],
+        "content_bytes": 36043,
+        "transport_bytes": 3226
+      },
+      {
+        "operation": "text",
+        "path": "/var/tmp/friday-astra-quality-a137-a144-whole54-all32-original-actor-connected-source-repair-a147-g1/source/caller.py",
+        "range": [
+          54,
+          122
+        ],
+        "content_bytes": 57981,
+        "transport_bytes": 4129
+      },
+      {
+        "operation": "text",
+        "path": "/var/tmp/friday-astra-quality-a137-a144-whole54-all32-original-actor-connected-source-repair-a147-g1/source/caller.py",
+        "range": [
+          568,
+          751
+        ],
+        "content_bytes": 57981,
+        "transport_bytes": 9323
+      },
+      {
+        "operation": "text",
+        "path": "/var/tmp/friday-astra-quality-a137-a144-whole54-all32-original-actor-connected-source-repair-a147-g1/source/caller.py",
+        "range": [
+          834,
+          950
+        ],
+        "content_bytes": 57981,
+        "transport_bytes": 6711
+      },
+      {
+        "operation": "text",
+        "path": "/var/tmp/friday-astra-quality-a137-a144-whole54-all32-original-actor-connected-source-repair-a147-g1/source/caller.py",
+        "range": [
+          1120,
+          1205
+        ],
+        "content_bytes": 57981,
+        "transport_bytes": 3685
+      },
+      {
+        "operation": "text",
+        "path": "/var/tmp/friday-astra-quality-a137-a144-whole54-all32-original-actor-connected-source-repair-a147-g1/source/root_native_launcher.py",
+        "range": [
+          66,
+          92
+        ],
+        "content_bytes": 91398,
+        "transport_bytes": 1907
+      },
+      {
+        "operation": "text",
+        "path": "/var/tmp/friday-astra-quality-a137-a144-whole54-all32-original-actor-connected-source-repair-a147-g1/source/root_native_launcher.py",
+        "range": [
+          92,
+          408
+        ],
+        "content_bytes": 91398,
+        "transport_bytes": 19191
+      },
+      {
+        "operation": "text",
+        "path": "/var/tmp/friday-astra-quality-a137-a144-whole54-all32-original-actor-connected-source-repair-a147-g1/source/root_native_launcher.py",
+        "range": [
+          512,
+          810
+        ],
+        "content_bytes": 91398,
+        "transport_bytes": 18823
+      },
+      {
+        "operation": "text",
+        "path": "/var/tmp/friday-astra-quality-a137-a144-whole54-all32-original-actor-connected-source-repair-a147-g1/source/root_native_launcher.py",
+        "range": [
+          810,
+          918
+        ],
+        "content_bytes": 91398,
+        "transport_bytes": 7537
+      },
+      {
+        "operation": "control-summary-output-cap",
+        "content_bytes": 4139478,
+        "transport_bytes_upper": 600000,
+        "reason": "Metadata summary unexpectedly included every dynamic key; no Source execution. Replaced with bounded complete-key digest and cardinality."
+      },
+      {
+        "operation": "control",
+        "content_bytes": 4139478,
+        "transport_bytes": 2449
+      },
+      {
+        "operation": "original32",
+        "content_bytes": 10469093,
+        "transport_bytes": 322966
+      },
+      {
+        "operation": "outline",
+        "content_bytes": 1010813,
+        "transport_bytes": 382177
+      },
+      {
+        "operation": "text",
+        "path": "/var/tmp/friday-astra-quality-a137-a144-whole54-all32-original-actor-connected-source-repair-a147-g1/source/root_native_launcher.py",
+        "range": [
+          918,
+          1047
+        ],
+        "content_bytes": 91398,
+        "transport_bytes": 9703
+      },
+      {
+        "operation": "text",
+        "path": "/var/tmp/friday-astra-quality-a137-a144-whole54-all32-original-actor-connected-source-repair-a147-g1/source/root_native_launcher.py",
+        "range": [
+          1155,
+          1301
+        ],
+        "content_bytes": 91398,
+        "transport_bytes": 11894
+      },
+      {
+        "operation": "text",
+        "path": "/var/tmp/friday-astra-quality-a137-a144-whole54-all32-original-actor-connected-source-repair-a147-g1/source/root_native_launcher.py",
+        "range": [
+          1301,
+          1537
+        ],
+        "content_bytes": 91398,
+        "transport_bytes": 17606
+      },
+      {
+        "operation": "text",
+        "path": "/var/tmp/friday-astra-quality-a137-a144-whole54-all32-original-actor-connected-source-repair-a147-g1/source/root_native_launcher.py",
+        "range": [
+          408,
+          511
+        ],
+        "content_bytes": 91398,
+        "transport_bytes": 6829
+      },
+      {
+        "operation": "text",
+        "path": "/var/tmp/friday-astra-quality-a137-a144-whole54-all32-original-actor-connected-source-repair-a147-g1/Source54/tests/run_tests.py",
+        "range": [
+          1,
+          62
+        ],
+        "content_bytes": 30194,
+        "transport_bytes": 3635
+      },
+      {
+        "operation": "text",
+        "path": "/var/tmp/friday-astra-quality-a137-a144-whole54-all32-original-actor-connected-source-repair-a147-g1/Source54/tests/run_tests.py",
+        "range": [
+          296,
+          552
+        ],
+        "content_bytes": 30194,
+        "transport_bytes": 16509
+      },
+      {
+        "operation": "text",
+        "path": "/var/tmp/friday-astra-quality-a137-a144-whole54-all32-original-actor-connected-source-repair-a147-g1/Source54/tests/execute_pair.py",
+        "range": [
+          1,
+          165
+        ],
+        "content_bytes": 25268,
+        "transport_bytes": 10441
+      },
+      {
+        "operation": "text",
+        "path": "/var/tmp/friday-astra-quality-a137-a144-whole54-all32-original-actor-connected-source-repair-a147-g1/Source54/fixtures/coordination/finalize_reports.py",
+        "range": [
+          1,
+          139
+        ],
+        "content_bytes": 7077,
+        "transport_bytes": 8178
+      },
+      {
+        "operation": "prior-contract-full-text",
+        "path": "/home/jericho/.jericho/grok-takeover/ASTRA-E4-A137-INPUT-20261002.json",
+        "content_bytes": 32656,
+        "transport_bytes": 21807
+      },
+      {
+        "operation": "prior-contract-full-text",
+        "path": "/var/tmp/friday-astra-quality-a137-whole-source54-all32-independent-review-a144-g1/review.md",
+        "content_bytes": 28388,
+        "transport_bytes": 12292
+      },
+      {
+        "operation": "text",
+        "path": "/var/tmp/friday-astra-quality-a137-a144-whole54-all32-original-actor-connected-source-repair-a147-g1/source/root_native_launcher.py",
+        "range": [
+          1047,
+          1154
+        ],
+        "content_bytes": 91398,
+        "transport_bytes": 8162
+      },
+      {
+        "operation": "text",
+        "path": "/home/jericho/.jericho/grok-takeover/ASTRA-E4-A137-INPUT-20261002.json",
+        "range": [
+          400,
+          550
+        ],
+        "content_bytes": 32656,
+        "transport_bytes": 14292
+      },
+      {
+        "operation": "text",
+        "path": "/var/tmp/friday-astra-quality-a137-a144-whole54-all32-original-actor-connected-source-repair-a147-g1/source/staged_sender.py",
+        "range": [
+          560,
+          833
+        ],
+        "content_bytes": 65390,
+        "transport_bytes": 15375
+      },
+      {
+        "operation": "text",
+        "path": "/var/tmp/friday-astra-quality-a137-a144-whole54-all32-original-actor-connected-source-repair-a147-g1/source/staged_sender.py",
+        "range": [
+          833,
+          1005
+        ],
+        "content_bytes": 65390,
+        "transport_bytes": 9856
+      },
+      {
+        "operation": "text",
+        "path": "/home/jericho/.jericho/grok-takeover/ASTRA-E4-A137-INPUT-20261002.json",
+        "range": [
+          510,
+          534
+        ],
+        "content_bytes": 32656,
+        "transport_bytes": 4335
+      },
+      {
+        "operation": "text",
+        "path": "/var/tmp/friday-astra-quality-a137-a144-whole54-all32-original-actor-connected-source-repair-a147-g1/source/staged_sender.py",
+        "range": [
+          265,
+          345
+        ],
+        "content_bytes": 65390,
+        "transport_bytes": 5737
+      },
+      {
+        "operation": "text",
+        "path": "/var/tmp/friday-astra-quality-a137-a144-whole54-all32-original-actor-connected-source-repair-a147-g1/source/staged_sender.py",
+        "range": [
+          560,
+          648
+        ],
+        "content_bytes": 65390,
+        "transport_bytes": 5316
+      },
+      {
+        "operation": "text",
+        "path": "/var/tmp/friday-astra-quality-a137-a144-whole54-all32-original-actor-connected-source-repair-a147-g1/Source54/tests/harness_selfcheck.py",
+        "range": [
+          1,
+          80
+        ],
+        "content_bytes": 47038,
+        "transport_bytes": 4952
+      },
+      {
+        "operation": "obligations",
+        "content_bytes": 10431019,
+        "transport_bytes": 93438
+      },
+      {
+        "operation": "predicates",
+        "content_bytes": 157471,
+        "transport_bytes": 76699
+      },
+      {
+        "operation": "actorsdelta-incomplete-read",
+        "transport_bytes_upper": 2048,
+        "reason": "Original A137 has no source/controller.py member; metadata read stopped before absent path, not candidate execution. Complete actual controller predecessor comes from pinned original A132 root.",
+        "content_bytes": 143334,
+        "exact_read_basis": "Caller current57981 + before65503 + current controller19850 before absent original path; no Source execution."
+      },
+      {
+        "operation": "exactinput-captured",
+        "content_bytes": 8114,
+        "transport_bytes": 8986,
+        "repeat_because": "Capture authoritative input into independent sealing proof after original full intake read."
+      },
+      {
+        "operation": "actorsdelta",
+        "content_bytes": 691648,
+        "transport_bytes": 10259
+      },
+      {
+        "operation": "required-pinned-review-or-terminal-full-json",
+        "path": "/home/jericho/.jericho/runtime/subagent-lifecycle/ASTRA-E4-QUALITY-A137-A144-WHOLE54-ALL32-ORIGINAL-ACTOR-CONNECTED-SOURCE-REPAIR-A147-G1-RESULT.json",
+        "content_bytes": 12348,
+        "transport_bytes": 13466
+      },
+      {
+        "operation": "required-pinned-review-or-terminal-full-json",
+        "path": "/var/tmp/friday-astra-quality-a137-whole-source54-all32-independent-review-a144-g1/evidence-matrix.json",
+        "content_bytes": 16900,
+        "transport_bytes": 18035
+      },
+      {
+        "operation": "required-pinned-review-or-terminal-full-json",
+        "path": "/var/tmp/friday-astra-quality-a137-whole-source54-all32-independent-review-a144-g1/whole54-classifications.json",
+        "content_bytes": 100062,
+        "transport_bytes": 105648
+      },
+      {
+        "operation": "required-pinned-review-or-terminal-full-json",
+        "path": "/var/tmp/friday-astra-quality-a137-whole-source54-all32-independent-review-a144-g1/all32-classifications.json",
+        "content_bytes": 100018,
+        "transport_bytes": 104720
+      },
+      {
+        "operation": "required-pinned-review-or-terminal-full-json",
+        "path": "/home/jericho/.jericho/runtime/subagent-lifecycle/ASTRA-E4-QUALITY-A137-WHOLE-SOURCE54-ALL32-INDEPENDENT-REVIEW-A144-G1-RESULT.json",
+        "content_bytes": 5640,
+        "transport_bytes": 6593
+      },
+      {
+        "operation": "required-pinned-review-or-terminal-full-json",
+        "path": "/var/tmp/friday-astra-quality-a137-whole-source54-all32-independent-review-a144-g1/final-manifest.json",
+        "content_bytes": 5850,
+        "transport_bytes": 6873
+      },
+      {
+        "operation": "text",
+        "path": "/var/tmp/friday-astra-quality-a137-a144-whole54-all32-original-actor-connected-source-repair-a147-g1/source/caller.py",
+        "range": [
+          376,
+          417
+        ],
+        "content_bytes": 57981,
+        "transport_bytes": 3489
+      },
+      {
+        "operation": "text",
+        "path": "/var/tmp/friday-astra-quality-a137-a144-whole54-all32-original-actor-connected-source-repair-a147-g1/source/caller.py",
+        "range": [
+          682,
+          713
+        ],
+        "content_bytes": 57981,
+        "transport_bytes": 1968
+      },
+      {
+        "operation": "text",
+        "path": "/var/tmp/friday-astra-quality-a137-a144-whole54-all32-original-actor-connected-source-repair-a147-g1/source/root_native_launcher.py",
+        "range": [
+          675,
+          734
+        ],
+        "content_bytes": 91398,
+        "transport_bytes": 4261
+      },
+      {
+        "operation": "text",
+        "path": "/var/tmp/friday-astra-quality-a137-a144-whole54-all32-original-actor-connected-source-repair-a147-g1/source/root_native_launcher.py",
+        "range": [
+          1210,
+          1229
+        ],
+        "content_bytes": 91398,
+        "transport_bytes": 1908
+      },
+      {
+        "operation": "text",
+        "path": "/var/tmp/friday-astra-quality-a137-a144-whole54-all32-original-actor-connected-source-repair-a147-g1/source/ordinary_root_consumers.py",
+        "range": [
+          74,
+          102
+        ],
+        "content_bytes": 50808,
+        "transport_bytes": 2491
+      },
+      {
+        "operation": "text",
+        "path": "/var/tmp/friday-astra-quality-a137-a144-whole54-all32-original-actor-connected-source-repair-a147-g1/source/ordinary_root_consumers.py",
+        "range": [
+          706,
+          745
+        ],
+        "content_bytes": 50808,
+        "transport_bytes": 3889
+      },
+      {
+        "operation": "text",
+        "path": "/var/tmp/friday-astra-quality-a137-a144-whole54-all32-original-actor-connected-source-repair-a147-g1/source/root_native_launcher.py",
+        "range": [
+          326,
+          377
+        ],
+        "content_bytes": 91398,
+        "transport_bytes": 4012
+      },
+      {
+        "operation": "text",
+        "path": "/var/tmp/friday-astra-quality-a137-a144-whole54-all32-original-actor-connected-source-repair-a147-g1/Source54/tests/execute_pair.py",
+        "range": [
+          375,
+          408
+        ],
+        "content_bytes": 25268,
+        "transport_bytes": 2404
+      },
+      {
+        "operation": "text",
+        "path": "/var/tmp/friday-astra-quality-a137-a144-whole54-all32-original-actor-connected-source-repair-a147-g1/source/ordinary_root_consumers.py",
+        "range": [
+          561,
+          603
+        ],
+        "content_bytes": 50808,
+        "transport_bytes": 3608
+      },
+      {
+        "operation": "text",
+        "path": "/var/tmp/friday-astra-quality-a137-a144-whole54-all32-original-actor-connected-source-repair-a147-g1/source/caller.py",
+        "range": [
+          877,
+          913
+        ],
+        "content_bytes": 57981,
+        "transport_bytes": 2415
+      },
+      {
+        "operation": "text",
+        "path": "/var/tmp/friday-astra-quality-a137-a144-whole54-all32-original-actor-connected-source-repair-a147-g1/source/staged_sender.py",
+        "range": [
+          61,
+          87
+        ],
+        "content_bytes": 65390,
+        "transport_bytes": 1629
+      },
+      {
+        "operation": "text",
+        "path": "/var/tmp/friday-astra-quality-a137-a144-whole54-all32-original-actor-connected-source-repair-a147-g1/Source54/tests/receipt_contract.py",
+        "range": [
+          1435,
+          1463
+        ],
+        "content_bytes": 101275,
+        "transport_bytes": 1783
+      },
+      {
+        "operation": "text",
+        "path": "/var/tmp/friday-astra-quality-a137-a144-whole54-all32-original-actor-connected-source-repair-a147-g1/Source54/tests/receipt_contract.py",
+        "range": [
+          1535,
+          1593
+        ],
+        "content_bytes": 101275,
+        "transport_bytes": 4349
+      },
+      {
+        "operation": "text",
+        "path": "/var/tmp/friday-astra-quality-a137-a144-whole54-all32-original-actor-connected-source-repair-a147-g1/source/root_native_launcher.py",
+        "range": [
+          1274,
+          1294
+        ],
+        "content_bytes": 91398,
+        "transport_bytes": 2233
+      },
+      {
+        "operation": "text",
+        "path": "/var/tmp/friday-astra-quality-a137-a144-whole54-all32-original-actor-connected-source-repair-a147-g1/source/ordinary_root_consumers.py",
+        "range": [
+          206,
+          280
+        ],
+        "content_bytes": 50808,
+        "transport_bytes": 6078
+      },
+      {
+        "operation": "text",
+        "path": "/var/tmp/friday-astra-quality-a137-a144-whole54-all32-original-actor-connected-source-repair-a147-g1/source/ordinary_root_consumers.py",
+        "range": [
+          330,
+          395
+        ],
+        "content_bytes": 50808,
+        "transport_bytes": 5395
+      },
+      {
+        "operation": "text",
+        "path": "/var/tmp/friday-astra-quality-a137-a144-whole54-all32-original-actor-connected-source-repair-a147-g1/source/native_grammar.py",
+        "range": [
+          214,
+          277
+        ],
+        "content_bytes": 36043,
+        "transport_bytes": 5200
+      },
+      {
+        "operation": "text",
+        "path": "/var/tmp/friday-astra-quality-a137-a144-whole54-all32-original-actor-connected-source-repair-a147-g1/Source54/tests/close_package.py",
+        "range": [
+          1,
+          42
+        ],
+        "content_bytes": 43302,
+        "transport_bytes": 2553
+      },
+      {
+        "operation": "text",
+        "path": "/var/tmp/friday-astra-quality-a137-a144-whole54-all32-original-actor-connected-source-repair-a147-g1/Source54/tests/close_package.py",
+        "range": [
+          709,
+          726
+        ],
+        "content_bytes": 43302,
+        "transport_bytes": 1387
+      },
+      {
+        "operation": "text",
+        "path": "/var/tmp/friday-astra-quality-a137-a144-whole54-all32-original-actor-connected-source-repair-a147-g1/source/source_grammar.py",
+        "range": [
+          1,
+          63
+        ],
+        "content_bytes": 73197,
+        "transport_bytes": 4348
+      },
+      {
+        "operation": "text",
+        "path": "/var/tmp/friday-astra-quality-a137-a144-whole54-all32-original-actor-connected-source-repair-a147-g1/source/staged_sender.py",
+        "range": [
+          1000,
+          1044
+        ],
+        "content_bytes": 65390,
+        "transport_bytes": 2653
+      },
+      {
+        "operation": "text",
+        "path": "/var/tmp/friday-astra-quality-a137-a144-whole54-all32-original-actor-connected-source-repair-a147-g1/source/staged_sender.py",
+        "range": [
+          1249,
+          1273
+        ],
+        "content_bytes": 65390,
+        "transport_bytes": 2486
+      },
+      {
+        "operation": "text",
+        "path": "/var/tmp/friday-astra-quality-a137-a144-whole54-all32-original-actor-connected-source-repair-a147-g1/source/caller.py",
+        "range": [
+          751,
+          834
+        ],
+        "content_bytes": 57981,
+        "transport_bytes": 4819
+      },
+      {
+        "operation": "bounded-shell-text-joins",
+        "content_bytes_upper": 123371,
+        "transport_bytes_upper": 4000
+      },
+      {
+        "operation": "control-summary-own-metadata-type-adaptation",
+        "content_bytes": 4139478,
+        "transport_bytes_upper": 2048,
+        "reason": "Own bounded metadata count summary applied len to scalar per-module collection declarations; matrices actually remain a dict of374 list values. Failed after full readonly JSON parse, no Source execution."
+      },
+      {
+        "operation": "control-summary-own-metadata-scalar-adaptation",
+        "content_bytes": 4139478,
+        "transport_bytes_upper": 2048,
+        "reason": "Second own summary attempt retained the same scalar collection len assumption; both read attempts are fully charged. Final shape-guarded stock summary records declarations separately from actual464 unique IDs."
+      },
+      {
+        "operation": "whole-control-obligation-counts",
+        "content_bytes": 4139478,
+        "transport_bytes": 3850,
+        "repeat_because": "Independently distinguish scalar declarations from actual464 full test ID list, and inspect exact current control shapes."
+      },
+      {
+        "operation": "pure-performer-observer-full-text-correspondence",
+        "content_bytes": 138587,
+        "transport_bytes": 14292
+      },
+      {
+        "operation": "own-stock-host-IO-calibration",
+        "content_bytes": 97,
+        "transport_bytes": 11063,
+        "meaning": "New observation only; no previous unmeasured host IO is asserted zero."
+      },
+      {
+        "operation": "final-subject-immutable-current9-check",
+        "content_bytes": 465365,
+        "transport_bytes": 56302,
+        "repeat_because": "Required final subject fence: exact unchanged full9 and pathset of every reviewed Source member and all33 original pinned inputs, plus full Source terminal/input hashes; no repeated Source semantic review."
+      }
+    ],
+    "known_file_payload_physical_read_bytes": 75958586,
+    "bounded_additional_file_payload_bytes": 123371,
+    "known_tool_output_length_units": 3541001,
+    "known_tool_output_upper_allowance_bytes": 610144,
+    "transport_unit_note": "Historical JS tool lengths use UTF16 string length, exact for ASCII; UTF8/framing/pipe copies/edit bodies/parent transport are charged in the explicit overhead reserve, not assumed free.",
+    "same_buffer_hashing": "Every stock input is fully SHA256-hashed in the single owned read buffer; no extra physical file reread hidden. Repeated body reads, including bounded summary failures and old/current comparison, are charged as separate operations.",
+    "charged_reserves": {
+      "early_unenumerated_intake_and_old_review_reads_and_uncaptured_initial_control_stdout_bytes": 9437184,
+      "stock_named_module_and_helper_startup_full_copy_allowance_bytes": 152300400,
+      "tool_framing_utf8_inflate_edit_payload_multilayer_transport_and_parent_result_bytes": 16777216,
+      "remaining_local_full_member_seal_hash_verify_manifest_terminal_read_write_transport_bytes": 4194304
+    },
+    "known_plus_conservative_named_reserves_bytes": 262942206,
+    "remaining_after_these_charged_reserves_bytes": 5493250,
+    "planned_named_stock_helper_invocation_ceiling": 120,
+    "stock_runtime_calibration_ref": "own-stock-host-io-calibration.json",
+    "startup_calibration_observed_rchar_bytes": 572745,
+    "calibration_distinct_loaded_stock_named_file_bytes": 1269170,
+    "host_module_allowance_meaning": "Full copies of both named source/cache/extension module files per up-to120 stock metadata invocations are charged; one calibration is not relabeled as measurements of past invocations.",
+    "unqualified_host_ELF_kernel_tool_IO_total": "UNKNOWN_NOT_ZERO_NOT_PROVEN; no zero or aggregate resource PASS claimed.",
+    "remaining_seal_reserve_meaning": "Manifest excludes itself and external terminal; resource file is a pre-seal ledger. Terminal adds actual seal/manifest/terminal known reads and transport inside this reservation without rewriting hashed resource file."
+  },
+  "review_actual_effects": {
+    "candidate_Source_import_AST_compile_eval_exec_tests_native_Root_archive_GPG_install_live_gate": 0,
+    "Source_execution_retries": 0,
+    "model_children": 0,
+    "network": 0,
+    "local_metadata_workers_peak_known": 4,
+    "reviewer_created_stock_metadata_readers": true,
+    "own_stock_summary_failures_and_adaptations_charged": true,
+    "settings_models_reasoning_tier_guards_locks_changes": 0,
+    "Source_or_external_user_file_writes": 0,
+    "writes": "Owned review artifact root and one exact allowed result terminal only.",
+    "metadata_helper_peak_ru_maxrss_KiB_observed": 615856,
+    "aggregate_review_RAM": "UNKNOWN_NOT_ZERO_NOT_PROVEN; observed subprocess ru_maxrss is not whole process-tree/host proof"
+  },
+  "SourceReady": false,
+  "runtime": "NOT_RUN",
+  "gates": "NOT_RUN",
+  "GO": false
+}
+

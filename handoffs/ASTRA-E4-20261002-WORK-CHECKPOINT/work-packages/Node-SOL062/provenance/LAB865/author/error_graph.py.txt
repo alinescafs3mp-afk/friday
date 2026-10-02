@@ -1,0 +1,65 @@
+ERROR_OBJECTS = []
+
+
+def exact_error(exc):
+    # Original native Python objects/tracebacks stay in the same owner lifetime.
+    # Lossless stock value graph includes UnicodeDecodeError's original bytes.
+    ERROR_OBJECTS.append(exc)
+    objects, nodes, values, cells = [exc], [], [], []
+    def ref(value):
+        if value is None:
+            return None
+        for i, old in enumerate(objects):
+            if old is value:
+                return i
+        objects.append(value)
+        return len(objects) - 1
+    def val(value):
+        if type(value) in (type(None), bool, int, str):
+            return {"literal": value}
+        if type(value) is float:
+            # Exact binary floating value, no JSON NaN or lossy decimal inference.
+            return {"float_hex": value.hex()}
+        for i, old in enumerate(values):
+            if old is value:
+                return {"value_ref": i}
+        require(type(value) in (bytes, bytearray, list, tuple, dict),
+                "unsupported native error value; original object retained, not proof")
+        values.append(value)
+        return {"value_ref": len(values) - 1}
+    i = 0
+    while i < len(objects):
+        obj = objects[i]
+        frames, tb = [], obj.__traceback__
+        while tb is not None:
+            frames.append({"file": tb.tb_frame.f_code.co_filename,
+                           "function": tb.tb_frame.f_code.co_name,
+                           "line": tb.tb_lineno, "lasti": tb.tb_lasti})
+            tb = tb.tb_next
+        nodes.append({"id": i, "module": type(obj).__module__,
+            "type": type(obj).__name__, "message": str(obj), "args": val(obj.args),
+            "state": val(vars(obj)), "errno": val(getattr(obj, "errno", None)),
+            "filename": val(getattr(obj, "filename", None)),
+            "filename2": val(getattr(obj, "filename2", None)),
+            "notes": val(getattr(obj, "__notes__", None)), "traceback": frames,
+            "cause": ref(obj.__cause__), "context": ref(obj.__context__),
+            "suppress_context": obj.__suppress_context__,
+            "group": [ref(e) for e in obj.exceptions] if isinstance(obj, BaseExceptionGroup) else None})
+        i += 1
+    i = 0
+    while i < len(values):
+        obj = values[i]
+        if type(obj) in (bytes, bytearray):
+            cell = {"id": i, "kind": type(obj).__name__,
+                    "bytes": len(obj), "sha256": hashlib.sha256(obj).hexdigest(),
+                    "base64": base64.b64encode(obj).decode("ascii")}
+        elif type(obj) in (list, tuple):
+            cell = {"id": i, "kind": type(obj).__name__, "items": [val(v) for v in obj]}
+        else:
+            cell = {"id": i, "kind": "dict", "pairs": [[val(k), val(v)] for k, v in obj.items()]}
+        cells.append(cell)
+        i += 1
+    return {"schema": "friday.sol060.error-graph.v2", "root": 0,
+            "nodes": nodes, "values": cells, "native_object_reconstruction": "NOT_QUALIFIED"}
+
+

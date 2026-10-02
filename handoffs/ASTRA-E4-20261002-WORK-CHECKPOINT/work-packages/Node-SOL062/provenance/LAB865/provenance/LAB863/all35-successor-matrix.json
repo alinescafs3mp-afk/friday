@@ -1,0 +1,554 @@
+{
+  "changed_factory_details": "Resource helpers use existing dict/type/int/float/math factories and fixed ASCII Refusal literals. Terminal token uses existing fstat/poll and registered OwnedFD attribute names<=32. No new import/provider/process authority.",
+  "consumer": "public_partition_bytes -> public_plan_fits -> encode_complete -> emit_complete; all raw and parsed records retained",
+  "current_caller_sha256": "d739a7e3705c5f76563fdf1a0dfff5bd90490689037b5eb6e187086c5d4d1236",
+  "disjoint_error_reserve": 71680,
+  "historical_provider_evidence": {
+    "old_bound_is_new_source_acceptance": false,
+    "path": "/var/tmp/friday-astra-node-a169-all6-all3-connected-source-implementation-a172-g1/evidence/all35-producer-consumer-matrix.json",
+    "sha256": "86491544550cb1001ae8f8942c3b22f3cf56cbdbd15cbd405c3451e8caef9a1a"
+  },
+  "lab863_error_raw_onceclose": "AUTHORED_NOT_RUN",
+  "new_actual_Root_qualification": false,
+  "new_independent_Source_acceptance": false,
+  "original35_stores_preserved": true,
+  "rows": [
+    {
+      "case": "startup-env-negative",
+      "copy": null,
+      "group": "case_failure",
+      "historical_provider_bound": 142,
+      "new_Source_acceptance": false,
+      "slot": 1,
+      "stage": null,
+      "store": "cases[0].failure",
+      "successor_roots": [
+        "public_plan_fits",
+        "launch",
+        "validate_canonical",
+        "supervisor_resources",
+        "bounded_number",
+        "numeric_mm"
+      ]
+    },
+    {
+      "case": "startup-as-negative",
+      "copy": null,
+      "group": "case_failure",
+      "historical_provider_bound": 142,
+      "new_Source_acceptance": false,
+      "slot": 2,
+      "stage": null,
+      "store": "cases[1].failure",
+      "successor_roots": [
+        "public_plan_fits",
+        "launch",
+        "validate_canonical",
+        "supervisor_resources",
+        "bounded_number",
+        "numeric_mm"
+      ]
+    },
+    {
+      "case": "verify-node",
+      "copy": null,
+      "group": "case_failure",
+      "historical_provider_bound": 142,
+      "new_Source_acceptance": false,
+      "slot": 3,
+      "stage": null,
+      "store": "cases[2].failure",
+      "successor_roots": [
+        "public_plan_fits",
+        "launch",
+        "validate_canonical",
+        "supervisor_resources",
+        "bounded_number",
+        "numeric_mm"
+      ]
+    },
+    {
+      "case": "supervisor-entry-fd7",
+      "copy": null,
+      "group": "case_failure",
+      "historical_provider_bound": 142,
+      "new_Source_acceptance": false,
+      "slot": 4,
+      "stage": null,
+      "store": "cases[3].failure",
+      "successor_roots": [
+        "public_plan_fits",
+        "launch",
+        "validate_entry"
+      ]
+    },
+    {
+      "case": "supervisor-entry-fd127",
+      "copy": null,
+      "group": "case_failure",
+      "historical_provider_bound": 142,
+      "new_Source_acceptance": false,
+      "slot": 5,
+      "stage": null,
+      "store": "cases[4].failure",
+      "successor_roots": [
+        "public_plan_fits",
+        "launch",
+        "validate_entry"
+      ]
+    },
+    {
+      "case": "verifier-entry-fd7",
+      "copy": null,
+      "group": "case_failure",
+      "historical_provider_bound": 142,
+      "new_Source_acceptance": false,
+      "slot": 6,
+      "stage": null,
+      "store": "cases[5].failure",
+      "successor_roots": [
+        "public_plan_fits",
+        "launch",
+        "validate_entry"
+      ]
+    },
+    {
+      "case": "startup-env-negative",
+      "copy": null,
+      "group": "cleanup_failure",
+      "historical_provider_bound": 140,
+      "new_Source_acceptance": false,
+      "slot": 7,
+      "stage": null,
+      "store": "cases[0].cleanup_failure",
+      "successor_roots": [
+        "settle_owned"
+      ]
+    },
+    {
+      "case": "startup-as-negative",
+      "copy": null,
+      "group": "cleanup_failure",
+      "historical_provider_bound": 140,
+      "new_Source_acceptance": false,
+      "slot": 8,
+      "stage": null,
+      "store": "cases[1].cleanup_failure",
+      "successor_roots": [
+        "settle_owned"
+      ]
+    },
+    {
+      "case": "verify-node",
+      "copy": null,
+      "group": "cleanup_failure",
+      "historical_provider_bound": 140,
+      "new_Source_acceptance": false,
+      "slot": 9,
+      "stage": null,
+      "store": "cases[2].cleanup_failure",
+      "successor_roots": [
+        "settle_owned"
+      ]
+    },
+    {
+      "case": "supervisor-entry-fd7",
+      "copy": null,
+      "group": "cleanup_failure",
+      "historical_provider_bound": 140,
+      "new_Source_acceptance": false,
+      "slot": 10,
+      "stage": null,
+      "store": "cases[3].cleanup_failure",
+      "successor_roots": [
+        "settle_owned"
+      ]
+    },
+    {
+      "case": "supervisor-entry-fd127",
+      "copy": null,
+      "group": "cleanup_failure",
+      "historical_provider_bound": 140,
+      "new_Source_acceptance": false,
+      "slot": 11,
+      "stage": null,
+      "store": "cases[4].cleanup_failure",
+      "successor_roots": [
+        "settle_owned"
+      ]
+    },
+    {
+      "case": "verifier-entry-fd7",
+      "copy": null,
+      "group": "cleanup_failure",
+      "historical_provider_bound": 140,
+      "new_Source_acceptance": false,
+      "slot": 12,
+      "stage": null,
+      "store": "cases[5].cleanup_failure",
+      "successor_roots": [
+        "settle_owned"
+      ]
+    },
+    {
+      "case": "startup-env-negative",
+      "copy": null,
+      "group": "closure_transport_failure",
+      "historical_provider_bound": 73,
+      "new_Source_acceptance": false,
+      "slot": 13,
+      "stage": null,
+      "store": "cases[0].closure_transport_failure",
+      "successor_roots": [
+        "drain_pipes"
+      ]
+    },
+    {
+      "case": "startup-as-negative",
+      "copy": null,
+      "group": "closure_transport_failure",
+      "historical_provider_bound": 73,
+      "new_Source_acceptance": false,
+      "slot": 14,
+      "stage": null,
+      "store": "cases[1].closure_transport_failure",
+      "successor_roots": [
+        "drain_pipes"
+      ]
+    },
+    {
+      "case": "verify-node",
+      "copy": null,
+      "group": "closure_transport_failure",
+      "historical_provider_bound": 73,
+      "new_Source_acceptance": false,
+      "slot": 15,
+      "stage": null,
+      "store": "cases[2].closure_transport_failure",
+      "successor_roots": [
+        "drain_pipes"
+      ]
+    },
+    {
+      "case": "supervisor-entry-fd7",
+      "copy": null,
+      "group": "closure_transport_failure",
+      "historical_provider_bound": 73,
+      "new_Source_acceptance": false,
+      "slot": 16,
+      "stage": null,
+      "store": "cases[3].closure_transport_failure",
+      "successor_roots": [
+        "drain_pipes"
+      ]
+    },
+    {
+      "case": "supervisor-entry-fd127",
+      "copy": null,
+      "group": "closure_transport_failure",
+      "historical_provider_bound": 73,
+      "new_Source_acceptance": false,
+      "slot": 17,
+      "stage": null,
+      "store": "cases[4].closure_transport_failure",
+      "successor_roots": [
+        "drain_pipes"
+      ]
+    },
+    {
+      "case": "verifier-entry-fd7",
+      "copy": null,
+      "group": "closure_transport_failure",
+      "historical_provider_bound": 73,
+      "new_Source_acceptance": false,
+      "slot": 18,
+      "stage": null,
+      "store": "cases[5].closure_transport_failure",
+      "successor_roots": [
+        "drain_pipes"
+      ]
+    },
+    {
+      "case": "startup-env-negative",
+      "copy": null,
+      "group": "completion_resource_failure",
+      "historical_provider_bound": 142,
+      "new_Source_acceptance": false,
+      "slot": 19,
+      "stage": null,
+      "store": "cases[0].completion_resource_failure",
+      "successor_roots": [
+        "sample_outer"
+      ]
+    },
+    {
+      "case": "startup-as-negative",
+      "copy": null,
+      "group": "completion_resource_failure",
+      "historical_provider_bound": 142,
+      "new_Source_acceptance": false,
+      "slot": 20,
+      "stage": null,
+      "store": "cases[1].completion_resource_failure",
+      "successor_roots": [
+        "sample_outer"
+      ]
+    },
+    {
+      "case": "verify-node",
+      "copy": null,
+      "group": "completion_resource_failure",
+      "historical_provider_bound": 142,
+      "new_Source_acceptance": false,
+      "slot": 21,
+      "stage": null,
+      "store": "cases[2].completion_resource_failure",
+      "successor_roots": [
+        "sample_outer"
+      ]
+    },
+    {
+      "case": "supervisor-entry-fd7",
+      "copy": null,
+      "group": "completion_resource_failure",
+      "historical_provider_bound": 142,
+      "new_Source_acceptance": false,
+      "slot": 22,
+      "stage": null,
+      "store": "cases[3].completion_resource_failure",
+      "successor_roots": [
+        "sample_outer"
+      ]
+    },
+    {
+      "case": "supervisor-entry-fd127",
+      "copy": null,
+      "group": "completion_resource_failure",
+      "historical_provider_bound": 142,
+      "new_Source_acceptance": false,
+      "slot": 23,
+      "stage": null,
+      "store": "cases[4].completion_resource_failure",
+      "successor_roots": [
+        "sample_outer"
+      ]
+    },
+    {
+      "case": "verifier-entry-fd7",
+      "copy": null,
+      "group": "completion_resource_failure",
+      "historical_provider_bound": 142,
+      "new_Source_acceptance": false,
+      "slot": 24,
+      "stage": null,
+      "store": "cases[5].completion_resource_failure",
+      "successor_roots": [
+        "sample_outer"
+      ]
+    },
+    {
+      "case": null,
+      "copy": 1,
+      "group": "owned_cleanup_problem",
+      "historical_provider_bound": 140,
+      "new_Source_acceptance": false,
+      "slot": 25,
+      "stage": "freeze_or_descendants",
+      "store": "owned_cleanup_problems.freeze_or_descendants.copy1",
+      "successor_roots": [
+        "exited",
+        "now",
+        "require",
+        "same_generation",
+        "signal_held",
+        "status",
+        "tree"
+      ]
+    },
+    {
+      "case": null,
+      "copy": 2,
+      "group": "owned_cleanup_problem",
+      "historical_provider_bound": 140,
+      "new_Source_acceptance": false,
+      "slot": 26,
+      "stage": "freeze_or_descendants",
+      "store": "owned_cleanup_problems.freeze_or_descendants.copy2",
+      "successor_roots": [
+        "exited",
+        "now",
+        "require",
+        "same_generation",
+        "signal_held",
+        "status",
+        "tree"
+      ]
+    },
+    {
+      "case": null,
+      "copy": 1,
+      "group": "owned_cleanup_problem",
+      "historical_provider_bound": 140,
+      "new_Source_acceptance": false,
+      "slot": 27,
+      "stage": "exact_parent_stop_reap",
+      "store": "owned_cleanup_problems.exact_parent_stop_reap.copy1",
+      "successor_roots": [
+        "stop_record"
+      ]
+    },
+    {
+      "case": null,
+      "copy": 2,
+      "group": "owned_cleanup_problem",
+      "historical_provider_bound": 140,
+      "new_Source_acceptance": false,
+      "slot": 28,
+      "stage": "exact_parent_stop_reap",
+      "store": "owned_cleanup_problems.exact_parent_stop_reap.copy2",
+      "successor_roots": [
+        "stop_record"
+      ]
+    },
+    {
+      "case": null,
+      "copy": null,
+      "group": "terminal_once",
+      "historical_provider_bound": 140,
+      "new_Source_acceptance": false,
+      "slot": 29,
+      "stage": "known_own_cleanup",
+      "store": "terminal_once.problems.known_own_cleanup",
+      "successor_roots": [
+        "settle_owned"
+      ]
+    },
+    {
+      "case": null,
+      "copy": null,
+      "group": "terminal_once",
+      "historical_provider_bound": 140,
+      "new_Source_acceptance": false,
+      "slot": 30,
+      "stage": "terminal_own_observation",
+      "store": "terminal_once.problems.terminal_own_observation",
+      "successor_roots": [
+        "direct_children",
+        "exited",
+        "require",
+        "prepare_proc_retirement"
+      ]
+    },
+    {
+      "case": null,
+      "copy": null,
+      "group": "terminal_once",
+      "historical_provider_bound": 133,
+      "new_Source_acceptance": false,
+      "slot": 31,
+      "stage": "terminal_full_custody",
+      "store": "terminal_once.problems.terminal_full_custody",
+      "successor_roots": [
+        "custody",
+        "require"
+      ]
+    },
+    {
+      "case": null,
+      "copy": null,
+      "group": "terminal_once",
+      "historical_provider_bound": 142,
+      "new_Source_acceptance": false,
+      "slot": 32,
+      "stage": "terminal_current_resources",
+      "store": "terminal_once.problems.terminal_current_resources",
+      "successor_roots": [
+        "sample_outer"
+      ]
+    },
+    {
+      "case": null,
+      "copy": null,
+      "group": "outer_failure",
+      "historical_provider_bound": 392,
+      "new_Source_acceptance": false,
+      "slot": 33,
+      "stage": "R.failure",
+      "store": "failure",
+      "successor_roots": [
+        "finish_terminal",
+        "direct_children",
+        "entry_fds",
+        "full9",
+        "hold",
+        "install_plan",
+        "kernel_policy",
+        "now",
+        "public_plan_fits",
+        "read_at",
+        "remaining_cases_fit",
+        "require",
+        "sample_outer",
+        "selection_data",
+        "strict_json",
+        "take_budget",
+        "prepare_proc_retirement"
+      ]
+    },
+    {
+      "case": null,
+      "copy": null,
+      "group": "terminal_failure",
+      "historical_provider_bound": 133,
+      "new_Source_acceptance": false,
+      "slot": 34,
+      "stage": "R.terminal_failure",
+      "store": "terminal_failure",
+      "successor_roots": [
+        "finish_terminal",
+        "prepare_proc_retirement"
+      ]
+    },
+    {
+      "case": null,
+      "copy": null,
+      "group": "selected_DATA_closure_failure",
+      "historical_provider_bound": 69,
+      "new_Source_acceptance": false,
+      "slot": 35,
+      "stage": "R.selected_DATA_closure_failure",
+      "store": "selected_DATA_closure_failure",
+      "successor_roots": [
+        "full9",
+        "require"
+      ]
+    }
+  ],
+  "runtime": "NOT_RUN",
+  "same_complete_condition_applies_to_each_of_35_rows": {
+    "cell_reserve": 2048,
+    "clock_ASCII": 32,
+    "complete_error_messages": true,
+    "message_ASCII": 900,
+    "message_slicing": false,
+    "native_ASCII": 32,
+    "new_independent_qualification": "NOT_PERFORMED",
+    "original_error_value_upper_bytes": 1894,
+    "path_ASCII": 160,
+    "required_new_Root_facts": [
+      "CURRENT_A172_SOURCE_HASHES_SIZES_SCHEMAS",
+      "IMAGE_ENV",
+      "RESOLVER",
+      "LOADED_ALIASES",
+      "NO_REWRITE",
+      "SHARED900",
+      "CAPSULE_NATIVE_GATES",
+      "HELD_PROC_TERMINAL_PROVIDER_TRANSITION",
+      "READONLY_GPG_NO_KEYRING_SEMANTICS",
+      "COMPLETE_NEW_RECEIPT_FIT"
+    ],
+    "type_ASCII": 32
+  },
+  "schema": "friday.a172.whole35-current-source-producer-consumer-map.v1",
+  "slots": 35
+}

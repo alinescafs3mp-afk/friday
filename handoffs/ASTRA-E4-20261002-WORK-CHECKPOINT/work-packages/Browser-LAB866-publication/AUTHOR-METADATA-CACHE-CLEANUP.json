@@ -1,0 +1,21 @@
+{
+  "removed_exact_owned_cache": {
+    "path": "/var/tmp/friday-astra-lab858-sol057-whole209-all216-actual-source-implementation-a171-g1/__pycache__/a171_metadata.cpython-314.pyc",
+    "bytes": 9923,
+    "sha256": "733d334a2852f93f9091ebcf90ad57cec15e8418f0e3ae624f8d66e7fbc26036",
+    "identity9_decimal_strings": [
+      "2050",
+      "6979349",
+      "33152",
+      "1000",
+      "1000",
+      "1",
+      "9923",
+      "1790929001829729604",
+      "1790929001829729604"
+    ],
+    "stable9": true
+  },
+  "reason": "author stock metadata-only module generated pyc under first invocation; no supplied Source imported or compiled",
+  "recoverable": "from author metadata text if authorized; no product/user artifact removed"
+}

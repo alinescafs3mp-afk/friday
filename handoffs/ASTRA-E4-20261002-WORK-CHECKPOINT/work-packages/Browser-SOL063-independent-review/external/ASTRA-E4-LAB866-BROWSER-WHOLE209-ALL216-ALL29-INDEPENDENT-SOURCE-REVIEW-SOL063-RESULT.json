@@ -1,0 +1,26 @@
+{
+  "schema":"friday.sol063.independent-review-result.v1",
+  "assignment":"ASTRA-E4-LAB866-BROWSER-WHOLE209-ALL216-ALL29-INDEPENDENT-SOURCE-REVIEW-SOL063",
+  "generation":1,
+  "event":"ASTRA-SOL-E4-SOL063-T1",
+  "task_sha256":"af88460e12461a27632ef9e29c6121c82935c24efe09b20f0c0af294ece53ebb",
+  "input_sha256":"541ef5fa6d0a386ca29c3f69c1020fb9bcc39a388a23be96a7300cb613f58109",
+  "accepted_msk":"2026-10-02T15:19:09+03:00",
+  "finished_msk":"2026-10-02T15:40:29+03:00",
+  "elapsed_wall_seconds":1280,
+  "sealed_msk":"2026-10-02T15:39:57+03:00",
+  "decision":"REJECT_CURRENT_WHOLE_SOURCE",
+  "CODE":9,
+  "metadata_source_join_open":1,
+  "coverage":"full47/SHA9/pathset/DAG; actual209/2changed207equal/oldnew8; exact216/29/all6/fullmethods/bothreceivers",
+  "manifest_pin":{
+    "path":"/var/tmp/friday-sol063-lab866-browser-whole209-all216-all29-independent-source-review/manifest.json",
+    "bytes":1218,
+    "sha256":"2873cfa03580c2a37711b9f58525c35017e3c80d6f637eb107a5214a068f9d06",
+    "identity9_decimal_strings":["2050","3980478","33152","1000","1000","1","1218","1790944797207709229","1790944797207709229"]
+  },
+  "review":"review.json; README-SOL063.txt",
+  "costs":"187268752 conservative read debit/268435456; output3634182/16777216; peak433040KiB metadata; wholeRAM/IO/tokens UNKNOWN_NOT_ZERO",
+  "genuine_repairs":"retirement/raw/prejoin/resource/write_all/frame/sticky/sink credits preserved scoped; unsafe historical bodies ABSTRACT_REQUIRED_NOT_RUN required=true waiver=false",
+  "SourceReady":false,"Root_admission":false,"runtime":"NOT_RUN","gates":"REQUIRED_NOT_RUN_NO_WAIVER","GO":false
+}

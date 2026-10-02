@@ -1,0 +1,29 @@
+--- expectations.json
++++ expectations.json
+@@ -3,7 +3,7 @@
+   "authority": "NONE_ORDINARY_DATA",
+   "lifetime_memory_source_contract": {
+     "schema": "friday.sol042.retained-lease-natural-ending.v1",
+-    "materialization_path": "/var/tmp/friday-sol060-lab863-node-whole6-all35-all6-connected-error-raw-source-closure",
++    "materialization_path": "/var/tmp/friday-lab865-sol060-a182-node-whole6-all35-all6-raw-bound-schema-connected-source-closure",
+     "numeric_slot_is_not_allocation_lease": true,
+     "retire_launch_aliases_at_first_close": true,
+     "tracked_leases_retained_through_terminal": true,
+@@ -239,6 +239,16 @@
+     "raw_truncation_or_hashonly_proof": false,
+     "closed_all35_metadata_and_history_bound": "CODE_OPEN",
+     "inner32KiB_and_supervisor64KiB_fit": "CODE_OPEN",
+-    "old_A175_bound_transfer": false
++    "old_A175_bound_transfer": false,
++    "consumer_join": "original_stock_cause(nodes[root])",
++    "stale_top_level_failure_equality": false,
++    "startup_controls_joined": ["startup-env-negative", "startup-as-negative"],
++    "supervisor_entry_controls_joined": ["supervisor-entry-fd7", "supervisor-entry-fd127"],
++    "prefunded_descriptor_history_cap": 256,
++    "prefunded_error_object_cap": 256,
++    "prefunded_exception_node_cap": 128,
++    "publication_over_inner_cap": "exit_without_smaller_substitute",
++    "inner32KiB_complete_graph_fit": "NOT_PROVEN",
++    "native_object_reconstruction": "NOT_QUALIFIED"
+   }
+ }

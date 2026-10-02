@@ -1,0 +1,304 @@
+{
+  "schema": "friday.e4.independent-whole-original-source-review.result.v1",
+  "assignment": "ASTRA-E4-SOL062-NODE-WHOLE6-ALL35-ALL6-ALL3-INDEPENDENT-SOURCE-REVIEW-A191",
+  "generation": 1,
+  "context": "fresh",
+  "owner_scope": "goal",
+  "review_key": "SOL062-terminal64581c94cdd5-manifest5316343b810b-whole6-actual5changed1equal-all35all6all3-current19",
+  "snapshot": {
+    "git": "cecd28a9",
+    "schema": 50,
+    "installed": "0.208.58",
+    "unchanged": true
+  },
+  "status": "COMPLETE",
+  "review_decision": "REJECT_CURRENT_SOURCE_PROTOCOL",
+  "source_decision": "CODE_OPEN",
+  "independent_review_complete": true,
+  "accepted_msk": "2026-10-02T15:18:30+03:00",
+  "completed_msk": "2026-10-02T15:40:01.000+03:00",
+  "elapsed_seconds": 1291,
+  "package_seal_completed_msk": "2026-10-02T15:39:08.147517+03:00",
+  "input_pin": {
+    "path": "/home/jericho/.jericho/grok-takeover/ASTRA-E4-A191-INPUT-20261002.json",
+    "bytes": 98955,
+    "sha256": "7de0512a468fee2125dda1d4f8fcc972cfe94b41fbea88f293cfec0d1062eb5a",
+    "identity9_decimal_strings": [
+      "2050",
+      "8534069",
+      "33152",
+      "1000",
+      "1000",
+      "1",
+      "98955",
+      "1790943467043241816",
+      "1790943467116245970"
+    ]
+  },
+  "output_root": "/var/tmp/friday-astra-sol062-node-whole6-all35-all6-all3-independent-source-review-a191-g1",
+  "manifest_pin": {
+    "path": "/var/tmp/friday-astra-sol062-node-whole6-all35-all6-all3-independent-source-review-a191-g1/manifest.json",
+    "bytes": 3514,
+    "sha256": "9fe0d154733644212b26a0594580d0d4ab4804b24586535c8382b8e6a81bee67",
+    "identity9_decimal_strings": [
+      "2050",
+      "4225483",
+      "33152",
+      "1000",
+      "1000",
+      "1",
+      "3514",
+      "1790944714393220308",
+      "1790944714444223210"
+    ],
+    "stable9": true
+  },
+  "artifact_contract": {
+    "private700600_uidgid1000_regular_nlink1": true,
+    "exact8files": true,
+    "seven_payloads": true,
+    "fullSHA9": true,
+    "acyclic_manifest": true,
+    "output_total_bytes": 489480,
+    "DAG": "seven payloads incl names-only pathset -> manifest -> this protected RESULT; no recursive selfhash"
+  },
+  "Source_authentication": {
+    "full133_tree_131payloads_15directories": true,
+    "full166_pins_SHA9_intake_and_final": true,
+    "late_source166_9_unchanged": true,
+    "faults": [],
+    "actual5changed1equal_fullbeforeafter": true,
+    "equal_plaintext_current_fullbase64_PRESENT_NOT_NULL": true,
+    "original_cases_caseorder_oracles_unchanged": true,
+    "current19_exact_stock_integer9": true,
+    "current19_full_bytes": 72457444,
+    "supervisor_subset_bytes": 7819077,
+    "verifier_subset_bytes": 7791116,
+    "fixed_reserved": 247788428,
+    "running_reserved": 20647028,
+    "total_reserved": 268435456,
+    "current_source_literal5_and_independentlocal9_DAG": true,
+    "historical_provenance_not_authority": true
+  },
+  "whole_scope": {
+    "fullcurrent_Source6_and_fulloriginal_inputs": true,
+    "original_A169_A172_A175_LAB863_A178_A182_A184_norms_and_reviews": true,
+    "source_actor_lines": 6673,
+    "lexical_top_level_partitions": 245,
+    "nested_definition_sites": 26,
+    "original35_exact_rows_current_roots_stores_copies": 35,
+    "original_all6": 6,
+    "original_GPG_routes": 6,
+    "original_all3": 3,
+    "F1F2D1D2": true,
+    "error_raw_default_optional_alias_native_recorder_phase_resources": true,
+    "not_author_residual_only": true,
+    "not_AST_or_execution": true
+  },
+  "findings": [
+    {
+      "id": "B01",
+      "kind": "ORIGINAL_STOCK_COMPLETE_NEW_SHAPE_BOUND_OPEN",
+      "severity": "HIGH",
+      "actual_observed_runtime": false,
+      "original_obligation": [
+        "A191 requirements[1..2]",
+        "original A169 all35 exact complete message/source/producer bounds, original32KiB/64KiB/2MiB caps"
+      ],
+      "source_sites": [
+        "caller.py:166",
+        "caller.py:496",
+        "caller.py:606",
+        "caller.py:2445",
+        "caller.py:2755",
+        "supervisor.py:204",
+        "supervisor.py:286",
+        "supervisor.py:2024",
+        "verifier.py:188",
+        "verifier.py:298",
+        "verifier.py:1306"
+      ],
+      "fact": "The256 owner/history ceilings and128 node/value/frame counts bound counts, not complete new full graph/history/default/raw/escape widths and repeated JSON copies. PUBLIC_FIXED_RESERVE489472 and raw-only1669337 are partition arithmetic, not joined current stock factories/alias/error bytes across all producers. No changed complete fixed-stock producer proof establishes inner32768/supervisor65536/outer2097152 fit.",
+      "negative_assertion": "65536 aggregate bytes would require87384 base64 bytes alone; this disproves caps-alone fit inference, NOT a claim fixed pinned stock GPG actually emits65536. No universal native objects or private heap serialization required.",
+      "future_facts_alone_CODE": false
+    },
+    {
+      "id": "B02",
+      "kind": "FULL_ORIGINAL_OTHER_SIDE_DELIVERY_BEFORE_PRIVATE_OWNER_END_OPEN",
+      "severity": "HIGH",
+      "actual_observed_runtime": false,
+      "original_obligation": [
+        "A191 requirement1: complete original raw/error custody and accepted original other-side receiver before private owner exit",
+        "original F2 required full raw/count/SHA/no summary substitute"
+      ],
+      "source_sites": [
+        "verifier.py:843",
+        "verifier.py:1674",
+        "verifier.py:1681",
+        "supervisor.py:2149",
+        "supervisor.py:2156",
+        "caller.py:2819"
+      ],
+      "fact": "encode/projection overflow or emission failure goes to native _exit without an accepted full current receipt or admitted other-side raw/error owner. Native objects retained privately until process end do not deliver their full evidence after that end. Normal complete reversible preimage transmission is credited; missing/partial/oversized output remains honest rejection, not full required prefix delivery.",
+      "future_facts_alone_CODE": false
+    },
+    {
+      "id": "B03",
+      "kind": "MANDATORY_ORIGINAL_RAW_PREFIX_COMPLETENESS_OPEN",
+      "severity": "HIGH",
+      "actual_observed_runtime": false,
+      "original_obligation": [
+        "original F2/all6 stdout stderr status and writable data full original produced bytes/count/SHA/alias",
+        "A191 source-only stock native+recorder prefix custody requirement"
+      ],
+      "source_sites": [
+        "verifier.py:770",
+        "verifier.py:789",
+        "verifier.py:1028",
+        "supervisor.py:1006",
+        "caller.py:1729",
+        "caller.py:1754",
+        "caller.py:2070"
+      ],
+      "fact": "attempted once, native owner/pending chunk, partial flags and lostless returned-byte projections are improved. However fstat failure, unsettled producer or quota check before reading, short/drifting/failed read, pending commit/capture failure can leave unread produced bytes only in an FD that is later once-closed; no complete original other-side handoff closes these prefixes. Both receivers correctly reject partial cells. No reread/retry or numeric-slot guessing is authorized.",
+      "future_facts_alone_CODE": false
+    },
+    {
+      "id": "B04",
+      "kind": "DEFINITE_NORMAL_ALL6_FD_HISTORY_CAPACITY_CONTRADICTION",
+      "severity": "HIGH",
+      "actual_observed_runtime": false,
+      "original_obligation": [
+        "original all6 unchanged cases/order and ordinary successful process observation/cleanup roles",
+        "A191 finite resources/onceFD/whole methods, original FD256 simultaneous cap and separate20MiB running-read reserve"
+      ],
+      "source_sites": [
+        "caller.py:702",
+        "caller.py:737",
+        "caller.py:878",
+        "caller.py:931",
+        "caller.py:992",
+        "caller.py:1202",
+        "caller.py:1370",
+        "caller.py:1471",
+        "caller.py:1847",
+        "caller.py:2021",
+        "caller.py:2493",
+        "caller.py:2578"
+      ],
+      "fact": "FD_ALLOCATION_USED increases for every acquisition and is never reclaimed, including proc descriptors closed immediately. A benign six-case source path needs >=255 allocations even with zero running-loop observations:22 unique component dirs +19 inputs +4 bootstrap +[33,33,33,34,34,35] launches/completions +8 final cleanup/terminal. One legal complete running observe alone adds>=7 and gives262>256; tree or actual descendant allocations only add more. preown_fd refuses before a later normal acquisition and can prevent later original cases/mandatory terminal sampling. Original simultaneous NOFILE256 does not imply total lifetime acquisition256.",
+      "symbolic_path_not_runtime_reproduction": true,
+      "source_negative_control": "No running iterations gives255<=256; one ordinary full live observation gives262>256. No hostile provider, arbitrary failure flood or operational fixture.",
+      "future_facts_alone_CODE": false
+    },
+    {
+      "id": "B05",
+      "kind": "CONDITIONAL_STOCK_RECORDER_PREFIX_CONTINUATION_NOT_CLOSED",
+      "severity": "HIGH",
+      "actual_observed_runtime": false,
+      "original_obligation": [
+        "A191 requirement1 neither secondary projection/serialization error may skip later raw/known owner retirement/original primary rethrow",
+        "original F1/F2 stock partial/native+recorder error-prefix closure"
+      ],
+      "source_sites": [
+        "caller.py:475",
+        "caller.py:1754",
+        "caller.py:2077",
+        "caller.py:2507",
+        "caller.py:2806",
+        "supervisor.py:1353",
+        "supervisor.py:1006",
+        "supervisor.py:2061",
+        "supervisor.py:2125",
+        "verifier.py:182",
+        "verifier.py:1635",
+        "verifier.py:1646"
+      ],
+      "fact": "Designated verifier.call secondary loops now store native failures and complete all captures/stream closes before deferred/public projection, so prior exact_error interruption there is FIXED. Other guarded catch bodies still call deferred_error with fallible exhausted256 owner journal, and outer finalizer guards are not themselves protected. A recorder failure there can interrupt another cell or bypass later physical final cleanup. The candidate does not join a complete actual stock reachable journal/recorder cost proof. This is conditional stock prefix CODE_OPEN, not an assertion arbitrary native reconstruction or malloc-proof C arena is mandated.",
+      "future_facts_alone_CODE": false
+    }
+  ],
+  "genuine_source_credits": [
+    "LAB865 exactroot stockcause fullgraph consumers repair preserved; no old top-level type/message contradiction repeated",
+    "SOL062 deferred native journal moves projection after designated requiredphysical loops",
+    "Verifier.call fixed local secondary capacity11+2*w, captures allcells/knownclose beforecopy/projection and originalprimary rethrow; prior designated interruption credited fixed",
+    "Sup raw cellfirstpass before fallible secondprojection pass; caller captureattemptsboth and batchalias firstclose",
+    "Joint graph error/value frontiers close lateerroraliases inargs/state/notes withfullpresence/causes/context/group andbytes",
+    "Normal reversible full canonical same-object preimages and exact consumerrestore; nothash-only",
+    "Current19/read buckets and whole6 actual5changed1equal/fullbeforeafter coherent",
+    "Original3resources/keyless/proc-token plusF1/F2/D1D2 repairs preserved"
+  ],
+  "old_review_reconciliation": {
+    "A182_original_error_schema_contradiction": "FIXED by LAB865 stock rootcause/fullgraph consumers, preserved here",
+    "A184_designated_projection_interrupt": "SOL062 verifier.call native-secondary storage/allcapture/allstreamclose-before-public-copy fixes old designated obstruction; not repeated",
+    "current19_newjoins": "coherent fresh arithmetic, no fictitious stale Source plan defect",
+    "remaining_whole_obligation": "B01 complete stock new width/producer bound; B02 accepted full delivery; B03 unread raw faultprefix; B05 other recorder continuations",
+    "new_independent_finding": "B04 ordinary normal all6 lifetime allocation-capacity contradiction255+7>256; original simultaneous NOFILE cap unchanged"
+  },
+  "future_qualification_only": {
+    "facts": [
+      "new genuine Root grant/finite clock/admission",
+      "actual independent Root selected exact19numeric9 Source6 image",
+      "executingstock interpreter/module/loader/provider/ENV/image facts",
+      "sameheld detached proc terminal owner relation",
+      "Popen implicit native/teardown and stocknative factory format boundaries",
+      "currentepoch crypto/keyring/readonlyhome/agent/trustdb/commonconf four behaviors",
+      "actual original all6/root/runtime andfullgates/live"
+    ],
+    "all_mandatory": true,
+    "missing_alone_CODE": false
+  },
+  "original_stock_domain": {
+    "arbitrary_custom_native_C_heap_privateheap_frame_locals_hostilekernel_enlargement": false,
+    "native_NOT_QUALIFIED_alone_CODE": false,
+    "full_actual_original_stock_raw_error_optional_presence_cause_alias_owner_prefixes_required": true,
+    "unsafe_history": {
+      "status": "REQUIRED_NOT_RUN",
+      "required": true,
+      "waiver": false,
+      "operational_payload": null,
+      "fixture": null,
+      "generator": null,
+      "reproduction": null,
+      "exploit": null,
+      "normal_ownchild_EOF_write_deadline_cleanup_controls": "PRESERVED_REQUIRED"
+    }
+  },
+  "historical_A169": {
+    "ended": "RED",
+    "all6_invoked": true,
+    "ten_preclose_Refusals": true,
+    "native_unconfirmed_close_list": "EMPTY",
+    "changed_fstat_field_cause": "UNKNOWN",
+    "Rootcleanup_not_SourceGREEN": true,
+    "old_clock_approval_transfer": false
+  },
+  "costs": {
+    "ledger": "costs.json",
+    "known_explicit_fullcontent_bytes": 159629852,
+    "conservative_read_charged_bound_bytes": 226738716,
+    "read_cap": 268435456,
+    "review_CPU_IO": "NONZERO/UNKNOWN_NOT_ZERO",
+    "review_total_RAM_and_implicit_IO": "UNKNOWN_NOT_ZERO_NOT_PROVEN",
+    "model_input_including_cached_and_output_including_reasoning": "UNKNOWN_NOT_ZERO",
+    "runtime_source_costs": "NOT_RUN_UNKNOWN_NOT_ZERO",
+    "out_bytes": 489480,
+    "children": 0,
+    "network": 0,
+    "retries": 0
+  },
+  "effects": {
+    "only_own_private_inert_JSON_TEXT": true,
+    "supplied_helper_import_AST_compile_eval_exec_tests": false,
+    "Source_native_Root_GPG_Node_archiveparse": false,
+    "net_install_UI_live_gates": false,
+    "Source_Git_index_config_guard_model_lock_writes": false
+  },
+  "SourceReady": false,
+  "Root_admission": false,
+  "Root_Image": false,
+  "runtime": "NOT_RUN",
+  "gates": "NOT_RUN",
+  "GO": false,
+  "finite_stop": "Assignment complete; no children/poll/newtasks/goal/wait. Parent owns lifecycle accept/complete."
+}

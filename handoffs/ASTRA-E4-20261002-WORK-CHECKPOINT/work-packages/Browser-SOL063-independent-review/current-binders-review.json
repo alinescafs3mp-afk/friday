@@ -1,0 +1,84 @@
+{
+  "new_current209_bindings": "EXACT209_VERIFIED",
+  "publication47": "VALID",
+  "older_internal_current_view_stale2": [
+    {
+      "name": "A071-CONTROLS.py",
+      "old_view_pin": {
+        "path": "/var/tmp/friday-lab864-a171-a174-browser-whole209-all216-remaining-connected-source-closure/source/A071-CONTROLS.py",
+        "bytes": 227193,
+        "sha256": "cf99fae2979256597c658fb889699798e2a46d578a734903f59d490c36c6970c",
+        "identity9_decimal_strings": [
+          "2050",
+          "6979794",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "227193",
+          "1790935043667313884",
+          "1790935043667313884"
+        ],
+        "stable9": true
+      },
+      "actual_pin": {
+        "path": "/var/tmp/friday-lab866-lab864-a183-browser-whole209-all216-all29-connected-source-closure/source/A071-CONTROLS.py",
+        "bytes": 235751,
+        "sha256": "a8805047b5f5ba7c01cab4337f59b70121c318f6fe3f284d2666e9909859e69e",
+        "identity9_decimal_strings": [
+          "2050",
+          "6980306",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "235751",
+          "1790940105086327015",
+          "1790940105086327015"
+        ],
+        "stable9": true
+      }
+    },
+    {
+      "name": "A071-SUPERVISOR.py",
+      "old_view_pin": {
+        "path": "/var/tmp/friday-lab864-a171-a174-browser-whole209-all216-remaining-connected-source-closure/source/A071-SUPERVISOR.py",
+        "bytes": 54263,
+        "sha256": "e35ff3b99508109588b15d2b09495880703f075cebb3685492b98d8475c687d8",
+        "identity9_decimal_strings": [
+          "2050",
+          "6979796",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "54263",
+          "1790935043669313999",
+          "1790935043669313999"
+        ],
+        "stable9": true
+      },
+      "actual_pin": {
+        "path": "/var/tmp/friday-lab866-lab864-a183-browser-whole209-all216-all29-connected-source-closure/source/A071-SUPERVISOR.py",
+        "bytes": 54576,
+        "sha256": "a419700a042c4718245a23e27e78ee7ae9b5f1e3838f886ff3e0ced226140ce3",
+        "identity9_decimal_strings": [
+          "2050",
+          "6980307",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "54576",
+          "1790940105087327072",
+          "1790940105087327072"
+        ],
+        "stable9": true
+      }
+    }
+  ],
+  "earlier_delta": "A158->LAB864 not LAB864->LAB866; neither executed nor copied as current body reconstruction",
+  "finding": "SOL063-M01",
+  "actual_current_delta_witness": "actual-delta8-equal207.json",
+  "future_consumer_bundle": "Must coherently match original A087 source-manifest/schema/compiled/currentSHA contract; future assembly alone not CODE"
+}

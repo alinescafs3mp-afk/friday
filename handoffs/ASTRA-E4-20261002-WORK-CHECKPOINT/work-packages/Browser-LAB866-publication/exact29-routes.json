@@ -1,0 +1,268 @@
+{
+  "count": 29,
+  "exact_unsafe_ID_classifier_established": false,
+  "rows": [
+    {
+      "benign_obligation": true,
+      "historical_body": "ABSTRACT_REQUIRED_NOT_RUN",
+      "id": "whole3_actual_G1_worker_positive",
+      "position": 35,
+      "route": "historical_body_not_copied",
+      "status": "HISTORICAL_OPERATIONAL_BODY_ABSTRACT_REQUIRED_NOT_RUN",
+      "token_blocked": false
+    },
+    {
+      "benign_obligation": true,
+      "historical_body": "ABSTRACT_REQUIRED_NOT_RUN",
+      "id": "whole3_redirect",
+      "position": 36,
+      "route": "historical_body_not_copied",
+      "status": "HISTORICAL_OPERATIONAL_BODY_ABSTRACT_REQUIRED_NOT_RUN",
+      "token_blocked": false
+    },
+    {
+      "benign_obligation": true,
+      "historical_body": "ABSTRACT_REQUIRED_NOT_RUN",
+      "id": "whole3_http404",
+      "position": 37,
+      "route": "historical_body_not_copied",
+      "status": "HISTORICAL_OPERATIONAL_BODY_ABSTRACT_REQUIRED_NOT_RUN",
+      "token_blocked": false
+    },
+    {
+      "benign_obligation": true,
+      "historical_body": "ABSTRACT_REQUIRED_NOT_RUN",
+      "id": "whole3_tls_certificate",
+      "position": 38,
+      "route": "historical_body_not_copied",
+      "status": "HISTORICAL_OPERATIONAL_BODY_ABSTRACT_REQUIRED_NOT_RUN",
+      "token_blocked": false
+    },
+    {
+      "benign_obligation": true,
+      "historical_body": "ABSTRACT_REQUIRED_NOT_RUN",
+      "id": "whole3_tls_protocol",
+      "position": 39,
+      "route": "historical_body_not_copied",
+      "status": "HISTORICAL_OPERATIONAL_BODY_ABSTRACT_REQUIRED_NOT_RUN",
+      "token_blocked": false
+    },
+    {
+      "benign_obligation": true,
+      "historical_body": "ABSTRACT_REQUIRED_NOT_RUN",
+      "id": "whole3_encoding",
+      "position": 40,
+      "route": "historical_body_not_copied",
+      "status": "HISTORICAL_OPERATIONAL_BODY_ABSTRACT_REQUIRED_NOT_RUN",
+      "token_blocked": false
+    },
+    {
+      "benign_obligation": true,
+      "historical_body": "ABSTRACT_REQUIRED_NOT_RUN",
+      "id": "whole3_framing",
+      "position": 41,
+      "route": "historical_body_not_copied",
+      "status": "HISTORICAL_OPERATIONAL_BODY_ABSTRACT_REQUIRED_NOT_RUN",
+      "token_blocked": false
+    },
+    {
+      "benign_obligation": true,
+      "historical_body": "ABSTRACT_REQUIRED_NOT_RUN",
+      "id": "whole3_duplicate_length",
+      "position": 42,
+      "route": "historical_body_not_copied",
+      "status": "HISTORICAL_OPERATIONAL_BODY_ABSTRACT_REQUIRED_NOT_RUN",
+      "token_blocked": false
+    },
+    {
+      "benign_obligation": true,
+      "historical_body": "ABSTRACT_REQUIRED_NOT_RUN",
+      "id": "whole3_length_cap",
+      "position": 43,
+      "route": "historical_body_not_copied",
+      "status": "HISTORICAL_OPERATIONAL_BODY_ABSTRACT_REQUIRED_NOT_RUN",
+      "token_blocked": false
+    },
+    {
+      "benign_obligation": true,
+      "historical_body": "ABSTRACT_REQUIRED_NOT_RUN",
+      "id": "whole3_truncated",
+      "position": 44,
+      "route": "historical_body_not_copied",
+      "status": "HISTORICAL_OPERATIONAL_BODY_ABSTRACT_REQUIRED_NOT_RUN",
+      "token_blocked": false
+    },
+    {
+      "benign_obligation": true,
+      "historical_body": "ABSTRACT_REQUIRED_NOT_RUN",
+      "id": "whole3_hostname",
+      "position": 45,
+      "route": "historical_body_not_copied",
+      "status": "HISTORICAL_OPERATIONAL_BODY_ABSTRACT_REQUIRED_NOT_RUN",
+      "token_blocked": false
+    },
+    {
+      "benign_obligation": true,
+      "historical_body": "ABSTRACT_REQUIRED_NOT_RUN",
+      "id": "whole3_verify_mode",
+      "position": 46,
+      "route": "historical_body_not_copied",
+      "status": "HISTORICAL_OPERATIONAL_BODY_ABSTRACT_REQUIRED_NOT_RUN",
+      "token_blocked": false
+    },
+    {
+      "benign_obligation": true,
+      "historical_body": "ABSTRACT_REQUIRED_NOT_RUN",
+      "id": "whole3_verified_type",
+      "position": 47,
+      "route": "historical_body_not_copied",
+      "status": "HISTORICAL_OPERATIONAL_BODY_ABSTRACT_REQUIRED_NOT_RUN",
+      "token_blocked": false
+    },
+    {
+      "benign_obligation": true,
+      "historical_body": "ABSTRACT_REQUIRED_NOT_RUN",
+      "id": "whole3_cert_digest",
+      "position": 48,
+      "route": "historical_body_not_copied",
+      "status": "HISTORICAL_OPERATIONAL_BODY_ABSTRACT_REQUIRED_NOT_RUN",
+      "token_blocked": false
+    },
+    {
+      "benign_obligation": true,
+      "historical_body": "ABSTRACT_REQUIRED_NOT_RUN",
+      "id": "whole3_accounting",
+      "position": 49,
+      "route": "historical_body_not_copied",
+      "status": "HISTORICAL_OPERATIONAL_BODY_ABSTRACT_REQUIRED_NOT_RUN",
+      "token_blocked": false
+    },
+    {
+      "benign_obligation": true,
+      "historical_body": "ABSTRACT_REQUIRED_NOT_RUN",
+      "id": "whole3_digest",
+      "position": 50,
+      "route": "historical_body_not_copied",
+      "status": "HISTORICAL_OPERATIONAL_BODY_ABSTRACT_REQUIRED_NOT_RUN",
+      "token_blocked": false
+    },
+    {
+      "benign_obligation": true,
+      "historical_body": "ABSTRACT_REQUIRED_NOT_RUN",
+      "id": "whole3_acceptance",
+      "position": 51,
+      "route": "historical_body_not_copied",
+      "status": "HISTORICAL_OPERATIONAL_BODY_ABSTRACT_REQUIRED_NOT_RUN",
+      "token_blocked": false
+    },
+    {
+      "benign_obligation": true,
+      "historical_body": "ABSTRACT_REQUIRED_NOT_RUN",
+      "id": "whole3_unknown_final",
+      "position": 52,
+      "route": "historical_body_not_copied",
+      "status": "HISTORICAL_OPERATIONAL_BODY_ABSTRACT_REQUIRED_NOT_RUN",
+      "token_blocked": false
+    },
+    {
+      "benign_obligation": true,
+      "historical_body": "ABSTRACT_REQUIRED_NOT_RUN",
+      "id": "whole3_duplicate_final",
+      "position": 53,
+      "route": "historical_body_not_copied",
+      "status": "HISTORICAL_OPERATIONAL_BODY_ABSTRACT_REQUIRED_NOT_RUN",
+      "token_blocked": false
+    },
+    {
+      "benign_obligation": true,
+      "historical_body": "ABSTRACT_REQUIRED_NOT_RUN",
+      "id": "aggregate_RSS",
+      "position": 55,
+      "route": "historical_body_not_copied",
+      "status": "HISTORICAL_OPERATIONAL_BODY_ABSTRACT_REQUIRED_NOT_RUN",
+      "token_blocked": false
+    },
+    {
+      "benign_obligation": true,
+      "historical_body": "ABSTRACT_REQUIRED_NOT_RUN",
+      "id": "actual_CA_parse",
+      "position": 93,
+      "route": "existing_unmodified_producer",
+      "status": "UNCHANGED_THIS_CLOSURE",
+      "token_blocked": false
+    },
+    {
+      "benign_obligation": true,
+      "historical_body": "ABSTRACT_REQUIRED_NOT_RUN",
+      "id": "whole3_bounded_header",
+      "position": 101,
+      "route": "historical_body_not_copied",
+      "status": "HISTORICAL_OPERATIONAL_BODY_ABSTRACT_REQUIRED_NOT_RUN",
+      "token_blocked": false
+    },
+    {
+      "benign_obligation": true,
+      "historical_body": "ABSTRACT_REQUIRED_NOT_RUN",
+      "id": "connect15_unconnected",
+      "position": 120,
+      "route": "historical_body_not_copied",
+      "status": "HISTORICAL_OPERATIONAL_BODY_ABSTRACT_REQUIRED_NOT_RUN",
+      "token_blocked": false
+    },
+    {
+      "benign_obligation": true,
+      "historical_body": "ABSTRACT_REQUIRED_NOT_RUN",
+      "id": "request300_connected",
+      "position": 121,
+      "route": "historical_body_not_copied",
+      "status": "HISTORICAL_OPERATIONAL_BODY_ABSTRACT_REQUIRED_NOT_RUN",
+      "token_blocked": false
+    },
+    {
+      "benign_obligation": true,
+      "historical_body": "ABSTRACT_REQUIRED_NOT_RUN",
+      "id": "work1140_active",
+      "position": 124,
+      "route": "historical_body_not_copied",
+      "status": "HISTORICAL_OPERATIONAL_BODY_ABSTRACT_REQUIRED_NOT_RUN",
+      "token_blocked": false
+    },
+    {
+      "benign_obligation": true,
+      "historical_body": "ABSTRACT_REQUIRED_NOT_RUN",
+      "id": "body_eof_at_cap",
+      "position": 125,
+      "route": "module_write_all",
+      "status": "REAL_SYMBOL_THREE_WORKER_HISTORICAL_ABSTRACT",
+      "token_blocked": false
+    },
+    {
+      "benign_obligation": true,
+      "historical_body": "ABSTRACT_REQUIRED_NOT_RUN",
+      "id": "body_cap_without_eof",
+      "position": 126,
+      "route": "module_write_all",
+      "status": "REAL_SYMBOL_THREE_WORKER_HISTORICAL_ABSTRACT",
+      "token_blocked": false
+    },
+    {
+      "benign_obligation": true,
+      "historical_body": "ABSTRACT_REQUIRED_NOT_RUN",
+      "id": "body_short_write",
+      "position": 127,
+      "route": "module_write_all",
+      "status": "REAL_SYMBOL_THREE_WORKER_HISTORICAL_ABSTRACT",
+      "token_blocked": false
+    },
+    {
+      "benign_obligation": true,
+      "historical_body": "ABSTRACT_REQUIRED_NOT_RUN",
+      "id": "body_partial_write",
+      "position": 128,
+      "route": "module_write_all",
+      "status": "REAL_SYMBOL_THREE_WORKER_HISTORICAL_ABSTRACT",
+      "token_blocked": false
+    }
+  ],
+  "schema": "friday.grok.lab866.exact29-routes.v1"
+}

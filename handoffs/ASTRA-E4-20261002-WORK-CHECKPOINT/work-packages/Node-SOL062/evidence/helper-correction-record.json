@@ -1,0 +1,23 @@
+{
+  "schema": "friday.sol062.owned-helper-correction.v1",
+  "events": [
+    {
+      "helper": "author/continue-transform.py",
+      "observed_exit": 1,
+      "reason": "owned literal pattern assertion matched nested indentation twice",
+      "effects_before_assertion": "no Source writes",
+      "repair": "anchored exact newline in own literal template before materialization",
+      "Source_or_native_execution_retry": false
+    },
+    {
+      "helper": "author/final-proof.py",
+      "observed_exit": 1,
+      "reason": "own metadata helper distinguished older normative original files from latest LAB865 current6; SHA assertion caught wrong delta baseline",
+      "effects_before_assertion": "only own private modes normalized; no Source bytes or evidence written",
+      "repair": "exact INPUT current6 pins are now full byte+9 verified delta baseline; older originals retained independently for normativity",
+      "Source_or_native_execution_retry": false
+    }
+  ],
+  "historical_author_fragments": "inert earlier templates; final actual bodies+shared equality are normative current Source, native_field_presence supersedes older stock-error-projection template",
+  "all_costs_charged": "included conservative uninstrumented allowance; unknown implicit IO not0"
+}

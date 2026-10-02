@@ -1,0 +1,1732 @@
+{
+  "schema": "friday.a192.independent.whole-methods-text.v1",
+  "part": 8,
+  "all_method_regions": 471,
+  "methods": [
+    {
+      "file": "source/zip_wheel.py",
+      "symbol": "_require_custody",
+      "kind": "def",
+      "line": 1103,
+      "end_exclusive": 1132,
+      "signature_defaults_text": "def _require_custody(held):",
+      "region_sha256": "587e199ce90d81d89969dc61b6469e7a4fcc07cbc4b47a704cc532f31dcfd842",
+      "calls_text": [
+        "_require_custody",
+        "compare_custody",
+        "get",
+        "held.get",
+        "in",
+        "isinstance",
+        "pack",
+        "plan.get",
+        "plan_nofollow_read"
+      ],
+      "error_cleanup_sites": [],
+      "classification": "TEXT_REGION_NOT_AST_NOT_DYNAMIC_EXECUTION",
+      "review_relations": "whole17-all6-current3-new2.json; phase-and-native-bothends.json; method-default-error-matrix.json",
+      "current_CODE_dependencies": [
+        "A192-C1-FINAL-ORIGINAL-ROOT-CUSTODY-PARENTHOOD-UNACCEPTED",
+        "A192-C2-SOURCE-NATIVE-RAW-REGISTRY-NOT-RETIRED"
+      ],
+      "whole_runtime_acceptance": false
+    },
+    {
+      "file": "source/zip_wheel.py",
+      "symbol": "_adopt_reader_custody",
+      "kind": "def",
+      "line": 1132,
+      "end_exclusive": 1155,
+      "signature_defaults_text": "def _adopt_reader_custody(held, meter):",
+      "region_sha256": "fb7a2274124bdd4f23af1a6effef775ca4d37e045bac2b0eeefb2fa422505cbc",
+      "calls_text": [
+        "_adopt_reader_custody",
+        "caller.get",
+        "fresh.get",
+        "held.get",
+        "in",
+        "isinstance",
+        "learned.items",
+        "meter.get"
+      ],
+      "error_cleanup_sites": [],
+      "classification": "TEXT_REGION_NOT_AST_NOT_DYNAMIC_EXECUTION",
+      "review_relations": "whole17-all6-current3-new2.json; phase-and-native-bothends.json; method-default-error-matrix.json",
+      "current_CODE_dependencies": [
+        "A192-C1-FINAL-ORIGINAL-ROOT-CUSTODY-PARENTHOOD-UNACCEPTED",
+        "A192-C2-SOURCE-NATIVE-RAW-REGISTRY-NOT-RETIRED"
+      ],
+      "whole_runtime_acceptance": false
+    },
+    {
+      "file": "source/zip_wheel.py",
+      "symbol": "_open_held",
+      "kind": "def",
+      "line": 1155,
+      "end_exclusive": 1178,
+      "signature_defaults_text": "def _open_held(held, resources, meter):",
+      "region_sha256": "4749d9f0279dbbb3f1d1db81139d172dd8caba8dd0a1455f162f5fddb558b17e",
+      "calls_text": [
+        "_adopt_reader_custody",
+        "_held_bytes",
+        "_open_held",
+        "_require_custody",
+        "grant.get",
+        "in",
+        "isinstance",
+        "pack",
+        "resources.get"
+      ],
+      "error_cleanup_sites": [],
+      "classification": "TEXT_REGION_NOT_AST_NOT_DYNAMIC_EXECUTION",
+      "review_relations": "whole17-all6-current3-new2.json; phase-and-native-bothends.json; method-default-error-matrix.json",
+      "current_CODE_dependencies": [
+        "A192-C1-FINAL-ORIGINAL-ROOT-CUSTODY-PARENTHOOD-UNACCEPTED",
+        "A192-C2-SOURCE-NATIVE-RAW-REGISTRY-NOT-RETIRED"
+      ],
+      "whole_runtime_acceptance": false
+    },
+    {
+      "file": "source/zip_wheel.py",
+      "symbol": "_scan_wheel",
+      "kind": "def",
+      "line": 1178,
+      "end_exclusive": 1302,
+      "signature_defaults_text": "def _scan_wheel(expected, held, resources, publisher_evidence=None, meter=None):",
+      "region_sha256": "671ba13d0a9962054bdd3f8fcc30de42e242d3daa1cf48400bce6c216c6e7aff",
+      "calls_text": [
+        "_expected_cause",
+        "_held_present",
+        "_open_held",
+        "_publisher_cause",
+        "_scan_wheel",
+        "_wheel_observation",
+        "admission_cause",
+        "after.get",
+        "begin_archive",
+        "clock_cause",
+        "content_sha256",
+        "effects_cause",
+        "expected.get",
+        "grant.get",
+        "held.get",
+        "ident.get",
+        "in",
+        "isinstance",
+        "len",
+        "member_cause",
+        "meter.get",
+        "new_meter",
+        "pack",
+        "parse_wheel_filename",
+        "parse_zip_members",
+        "pep503_name",
+        "performing_requested",
+        "release_retained_fd",
+        "reserve_public_members",
+        "resources.get",
+        "seal_archive_custody",
+        "validate_value",
+        "wheel_raw_cause"
+      ],
+      "error_cleanup_sites": [
+        {
+          "line": 1287,
+          "text": "finally:"
+        }
+      ],
+      "classification": "TEXT_REGION_NOT_AST_NOT_DYNAMIC_EXECUTION",
+      "review_relations": "whole17-all6-current3-new2.json; phase-and-native-bothends.json; method-default-error-matrix.json",
+      "current_CODE_dependencies": [
+        "A192-C1-FINAL-ORIGINAL-ROOT-CUSTODY-PARENTHOOD-UNACCEPTED",
+        "A192-C2-SOURCE-NATIVE-RAW-REGISTRY-NOT-RETIRED"
+      ],
+      "whole_runtime_acceptance": false
+    },
+    {
+      "file": "source/zip_wheel.py",
+      "symbol": "scan_wheel",
+      "kind": "def",
+      "line": 1302,
+      "end_exclusive": 1344,
+      "signature_defaults_text": "def scan_wheel(expected, held, resources, publisher_evidence=None, meter=None):",
+      "region_sha256": "9e4b87af3c52bd26d7b682ca3d06d7c5c0aa8bbea842dc5c29212c7ad84369f0",
+      "calls_text": [
+        "_scan_wheel",
+        "causal_refusal",
+        "except",
+        "exception_owned_result",
+        "finish_owned",
+        "isinstance",
+        "meter.pop",
+        "new_meter",
+        "release_archive_live",
+        "retain_public_observation",
+        "retain_source_origin",
+        "scan_wheel"
+      ],
+      "error_cleanup_sites": [
+        {
+          "line": 1312,
+          "text": "except DigestStop as stop:"
+        },
+        {
+          "line": 1313,
+          "text": "from tools.native_support import retain_source_origin"
+        },
+        {
+          "line": 1314,
+          "text": "retain_source_origin(meter,stop)"
+        },
+        {
+          "line": 1317,
+          "text": "except (MemoryError,OSError,ValueError,UnicodeError,KeyError,TypeError,IndexError,RuntimeError) as exc:"
+        },
+        {
+          "line": 1318,
+          "text": "from tools.native_support import retain_source_origin"
+        },
+        {
+          "line": 1319,
+          "text": "retain_source_origin(meter,exc)"
+        },
+        {
+          "line": 1322,
+          "text": "finally:"
+        },
+        {
+          "line": 1334,
+          "text": "finally:"
+        }
+      ],
+      "classification": "TEXT_REGION_NOT_AST_NOT_DYNAMIC_EXECUTION",
+      "review_relations": "whole17-all6-current3-new2.json; phase-and-native-bothends.json; method-default-error-matrix.json",
+      "current_CODE_dependencies": [
+        "A192-C1-FINAL-ORIGINAL-ROOT-CUSTODY-PARENTHOOD-UNACCEPTED",
+        "A192-C2-SOURCE-NATIVE-RAW-REGISTRY-NOT-RETIRED"
+      ],
+      "whole_runtime_acceptance": false
+    },
+    {
+      "file": "tools/native_owner.py",
+      "symbol": "canonical",
+      "kind": "def",
+      "line": 24,
+      "end_exclusive": 29,
+      "signature_defaults_text": "def canonical(value):",
+      "region_sha256": "f049b66f06784232dfcde79c74058c9c0f5a77a7df0f22c2c4d8ff6d7f9f5447",
+      "calls_text": [
+        "canonical",
+        "encode",
+        "json.dumps"
+      ],
+      "error_cleanup_sites": [],
+      "classification": "TEXT_REGION_NOT_AST_NOT_DYNAMIC_EXECUTION",
+      "review_relations": "whole17-all6-current3-new2.json; phase-and-native-bothends.json; method-default-error-matrix.json",
+      "current_CODE_dependencies": [
+        "A192-C1-FINAL-ORIGINAL-ROOT-CUSTODY-PARENTHOOD-UNACCEPTED",
+        "A192-C2-SOURCE-NATIVE-RAW-REGISTRY-NOT-RETIRED"
+      ],
+      "whole_runtime_acceptance": false
+    },
+    {
+      "file": "tools/native_owner.py",
+      "symbol": "RootNativeOwner",
+      "kind": "class",
+      "line": 29,
+      "end_exclusive": 37,
+      "signature_defaults_text": "class RootNativeOwner:",
+      "region_sha256": "5914ceaf7dad808aadb6eb3d14d19b35f63afb52cd86da1c8fe1c6690da18dae",
+      "calls_text": [],
+      "error_cleanup_sites": [],
+      "classification": "TEXT_REGION_NOT_AST_NOT_DYNAMIC_EXECUTION",
+      "review_relations": "whole17-all6-current3-new2.json; phase-and-native-bothends.json; method-default-error-matrix.json",
+      "current_CODE_dependencies": [
+        "A192-C1-FINAL-ORIGINAL-ROOT-CUSTODY-PARENTHOOD-UNACCEPTED",
+        "A192-C2-SOURCE-NATIVE-RAW-REGISTRY-NOT-RETIRED"
+      ],
+      "whole_runtime_acceptance": false
+    },
+    {
+      "file": "tools/native_owner.py",
+      "symbol": "__init__",
+      "kind": "def",
+      "line": 37,
+      "end_exclusive": 161,
+      "signature_defaults_text": "    def __init__(self,permit,selected_permit,selection,resource_contract,launch):",
+      "region_sha256": "1efc814d1b7fbdf9b36a640cfd352cc19ea25d1e1fa4e7a50364394efbab4de4",
+      "calls_text": [
+        "HolderStop",
+        "RootBudget",
+        "__init__",
+        "fcntl.fcntl",
+        "full9",
+        "get",
+        "in",
+        "isinstance",
+        "len",
+        "native.snapshot",
+        "os.fstat",
+        "os.getpid",
+        "permit.authorize_holder",
+        "permit.authorize_native_source_launch",
+        "physical.get",
+        "selected_owner",
+        "selection.get",
+        "self._check_source_bootstrap",
+        "self._check_source_caps",
+        "self._hash_selected",
+        "self.budget.reserve",
+        "set",
+        "stat.S_IMODE",
+        "stat.S_ISDIR",
+        "type",
+        "zip"
+      ],
+      "error_cleanup_sites": [],
+      "classification": "TEXT_REGION_NOT_AST_NOT_DYNAMIC_EXECUTION",
+      "review_relations": "whole17-all6-current3-new2.json; phase-and-native-bothends.json; method-default-error-matrix.json",
+      "current_CODE_dependencies": [
+        "A192-C1-FINAL-ORIGINAL-ROOT-CUSTODY-PARENTHOOD-UNACCEPTED",
+        "A192-C2-SOURCE-NATIVE-RAW-REGISTRY-NOT-RETIRED"
+      ],
+      "whole_runtime_acceptance": false
+    },
+    {
+      "file": "tools/native_owner.py",
+      "symbol": "_check_source_bootstrap",
+      "kind": "def",
+      "line": 161,
+      "end_exclusive": 187,
+      "signature_defaults_text": "    def _check_source_bootstrap(self):",
+      "region_sha256": "12a0e805698e163401d762c6ea122d52b8ba8f85c46df1cdd73c22a95a24ab42",
+      "calls_text": [
+        "HolderStop",
+        "_check_source_bootstrap",
+        "boot.get",
+        "canonical_loads",
+        "full9",
+        "hashlib.sha256",
+        "hexdigest",
+        "in",
+        "int",
+        "join",
+        "len",
+        "min",
+        "os.fstat",
+        "os.getpid",
+        "os.pread",
+        "parts.append",
+        "self._deadline",
+        "self.budget.reserve",
+        "tuple"
+      ],
+      "error_cleanup_sites": [],
+      "classification": "TEXT_REGION_NOT_AST_NOT_DYNAMIC_EXECUTION",
+      "review_relations": "whole17-all6-current3-new2.json; phase-and-native-bothends.json; method-default-error-matrix.json",
+      "current_CODE_dependencies": [
+        "A192-C1-FINAL-ORIGINAL-ROOT-CUSTODY-PARENTHOOD-UNACCEPTED",
+        "A192-C2-SOURCE-NATIVE-RAW-REGISTRY-NOT-RETIRED"
+      ],
+      "whole_runtime_acceptance": false
+    },
+    {
+      "file": "tools/native_owner.py",
+      "symbol": "_check_source_caps",
+      "kind": "def",
+      "line": 187,
+      "end_exclusive": 203,
+      "signature_defaults_text": "    def _check_source_caps(self):",
+      "region_sha256": "20f10907c39fc1ea78a3389f402678f52699f088f8dc1e59cc649b41650c1326",
+      "calls_text": [
+        "HolderStop",
+        "_check_source_caps",
+        "full9",
+        "hex",
+        "in",
+        "len",
+        "os.fstat",
+        "os.pread",
+        "self.budget.reserve",
+        "stat.S_ISREG",
+        "struct.unpack"
+      ],
+      "error_cleanup_sites": [],
+      "classification": "TEXT_REGION_NOT_AST_NOT_DYNAMIC_EXECUTION",
+      "review_relations": "whole17-all6-current3-new2.json; phase-and-native-bothends.json; method-default-error-matrix.json",
+      "current_CODE_dependencies": [
+        "A192-C1-FINAL-ORIGINAL-ROOT-CUSTODY-PARENTHOOD-UNACCEPTED",
+        "A192-C2-SOURCE-NATIVE-RAW-REGISTRY-NOT-RETIRED"
+      ],
+      "whole_runtime_acceptance": false
+    },
+    {
+      "file": "tools/native_owner.py",
+      "symbol": "_hash_selected",
+      "kind": "def",
+      "line": 203,
+      "end_exclusive": 219,
+      "signature_defaults_text": "    def _hash_selected(self,fd,identity,expected):",
+      "region_sha256": "7c8d3317b317a98ed70f43539904fcd1100a7849c6a95575d159bc9c2758ebef",
+      "calls_text": [
+        "HolderStop",
+        "_hash_selected",
+        "full9",
+        "hashlib.sha256",
+        "int",
+        "len",
+        "min",
+        "os.fstat",
+        "os.pread",
+        "self.budget.release",
+        "self.budget.reserve",
+        "state.hexdigest",
+        "state.update"
+      ],
+      "error_cleanup_sites": [
+        {
+          "line": 214,
+          "text": "finally: piece=None;self.budget.release('live_bytes',amount+64)"
+        }
+      ],
+      "classification": "TEXT_REGION_NOT_AST_NOT_DYNAMIC_EXECUTION",
+      "review_relations": "whole17-all6-current3-new2.json; phase-and-native-bothends.json; method-default-error-matrix.json",
+      "current_CODE_dependencies": [
+        "A192-C1-FINAL-ORIGINAL-ROOT-CUSTODY-PARENTHOOD-UNACCEPTED",
+        "A192-C2-SOURCE-NATIVE-RAW-REGISTRY-NOT-RETIRED"
+      ],
+      "whole_runtime_acceptance": false
+    },
+    {
+      "file": "tools/native_owner.py",
+      "symbol": "_lease",
+      "kind": "def",
+      "line": 219,
+      "end_exclusive": 226,
+      "signature_defaults_text": "    def _lease(self,fd,label):",
+      "region_sha256": "1b56a3a1723679a602bc9e09e14243ada92b1a1636041d71f498725aff28353e",
+      "calls_text": [
+        "HolderStop",
+        "_lease"
+      ],
+      "error_cleanup_sites": [],
+      "classification": "TEXT_REGION_NOT_AST_NOT_DYNAMIC_EXECUTION",
+      "review_relations": "whole17-all6-current3-new2.json; phase-and-native-bothends.json; method-default-error-matrix.json",
+      "current_CODE_dependencies": [
+        "A192-C1-FINAL-ORIGINAL-ROOT-CUSTODY-PARENTHOOD-UNACCEPTED",
+        "A192-C2-SOURCE-NATIVE-RAW-REGISTRY-NOT-RETIRED"
+      ],
+      "whole_runtime_acceptance": false
+    },
+    {
+      "file": "tools/native_owner.py",
+      "symbol": "_close",
+      "kind": "def",
+      "line": 226,
+      "end_exclusive": 231,
+      "signature_defaults_text": "    def _close(self,label):",
+      "region_sha256": "47eaa064ee427fac3f404b9c3a878092cbda9bc205e99d4fcdb5fd781d132e6e",
+      "calls_text": [
+        "_close",
+        "self.budget.close_fd",
+        "self.leases.pop"
+      ],
+      "error_cleanup_sites": [],
+      "classification": "TEXT_REGION_NOT_AST_NOT_DYNAMIC_EXECUTION",
+      "review_relations": "whole17-all6-current3-new2.json; phase-and-native-bothends.json; method-default-error-matrix.json",
+      "current_CODE_dependencies": [
+        "A192-C1-FINAL-ORIGINAL-ROOT-CUSTODY-PARENTHOOD-UNACCEPTED",
+        "A192-C2-SOURCE-NATIVE-RAW-REGISTRY-NOT-RETIRED"
+      ],
+      "whole_runtime_acceptance": false
+    },
+    {
+      "file": "tools/native_owner.py",
+      "symbol": "_open",
+      "kind": "def",
+      "line": 231,
+      "end_exclusive": 240,
+      "signature_defaults_text": "    def _open(self,name,flags,parent,label):",
+      "region_sha256": "331ad376753bfcefcd0f5a9a69d9b47fff5fbbfc42c6da999498cb67b98344cc",
+      "calls_text": [
+        "_open",
+        "os.open",
+        "self._lease",
+        "self.budget.release",
+        "self.budget.reserve",
+        "self.leases.get",
+        "self.leases.pop"
+      ],
+      "error_cleanup_sites": [
+        {
+          "line": 235,
+          "text": "except BaseException:"
+        }
+      ],
+      "classification": "TEXT_REGION_NOT_AST_NOT_DYNAMIC_EXECUTION",
+      "review_relations": "whole17-all6-current3-new2.json; phase-and-native-bothends.json; method-default-error-matrix.json",
+      "current_CODE_dependencies": [
+        "A192-C1-FINAL-ORIGINAL-ROOT-CUSTODY-PARENTHOOD-UNACCEPTED",
+        "A192-C2-SOURCE-NATIVE-RAW-REGISTRY-NOT-RETIRED"
+      ],
+      "whole_runtime_acceptance": false
+    },
+    {
+      "file": "tools/native_owner.py",
+      "symbol": "_deadline",
+      "kind": "def",
+      "line": 240,
+      "end_exclusive": 246,
+      "signature_defaults_text": "    def _deadline(self):",
+      "region_sha256": "ddb6647a70f0fb8934e652e233c3a0b6c4a10978fe7b9cd03178c27faab147c3",
+      "calls_text": [
+        "TimeoutError",
+        "_deadline",
+        "self.budget.operation_end_ns",
+        "time.monotonic_ns"
+      ],
+      "error_cleanup_sites": [],
+      "classification": "TEXT_REGION_NOT_AST_NOT_DYNAMIC_EXECUTION",
+      "review_relations": "whole17-all6-current3-new2.json; phase-and-native-bothends.json; method-default-error-matrix.json",
+      "current_CODE_dependencies": [
+        "A192-C1-FINAL-ORIGINAL-ROOT-CUSTODY-PARENTHOOD-UNACCEPTED",
+        "A192-C2-SOURCE-NATIVE-RAW-REGISTRY-NOT-RETIRED"
+      ],
+      "whole_runtime_acceptance": false
+    },
+    {
+      "file": "tools/native_owner.py",
+      "symbol": "_lock_slots",
+      "kind": "def",
+      "line": 246,
+      "end_exclusive": 251,
+      "signature_defaults_text": "    def _lock_slots(self):",
+      "region_sha256": "19cc307750e706785e707a8b798ac935d03f80562ef820355c74a116ed160021",
+      "calls_text": [
+        "_lock_slots",
+        "in",
+        "self.native.lock_canonical_slot"
+      ],
+      "error_cleanup_sites": [],
+      "classification": "TEXT_REGION_NOT_AST_NOT_DYNAMIC_EXECUTION",
+      "review_relations": "whole17-all6-current3-new2.json; phase-and-native-bothends.json; method-default-error-matrix.json",
+      "current_CODE_dependencies": [
+        "A192-C1-FINAL-ORIGINAL-ROOT-CUSTODY-PARENTHOOD-UNACCEPTED",
+        "A192-C2-SOURCE-NATIVE-RAW-REGISTRY-NOT-RETIRED"
+      ],
+      "whole_runtime_acceptance": false
+    },
+    {
+      "file": "tools/native_owner.py",
+      "symbol": "_put_source_in_original_memory_domain",
+      "kind": "def",
+      "line": 251,
+      "end_exclusive": 272,
+      "signature_defaults_text": "    def _put_source_in_original_memory_domain(self):",
+      "region_sha256": "fc00dd2c14ad8869b315a5ef16fe4285dd0c7548deb3ca5a2a93715cf37ec638",
+      "calls_text": [
+        "HolderStop",
+        "_put_source_in_original_memory_domain",
+        "encode",
+        "len",
+        "os.read",
+        "os.write",
+        "self._close",
+        "self._open",
+        "self.budget.reserve",
+        "str"
+      ],
+      "error_cleanup_sites": [],
+      "classification": "TEXT_REGION_NOT_AST_NOT_DYNAMIC_EXECUTION",
+      "review_relations": "whole17-all6-current3-new2.json; phase-and-native-bothends.json; method-default-error-matrix.json",
+      "current_CODE_dependencies": [
+        "A192-C1-FINAL-ORIGINAL-ROOT-CUSTODY-PARENTHOOD-UNACCEPTED",
+        "A192-C2-SOURCE-NATIVE-RAW-REGISTRY-NOT-RETIRED"
+      ],
+      "whole_runtime_acceptance": false
+    },
+    {
+      "file": "tools/native_owner.py",
+      "symbol": "launch_source",
+      "kind": "def",
+      "line": 272,
+      "end_exclusive": 349,
+      "signature_defaults_text": "    def launch_source(self):",
+      "region_sha256": "b70c3150e1a48df115d210c53a9070deb2711a858eb39f9a2c7c3aca517f4c3b",
+      "calls_text": [
+        "HolderStop",
+        "REFUSED",
+        "RootHolder.__init__",
+        "RootHolder.__new__",
+        "child_channel.detach",
+        "child_channel.fileno",
+        "child_channel.setsockopt",
+        "exception_detail",
+        "in",
+        "int",
+        "launch_source",
+        "os.pipe2",
+        "os.set_blocking",
+        "os.write",
+        "physical.get",
+        "root_channel.fileno",
+        "root_channel.setsockopt",
+        "selectors.DefaultSelector",
+        "self._close",
+        "self._deadline",
+        "self._drain_and_reap",
+        "self._lock_slots",
+        "self._put_source_in_original_memory_domain",
+        "self.budget.reserve",
+        "self.final_document.get",
+        "self.holder.bind_source_channel",
+        "self.holder.channel.fileno",
+        "self.holder.serve",
+        "self.leases.pop",
+        "self.native.snapshot",
+        "self.native.spawn_source",
+        "self.selector.register",
+        "socket.socketpair"
+      ],
+      "error_cleanup_sites": [
+        {
+          "line": 336,
+          "text": "except BaseException as protocol_failure:"
+        }
+      ],
+      "classification": "TEXT_REGION_NOT_AST_NOT_DYNAMIC_EXECUTION",
+      "review_relations": "whole17-all6-current3-new2.json; phase-and-native-bothends.json; method-default-error-matrix.json",
+      "current_CODE_dependencies": [
+        "A192-C1-FINAL-ORIGINAL-ROOT-CUSTODY-PARENTHOOD-UNACCEPTED",
+        "A192-C2-SOURCE-NATIVE-RAW-REGISTRY-NOT-RETIRED"
+      ],
+      "whole_runtime_acceptance": false
+    },
+    {
+      "file": "tools/native_owner.py",
+      "symbol": "_take_pipe_piece",
+      "kind": "def",
+      "line": 349,
+      "end_exclusive": 371,
+      "signature_defaults_text": "    def _take_pipe_piece(self,key):",
+      "region_sha256": "e88ab9b5f35bcb961b93d458d9ef57736049a4879c4636c83673ce453dcdcd50",
+      "calls_text": [
+        "HolderStop",
+        "_take_pipe_piece",
+        "len",
+        "min",
+        "os.read",
+        "self._close",
+        "self.budget.release",
+        "self.budget.reserve",
+        "self.diagnostic_parts.append",
+        "self.final_parts.append",
+        "self.pipe_eof.add",
+        "self.selector.unregister"
+      ],
+      "error_cleanup_sites": [],
+      "classification": "TEXT_REGION_NOT_AST_NOT_DYNAMIC_EXECUTION",
+      "review_relations": "whole17-all6-current3-new2.json; phase-and-native-bothends.json; method-default-error-matrix.json",
+      "current_CODE_dependencies": [
+        "A192-C1-FINAL-ORIGINAL-ROOT-CUSTODY-PARENTHOOD-UNACCEPTED",
+        "A192-C2-SOURCE-NATIVE-RAW-REGISTRY-NOT-RETIRED"
+      ],
+      "whole_runtime_acceptance": false
+    },
+    {
+      "file": "tools/native_owner.py",
+      "symbol": "_observe_direct_exit",
+      "kind": "def",
+      "line": 371,
+      "end_exclusive": 380,
+      "signature_defaults_text": "    def _observe_direct_exit(self):",
+      "region_sha256": "d35822fa0fefd85ed0c0b4c90901df2147a9c880cd68873291250f7af00659c1",
+      "calls_text": [
+        "HolderStop",
+        "_observe_direct_exit",
+        "self.native.direct_source_wait",
+        "self.selector.unregister"
+      ],
+      "error_cleanup_sites": [],
+      "classification": "TEXT_REGION_NOT_AST_NOT_DYNAMIC_EXECUTION",
+      "review_relations": "whole17-all6-current3-new2.json; phase-and-native-bothends.json; method-default-error-matrix.json",
+      "current_CODE_dependencies": [
+        "A192-C1-FINAL-ORIGINAL-ROOT-CUSTODY-PARENTHOOD-UNACCEPTED",
+        "A192-C2-SOURCE-NATIVE-RAW-REGISTRY-NOT-RETIRED"
+      ],
+      "whole_runtime_acceptance": false
+    },
+    {
+      "file": "tools/native_owner.py",
+      "symbol": "wait_protocol_readable",
+      "kind": "def",
+      "line": 380,
+      "end_exclusive": 398,
+      "signature_defaults_text": "    def wait_protocol_readable(self):",
+      "region_sha256": "fe2f184f271c00fa5308f07b844dc045e10573f0d68a2c2b0802ca66f6b62a67",
+      "calls_text": [
+        "HolderStop",
+        "TimeoutError",
+        "self._deadline",
+        "self._observe_direct_exit",
+        "self._take_pipe_piece",
+        "self.selector.select",
+        "wait_protocol_readable"
+      ],
+      "error_cleanup_sites": [],
+      "classification": "TEXT_REGION_NOT_AST_NOT_DYNAMIC_EXECUTION",
+      "review_relations": "whole17-all6-current3-new2.json; phase-and-native-bothends.json; method-default-error-matrix.json",
+      "current_CODE_dependencies": [
+        "A192-C1-FINAL-ORIGINAL-ROOT-CUSTODY-PARENTHOOD-UNACCEPTED",
+        "A192-C2-SOURCE-NATIVE-RAW-REGISTRY-NOT-RETIRED"
+      ],
+      "whole_runtime_acceptance": false
+    },
+    {
+      "file": "tools/native_owner.py",
+      "symbol": "_drain_and_reap",
+      "kind": "def",
+      "line": 398,
+      "end_exclusive": 413,
+      "signature_defaults_text": "    def _drain_and_reap(self):",
+      "region_sha256": "1f74fb187906f5be8b7b8cdd84bd2f5c1283b5874800b2868f0255e4c33e81be",
+      "calls_text": [
+        "HolderStop",
+        "TimeoutError",
+        "_drain_and_reap",
+        "any",
+        "in",
+        "os.WEXITSTATUS",
+        "os.WIFEXITED",
+        "self._deadline",
+        "self._observe_direct_exit",
+        "self._retain_final_source",
+        "self._take_pipe_piece",
+        "self.holder.channel.fileno",
+        "self.selector.select",
+        "self.selector.unregister"
+      ],
+      "error_cleanup_sites": [
+        {
+          "line": 401,
+          "text": "except KeyError:pass"
+        }
+      ],
+      "classification": "TEXT_REGION_NOT_AST_NOT_DYNAMIC_EXECUTION",
+      "review_relations": "whole17-all6-current3-new2.json; phase-and-native-bothends.json; method-default-error-matrix.json",
+      "current_CODE_dependencies": [
+        "A192-C1-FINAL-ORIGINAL-ROOT-CUSTODY-PARENTHOOD-UNACCEPTED",
+        "A192-C2-SOURCE-NATIVE-RAW-REGISTRY-NOT-RETIRED"
+      ],
+      "whole_runtime_acceptance": false
+    },
+    {
+      "file": "tools/native_owner.py",
+      "symbol": "_retain_final_source",
+      "kind": "def",
+      "line": 413,
+      "end_exclusive": 461,
+      "signature_defaults_text": "    def _retain_final_source(self):",
+      "region_sha256": "70a2dc57cc86d81ae4975cd9f214912d4df542c2fe75c897d3c517f2c236b41d",
+      "calls_text": [
+        "HolderStop",
+        "_retain_final_source",
+        "canonical_loads",
+        "document.get",
+        "exception_detail",
+        "in",
+        "join",
+        "new_meter",
+        "self._retain_native_metrics",
+        "self.budget.origin_failures.extend",
+        "self.budget.owned_origin_exceptions.extend",
+        "self.budget.reserve",
+        "self.budget.retain_origin",
+        "self.source_validation_state.startswith",
+        "validate_document",
+        "validator_meter.get"
+      ],
+      "error_cleanup_sites": [
+        {
+          "line": 442,
+          "text": "except BaseException as validation_failure:"
+        },
+        {
+          "line": 453,
+          "text": "except BaseException as metric_failure:"
+        }
+      ],
+      "classification": "TEXT_REGION_NOT_AST_NOT_DYNAMIC_EXECUTION",
+      "review_relations": "whole17-all6-current3-new2.json; phase-and-native-bothends.json; method-default-error-matrix.json",
+      "current_CODE_dependencies": [
+        "A192-C1-FINAL-ORIGINAL-ROOT-CUSTODY-PARENTHOOD-UNACCEPTED",
+        "A192-C2-SOURCE-NATIVE-RAW-REGISTRY-NOT-RETIRED"
+      ],
+      "whole_runtime_acceptance": false
+    },
+    {
+      "file": "tools/native_owner.py",
+      "symbol": "_retain_native_metrics",
+      "kind": "def",
+      "line": 461,
+      "end_exclusive": 481,
+      "signature_defaults_text": "    def _retain_native_metrics(self):",
+      "region_sha256": "9dbb5ea41bdd4eabaf4a2d5c52c8e06fc4850e2fc9a87b2b348c0ef27f6d1db7",
+      "calls_text": [
+        "HolderStop",
+        "_retain_native_metrics",
+        "dict",
+        "hex",
+        "join",
+        "len",
+        "self.budget.reserve",
+        "struct.unpack",
+        "zip"
+      ],
+      "error_cleanup_sites": [],
+      "classification": "TEXT_REGION_NOT_AST_NOT_DYNAMIC_EXECUTION",
+      "review_relations": "whole17-all6-current3-new2.json; phase-and-native-bothends.json; method-default-error-matrix.json",
+      "current_CODE_dependencies": [
+        "A192-C1-FINAL-ORIGINAL-ROOT-CUSTODY-PARENTHOOD-UNACCEPTED",
+        "A192-C2-SOURCE-NATIVE-RAW-REGISTRY-NOT-RETIRED"
+      ],
+      "whole_runtime_acceptance": false
+    },
+    {
+      "file": "tools/native_owner.py",
+      "symbol": "complete_error_pipes",
+      "kind": "def",
+      "line": 481,
+      "end_exclusive": 499,
+      "signature_defaults_text": "    def complete_error_pipes(self):",
+      "region_sha256": "5cd36ce469f691a71cae13de549e9befd4425493aba69a7d5576eff78e87cf1b",
+      "calls_text": [
+        "TimeoutError",
+        "any",
+        "complete_error_pipes",
+        "in",
+        "self._deadline",
+        "self._retain_final_source",
+        "self._take_pipe_piece",
+        "self.holder.channel.fileno",
+        "self.selector.select",
+        "self.selector.unregister"
+      ],
+      "error_cleanup_sites": [
+        {
+          "line": 491,
+          "text": "except KeyError:pass"
+        }
+      ],
+      "classification": "TEXT_REGION_NOT_AST_NOT_DYNAMIC_EXECUTION",
+      "review_relations": "whole17-all6-current3-new2.json; phase-and-native-bothends.json; method-default-error-matrix.json",
+      "current_CODE_dependencies": [
+        "A192-C1-FINAL-ORIGINAL-ROOT-CUSTODY-PARENTHOOD-UNACCEPTED",
+        "A192-C2-SOURCE-NATIVE-RAW-REGISTRY-NOT-RETIRED"
+      ],
+      "whole_runtime_acceptance": false
+    },
+    {
+      "file": "tools/native_owner.py",
+      "symbol": "cancel_and_reap",
+      "kind": "def",
+      "line": 499,
+      "end_exclusive": 556,
+      "signature_defaults_text": "    def cancel_and_reap(self):",
+      "region_sha256": "4b15e6616eb5a90cda3bd18ea1db0369ef07c89f28ecdd8af34ce450cbfe5c25",
+      "calls_text": [
+        "HolderStop",
+        "cancel_and_reap",
+        "os.waitid",
+        "os.waitpid",
+        "selector.close",
+        "selector.register",
+        "selector.select",
+        "selectors.DefaultSelector",
+        "self._deadline",
+        "self.budget.close_uncertainties.append",
+        "self.budget.release",
+        "self.budget.reserve",
+        "self.budget.retain_origin",
+        "self.native.begin_terminal",
+        "self.native.direct_source_wait",
+        "self.native.retire_direct_children",
+        "self.native.snapshot",
+        "signal.pidfd_send_signal"
+      ],
+      "error_cleanup_sites": [
+        {
+          "line": 531,
+          "text": "except ProcessLookupError:"
+        },
+        {
+          "line": 548,
+          "text": "finally:"
+        },
+        {
+          "line": 550,
+          "text": "except BaseException as exc:"
+        }
+      ],
+      "classification": "TEXT_REGION_NOT_AST_NOT_DYNAMIC_EXECUTION",
+      "review_relations": "whole17-all6-current3-new2.json; phase-and-native-bothends.json; method-default-error-matrix.json",
+      "current_CODE_dependencies": [
+        "A192-C1-FINAL-ORIGINAL-ROOT-CUSTODY-PARENTHOOD-UNACCEPTED",
+        "A192-C2-SOURCE-NATIVE-RAW-REGISTRY-NOT-RETIRED"
+      ],
+      "whole_runtime_acceptance": false
+    },
+    {
+      "file": "tools/native_owner.py",
+      "symbol": "_publish_bytes",
+      "kind": "def",
+      "line": 556,
+      "end_exclusive": 588,
+      "signature_defaults_text": "    def _publish_bytes(self,name,raw):",
+      "region_sha256": "7f9e275964a156ff7d72a8ce8ca17469c4ed86f32f717cd921054db774a2d14b",
+      "calls_text": [
+        "HolderStop",
+        "_publish_bytes",
+        "full9",
+        "hashlib.sha256",
+        "hexdigest",
+        "len",
+        "memoryview",
+        "os.fstat",
+        "os.fsync",
+        "os.stat",
+        "os.write",
+        "self._close",
+        "self._deadline",
+        "self._open",
+        "self.budget.reserve"
+      ],
+      "error_cleanup_sites": [
+        {
+          "line": 572,
+          "text": "finally: self._close('publish:'+name)"
+        }
+      ],
+      "classification": "TEXT_REGION_NOT_AST_NOT_DYNAMIC_EXECUTION",
+      "review_relations": "whole17-all6-current3-new2.json; phase-and-native-bothends.json; method-default-error-matrix.json",
+      "current_CODE_dependencies": [
+        "A192-C1-FINAL-ORIGINAL-ROOT-CUSTODY-PARENTHOOD-UNACCEPTED",
+        "A192-C2-SOURCE-NATIVE-RAW-REGISTRY-NOT-RETIRED"
+      ],
+      "whole_runtime_acceptance": false
+    },
+    {
+      "file": "tools/native_owner.py",
+      "symbol": "_completion_handoff",
+      "kind": "def",
+      "line": 588,
+      "end_exclusive": 631,
+      "signature_defaults_text": "    def _completion_handoff(self,value):",
+      "region_sha256": "569bd43f9ee54b6e4333b29a46b5bf0764a67fe2744fc17e5c2b37bb12f1fd38",
+      "calls_text": [
+        "HolderStop",
+        "_completion_handoff",
+        "canonical",
+        "canonical_loads",
+        "hashlib.sha256",
+        "hexdigest",
+        "in",
+        "len",
+        "min",
+        "os.getpid",
+        "self.budget.reserve",
+        "self.native.accept_existing_parent_delivery",
+        "self.native.capture_root_ledger",
+        "self.native.recv_packet",
+        "self.native.send_root_completion",
+        "self.native.snapshot",
+        "tuple",
+        "value.get"
+      ],
+      "error_cleanup_sites": [
+        {
+          "line": 625,
+          "text": "# C retains this exact performed ledger through Py_FinalizeEx; no"
+        }
+      ],
+      "classification": "TEXT_REGION_NOT_AST_NOT_DYNAMIC_EXECUTION",
+      "review_relations": "whole17-all6-current3-new2.json; phase-and-native-bothends.json; method-default-error-matrix.json",
+      "current_CODE_dependencies": [
+        "A192-C1-FINAL-ORIGINAL-ROOT-CUSTODY-PARENTHOOD-UNACCEPTED",
+        "A192-C2-SOURCE-NATIVE-RAW-REGISTRY-NOT-RETIRED"
+      ],
+      "whole_runtime_acceptance": false
+    },
+    {
+      "file": "tools/native_owner.py",
+      "symbol": "close",
+      "kind": "def",
+      "line": 631,
+      "end_exclusive": 660,
+      "signature_defaults_text": "    def close(self):",
+      "region_sha256": "d4ea41458fe3eb95ea21f9674cdfe80e556df375d19070808ec143cdfb23be5b",
+      "calls_text": [
+        "HolderStop",
+        "close",
+        "selector.close",
+        "self._close",
+        "self.budget.close_uncertainties.append",
+        "self.budget.release",
+        "self.budget.retain_origin",
+        "self.capsule.retain",
+        "self.channel.detach",
+        "self.holder.close",
+        "self.native.unlock_canonical_slots",
+        "str",
+        "tuple",
+        "type"
+      ],
+      "error_cleanup_sites": [
+        {
+          "line": 642,
+          "text": "except OSError as exc:"
+        },
+        {
+          "line": 652,
+          "text": "except BaseException as exc:"
+        }
+      ],
+      "classification": "TEXT_REGION_NOT_AST_NOT_DYNAMIC_EXECUTION",
+      "review_relations": "whole17-all6-current3-new2.json; phase-and-native-bothends.json; method-default-error-matrix.json",
+      "current_CODE_dependencies": [
+        "A192-C1-FINAL-ORIGINAL-ROOT-CUSTODY-PARENTHOOD-UNACCEPTED",
+        "A192-C2-SOURCE-NATIVE-RAW-REGISTRY-NOT-RETIRED"
+      ],
+      "whole_runtime_acceptance": false
+    },
+    {
+      "file": "tools/native_owner.py",
+      "symbol": "run_selected_source",
+      "kind": "def",
+      "line": 660,
+      "end_exclusive": 766,
+      "signature_defaults_text": "def run_selected_source(permit,selected_permit,selection,resource_contract,launch,capsule=None):",
+      "region_sha256": "a19c7f4a61f8cf48b6efe3ea0f3215be8f7ba8c49ef7d48c525351d8ea2da853",
+      "calls_text": [
+        "HolderStop",
+        "RootNativeOwner.__new__",
+        "bytes",
+        "canonical",
+        "capsule.attach",
+        "capsule.complete",
+        "capsule.retain",
+        "cleanup.append",
+        "dict",
+        "exception_detail",
+        "hashlib.sha256",
+        "hex",
+        "hexdigest",
+        "join",
+        "len",
+        "owner.__init__",
+        "owner._publish_bytes",
+        "owner.budget.begin_terminal",
+        "owner.budget.reserve",
+        "owner.budget.retain_origin",
+        "owner.cancel_and_reap",
+        "owner.close",
+        "owner.complete_error_pipes",
+        "owner.holder.verify_whole",
+        "owner.launch_source",
+        "owner.native.begin_terminal",
+        "owner.native.snapshot",
+        "owner.source_candidate.hex",
+        "piece.hex",
+        "run_selected_source",
+        "type"
+      ],
+      "error_cleanup_sites": [
+        {
+          "line": 686,
+          "text": "except BaseException as exc:"
+        },
+        {
+          "line": 689,
+          "text": "finally:"
+        },
+        {
+          "line": 694,
+          "text": "except BaseException as exc:"
+        },
+        {
+          "line": 705,
+          "text": "except BaseException as exc:"
+        },
+        {
+          "line": 708,
+          "text": "except BaseException as exc:"
+        },
+        {
+          "line": 752,
+          "text": "except BaseException as exc:"
+        }
+      ],
+      "classification": "TEXT_REGION_NOT_AST_NOT_DYNAMIC_EXECUTION",
+      "review_relations": "whole17-all6-current3-new2.json; phase-and-native-bothends.json; method-default-error-matrix.json",
+      "current_CODE_dependencies": [
+        "A192-C1-FINAL-ORIGINAL-ROOT-CUSTODY-PARENTHOOD-UNACCEPTED",
+        "A192-C2-SOURCE-NATIVE-RAW-REGISTRY-NOT-RETIRED"
+      ],
+      "whole_runtime_acceptance": false
+    },
+    {
+      "file": "tools/native_owner.py",
+      "symbol": "consume_selected_source_capsule",
+      "kind": "def",
+      "line": 766,
+      "end_exclusive": 805,
+      "signature_defaults_text": "def consume_selected_source_capsule(capsule):",
+      "region_sha256": "864562f5d9f37af8ea34a78679cc94d28423113d751cef4ace19216d954c1193",
+      "calls_text": [
+        "HolderStop",
+        "capsule.begin_consume",
+        "capsule.consumed",
+        "capsule.retain",
+        "consume_selected_source_capsule",
+        "os.getpid",
+        "owner._completion_handoff",
+        "owner._deadline",
+        "owner.budget.begin_terminal",
+        "owner.budget.reserve",
+        "owner.native.begin_terminal",
+        "type",
+        "value.get"
+      ],
+      "error_cleanup_sites": [
+        {
+          "line": 799,
+          "text": "except BaseException as exc:"
+        }
+      ],
+      "classification": "TEXT_REGION_NOT_AST_NOT_DYNAMIC_EXECUTION",
+      "review_relations": "whole17-all6-current3-new2.json; phase-and-native-bothends.json; method-default-error-matrix.json",
+      "current_CODE_dependencies": [
+        "A192-C1-FINAL-ORIGINAL-ROOT-CUSTODY-PARENTHOOD-UNACCEPTED",
+        "A192-C2-SOURCE-NATIVE-RAW-REGISTRY-NOT-RETIRED"
+      ],
+      "whole_runtime_acceptance": false
+    },
+    {
+      "file": "tools/native_owner.py",
+      "symbol": "RootCompletionObserver",
+      "kind": "class",
+      "line": 805,
+      "end_exclusive": 818,
+      "signature_defaults_text": "class RootCompletionObserver:",
+      "region_sha256": "c89952ddebbab3672e3efe49957c086382fdb70d52011a13ba4e2f40709bf98c",
+      "calls_text": [],
+      "error_cleanup_sites": [],
+      "classification": "TEXT_REGION_NOT_AST_NOT_DYNAMIC_EXECUTION",
+      "review_relations": "whole17-all6-current3-new2.json; phase-and-native-bothends.json; method-default-error-matrix.json",
+      "current_CODE_dependencies": [
+        "A192-C1-FINAL-ORIGINAL-ROOT-CUSTODY-PARENTHOOD-UNACCEPTED",
+        "A192-C2-SOURCE-NATIVE-RAW-REGISTRY-NOT-RETIRED"
+      ],
+      "whole_runtime_acceptance": false
+    },
+    {
+      "file": "tools/native_owner.py",
+      "symbol": "__init__",
+      "kind": "def",
+      "line": 818,
+      "end_exclusive": 911,
+      "signature_defaults_text": "    def __init__(self,permit,selected_permit,selection,resource_contract):",
+      "region_sha256": "f1beef8a134d68573f8858d5fcae410d4ec915cf5a66b1d266fcbdfef7c39ec2",
+      "calls_text": [
+        "HolderStop",
+        "RootBudget",
+        "__init__",
+        "full9",
+        "in",
+        "isinstance",
+        "min",
+        "os.fstat",
+        "os.geteuid",
+        "os.set_blocking",
+        "os.waitid",
+        "permit.authorize_root_completion",
+        "selected_owner",
+        "selection.get",
+        "selectors.DefaultSelector",
+        "self.budget.begin_terminal",
+        "self.budget.reserve",
+        "self.channel.fileno",
+        "self.channel.setblocking",
+        "self.channel.setsockopt",
+        "self.native.begin_terminal",
+        "self.native.snapshot",
+        "self.selector.register",
+        "set",
+        "stat.S_IMODE",
+        "stat.S_ISDIR",
+        "type"
+      ],
+      "error_cleanup_sites": [],
+      "classification": "TEXT_REGION_NOT_AST_NOT_DYNAMIC_EXECUTION",
+      "review_relations": "whole17-all6-current3-new2.json; phase-and-native-bothends.json; method-default-error-matrix.json",
+      "current_CODE_dependencies": [
+        "A192-C1-FINAL-ORIGINAL-ROOT-CUSTODY-PARENTHOOD-UNACCEPTED",
+        "A192-C2-SOURCE-NATIVE-RAW-REGISTRY-NOT-RETIRED"
+      ],
+      "whole_runtime_acceptance": false
+    },
+    {
+      "file": "tools/native_owner.py",
+      "symbol": "_remaining",
+      "kind": "def",
+      "line": 911,
+      "end_exclusive": 916,
+      "signature_defaults_text": "    def _remaining(self):",
+      "region_sha256": "6af3131809b6ca6047ae42d92bddb608ebcb86deef5c831b9739906ec741a773",
+      "calls_text": [
+        "HolderStop",
+        "_remaining",
+        "self.operation_end_ns",
+        "time.monotonic_ns"
+      ],
+      "error_cleanup_sites": [],
+      "classification": "TEXT_REGION_NOT_AST_NOT_DYNAMIC_EXECUTION",
+      "review_relations": "whole17-all6-current3-new2.json; phase-and-native-bothends.json; method-default-error-matrix.json",
+      "current_CODE_dependencies": [
+        "A192-C1-FINAL-ORIGINAL-ROOT-CUSTODY-PARENTHOOD-UNACCEPTED",
+        "A192-C2-SOURCE-NATIVE-RAW-REGISTRY-NOT-RETIRED"
+      ],
+      "whole_runtime_acceptance": false
+    },
+    {
+      "file": "tools/native_owner.py",
+      "symbol": "operation_end_ns",
+      "kind": "def",
+      "line": 916,
+      "end_exclusive": 920,
+      "signature_defaults_text": "    def operation_end_ns(self):",
+      "region_sha256": "47750442fa6907a0eaebc0510ba537697e81775350bafa107bcae533c8ab549a",
+      "calls_text": [
+        "min",
+        "operation_end_ns"
+      ],
+      "error_cleanup_sites": [],
+      "classification": "TEXT_REGION_NOT_AST_NOT_DYNAMIC_EXECUTION",
+      "review_relations": "whole17-all6-current3-new2.json; phase-and-native-bothends.json; method-default-error-matrix.json",
+      "current_CODE_dependencies": [
+        "A192-C1-FINAL-ORIGINAL-ROOT-CUSTODY-PARENTHOOD-UNACCEPTED",
+        "A192-C2-SOURCE-NATIVE-RAW-REGISTRY-NOT-RETIRED"
+      ],
+      "whole_runtime_acceptance": false
+    },
+    {
+      "file": "tools/native_owner.py",
+      "symbol": "_receive",
+      "kind": "def",
+      "line": 920,
+      "end_exclusive": 1012,
+      "signature_defaults_text": "    def _receive(self):",
+      "region_sha256": "feb35010a4b8c90ddd47046196310dfbdaf9b94783272347775e334b12afea79",
+      "calls_text": [
+        "HolderStop",
+        "_receive",
+        "any",
+        "canonical_loads",
+        "get",
+        "in",
+        "isinstance",
+        "len",
+        "native_physical.get",
+        "observed.get",
+        "or",
+        "prior.values",
+        "self._accept_observer_handoff",
+        "self._accept_parent_handoff",
+        "self._verify_receipt",
+        "self.budget.reserve",
+        "self.channel.fileno",
+        "self.native.recv_packet",
+        "self.operation_end_ns",
+        "self.selector.unregister",
+        "set",
+        "terminal.get",
+        "type",
+        "value.get"
+      ],
+      "error_cleanup_sites": [],
+      "classification": "TEXT_REGION_NOT_AST_NOT_DYNAMIC_EXECUTION",
+      "review_relations": "whole17-all6-current3-new2.json; phase-and-native-bothends.json; method-default-error-matrix.json",
+      "current_CODE_dependencies": [
+        "A192-C1-FINAL-ORIGINAL-ROOT-CUSTODY-PARENTHOOD-UNACCEPTED",
+        "A192-C2-SOURCE-NATIVE-RAW-REGISTRY-NOT-RETIRED"
+      ],
+      "whole_runtime_acceptance": false
+    },
+    {
+      "file": "tools/native_owner.py",
+      "symbol": "_accept_parent_handoff",
+      "kind": "def",
+      "line": 1012,
+      "end_exclusive": 1031,
+      "signature_defaults_text": "    def _accept_parent_handoff(self):",
+      "region_sha256": "b9576a1b23d248a81f5895eb9f714b283f4fb485f292ef9bc241b3dbfe604979",
+      "calls_text": [
+        "HolderStop",
+        "_accept_parent_handoff",
+        "canonical",
+        "hashlib.sha256",
+        "hexdigest",
+        "len",
+        "self._remaining",
+        "self.budget.reserve",
+        "self.channel.fileno",
+        "self.handoff.get",
+        "self.native.send_packet",
+        "self.operation_end_ns"
+      ],
+      "error_cleanup_sites": [],
+      "classification": "TEXT_REGION_NOT_AST_NOT_DYNAMIC_EXECUTION",
+      "review_relations": "whole17-all6-current3-new2.json; phase-and-native-bothends.json; method-default-error-matrix.json",
+      "current_CODE_dependencies": [
+        "A192-C1-FINAL-ORIGINAL-ROOT-CUSTODY-PARENTHOOD-UNACCEPTED",
+        "A192-C2-SOURCE-NATIVE-RAW-REGISTRY-NOT-RETIRED"
+      ],
+      "whole_runtime_acceptance": false
+    },
+    {
+      "file": "tools/native_owner.py",
+      "symbol": "_accept_observer_handoff",
+      "kind": "def",
+      "line": 1031,
+      "end_exclusive": 1048,
+      "signature_defaults_text": "    def _accept_observer_handoff(self):",
+      "region_sha256": "04eedb6cf3ed507e9a3611d2b443d383b407f99ac33b0ac519cf9b9f6e0881a0",
+      "calls_text": [
+        "HolderStop",
+        "_accept_observer_handoff",
+        "canonical",
+        "hashlib.sha256",
+        "hexdigest",
+        "len",
+        "self._remaining",
+        "self.budget.reserve",
+        "self.channel.fileno",
+        "self.native.send_packet",
+        "self.operation_end_ns"
+      ],
+      "error_cleanup_sites": [],
+      "classification": "TEXT_REGION_NOT_AST_NOT_DYNAMIC_EXECUTION",
+      "review_relations": "whole17-all6-current3-new2.json; phase-and-native-bothends.json; method-default-error-matrix.json",
+      "current_CODE_dependencies": [
+        "A192-C1-FINAL-ORIGINAL-ROOT-CUSTODY-PARENTHOOD-UNACCEPTED",
+        "A192-C2-SOURCE-NATIVE-RAW-REGISTRY-NOT-RETIRED"
+      ],
+      "whole_runtime_acceptance": false
+    },
+    {
+      "file": "tools/native_owner.py",
+      "symbol": "_pipe",
+      "kind": "def",
+      "line": 1048,
+      "end_exclusive": 1066,
+      "signature_defaults_text": "    def _pipe(self,key):",
+      "region_sha256": "6e3939e23dcc782fcbabd915c01b57ea04520362116bda7d3f7b80cd4a7f6a77",
+      "calls_text": [
+        "HolderStop",
+        "_pipe",
+        "len",
+        "min",
+        "os.read",
+        "self.budget.release",
+        "self.budget.reserve",
+        "self.eof.add",
+        "self.selector.unregister",
+        "self.stderr_parts.append",
+        "self.stdout_parts.append"
+      ],
+      "error_cleanup_sites": [],
+      "classification": "TEXT_REGION_NOT_AST_NOT_DYNAMIC_EXECUTION",
+      "review_relations": "whole17-all6-current3-new2.json; phase-and-native-bothends.json; method-default-error-matrix.json",
+      "current_CODE_dependencies": [
+        "A192-C1-FINAL-ORIGINAL-ROOT-CUSTODY-PARENTHOOD-UNACCEPTED",
+        "A192-C2-SOURCE-NATIVE-RAW-REGISTRY-NOT-RETIRED"
+      ],
+      "whole_runtime_acceptance": false
+    },
+    {
+      "file": "tools/native_owner.py",
+      "symbol": "_direct_wait",
+      "kind": "def",
+      "line": 1066,
+      "end_exclusive": 1074,
+      "signature_defaults_text": "    def _direct_wait(self):",
+      "region_sha256": "b52034427f96177bd4afc3aecb28966512f3c9772aef1af622d598d3908dd9dc",
+      "calls_text": [
+        "HolderStop",
+        "_direct_wait",
+        "self.native.direct_root_wait",
+        "self.selector.unregister"
+      ],
+      "error_cleanup_sites": [],
+      "classification": "TEXT_REGION_NOT_AST_NOT_DYNAMIC_EXECUTION",
+      "review_relations": "whole17-all6-current3-new2.json; phase-and-native-bothends.json; method-default-error-matrix.json",
+      "current_CODE_dependencies": [
+        "A192-C1-FINAL-ORIGINAL-ROOT-CUSTODY-PARENTHOOD-UNACCEPTED",
+        "A192-C2-SOURCE-NATIVE-RAW-REGISTRY-NOT-RETIRED"
+      ],
+      "whole_runtime_acceptance": false
+    },
+    {
+      "file": "tools/native_owner.py",
+      "symbol": "cancel_and_reap",
+      "kind": "def",
+      "line": 1074,
+      "end_exclusive": 1090,
+      "signature_defaults_text": "    def cancel_and_reap(self):",
+      "region_sha256": "a588f2eace0bb50e436895d9ab388c9b11f74fb1ad6bbae97a5ac1e94dc59050",
+      "calls_text": [
+        "HolderStop",
+        "cancel_and_reap",
+        "self.native.begin_terminal",
+        "self.native.direct_root_wait",
+        "self.native.retire_direct_children"
+      ],
+      "error_cleanup_sites": [],
+      "classification": "TEXT_REGION_NOT_AST_NOT_DYNAMIC_EXECUTION",
+      "review_relations": "whole17-all6-current3-new2.json; phase-and-native-bothends.json; method-default-error-matrix.json",
+      "current_CODE_dependencies": [
+        "A192-C1-FINAL-ORIGINAL-ROOT-CUSTODY-PARENTHOOD-UNACCEPTED",
+        "A192-C2-SOURCE-NATIVE-RAW-REGISTRY-NOT-RETIRED"
+      ],
+      "whole_runtime_acceptance": false
+    },
+    {
+      "file": "tools/native_owner.py",
+      "symbol": "complete_error_pipes",
+      "kind": "def",
+      "line": 1090,
+      "end_exclusive": 1103,
+      "signature_defaults_text": "    def complete_error_pipes(self):",
+      "region_sha256": "310c6d1c7489d77b0a0eafa1880deeb862b1155e6d2c935b4f68d56ff6f99f35",
+      "calls_text": [
+        "HolderStop",
+        "complete_error_pipes",
+        "in",
+        "issubset",
+        "self._pipe",
+        "self._receive",
+        "self._remaining",
+        "self.selector.select",
+        "self.selector.unregister"
+      ],
+      "error_cleanup_sites": [],
+      "classification": "TEXT_REGION_NOT_AST_NOT_DYNAMIC_EXECUTION",
+      "review_relations": "whole17-all6-current3-new2.json; phase-and-native-bothends.json; method-default-error-matrix.json",
+      "current_CODE_dependencies": [
+        "A192-C1-FINAL-ORIGINAL-ROOT-CUSTODY-PARENTHOOD-UNACCEPTED",
+        "A192-C2-SOURCE-NATIVE-RAW-REGISTRY-NOT-RETIRED"
+      ],
+      "whole_runtime_acceptance": false
+    },
+    {
+      "file": "tools/native_owner.py",
+      "symbol": "_verify_receipt",
+      "kind": "def",
+      "line": 1103,
+      "end_exclusive": 1139,
+      "signature_defaults_text": "    def _verify_receipt(self):",
+      "region_sha256": "c1633ff481f359e393252986037aeb0b87ded7825736f375843207ba94e68f9f",
+      "calls_text": [
+        "HolderStop",
+        "_verify_receipt",
+        "canonical_loads",
+        "full9",
+        "hashlib.sha256",
+        "int",
+        "isinstance",
+        "join",
+        "len",
+        "min",
+        "os.fstat",
+        "os.open",
+        "os.pread",
+        "os.stat",
+        "parts.append",
+        "self._remaining",
+        "self.budget.close_fd",
+        "self.budget.reserve",
+        "self.handoff.get",
+        "set",
+        "stat.S_IMODE",
+        "stat.S_ISREG",
+        "state.hexdigest",
+        "state.update"
+      ],
+      "error_cleanup_sites": [
+        {
+          "line": 1136,
+          "text": "finally:self.budget.close_fd(fd,'Root.completed_terminal.read')"
+        }
+      ],
+      "classification": "TEXT_REGION_NOT_AST_NOT_DYNAMIC_EXECUTION",
+      "review_relations": "whole17-all6-current3-new2.json; phase-and-native-bothends.json; method-default-error-matrix.json",
+      "current_CODE_dependencies": [
+        "A192-C1-FINAL-ORIGINAL-ROOT-CUSTODY-PARENTHOOD-UNACCEPTED",
+        "A192-C2-SOURCE-NATIVE-RAW-REGISTRY-NOT-RETIRED"
+      ],
+      "whole_runtime_acceptance": false
+    },
+    {
+      "file": "tools/native_owner.py",
+      "symbol": "finish",
+      "kind": "def",
+      "line": 1139,
+      "end_exclusive": 1246,
+      "signature_defaults_text": "    def finish(self):",
+      "region_sha256": "514a288b7da87ff399bac93b4944f605019e44de1433b0218c8dd56e59c0a617",
+      "calls_text": [
+        "HolderStop",
+        "dict",
+        "finish",
+        "hard_end_trailer.hex",
+        "hashlib.sha256",
+        "hex",
+        "hexdigest",
+        "join",
+        "len",
+        "os.WEXITSTATUS",
+        "os.WIFEXITED",
+        "part.hex",
+        "self._direct_wait",
+        "self._pipe",
+        "self._receive",
+        "self._remaining",
+        "self.budget.reserve",
+        "self.budget.retain_origin",
+        "self.capsule.complete",
+        "self.capsule.retain",
+        "self.channel.recv",
+        "self.eof.add",
+        "self.handoff.get",
+        "self.handoff_raw.hex",
+        "self.selector.select",
+        "sorted",
+        "struct.unpack",
+        "zip"
+      ],
+      "error_cleanup_sites": [
+        {
+          "line": 1230,
+          "text": "except BaseException as exc:"
+        }
+      ],
+      "classification": "TEXT_REGION_NOT_AST_NOT_DYNAMIC_EXECUTION",
+      "review_relations": "whole17-all6-current3-new2.json; phase-and-native-bothends.json; method-default-error-matrix.json",
+      "current_CODE_dependencies": [
+        "A192-C1-FINAL-ORIGINAL-ROOT-CUSTODY-PARENTHOOD-UNACCEPTED",
+        "A192-C2-SOURCE-NATIVE-RAW-REGISTRY-NOT-RETIRED"
+      ],
+      "whole_runtime_acceptance": false
+    },
+    {
+      "file": "tools/native_owner.py",
+      "symbol": "observe_selected_root_completion",
+      "kind": "def",
+      "line": 1246,
+      "end_exclusive": 1267,
+      "signature_defaults_text": "def observe_selected_root_completion(permit,selected_permit,selection,resource_contract,capsule=None):",
+      "region_sha256": "a4e2a1e8d7dd54ccb56dd8b5284817833688e9fa8bdf334e978ba6516d7c216a",
+      "calls_text": [
+        "HolderStop",
+        "RootCompletionObserver.__new__",
+        "capsule.attach",
+        "capsule.complete",
+        "capsule.retain",
+        "exception_detail",
+        "observe_selected_root_completion",
+        "owner.__init__",
+        "owner.finish",
+        "type"
+      ],
+      "error_cleanup_sites": [
+        {
+          "line": 1256,
+          "text": "except BaseException as exc:"
+        }
+      ],
+      "classification": "TEXT_REGION_NOT_AST_NOT_DYNAMIC_EXECUTION",
+      "review_relations": "whole17-all6-current3-new2.json; phase-and-native-bothends.json; method-default-error-matrix.json",
+      "current_CODE_dependencies": [
+        "A192-C1-FINAL-ORIGINAL-ROOT-CUSTODY-PARENTHOOD-UNACCEPTED",
+        "A192-C2-SOURCE-NATIVE-RAW-REGISTRY-NOT-RETIRED"
+      ],
+      "whole_runtime_acceptance": false
+    },
+    {
+      "file": "tools/native_owner.py",
+      "symbol": "consume_selected_observer_capsule",
+      "kind": "def",
+      "line": 1267,
+      "end_exclusive": 1351,
+      "signature_defaults_text": "def consume_selected_observer_capsule(capsule):",
+      "region_sha256": "e159a67ea578b2c1dee11cbf76b5faeee354e6e18982aaef3cde88f9417557c0",
+      "calls_text": [
+        "HolderStop",
+        "any",
+        "canonical",
+        "canonical_loads",
+        "capsule.begin_consume",
+        "capsule.consumed",
+        "capsule.retain",
+        "consume_selected_observer_capsule",
+        "hashlib.sha256",
+        "hexdigest",
+        "in",
+        "isinstance",
+        "len",
+        "or",
+        "os.getpid",
+        "owner._remaining",
+        "owner.budget.close_uncertainties.append",
+        "owner.budget.release",
+        "owner.budget.reserve",
+        "owner.budget.retain_origin",
+        "owner.native.accept_existing_parent_delivery",
+        "owner.native.capture_root_ledger",
+        "owner.native.recv_packet",
+        "owner.native.send_root_completion",
+        "owner.native.snapshot",
+        "owner.operation_end_ns",
+        "prior.values",
+        "selector.close",
+        "set",
+        "tuple",
+        "type",
+        "value.get"
+      ],
+      "error_cleanup_sites": [
+        {
+          "line": 1291,
+          "text": "except BaseException as exc:"
+        },
+        {
+          "line": 1346,
+          "text": "except BaseException as exc:"
+        }
+      ],
+      "classification": "TEXT_REGION_NOT_AST_NOT_DYNAMIC_EXECUTION",
+      "review_relations": "whole17-all6-current3-new2.json; phase-and-native-bothends.json; method-default-error-matrix.json",
+      "current_CODE_dependencies": [
+        "A192-C1-FINAL-ORIGINAL-ROOT-CUSTODY-PARENTHOOD-UNACCEPTED",
+        "A192-C2-SOURCE-NATIVE-RAW-REGISTRY-NOT-RETIRED"
+      ],
+      "whole_runtime_acceptance": false
+    },
+    {
+      "file": "tools/native_owner.py",
+      "symbol": "retain_selected_final_caller_capsule",
+      "kind": "def",
+      "line": 1351,
+      "end_exclusive": 1384,
+      "signature_defaults_text": "def retain_selected_final_caller_capsule(capsule):",
+      "region_sha256": "2cbfb6d6b7ef563b66a6509e963b3c3404ee8414c5a3ddc3c30a89ffa342f6b1",
+      "calls_text": [
+        "HolderStop",
+        "capsule.begin_consume",
+        "capsule.consumed",
+        "capsule.retain",
+        "finish",
+        "owner._remaining",
+        "owner.budget.close_uncertainties.append",
+        "owner.budget.release",
+        "owner.budget.reserve",
+        "owner.budget.retain_origin",
+        "retain_selected_final_caller_capsule",
+        "selector.close",
+        "type",
+        "value.get"
+      ],
+      "error_cleanup_sites": [
+        {
+          "line": 1357,
+          "text": "fixed C entry actually calls native_caller_destruct/Py_FinalizeEx, retires"
+        },
+        {
+          "line": 1370,
+          "text": "except BaseException as exc:"
+        },
+        {
+          "line": 1381,
+          "text": "except BaseException as exc:"
+        }
+      ],
+      "classification": "TEXT_REGION_NOT_AST_NOT_DYNAMIC_EXECUTION",
+      "review_relations": "whole17-all6-current3-new2.json; phase-and-native-bothends.json; method-default-error-matrix.json",
+      "current_CODE_dependencies": [
+        "A192-C1-FINAL-ORIGINAL-ROOT-CUSTODY-PARENTHOOD-UNACCEPTED",
+        "A192-C2-SOURCE-NATIVE-RAW-REGISTRY-NOT-RETIRED"
+      ],
+      "whole_runtime_acceptance": false
+    },
+    {
+      "file": "tools/native_support.py",
+      "symbol": "SourceRawOrigin",
+      "kind": "class",
+      "line": 12,
+      "end_exclusive": 15,
+      "signature_defaults_text": "class SourceRawOrigin:",
+      "region_sha256": "50576dfe7d0c52a9ed15f991ae76c026c93bead865c274336fab5efd591de111",
+      "calls_text": [],
+      "error_cleanup_sites": [],
+      "classification": "TEXT_REGION_NOT_AST_NOT_DYNAMIC_EXECUTION",
+      "review_relations": "whole17-all6-current3-new2.json; phase-and-native-bothends.json; method-default-error-matrix.json",
+      "current_CODE_dependencies": [
+        "A192-C1-FINAL-ORIGINAL-ROOT-CUSTODY-PARENTHOOD-UNACCEPTED",
+        "A192-C2-SOURCE-NATIVE-RAW-REGISTRY-NOT-RETIRED"
+      ],
+      "whole_runtime_acceptance": false
+    },
+    {
+      "file": "tools/native_support.py",
+      "symbol": "SourceRawOwner",
+      "kind": "class",
+      "line": 15,
+      "end_exclusive": 23,
+      "signature_defaults_text": "class SourceRawOwner:",
+      "region_sha256": "02a07dc9b7c6a0a406bc1c65ffa117a2b4817ac68a909092e3fc7a730cce7cf4",
+      "calls_text": [],
+      "error_cleanup_sites": [],
+      "classification": "TEXT_REGION_NOT_AST_NOT_DYNAMIC_EXECUTION",
+      "review_relations": "whole17-all6-current3-new2.json; phase-and-native-bothends.json; method-default-error-matrix.json",
+      "current_CODE_dependencies": [
+        "A192-C1-FINAL-ORIGINAL-ROOT-CUSTODY-PARENTHOOD-UNACCEPTED",
+        "A192-C2-SOURCE-NATIVE-RAW-REGISTRY-NOT-RETIRED"
+      ],
+      "whole_runtime_acceptance": false
+    },
+    {
+      "file": "tools/native_support.py",
+      "symbol": "__init__",
+      "kind": "def",
+      "line": 23,
+      "end_exclusive": 26,
+      "signature_defaults_text": "    def __init__(self,native):",
+      "region_sha256": "1457716a827463ea4e4bd79c15d65c1db26975f393f87ffdb230d40a85d9f4fd",
+      "calls_text": [
+        "__init__"
+      ],
+      "error_cleanup_sites": [],
+      "classification": "TEXT_REGION_NOT_AST_NOT_DYNAMIC_EXECUTION",
+      "review_relations": "whole17-all6-current3-new2.json; phase-and-native-bothends.json; method-default-error-matrix.json",
+      "current_CODE_dependencies": [
+        "A192-C1-FINAL-ORIGINAL-ROOT-CUSTODY-PARENTHOOD-UNACCEPTED",
+        "A192-C2-SOURCE-NATIVE-RAW-REGISTRY-NOT-RETIRED"
+      ],
+      "whole_runtime_acceptance": false
+    }
+  ],
+  "files52": [],
+  "reads_bytes": 1437030,
+  "SourceReady": false,
+  "runtime": "NOT_RUN"
+}

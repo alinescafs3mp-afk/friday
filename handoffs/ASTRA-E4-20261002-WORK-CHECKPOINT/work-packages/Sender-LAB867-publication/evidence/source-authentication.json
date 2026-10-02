@@ -1,0 +1,14 @@
+{
+  "caller_bytes": 65450,
+  "leaf_count": 136,
+  "leaf_identity_mismatch": 0,
+  "leaf_sha_mismatch": 0,
+  "pathset_recipe": "newline_terminated_relative_paths",
+  "pathset_sha256": "cc1ab708c413466477cb90bd9939574ad8b523bd97ca0483413168d8dd04d206",
+  "pins_verified": 165,
+  "predecessor_manifest_sha256": "c82c4662c1c7702eea92739b907b9b6bbe9dde78624bc0aedb90db4c21361ab7",
+  "predecessor_seal_sha256": "a1ad25fc62e135987cc7de69a0df53963f756feb24758b34ac96ba3d45c110cf",
+  "schema": "friday.grok.lab867.source-authentication.v1",
+  "sender_bytes": 65443,
+  "sender_caller_ceiling": 65536
+}

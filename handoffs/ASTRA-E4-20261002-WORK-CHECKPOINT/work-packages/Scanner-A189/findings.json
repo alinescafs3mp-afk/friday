@@ -1,0 +1,20 @@
+{
+  "schema": "friday.a189.author.remaining-CODE.v1",
+  "remaining_CODE": [
+    {
+      "id": "A189-C1-FINAL-ORIGINAL-PROCESS-CUSTODY-PARENTHOOD-UNACCEPTED",
+      "status": "OPEN_CURRENT_CODE",
+      "statement": "Final physical original process loss is not preceded on all prefixes by confirmed finite retirement or actual legal original complete raw/native/202/FD/slot/parenthood acceptance",
+      "precise_sites": "end-parenthood-raw-matrix.json",
+      "original_constraints": "SOURCE.md and authenticated original A180 mandatory edges",
+      "scope": "ACTUAL_WHOLE52_28_14_61_17_6_3_2_202",
+      "future_facts_alone_not_CODE": true
+    }
+  ],
+  "generic_raw_firstcatch": "IMPLEMENTED_AUTHOR_ATTEMPT_UNREVIEWED_DEPENDS_FINAL_LIFETIME",
+  "SourceReady": false,
+  "Root_admission": false,
+  "runtime": "NOT_RUN",
+  "gates": "NOT_RUN",
+  "GO": false
+}

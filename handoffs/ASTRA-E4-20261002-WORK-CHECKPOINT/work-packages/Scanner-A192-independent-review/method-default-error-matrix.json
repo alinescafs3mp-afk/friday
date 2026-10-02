@@ -1,0 +1,305 @@
+{
+  "schema": "friday.a192.independent.performing-default-error-method-families.v1",
+  "scope": "All28 actual code files; all471 lexical definition regions and exact signatures/defaults are methods-part-01..10.json, not AST/full dynamic-call proof. Family decisions below independently join actual normal/error/default constructors/receivers and both native ends.",
+  "families": [
+    {
+      "index": 0,
+      "id": "SOURCE_FACTORY",
+      "actual_methods_defaults": "tools/native_support.py source_raw_owner()/SourceRawOwner.__init__/capture; source/bounds.py new_meter(raw_owner=None)",
+      "producer": "NativeHandle21 and C source_raw_custody",
+      "normal": "C root before __init__/snapshot/dict; exact primary pending before node allocation; recorder separately pending",
+      "error_cleanup_recorder": "Constructor or recorder failure uses exact existing16 lane/raise; no overwrite of uncommitted pending",
+      "same_owner_aliases": "partial Owner+NativeHandle21+exceptionframes -> same C Source registry",
+      "current_CODE_dependencies": [
+        "A192-C2-SOURCE-NATIVE-RAW-REGISTRY-NOT-RETIRED"
+      ],
+      "runtime": "NOT_RUN"
+    },
+    {
+      "index": 1,
+      "id": "CONTEXT_STATE",
+      "actual_methods_defaults": "context.bind_stock; contracts.bind_loaded_implementation/bind_loaded_source_graph/loaded_globals_cause; state_binding predicates",
+      "producer": "Seven exact actual selected raw roles+runtime/module/default/closure/native state",
+      "normal": "Actual copy_context+same owner, stock bindings/generation/held9 checked, no mutable-module broad bypass",
+      "error_cleanup_recorder": "Caught administrative/publisher errors preowned before normal refusal; unhandled propagates through selected owned entry",
+      "same_owner_aliases": "ContextVar token/meter/root/native/bodies/schema/code graph same original fence",
+      "current_CODE_dependencies": [
+        "A192-C1-FINAL-ORIGINAL-ROOT-CUSTODY-PARENTHOOD-UNACCEPTED",
+        "A192-C2-SOURCE-NATIVE-RAW-REGISTRY-NOT-RETIRED"
+      ],
+      "runtime": "NOT_RUN"
+    },
+    {
+      "index": 2,
+      "id": "PUBLIC_PERFORMING",
+      "actual_methods_defaults": "scan_retained(...stock_context=None); scan_retained_bytes; _run_owned",
+      "producer": "Selected Source worker actual scan_retained_bytes call",
+      "normal": "Owner allocated before meter; normal finish/transfer closes token only, aliases retained",
+      "error_cleanup_recorder": "Primary catches now capture before exception_owned_result; outer BaseException raw capture before reraise; finally reset",
+      "same_owner_aliases": "OwnedMap/OwnedBytes/ResultOwner/meter/rawroot same actual root",
+      "current_CODE_dependencies": [
+        "A192-C2-SOURCE-NATIVE-RAW-REGISTRY-NOT-RETIRED"
+      ],
+      "runtime": "NOT_RUN"
+    },
+    {
+      "index": 3,
+      "id": "PUBLIC_DEFAULT",
+      "actual_methods_defaults": "scan_rows(...publisher_evidence=None,mode=None,meter=None); _finish(resources=None,meter=None); load_retained_index",
+      "producer": "Finite DATA defaults or actual called selected Source generic helper",
+      "normal": "Defaults do not mint performing permission; actual selected default path native root fallback exists",
+      "error_cleanup_recorder": "Actual caught DigestStop/ValueError/generic error owned before projection and normal return",
+      "same_owner_aliases": "Same root via ContextVar/current C native root; no absent key=>null normalization",
+      "current_CODE_dependencies": [
+        "A192-C2-SOURCE-NATIVE-RAW-REGISTRY-NOT-RETIRED"
+      ],
+      "runtime": "NOT_RUN"
+    },
+    {
+      "index": 4,
+      "id": "TERMINAL_CLEANUP",
+      "actual_methods_defaults": "finish_owned/_finish_exception_refusal/_with_origin_successor",
+      "producer": "Reached schema/encoder/lease/close/error successor producers",
+      "normal": "Same owner before result/schema/output construction; preserved all full causal facts",
+      "error_cleanup_recorder": "Reached secondary close/release/projection/recorder actual objects first captured; no primary-only suppression",
+      "same_owner_aliases": "primary+secondary frames/meter/leases/ranges/finalbytes -> rawroot",
+      "current_CODE_dependencies": [
+        "A192-C2-SOURCE-NATIVE-RAW-REGISTRY-NOT-RETIRED",
+        "A192-C1-FINAL-ORIGINAL-ROOT-CUSTODY-PARENTHOOD-UNACCEPTED"
+      ],
+      "runtime": "NOT_RUN"
+    },
+    {
+      "index": 5,
+      "id": "CANONICAL",
+      "actual_methods_defaults": "canonical_loads/sha256/bytes_bounded defaults resources=None,meter=None",
+      "producer": "Strict raw JSON ingress/owned encoder",
+      "normal": "Finite bytes/depth/fullkeys, wholeencoding actual budgets; unsafe bodies never supplied",
+      "error_cleanup_recorder": "Reached caught host/policy exception is captured before cause or normal refusal",
+      "same_owner_aliases": "Scratch is not refunded if exception graph holds alias",
+      "current_CODE_dependencies": [
+        "A192-C2-SOURCE-NATIVE-RAW-REGISTRY-NOT-RETIRED"
+      ],
+      "runtime": "NOT_RUN"
+    },
+    {
+      "index": 6,
+      "id": "SCHEMA",
+      "actual_methods_defaults": "schema_validate.validate_document resources=None,meter=None and loader/ref consumers",
+      "producer": "All14 exact owned schemas/61 refs incl aliases",
+      "normal": "All stock-traversed ref targets resolve; actual strict error consumer remains selected-runtime qualification",
+      "error_cleanup_recorder": "Actual caught loader/validation errors preowned before return; no runtime schema-engine execution",
+      "same_owner_aliases": "14/61 current bytes tied both producer/error/result receiver",
+      "current_CODE_dependencies": [
+        "A192-C2-SOURCE-NATIVE-RAW-REGISTRY-NOT-RETIRED",
+        "A192-C1-FINAL-ORIGINAL-ROOT-CUSTODY-PARENTHOOD-UNACCEPTED"
+      ],
+      "runtime": "NOT_RUN"
+    },
+    {
+      "index": 7,
+      "id": "DIGESTS",
+      "actual_methods_defaults": "content_sha256/record_digest/crc32 resources=None,meter=None",
+      "producer": "Bounded original SHA256/384/512+CRC stock/HeldRange chunks",
+      "normal": "Full raw bytes/algorithms preserved with budgets and literal symlink body",
+      "error_cleanup_recorder": "Caught ImportError/MemoryError/DigestStop capture before normal cause; others propagate into actual owned Source catch",
+      "same_owner_aliases": "actualhashstates/range/scratch aliases samecapturedowner",
+      "current_CODE_dependencies": [
+        "A192-C2-SOURCE-NATIVE-RAW-REGISTRY-NOT-RETIRED"
+      ],
+      "runtime": "NOT_RUN"
+    },
+    {
+      "index": 8,
+      "id": "COMPRESSION_PERFORMING",
+      "actual_methods_defaults": "stream_reader/_decode_chunks_admitted/_feed_chunks/DecodedReader",
+      "producer": "Actual selected stock decoder constructor/protocol/state/EOF",
+      "normal": "Bounded <=64KiB decoded pieces and full original methods; no full-buffer shortcut",
+      "error_cleanup_recorder": "Host import/API/decode/allocator caught graph retained before BudgetStop/projection; generator cleanup reaches selected owned wrapper",
+      "same_owner_aliases": "decoder/pending/chunks/reader/frame/rawpayload same original Source aliasgraph",
+      "current_CODE_dependencies": [
+        "A192-C2-SOURCE-NATIVE-RAW-REGISTRY-NOT-RETIRED"
+      ],
+      "runtime": "NOT_RUN"
+    },
+    {
+      "index": 9,
+      "id": "COMPRESSION_DEFAULT",
+      "actual_methods_defaults": "decode_admitted(...resources=None,meter=None) finite DATA",
+      "producer": "Legacy finite default decoder adapter, not performing archive body consumer",
+      "normal": "Original finite DATA output retained; not replacement of streaming performing route",
+      "error_cleanup_recorder": "Catch exact origin before tuple-refusal return; terminal fixed resources unchanged",
+      "same_owner_aliases": "buffer/returned bytes/iterator/raworigin under actual selected root when performing caller",
+      "current_CODE_dependencies": [
+        "A192-C2-SOURCE-NATIVE-RAW-REGISTRY-NOT-RETIRED"
+      ],
+      "runtime": "NOT_RUN"
+    },
+    {
+      "index": 10,
+      "id": "ZIP-WHEEL",
+      "actual_methods_defaults": "zip_wheel.scan default wrapper and streaming/member/raw/metadata/RECORD routines",
+      "producer": "Full central/local/Zip64/descriptors/ranges/name/CRC/WHEEL/METADATA/RECORD",
+      "normal": "Original rawpublisher and RequiresPython fields, digest/signature/self/link exceptions intact",
+      "error_cleanup_recorder": "Real stream and wrapper firstcatches capture raw before exception_owned_result; secondary cleanup retained",
+      "same_owner_aliases": "lease/rootclient/HeldRange/decoder/payload/rawframe under same meter/native",
+      "current_CODE_dependencies": [
+        "A192-C2-SOURCE-NATIVE-RAW-REGISTRY-NOT-RETIRED",
+        "A192-C1-FINAL-ORIGINAL-ROOT-CUSTODY-PARENTHOOD-UNACCEPTED"
+      ],
+      "runtime": "NOT_RUN"
+    },
+    {
+      "index": 11,
+      "id": "DEB-AR-TAR-PAX",
+      "actual_methods_defaults": "deb_archive.scan default wrapper and AR/TAR/PAX/link routines",
+      "producer": "Complete physical framing/numeric/name/order/extension/state/replay",
+      "normal": "Original supported AR/PAX/GNU/TAR/full512-byte closure retained",
+      "error_cleanup_recorder": "Real stream and wrapper catches capture before typed normal return; raw cleanup actual errors remain",
+      "same_owner_aliases": "raw headers/extension/decoded reader/frame/lease aliases same root",
+      "current_CODE_dependencies": [
+        "A192-C2-SOURCE-NATIVE-RAW-REGISTRY-NOT-RETIRED",
+        "A192-C1-FINAL-ORIGINAL-ROOT-CUSTODY-PARENTHOOD-UNACCEPTED"
+      ],
+      "runtime": "NOT_RUN"
+    },
+    {
+      "index": 12,
+      "id": "DEB822-SEMANTICS",
+      "actual_methods_defaults": "deb_archive control reader; source/semantics.py",
+      "producer": "Original simple/folded/multiline supported rawfields and semantics",
+      "normal": "Exact supported rawfield/hash/order/unknown-simple and memberlinks; no domain cut",
+      "error_cleanup_recorder": "Host decoder/text error reaches actual owned selected wrapper",
+      "same_owner_aliases": "controlbytes/folded fields/rawmetadata frame aliases retained",
+      "current_CODE_dependencies": [
+        "A192-C2-SOURCE-NATIVE-RAW-REGISTRY-NOT-RETIRED"
+      ],
+      "runtime": "NOT_RUN"
+    },
+    {
+      "index": 13,
+      "id": "RAW_REPLAY",
+      "actual_methods_defaults": "member_raw_cause/wheel_raw_cause/tar_archive_cause/deb_raw_cause(resources=None,meter=None)",
+      "producer": "Independent literal member/archive raw replay",
+      "normal": "No inferred normalized surrogate; original no-payload static review only",
+      "error_cleanup_recorder": "All normal-return caught actual raw Value/Unicode/Key/Type/Index/struct/numeric exceptions captured first",
+      "same_owner_aliases": "raw record/publisher/header body identity same original root",
+      "current_CODE_dependencies": [
+        "A192-C2-SOURCE-NATIVE-RAW-REGISTRY-NOT-RETIRED"
+      ],
+      "runtime": "NOT_RUN"
+    },
+    {
+      "index": 14,
+      "id": "CUSTODY_R2",
+      "actual_methods_defaults": "custody default acquire/range/wrappers; RootHolderClient/retainOriginFailure original7",
+      "producer": "Held actual mount/named9/fullbytes/originalorigin",
+      "normal": "Seven repaired original R2 firstcatches credited; current wrapper raw constructors supplement",
+      "error_cleanup_recorder": "Once-close and uncertain failure remains raw-owned; causal leaf facts complete",
+      "same_owner_aliases": "meter owned_origin_exceptions+generic root both actual graphs, FD aliases not guessedfree",
+      "current_CODE_dependencies": [
+        "A192-C2-SOURCE-NATIVE-RAW-REGISTRY-NOT-RETIRED",
+        "A192-C1-FINAL-ORIGINAL-ROOT-CUSTODY-PARENTHOOD-UNACCEPTED"
+      ],
+      "runtime": "NOT_RUN"
+    },
+    {
+      "index": 15,
+      "id": "CONTROLS_DEFAULT",
+      "actual_methods_defaults": "load_catalog/load_contract resources=None,meter=None; run_ordinary_contract",
+      "producer": "Original control JSON/ordinary independent actual output/trace",
+      "normal": "All30/F0F11/C01C14/31+20+55/6 and significant negatives retained",
+      "error_cleanup_recorder": "Firstcaught DigestStop/Memory/OSError/Value/Key/Type captured before normal failure projection",
+      "same_owner_aliases": "Actual trusted default stockJSON call graph same root; unsafe historical bodies abstract required-not-run",
+      "current_CODE_dependencies": [
+        "A192-C2-SOURCE-NATIVE-RAW-REGISTRY-NOT-RETIRED",
+        "A192-C1-FINAL-ORIGINAL-ROOT-CUSTODY-PARENTHOOD-UNACCEPTED"
+      ],
+      "runtime": "NOT_RUN"
+    },
+    {
+      "index": 16,
+      "id": "ORIGINAL_METADATA_AGGREGATE",
+      "actual_methods_defaults": "contracts/broker_map/public/normalize/filename/guards",
+      "producer": "202 current stockmetadata/rawpublisher/class/held9, full350/512 recipe/install/authority/approval/golden",
+      "normal": "All exact original byteequal 24 data/schema/control/plan; absent/null/empty RequiresPython distinction retained",
+      "error_cleanup_recorder": "No newly invented local bug on unchanged body without actual cause; reached exceptions owned by current selected wrapper",
+      "same_owner_aliases": "actual role/raw/default/code/closure and originalaggregate hash/schema/cost join",
+      "current_CODE_dependencies": [
+        "A192-C1-FINAL-ORIGINAL-ROOT-CUSTODY-PARENTHOOD-UNACCEPTED",
+        "A192-C2-SOURCE-NATIVE-RAW-REGISTRY-NOT-RETIRED"
+      ],
+      "runtime": "NOT_RUN"
+    },
+    {
+      "index": 17,
+      "id": "FIXTURE_EXPORT_BOUNDARY",
+      "actual_methods_defaults": "fixtures.build_zip; source/__init__ publicexports",
+      "producer": "Unchanged ordinary fixture-only text and public API map",
+      "normal": "No fixture/test/native/archive execution; ordinary performing obligation unchanged",
+      "error_cleanup_recorder": "Historical unsafe fixture/generator/body excluded; not replacing live scenarios",
+      "same_owner_aliases": "Fixture absence/selected futureRoot alone NOTCODE",
+      "current_CODE_dependencies": [
+        "A192-C1-FINAL-ORIGINAL-ROOT-CUSTODY-PARENTHOOD-UNACCEPTED",
+        "A192-C2-SOURCE-NATIVE-RAW-REGISTRY-NOT-RETIRED"
+      ],
+      "runtime": "NOT_RUN"
+    },
+    {
+      "index": 18,
+      "id": "ROOT_SOURCE_RECEIVER",
+      "actual_methods_defaults": "native_owner.NativeRootOwner/run_selected_source/consume_selected_source_capsule; root_holder.launch_selected_source",
+      "producer": "Actual independently selected original opaquepermit/nativeparent/generation/caps/Sourcebirth",
+      "normal": "All202 beforechild; called both ends; Source stdout/stderr/native120/EOF/directwait and validated REFUSED exactnegative preserved",
+      "error_cleanup_recorder": "Caller prospective raworiginnodes capture primary+secondary before projections; unconfirmed external end stillC1",
+      "same_owner_aliases": "holder13500416/206207descriptions/partialcapsule/rawRoot/Source directparent",
+      "current_CODE_dependencies": [
+        "A192-C1-FINAL-ORIGINAL-ROOT-CUSTODY-PARENTHOOD-UNACCEPTED",
+        "A192-C2-SOURCE-NATIVE-RAW-REGISTRY-NOT-RETIRED"
+      ],
+      "runtime": "NOT_RUN"
+    },
+    {
+      "index": 19,
+      "id": "ROOT_OBSERVER_FINAL_RECEIVER",
+      "actual_methods_defaults": "native_owner.RootCompletionObserver/observe_selected_root/retain_selected_final_caller_capsule; root_holder.complete_selected_root",
+      "producer": "Actual preinit directRoot/pidfd/generation and Python receiver matching samepair",
+      "normal": "Rootnative216/realEOF/directwait/credential/start/end/hash/ACK; finalkind2 actual localconsumer",
+      "error_cleanup_recorder": "Finite child errors/secondary nodes preserved; no lateparenthood or infinite observer",
+      "same_owner_aliases": "Exactlyoriginal samecaller resources; BYTE receipt not complete raw outsideownership",
+      "current_CODE_dependencies": [
+        "A192-C1-FINAL-ORIGINAL-ROOT-CUSTODY-PARENTHOOD-UNACCEPTED"
+      ],
+      "runtime": "NOT_RUN"
+    },
+    {
+      "index": 20,
+      "id": "NATIVE_SOURCE_MAIN",
+      "actual_methods_defaults": "source_owner.c main +source_raw_custody/retain_source_raw_exception",
+      "producer": "NativeSource rawregistry/entry errorlane16",
+      "normal": "New lowlevel PyRun_FileExFlags preserves actual errors before threadstateclear",
+      "error_cleanup_recorder": "Only packet error Py_CLEAR; never Source rawroot/newcaller lane cleanup; FDcloseafterFinalize",
+      "same_owner_aliases": "C externalstrongreferences do not constituteconfirmedfinite retirement at Sourceendpoint",
+      "current_CODE_dependencies": [
+        "A192-C2-SOURCE-NATIVE-RAW-REGISTRY-NOT-RETIRED"
+      ],
+      "runtime": "NOT_RUN"
+    },
+    {
+      "index": 21,
+      "id": "NATIVE_ROOT_WARM_COLD",
+      "actual_methods_defaults": "source_owner.c native_caller_destruct/native_cold_original_caller_consume/hard_end/run_selected_existing_caller",
+      "producer": "Original Root rawgraphs/FDslots/children/tasks/caller/minends",
+      "normal": "Warm allconfirmedresources close-before-clear genuine; physicalend enforcement/kernelclear_tid genuine",
+      "error_cleanup_recorder": "Uncertain warm/cold/startup/hard/taskconfirmation actual TGID loss lacks accepted outside custody/parenthood",
+      "same_owner_aliases": "sameTGID registry not outside owner; ownexit125 and graphretention not adoption",
+      "current_CODE_dependencies": [
+        "A192-C1-FINAL-ORIGINAL-ROOT-CUSTODY-PARENTHOOD-UNACCEPTED"
+      ],
+      "runtime": "NOT_RUN"
+    }
+  ],
+  "whole_source_closed": false,
+  "original_scope_cut": false,
+  "no_candidate_execution": true
+}

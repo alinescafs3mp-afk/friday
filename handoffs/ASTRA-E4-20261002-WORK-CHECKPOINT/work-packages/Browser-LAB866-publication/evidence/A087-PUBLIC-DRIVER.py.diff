@@ -1,0 +1,21 @@
+--- a/source/A087-PUBLIC-DRIVER.py
++++ b/source/A087-PUBLIC-DRIVER.py
+@@ -1202,6 +1202,9 @@
+         all((record["fd"] is None or (record["closed"] is True and record["close_attempted"] is True)) and
+             record["close_error"] is None for record in value["descriptor_records"]),
+         "A171_ACTUAL_OPERATION_DESCRIPTOR_CLEANUP")
++    dependency_errors=[item for item in value["facts"].get("run_errors") or [] if item!=meta["cause"]]
++    need(not dependency_errors and value["facts"].get("sticky_uncertainty") is not True,
++        "A171_DEPENDENCY_CLEANUP_BLOCKS_SUCCESS")
+     need(value["state"]==meta["state"] and value["started_routes"]==meta["started_routes"],
+         "A171_ORIGINAL_STATE_STARTS")
+     need(type(value["stages"]) is dict and value["stages"].get(meta["stage"],0)>0,
+@@ -1231,6 +1234,8 @@
+     actual_times=[int(phase["at_ns"]) for phase in value["phase_order"]]
+     need(actual_times==sorted(actual_times),"A171_ACTUAL_MONOTONIC_PHASE_ORDER")
+     for raw in value["operation_raw"]:
++        if raw.get("transport")=="stdout_frame" and type(raw.get("raw_hex")) is not str:
++            need(False,"A171_FULL_RAW_FRAME_NOT_RESTORED")
+         actual=bytes.fromhex(raw["raw_hex"])
+         need(raw["hash_only"] is False and len(actual)==raw["bytes"] and
+             hashlib.sha256(actual).hexdigest()==raw["sha256"],"A171_FULL_OPERATION_RAW_HASH")

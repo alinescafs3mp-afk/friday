@@ -1,0 +1,40 @@
+{
+  "schema": "friday.a189.current3-matrix.v1",
+  "count": 3,
+  "rows": [
+    {
+      "original_id": "A176-C1-ORIGINAL-HARD-END-NOT-ENFORCED",
+      "genuine_prior_credit": "Preinit immutable interval + original hard process exit; earlier same-budget task cutoff, confirmed kernel clear_tid before cold consume. Startup/cutoff/wait failures and cold unfinalized graph have no accepted final process/custody consumer; no completed PyFinalize/native216 invented.",
+      "actual_current_scope": "Original whole dependency preserved; warm FD/error retirement and Source/native raw registry are changed current bytes",
+      "current_code_dependencies": [
+        "A189-C1-FINAL-ORIGINAL-PROCESS-CUSTODY-PARENTHOOD-UNACCEPTED"
+      ],
+      "final_acceptance": "NOT_ACCEPTED_AUTHOR_ATTEMPT",
+      "actual_source_index": "source-index.json",
+      "runtime": "NOT_RUN"
+    },
+    {
+      "original_id": "A176-C2-UNREAPED-DIRECT-CHILD-CUSTODY-LOSS",
+      "genuine_prior_credit": "Both actual direct child families now preowned at native prefixes and finite exact wait consumers. If Source/Root not confirmed retired by final original process end, no legally accepted original external full202/raw/slot/FD parenthood transfer is implemented; exit125/failure retention still loses that relation.",
+      "actual_current_scope": "Original whole dependency preserved; warm FD/error retirement and Source/native raw registry are changed current bytes",
+      "current_code_dependencies": [
+        "A189-C1-FINAL-ORIGINAL-PROCESS-CUSTODY-PARENTHOOD-UNACCEPTED"
+      ],
+      "final_acceptance": "NOT_ACCEPTED_AUTHOR_ATTEMPT",
+      "actual_source_index": "source-index.json",
+      "runtime": "NOT_RUN"
+    },
+    {
+      "original_id": "A176-C3-SECONDARY-PYTHON-ORIGIN-DROPPED",
+      "genuine_prior_credit": "All actual targeted primary/secondary cleanup, release, unlock, pipe, constructor and recorder raw origins retained before projection in separate linked/pending nodes. Native import errors are fetched before diagnostic. Complete final raw/process lifetime still depends on the exact C2 relation.",
+      "actual_current_scope": "Original whole dependency preserved; warm FD/error retirement and Source/native raw registry are changed current bytes",
+      "current_code_dependencies": [
+        "A189-C1-FINAL-ORIGINAL-PROCESS-CUSTODY-PARENTHOOD-UNACCEPTED"
+      ],
+      "final_acceptance": "NOT_ACCEPTED_AUTHOR_ATTEMPT",
+      "actual_source_index": "source-index.json",
+      "runtime": "NOT_RUN"
+    }
+  ],
+  "SourceReady": false
+}

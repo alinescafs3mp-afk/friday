@@ -1,0 +1,2643 @@
+{
+  "schema": "friday.e4.a178.node-lab863-whole6-all35-independent-source-review.input.v1",
+  "assignment": "ASTRA-E4-LAB863-NODE-WHOLE6-ALL35-ALL6-ERROR-RAW-ONCECLOSE-INDEPENDENT-SOURCE-REVIEW-A178",
+  "generation": 1,
+  "owner_scope": "goal",
+  "REVIEW_KEY": "LAB863-c8cf17d3653cf7a9-current6-changed5-all35-all6-F1F2",
+  "Source": {
+    "root": "/var/tmp/friday-lab863-a172-node-whole6-all35-error-raw-onceclose-source-closure",
+    "pins": [
+      {
+        "path": "/var/tmp/friday-lab863-a172-node-whole6-all35-error-raw-onceclose-source-closure/all35-successor-matrix.json",
+        "bytes": 14779,
+        "sha256": "93d119c89c735afbdab8c0895c11361e369e3da0ad822e3734b5aa8ece6df109",
+        "identity9_decimal_strings": [
+          "2050",
+          "6979664",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "14779",
+          "1790932727349413814",
+          "1790932727349413814"
+        ],
+        "stable9": true
+      },
+      {
+        "path": "/var/tmp/friday-lab863-a172-node-whole6-all35-error-raw-onceclose-source-closure/author-effect-accounting.json",
+        "bytes": 2019,
+        "sha256": "fe1296e939208f7d249e867d99e1b0ff7728b2107efc546652515e956b2b6f1c",
+        "identity9_decimal_strings": [
+          "2050",
+          "6979640",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "2019",
+          "1790932727325768452",
+          "1790932727325768452"
+        ],
+        "stable9": true
+      },
+      {
+        "path": "/var/tmp/friday-lab863-a172-node-whole6-all35-error-raw-onceclose-source-closure/caller.py",
+        "bytes": 116904,
+        "sha256": "d739a7e3705c5f76563fdf1a0dfff5bd90490689037b5eb6e187086c5d4d1236",
+        "identity9_decimal_strings": [
+          "2050",
+          "6979657",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "116904",
+          "1790932727343413470",
+          "1790932727343413470"
+        ],
+        "stable9": true
+      },
+      {
+        "path": "/var/tmp/friday-lab863-a172-node-whole6-all35-error-raw-onceclose-source-closure/candidate-text-relations.json",
+        "bytes": 2916,
+        "sha256": "95c9fa1626a2f2992fa8abc0d3f0b7a681499ca3194da633f807c475901c7761",
+        "identity9_decimal_strings": [
+          "2050",
+          "6979662",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "2916",
+          "1790932727347413700",
+          "1790932727347413700"
+        ],
+        "stable9": true
+      },
+      {
+        "path": "/var/tmp/friday-lab863-a172-node-whole6-all35-error-raw-onceclose-source-closure/evidence/ASTRA-E4-A134-SOURCE-REVIEW-RECEIVED-20261002.json",
+        "bytes": 2958,
+        "sha256": "7cf4c977d12e139a82a7589eef4709c689e2b9b24c23089fd38e6b3bb07ed1d5",
+        "identity9_decimal_strings": [
+          "2050",
+          "6979646",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "2958",
+          "1790932727330430321",
+          "1790932727330430321"
+        ],
+        "stable9": true
+      },
+      {
+        "path": "/var/tmp/friday-lab863-a172-node-whole6-all35-error-raw-onceclose-source-closure/evidence/ASTRA-E4-A161-INDEPENDENT-ALL35-STOCK-DATA-RESULT-RECEIVED-20261002.json",
+        "bytes": 18310,
+        "sha256": "7aee73be527a5635f2b69cbe9376f9451ffd66c24efc915fe2917d901979e3c5",
+        "identity9_decimal_strings": [
+          "2050",
+          "6979647",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "18310",
+          "1790932727331270269",
+          "1790932727331270269"
+        ],
+        "stable9": true
+      },
+      {
+        "path": "/var/tmp/friday-lab863-a172-node-whole6-all35-error-raw-onceclose-source-closure/evidence/ASTRA-E4-A164-ROOT-PREFLIGHT-RESULT-RECEIVED-20261002.json",
+        "bytes": 18362,
+        "sha256": "3f996ff220813f6ac741ddf89549a3796b556dc62c4179b8e208177b0c7d1252",
+        "identity9_decimal_strings": [
+          "2050",
+          "6979648",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "18362",
+          "1790932727332123218",
+          "1790932727332123218"
+        ],
+        "stable9": true
+      },
+      {
+        "path": "/var/tmp/friday-lab863-a172-node-whole6-all35-error-raw-onceclose-source-closure/evidence/ASTRA-E4-A169-NODE-EXACT-INT9-WHOLE-NATIVE-RESULT-20261002.json",
+        "bytes": 35489,
+        "sha256": "a2c34645498674d15ba07111da729ee55b59913929b6cccda69d1076a2408aa7",
+        "identity9_decimal_strings": [
+          "2050",
+          "6979649",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "35489",
+          "1790932727332951866",
+          "1790932727332951866"
+        ],
+        "stable9": true
+      },
+      {
+        "path": "/var/tmp/friday-lab863-a172-node-whole6-all35-error-raw-onceclose-source-closure/evidence/ASTRA-E4-A172-INPUT-20261002.json",
+        "bytes": 89517,
+        "sha256": "b666e8114fa15ae0720f5b7bbc984b6f58ac250c5a7ffac660860fca373e754b",
+        "identity9_decimal_strings": [
+          "2050",
+          "6979650",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "89517",
+          "1790932727333970125",
+          "1790932727333970125"
+        ],
+        "stable9": true
+      },
+      {
+        "path": "/var/tmp/friday-lab863-a172-node-whole6-all35-error-raw-onceclose-source-closure/evidence/LAB861-calls.json",
+        "bytes": 7382,
+        "sha256": "8ef5f1b1d6171ae349573a006b1df737276d3280def9fc14f836631b1b0534c7",
+        "identity9_decimal_strings": [
+          "2050",
+          "6979651",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "7382",
+          "1790932727334814374",
+          "1790932727334814374"
+        ],
+        "stable9": true
+      },
+      {
+        "path": "/var/tmp/friday-lab863-a172-node-whole6-all35-error-raw-onceclose-source-closure/evidence/LAB861-gaps.json",
+        "bytes": 1243,
+        "sha256": "60dc76dc07fac55c831f1b87cb1dde9623c2bc0f29c3fd09d28bcb3d39cab4fc",
+        "identity9_decimal_strings": [
+          "2050",
+          "6979652",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "1243",
+          "1790932727335552216",
+          "1790932727335552216"
+        ],
+        "stable9": true
+      },
+      {
+        "path": "/var/tmp/friday-lab863-a172-node-whole6-all35-error-raw-onceclose-source-closure/evidence/LAB861-primary.json",
+        "bytes": 17873,
+        "sha256": "e42fd3b503be1569de5ff059002c2ed947d6fc36b77ecf3362067ced545c8e4f",
+        "identity9_decimal_strings": [
+          "2050",
+          "6979653",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "17873",
+          "1790932727336235155",
+          "1790932727336235155"
+        ],
+        "stable9": true
+      },
+      {
+        "path": "/var/tmp/friday-lab863-a172-node-whole6-all35-error-raw-onceclose-source-closure/evidence/LAB861-root-received.json",
+        "bytes": 16936,
+        "sha256": "f1bd90cec0abf20602c6efe93a879d478559eeb1934719bd03e6a9e24cb25e49",
+        "identity9_decimal_strings": [
+          "2050",
+          "6979654",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "16936",
+          "1790932727336972598",
+          "1790932727336972598"
+        ],
+        "stable9": true
+      },
+      {
+        "path": "/var/tmp/friday-lab863-a172-node-whole6-all35-error-raw-onceclose-source-closure/evidence/all35-producer-consumer-matrix.json",
+        "bytes": 82184,
+        "sha256": "86491544550cb1001ae8f8942c3b22f3cf56cbdbd15cbd405c3451e8caef9a1a",
+        "identity9_decimal_strings": [
+          "2050",
+          "6979655",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "82184",
+          "1790932727337741242",
+          "1790932727337741242"
+        ],
+        "stable9": true
+      },
+      {
+        "path": "/var/tmp/friday-lab863-a172-node-whole6-all35-error-raw-onceclose-source-closure/evidence/source-stderr.native",
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "identity9_decimal_strings": [
+          "2050",
+          "6979656",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "0",
+          "1790932727337741242",
+          "1790932727337741242"
+        ],
+        "stable9": true
+      },
+      {
+        "path": "/var/tmp/friday-lab863-a172-node-whole6-all35-error-raw-onceclose-source-closure/expectations.json",
+        "bytes": 9128,
+        "sha256": "c6c2635abb11aa3df34d662ef0d7495e0c96ce4940664af62a01f343085eb5cc",
+        "identity9_decimal_strings": [
+          "2050",
+          "6979661",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "9128",
+          "1790932727347413700",
+          "1790932727347413700"
+        ],
+        "stable9": true
+      },
+      {
+        "path": "/var/tmp/friday-lab863-a172-node-whole6-all35-error-raw-onceclose-source-closure/fixed-metadata-bound.json",
+        "bytes": 1926,
+        "sha256": "864d61d3183f7ba8a0d8f26c66d3acae5df594c2641b065820dffa7f596b3cab",
+        "identity9_decimal_strings": [
+          "2050",
+          "6979641",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "1926",
+          "1790932727326915518",
+          "1790932727326915518"
+        ],
+        "stable9": true
+      },
+      {
+        "path": "/var/tmp/friday-lab863-a172-node-whole6-all35-error-raw-onceclose-source-closure/input-read-ledger.json",
+        "bytes": 50910,
+        "sha256": "a86a2a3f625f0f9ec152a75058fba4c4bc22f2b3852e9d1013f274b98db2d36c",
+        "identity9_decimal_strings": [
+          "2050",
+          "6979642",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "50910",
+          "1790932727327814669",
+          "1790932727327814669"
+        ],
+        "stable9": true
+      },
+      {
+        "path": "/var/tmp/friday-lab863-a172-node-whole6-all35-error-raw-onceclose-source-closure/launch-contract.json",
+        "bytes": 48250,
+        "sha256": "587b0beeb6b2b45980463c1d1032efc5c4430d7798f36c42d0e54279c8fd6418",
+        "identity9_decimal_strings": [
+          "2050",
+          "6979660",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "48250",
+          "1790932727346413642",
+          "1790932727346413642"
+        ],
+        "stable9": true
+      },
+      {
+        "path": "/var/tmp/friday-lab863-a172-node-whole6-all35-error-raw-onceclose-source-closure/ordinary-surplus.txt",
+        "bytes": 158,
+        "sha256": "a21adfb2651cc9265aa37585b38adccec8b11fc627a7030493f76bfe0d5fec7e",
+        "identity9_decimal_strings": [
+          "2050",
+          "6979643",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "158",
+          "1790932727328412608",
+          "1790932727328412608"
+        ],
+        "stable9": true
+      },
+      {
+        "path": "/var/tmp/friday-lab863-a172-node-whole6-all35-error-raw-onceclose-source-closure/performing-read-budget.json",
+        "bytes": 3456,
+        "sha256": "7e334c42c53210732d5350835140e1510fff689b7175438fb0f76b3993881078",
+        "identity9_decimal_strings": [
+          "2050",
+          "6979663",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "3456",
+          "1790932727348413757",
+          "1790932727348413757"
+        ],
+        "stable9": true
+      },
+      {
+        "path": "/var/tmp/friday-lab863-a172-node-whole6-all35-error-raw-onceclose-source-closure/publication-bound.json",
+        "bytes": 3053,
+        "sha256": "c00c9376949534cc0b6266728882337e9e7cbd641ca8ab93be3cefce430bebb2",
+        "identity9_decimal_strings": [
+          "2050",
+          "6979644",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "3053",
+          "1790932727329477966",
+          "1790932727329477966"
+        ],
+        "stable9": true
+      },
+      {
+        "path": "/var/tmp/friday-lab863-a172-node-whole6-all35-error-raw-onceclose-source-closure/resource-raw-custody-matrix.json",
+        "bytes": 13680,
+        "sha256": "117f6e21c0e3a53b5f2edf64dc62f5b16e100431d407fe7ab1c5586b7c12afd9",
+        "identity9_decimal_strings": [
+          "2050",
+          "6979665",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "13680",
+          "1790932727349413814",
+          "1790932727349413814"
+        ],
+        "stable9": true
+      },
+      {
+        "path": "/var/tmp/friday-lab863-a172-node-whole6-all35-error-raw-onceclose-source-closure/result.json",
+        "bytes": 4570,
+        "sha256": "428f28de4b77fb8ffbde3749086e8ee55688600d02d8cd8e54853226b2acee53",
+        "identity9_decimal_strings": [
+          "2050",
+          "6979670",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "4570",
+          "1790932727357414273",
+          "1790932727357414273"
+        ],
+        "stable9": true
+      },
+      {
+        "path": "/var/tmp/friday-lab863-a172-node-whole6-all35-error-raw-onceclose-source-closure/source-delta.diff",
+        "bytes": 33488,
+        "sha256": "d8327a39d9f559bc11373125013b13fc5f7770b0ac73c41ade72bd7c1a452e5e",
+        "identity9_decimal_strings": [
+          "2050",
+          "6979666",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "33488",
+          "1790932727350413872",
+          "1790932727350413872"
+        ],
+        "stable9": true
+      },
+      {
+        "path": "/var/tmp/friday-lab863-a172-node-whole6-all35-error-raw-onceclose-source-closure/supervisor.py",
+        "bytes": 89782,
+        "sha256": "bcd0fb9f0c5d68468aa896b4a6f9a36f5e32a5d62dc11c6c3bc3787cfa128d10",
+        "identity9_decimal_strings": [
+          "2050",
+          "6979658",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "89782",
+          "1790932727344413527",
+          "1790932727344413527"
+        ],
+        "stable9": true
+      },
+      {
+        "path": "/var/tmp/friday-lab863-a172-node-whole6-all35-error-raw-onceclose-source-closure/verifier.py",
+        "bytes": 62097,
+        "sha256": "9d906e5e6fb2c8f54929da2ef50399138afceef1fb16a1092ca965fcb3efa8d9",
+        "identity9_decimal_strings": [
+          "2050",
+          "6979659",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "62097",
+          "1790932727345413585",
+          "1790932727345413585"
+        ],
+        "stable9": true
+      },
+      {
+        "path": "/var/tmp/friday-lab863-a172-node-whole6-all35-error-raw-onceclose-source-closure/manifest/manifest.json",
+        "bytes": 10047,
+        "sha256": "c8cf17d3653cf7a951f8e4b893ccdfcc7d0cb315dbe6b1e6b5c6eb77477c6c73",
+        "identity9_decimal_strings": [
+          "2050",
+          "6979672",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "10047",
+          "1790932727363414617",
+          "1790932727363414617"
+        ],
+        "stable9": true
+      },
+      {
+        "path": "/var/tmp/friday-lab863-a172-node-whole6-all35-error-raw-onceclose-source-closure/seal/pathset.json",
+        "bytes": 9933,
+        "sha256": "851bcf854d5c480fa63f36a2b4fbfb9a380599fc4a39fea976035076049cc9e7",
+        "identity9_decimal_strings": [
+          "2050",
+          "6979671",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "9933",
+          "1790932727362414560",
+          "1790932727362414560"
+        ],
+        "stable9": true
+      },
+      {
+        "path": "/var/tmp/friday-lab863-a172-node-whole6-all35-error-raw-onceclose-source-closure/publish/payload.json",
+        "bytes": 127,
+        "sha256": "9e2179021c3af8060f018a06aac45c4e19e663ad1b01eb8da62f4cca95419159",
+        "identity9_decimal_strings": [
+          "2050",
+          "6979673",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "127",
+          "1790932727364414675",
+          "1790932727364414675"
+        ],
+        "stable9": true
+      }
+    ],
+    "source6": [
+      {
+        "path": "/var/tmp/friday-lab863-a172-node-whole6-all35-error-raw-onceclose-source-closure/caller.py",
+        "bytes": 116904,
+        "sha256": "d739a7e3705c5f76563fdf1a0dfff5bd90490689037b5eb6e187086c5d4d1236",
+        "identity9_decimal_strings": [
+          "2050",
+          "6979657",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "116904",
+          "1790932727343413470",
+          "1790932727343413470"
+        ],
+        "stable9": true
+      },
+      {
+        "path": "/var/tmp/friday-lab863-a172-node-whole6-all35-error-raw-onceclose-source-closure/expectations.json",
+        "bytes": 9128,
+        "sha256": "c6c2635abb11aa3df34d662ef0d7495e0c96ce4940664af62a01f343085eb5cc",
+        "identity9_decimal_strings": [
+          "2050",
+          "6979661",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "9128",
+          "1790932727347413700",
+          "1790932727347413700"
+        ],
+        "stable9": true
+      },
+      {
+        "path": "/var/tmp/friday-lab863-a172-node-whole6-all35-error-raw-onceclose-source-closure/launch-contract.json",
+        "bytes": 48250,
+        "sha256": "587b0beeb6b2b45980463c1d1032efc5c4430d7798f36c42d0e54279c8fd6418",
+        "identity9_decimal_strings": [
+          "2050",
+          "6979660",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "48250",
+          "1790932727346413642",
+          "1790932727346413642"
+        ],
+        "stable9": true
+      },
+      {
+        "path": "/var/tmp/friday-lab863-a172-node-whole6-all35-error-raw-onceclose-source-closure/ordinary-surplus.txt",
+        "bytes": 158,
+        "sha256": "a21adfb2651cc9265aa37585b38adccec8b11fc627a7030493f76bfe0d5fec7e",
+        "identity9_decimal_strings": [
+          "2050",
+          "6979643",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "158",
+          "1790932727328412608",
+          "1790932727328412608"
+        ],
+        "stable9": true
+      },
+      {
+        "path": "/var/tmp/friday-lab863-a172-node-whole6-all35-error-raw-onceclose-source-closure/supervisor.py",
+        "bytes": 89782,
+        "sha256": "bcd0fb9f0c5d68468aa896b4a6f9a36f5e32a5d62dc11c6c3bc3787cfa128d10",
+        "identity9_decimal_strings": [
+          "2050",
+          "6979658",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "89782",
+          "1790932727344413527",
+          "1790932727344413527"
+        ],
+        "stable9": true
+      },
+      {
+        "path": "/var/tmp/friday-lab863-a172-node-whole6-all35-error-raw-onceclose-source-closure/verifier.py",
+        "bytes": 62097,
+        "sha256": "9d906e5e6fb2c8f54929da2ef50399138afceef1fb16a1092ca965fcb3efa8d9",
+        "identity9_decimal_strings": [
+          "2050",
+          "6979659",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "62097",
+          "1790932727345413585",
+          "1790932727345413585"
+        ],
+        "stable9": true
+      }
+    ],
+    "Root_received": {
+      "path": "/home/jericho/.jericho/grok-takeover/ASTRA-E4-LAB863-CONNECTED-SOURCE-RESULT-RECEIVED-20261002.json",
+      "bytes": 25792,
+      "sha256": "d70468dfd9b79478f10a692a2c0a68f741ce347f61733adef8400b9b5fcf2945",
+      "identity9_decimal_strings": [
+        "2050",
+        "8533585",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "25792",
+        "1790933410657619017",
+        "1790933410714622287"
+      ],
+      "stable9": true
+    },
+    "author_code_open": [
+      "UNCONFIRMED_CLOSE_IS_NOT_SUCCESS: a failed os.close stays sticky and is not a retired-success.",
+      "PARTIAL_STREAM_IS_NOT_COMPLETE: a short, capped, or undecodable capture stays partial and cannot qualify.",
+      "OVERSIZE_PUBLIC_RECEIPT_KEEPS_STREAM_HASH: when the verifier whole receipt does not fit, the small refusal keeps stream count, sha256, partial and encoding, not a second raw copy.",
+      "LAB861_FOUR_GAPS_PENDING: readonly home, agent, trustdb and common.conf remain a Root qualification gap, not a Source pass.",
+      "NOT_RUN: no Source execution, Root image, compiler, runtime, or gates."
+    ],
+    "delta": {
+      "verified_msk": "2026-10-02T12:30:10.609735+03:00",
+      "original6_held_named9_unchanged": true,
+      "changed5": [
+        "caller.py",
+        "expectations.json",
+        "launch-contract.json",
+        "supervisor.py",
+        "verifier.py"
+      ],
+      "equal1": [
+        "ordinary-surplus.txt"
+      ],
+      "prior_full_SHA9_provenance": {
+        "path": "/home/jericho/.jericho/grok-takeover/ASTRA-E4-A172-CONNECTED-SOURCE-RESULT-RECEIVED-20261002.json",
+        "bytes": 24600,
+        "sha256": "3b913edde065bc900285bea1397b21a3683d4c9f5272de532023a78e31690563",
+        "identity9_decimal_strings": [
+          "2050",
+          "8533517",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "24600",
+          "1790930837952233026",
+          "1790930838011236403"
+        ],
+        "stable9": true
+      }
+    }
+  },
+  "original_exact_LAB863_input": {
+    "path": "/home/jericho/.jericho/grok-takeover/ASTRA-E4-LAB863-INPUT-20261002.json",
+    "bytes": 78301,
+    "sha256": "00d2b19c52972de1503beeb393eeb233459e8840b61616e2f1770713a0c2cc7e",
+    "identity9_decimal_strings": [
+      "2050",
+      "8533523",
+      "33152",
+      "1000",
+      "1000",
+      "1",
+      "78301",
+      "1790932076031109575",
+      "1790932076088112839"
+    ],
+    "stable9": true
+  },
+  "original_exact_A175_input": {
+    "path": "/home/jericho/.jericho/grok-takeover/ASTRA-E4-A175-INPUT-20261002.json",
+    "bytes": 86905,
+    "sha256": "80ccbbcd58cea5ccbc4de1688421692eb824310caff4fa1b4dd654de2a33015c",
+    "identity9_decimal_strings": [
+      "2050",
+      "8533518",
+      "33152",
+      "1000",
+      "1000",
+      "1",
+      "86905",
+      "1790930955988989730",
+      "1790930956055993565"
+    ],
+    "stable9": true
+  },
+  "original_exact_A172_input": {
+    "bytes": 89517,
+    "identity9_decimal_strings": [
+      "2050",
+      "8533450",
+      "33152",
+      "1000",
+      "1000",
+      "1",
+      "89517",
+      "1790928333858896198",
+      "1790928333929900263"
+    ],
+    "path": "/home/jericho/.jericho/grok-takeover/ASTRA-E4-A172-INPUT-20261002.json",
+    "sha256": "b666e8114fa15ae0720f5b7bbc984b6f58ac250c5a7ffac660860fca373e754b",
+    "stable9": true
+  },
+  "original_scope_pin": {
+    "bytes": 25006,
+    "identity9_decimal_strings": [
+      "2050",
+      "8533447",
+      "33152",
+      "1000",
+      "1000",
+      "1",
+      "25006",
+      "1790927657204164831",
+      "1790927657260168037"
+    ],
+    "path": "/home/jericho/.jericho/grok-takeover/ASTRA-E4-A169-NODE-EXACT-INT9-WHOLE-SCOPE-20261002.json",
+    "sha256": "3435f9526751565165c852b98ccda72de6a533113d3edc52f82d88d5dcc785e6",
+    "stable9": true
+  },
+  "original_full_scope_materials": {
+    "prior_input": {
+      "path": "/home/jericho/.jericho/grok-takeover/ASTRA-E4-LAB856-INPUT-20261002.json",
+      "bytes": 32996,
+      "sha256": "8d7d7d9e8ac5567cf47ef7a74f89e7ec0081d53a4f6747f8058273f0b383dc59",
+      "identity9_decimal_strings": [
+        "2050",
+        "8532643",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "32996",
+        "1790917265072335082",
+        "1790917265135338687"
+      ],
+      "stable9": true
+    },
+    "prior_received": "/home/jericho/.jericho/grok-takeover/ASTRA-E4-LAB856-SCOPED-STOCK-DATA-RESULT-RECEIVED-20261002.json",
+    "prior_manifest": {
+      "path": "/var/tmp/friday-lab856-a131-whole35-actual-slot33-loader-provider-domain-binding/manifest/manifest.json",
+      "bytes": 5103,
+      "sha256": "6a2e0519a9c07a08d8bd78826103c8152f2f7e311c6b609540a87d9db153b867",
+      "identity9_decimal_strings": [
+        "2050",
+        "4370873",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "5103",
+        "1790918693690078108",
+        "1790918693690078108"
+      ],
+      "stable9": true
+    },
+    "prior_full33pins": [
+      {
+        "path": "/var/tmp/friday-lab856-a131-whole35-actual-slot33-loader-provider-domain-binding/evidence/ct-dlopen-body.objdump.txt",
+        "bytes": 24203,
+        "sha256": "f0d2fa4cbbb52b60d1ac2fe8a4f1081e42ac7f37d43468bb2dc0642cec91794b",
+        "identity9_decimal_strings": [
+          "2050",
+          "4370838",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "24203",
+          "1790918693664093606",
+          "1790918693664093606"
+        ],
+        "stable9": true
+      },
+      {
+        "path": "/var/tmp/friday-lab856-a131-whole35-actual-slot33-loader-provider-domain-binding/evidence/ct-dlopen.objdump.txt",
+        "bytes": 73097,
+        "sha256": "b61744c2a949c5badd72ce7806bafb1c731d99b201016abc78867008afbab3dd",
+        "identity9_decimal_strings": [
+          "2050",
+          "4370839",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "73097",
+          "1790918693665013059",
+          "1790918693665013059"
+        ],
+        "stable9": true
+      },
+      {
+        "path": "/var/tmp/friday-lab856-a131-whole35-actual-slot33-loader-provider-domain-binding/evidence/ct-dynamic.txt",
+        "bytes": 1455,
+        "sha256": "db8229abc522d30568075e895360193267d92fc010cda34e6389f6e41dc16e97",
+        "identity9_decimal_strings": [
+          "2050",
+          "4370840",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "1455",
+          "1790918693665076678",
+          "1790918693665076678"
+        ],
+        "stable9": true
+      },
+      {
+        "path": "/var/tmp/friday-lab856-a131-whole35-actual-slot33-loader-provider-domain-binding/evidence/ct-strings.txt",
+        "bytes": 6357,
+        "sha256": "f55de9c0d625be8bbf12e80e9b3824154ac4f70047d18111f627ff99a8800926",
+        "identity9_decimal_strings": [
+          "2050",
+          "4370841",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "6357",
+          "1790918693666076735",
+          "1790918693666076735"
+        ],
+        "stable9": true
+      },
+      {
+        "path": "/var/tmp/friday-lab856-a131-whole35-actual-slot33-loader-provider-domain-binding/evidence/ct-symbol.objdump.txt",
+        "bytes": 130255,
+        "sha256": "b6ed67838faf6a57fa3028ac9317b07616bdc83b05d44afdc13fc762c0a99698",
+        "identity9_decimal_strings": [
+          "2050",
+          "4370842",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "130255",
+          "1790918693667076792",
+          "1790918693667076792"
+        ],
+        "stable9": true
+      },
+      {
+        "path": "/var/tmp/friday-lab856-a131-whole35-actual-slot33-loader-provider-domain-binding/evidence/ct-ver.txt",
+        "bytes": 7809,
+        "sha256": "2e13091c5747fef888bc320c5e793caa3906a97dafde3cf9b83c0c3e05fa94f8",
+        "identity9_decimal_strings": [
+          "2050",
+          "4370843",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "7809",
+          "1790918693668076849",
+          "1790918693668076849"
+        ],
+        "stable9": true
+      },
+      {
+        "path": "/var/tmp/friday-lab856-a131-whole35-actual-slot33-loader-provider-domain-binding/evidence/ctypes-undef-nm.txt",
+        "bytes": 8506,
+        "sha256": "bf996eaf7dce6be3ce4c50c69b9ab34d55faf5e00b0981aff9a41641f2e30c26",
+        "identity9_decimal_strings": [
+          "2050",
+          "4370859",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "8506",
+          "1790918693682157044",
+          "1790918693682157044"
+        ],
+        "stable9": true
+      },
+      {
+        "path": "/var/tmp/friday-lab856-a131-whole35-actual-slot33-loader-provider-domain-binding/evidence/dlmopen-mode-gate.objdump.txt",
+        "bytes": 3049,
+        "sha256": "7158f4c2891bc4f6909e7c1b8cd379caae0a6d13c70e899b727e47cd24dda14c",
+        "identity9_decimal_strings": [
+          "2050",
+          "4370858",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "3049",
+          "1790918693681077593",
+          "1790918693681077593"
+        ],
+        "stable9": true
+      },
+      {
+        "path": "/var/tmp/friday-lab856-a131-whole35-actual-slot33-loader-provider-domain-binding/evidence/dpkg-query.txt",
+        "bytes": 85,
+        "sha256": "d572740d1f999c8d30f31997d3b15db8108f22bee637ecb4a96137e9190072d7",
+        "identity9_decimal_strings": [
+          "2050",
+          "4370860",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "85",
+          "1790918693682827083",
+          "1790918693682827083"
+        ],
+        "stable9": true
+      },
+      {
+        "path": "/var/tmp/friday-lab856-a131-whole35-actual-slot33-loader-provider-domain-binding/evidence/ffi-dynamic.txt",
+        "bytes": 1525,
+        "sha256": "a0e748e7456acebff82992b0eef524ce32bcc2d32be9e0dceab5ae4417d24c84",
+        "identity9_decimal_strings": [
+          "2050",
+          "4370844",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "1525",
+          "1790918693669076907",
+          "1790918693669076907"
+        ],
+        "stable9": true
+      },
+      {
+        "path": "/var/tmp/friday-lab856-a131-whole35-actual-slot33-loader-provider-domain-binding/evidence/ffi-strings.txt",
+        "bytes": 1535,
+        "sha256": "bdc5f977143f08154d5e94f56b1aca7d6e137f456acd2f4f8edcc467aeec6213",
+        "identity9_decimal_strings": [
+          "2050",
+          "4370845",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "1535",
+          "1790918693670076964",
+          "1790918693670076964"
+        ],
+        "stable9": true
+      },
+      {
+        "path": "/var/tmp/friday-lab856-a131-whole35-actual-slot33-loader-provider-domain-binding/evidence/ffi-ver.txt",
+        "bytes": 3947,
+        "sha256": "0a2b4827e216331fd669cc8661d7366c9e2b9cfde9f2290791496deac7f1cd14",
+        "identity9_decimal_strings": [
+          "2050",
+          "4370846",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "3947",
+          "1790918693671282119",
+          "1790918693671282119"
+        ],
+        "stable9": true
+      },
+      {
+        "path": "/var/tmp/friday-lab856-a131-whole35-actual-slot33-loader-provider-domain-binding/evidence/format-operands.json",
+        "bytes": 1144,
+        "sha256": "672b71f3160e530265e305f835182c56977875befb3742f14650893e6c8b2b93",
+        "identity9_decimal_strings": [
+          "2050",
+          "4370861",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "1144",
+          "1790918693683077708",
+          "1790918693683077708"
+        ],
+        "stable9": true
+      },
+      {
+        "path": "/var/tmp/friday-lab856-a131-whole35-actual-slot33-loader-provider-domain-binding/evidence/ld-mode.objdump.txt",
+        "bytes": 54643,
+        "sha256": "3db9e960aebdc0319bc71d6dd8f6777eab5c4c6f57716de3745adaaf190e0806",
+        "identity9_decimal_strings": [
+          "2050",
+          "4370847",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "54643",
+          "1790918693672129768",
+          "1790918693672129768"
+        ],
+        "stable9": true
+      },
+      {
+        "path": "/var/tmp/friday-lab856-a131-whole35-actual-slot33-loader-provider-domain-binding/evidence/ld-open.objdump.txt",
+        "bytes": 51480,
+        "sha256": "df627026cc8e3df6ef5e7fab636a652319333881b1e3ee08cbefe48e7b794d00",
+        "identity9_decimal_strings": [
+          "2050",
+          "4370848",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "51480",
+          "1790918693673130226",
+          "1790918693673130226"
+        ],
+        "stable9": true
+      },
+      {
+        "path": "/var/tmp/friday-lab856-a131-whole35-actual-slot33-loader-provider-domain-binding/evidence/ld-strings.txt",
+        "bytes": 5709,
+        "sha256": "8ee45097632a498ed1ffa0b0cb71df820f7e204ee17d99519b03fb21505c04f3",
+        "identity9_decimal_strings": [
+          "2050",
+          "4370849",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "5709",
+          "1790918693674091381",
+          "1790918693674091381"
+        ],
+        "stable9": true
+      },
+      {
+        "path": "/var/tmp/friday-lab856-a131-whole35-actual-slot33-loader-provider-domain-binding/evidence/ld-undef.objdump.txt",
+        "bytes": 50740,
+        "sha256": "0a6362126ecf6594253447022ea09251ea75ba1e6dde1aa4f7f0c18df39a8788",
+        "identity9_decimal_strings": [
+          "2050",
+          "4370850",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "50740",
+          "1790918693674856125",
+          "1790918693674856125"
+        ],
+        "stable9": true
+      },
+      {
+        "path": "/var/tmp/friday-lab856-a131-whole35-actual-slot33-loader-provider-domain-binding/evidence/ld-ver.objdump.txt",
+        "bytes": 59141,
+        "sha256": "ea70e739cb98f52f16d66cbbc3fd34e01c9fb67ca7bf485f5a92270a54a17a43",
+        "identity9_decimal_strings": [
+          "2050",
+          "4370851",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "59141",
+          "1790918693675077250",
+          "1790918693675077250"
+        ],
+        "stable9": true
+      },
+      {
+        "path": "/var/tmp/friday-lab856-a131-whole35-actual-slot33-loader-provider-domain-binding/evidence/libc-dlerror.objdump.txt",
+        "bytes": 35143,
+        "sha256": "c6f3848abe7798cbdc2f9eb306d30a71a9be9586f051ff4e81580921eb5a0cd6",
+        "identity9_decimal_strings": [
+          "2050",
+          "4370852",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "35143",
+          "1790918693676077307",
+          "1790918693676077307"
+        ],
+        "stable9": true
+      },
+      {
+        "path": "/var/tmp/friday-lab856-a131-whole35-actual-slot33-loader-provider-domain-binding/evidence/none-reloc.txt",
+        "bytes": 94,
+        "sha256": "c7972729c22d4a5b5267f799bff5fa6df46c636f7825c1ce235e7d29c384735b",
+        "identity9_decimal_strings": [
+          "2050",
+          "4370856",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "94",
+          "1790918693679850212",
+          "1790918693679850212"
+        ],
+        "stable9": true
+      },
+      {
+        "path": "/var/tmp/friday-lab856-a131-whole35-actual-slot33-loader-provider-domain-binding/evidence/py-dynamic.txt",
+        "bytes": 1667,
+        "sha256": "eca27b83ba1491a234e3576356b230d6e8791f3a6dd19a8c123f71f438f93a81",
+        "identity9_decimal_strings": [
+          "2050",
+          "4370853",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "1667",
+          "1790918693677264063",
+          "1790918693677264063"
+        ],
+        "stable9": true
+      },
+      {
+        "path": "/var/tmp/friday-lab856-a131-whole35-actual-slot33-loader-provider-domain-binding/evidence/py-strings.txt",
+        "bytes": 2194,
+        "sha256": "343fcd41161bba94b5b266b2ce3836c413949c3389889a77cc1174f6fe05fb08",
+        "identity9_decimal_strings": [
+          "2050",
+          "4370854",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "2194",
+          "1790918693678207517",
+          "1790918693678207517"
+        ],
+        "stable9": true
+      },
+      {
+        "path": "/var/tmp/friday-lab856-a131-whole35-actual-slot33-loader-provider-domain-binding/evidence/rtld-local.objdump.txt",
+        "bytes": 825,
+        "sha256": "a4540fe5ffce91059c1a154ade7bba8a78c31c328d301922cd92ace60a0bf652",
+        "identity9_decimal_strings": [
+          "2050",
+          "4370857",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "825",
+          "1790918693680077536",
+          "1790918693680077536"
+        ],
+        "stable9": true
+      },
+      {
+        "path": "/var/tmp/friday-lab856-a131-whole35-actual-slot33-loader-provider-domain-binding/evidence/scan-meta.json",
+        "bytes": 4290,
+        "sha256": "b8a28d7d031bb20dae7cdfe90ee300a43e4c2c261fe0e699eb7a6b48f801c1cc",
+        "identity9_decimal_strings": [
+          "2050",
+          "4370855",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "4290",
+          "1790918693679108169",
+          "1790918693679108169"
+        ],
+        "stable9": true
+      },
+      {
+        "path": "/var/tmp/friday-lab856-a131-whole35-actual-slot33-loader-provider-domain-binding/ledger/read-ledger.json",
+        "bytes": 31956,
+        "sha256": "82b56d9aca3b27c0a9e24f9c4b7ddf6a666759213f74ca2a7d3d2a9e97b727c6",
+        "identity9_decimal_strings": [
+          "2050",
+          "4370868",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "31956",
+          "1790918693686077879",
+          "1790918693686077879"
+        ],
+        "stable9": true
+      },
+      {
+        "path": "/var/tmp/friday-lab856-a131-whole35-actual-slot33-loader-provider-domain-binding/manifest/manifest.json",
+        "bytes": 5103,
+        "sha256": "6a2e0519a9c07a08d8bd78826103c8152f2f7e311c6b609540a87d9db153b867",
+        "identity9_decimal_strings": [
+          "2050",
+          "4370873",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "5103",
+          "1790918693690078108",
+          "1790918693690078108"
+        ],
+        "stable9": true
+      },
+      {
+        "path": "/var/tmp/friday-lab856-a131-whole35-actual-slot33-loader-provider-domain-binding/publish/payload.json",
+        "bytes": 126,
+        "sha256": "93ede78c327f2aec9eaf9014f164ab912f3301cb963e480763a981642647206e",
+        "identity9_decimal_strings": [
+          "2050",
+          "4370875",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "126",
+          "1790918693691078165",
+          "1790918693691078165"
+        ],
+        "stable9": true
+      },
+      {
+        "path": "/var/tmp/friday-lab856-a131-whole35-actual-slot33-loader-provider-domain-binding/qualification/controlflow.json",
+        "bytes": 3692,
+        "sha256": "6c37e08588414d96fefb0d0b6ba3b0e06f1637056ddffe65339106e4ec05f8c6",
+        "identity9_decimal_strings": [
+          "2050",
+          "4370864",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "3692",
+          "1790918693684077765",
+          "1790918693684077765"
+        ],
+        "stable9": true
+      },
+      {
+        "path": "/var/tmp/friday-lab856-a131-whole35-actual-slot33-loader-provider-domain-binding/qualification/loader-domain.json",
+        "bytes": 1423,
+        "sha256": "327645d321654f153c1a5b571ce2d319cdf7ed5136080e91d639a59edfef09b5",
+        "identity9_decimal_strings": [
+          "2050",
+          "4370866",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "1423",
+          "1790918693686077879",
+          "1790918693686077879"
+        ],
+        "stable9": true
+      },
+      {
+        "path": "/var/tmp/friday-lab856-a131-whole35-actual-slot33-loader-provider-domain-binding/qualification/reused-pins.json",
+        "bytes": 1438,
+        "sha256": "fe411829e3e8112a74789b8245a1bb90397dde013dec6dd8583caa2dd30d2240",
+        "identity9_decimal_strings": [
+          "2050",
+          "4370863",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "1438",
+          "1790918693683077708",
+          "1790918693683077708"
+        ],
+        "stable9": true
+      },
+      {
+        "path": "/var/tmp/friday-lab856-a131-whole35-actual-slot33-loader-provider-domain-binding/qualification/supplier-matrix.json",
+        "bytes": 708,
+        "sha256": "b56652daed0bd61201f396f87fb325dc903afc49ada25c310d4e1e25286a7457",
+        "identity9_decimal_strings": [
+          "2050",
+          "4370865",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "708",
+          "1790918693685077822",
+          "1790918693685077822"
+        ],
+        "stable9": true
+      },
+      {
+        "path": "/var/tmp/friday-lab856-a131-whole35-actual-slot33-loader-provider-domain-binding/result.json",
+        "bytes": 4010,
+        "sha256": "c094584b8cdc4758c80065441de2b50ca35c47cb7378590ecd35911974ff3710",
+        "identity9_decimal_strings": [
+          "2050",
+          "4370869",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "4010",
+          "1790918693687077937",
+          "1790918693687077937"
+        ],
+        "stable9": true
+      },
+      {
+        "path": "/var/tmp/friday-lab856-a131-whole35-actual-slot33-loader-provider-domain-binding/seal/pathset.json",
+        "bytes": 11522,
+        "sha256": "3c2e7fab633c219ed06070c331cb86fb9d598c120fb0824b8e5970cd6ec724c8",
+        "identity9_decimal_strings": [
+          "2050",
+          "4370871",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "11522",
+          "1790918693689078051",
+          "1790918693689078051"
+        ],
+        "stable9": true
+      }
+    ],
+    "original_input": {
+      "path": "/home/jericho/.jericho/grok-takeover/ASTRA-E4-LAB855-G2-INPUT-20261002.json",
+      "sha256": "4da3aea8c19b2bbb6184de5b757a0a1014a3ea13d88ee7f5e3e897e53be4082a"
+    },
+    "canonical_Source3": {
+      "caller": {
+        "path": "/var/tmp/friday-astra-node-owned-stock-caller-a131-successor-g1/caller.py",
+        "bytes": 106870,
+        "sha256": "c98f1ff72c808785327cc7d37af2ee25c074682d21f833ed586a731aaaf50a9f",
+        "identity9_decimal_strings": [
+          "2050",
+          "4370257",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "106870",
+          "1790900083234541013",
+          "1790905750063496235"
+        ],
+        "stable9": true
+      },
+      "expectations": {
+        "path": "/var/tmp/friday-astra-node-owned-stock-caller-a131-successor-g1/expectations.json",
+        "bytes": 7202,
+        "sha256": "86cf7eaf3f681d9e67d3542df8740f63f201d0a82a21f167a9968c109d58d292",
+        "identity9_decimal_strings": [
+          "2050",
+          "4370258",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "7202",
+          "1790900103794713859",
+          "1790905750066704621"
+        ],
+        "stable9": true
+      },
+      "plain": {
+        "path": "/var/tmp/friday-astra-node-owned-stock-caller-a131-successor-g1/ordinary-surplus.txt",
+        "bytes": 158,
+        "sha256": "a21adfb2651cc9265aa37585b38adccec8b11fc627a7030493f76bfe0d5fec7e",
+        "identity9_decimal_strings": [
+          "2050",
+          "4370259",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "158",
+          "1790900042448682950",
+          "1790905750069987111"
+        ],
+        "stable9": true
+      }
+    },
+    "selected_image": {
+      "path": "/usr/bin/python3.14",
+      "sha256": "52e0a13e60a981d8c4b6478be2ba5176f69da07948a056bf49cf6f077e30cb41"
+    }
+  },
+  "current_selected19_before_new_bytes": {
+    "accepted": {
+      "path": "/home/jericho/.jericho/grok-takeover/ASTRA-E4-LAB830-NODE-SOURCE-ACCEPTED-20261001.json",
+      "bytes": 5880,
+      "sha256": "d29ad65ae1f6b1c1373c021cb1cad334bfc204f3c62c93381b7346d1fb904023",
+      "identity9_decimal_strings": [
+        "2050",
+        "8529578",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "5880",
+        "1790867713767913769",
+        "1790867713817916614"
+      ],
+      "stable9": true
+    },
+    "archive": {
+      "path": "/var/tmp/friday-astra-material-acquisition-20261001-a023-g1/archives/node/node-v22.23.2-linux-x64.tar.xz",
+      "bytes": 31058332,
+      "sha256": "d60acfe00a2932254bb0ad20e01b0d74397a0875595de719654b214f4b03f307",
+      "identity9_decimal_strings": [
+        "2050",
+        "6823289",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "31058332",
+        "1790815333325014219",
+        "1790815333325014219"
+      ],
+      "stable9": true
+    },
+    "bill": {
+      "path": "/home/jericho/.jericho/runtime/subagent-lifecycle/ASTRA-E4-ACQUISITION-INPUT-DRIFT-SUCCESSOR-A032-G1-BILL.json",
+      "bytes": 466956,
+      "sha256": "cd973b83717015b985055482c9835e7ac1cf8311120c71461d4c0f17ad2d50a2",
+      "identity9_decimal_strings": [
+        "2050",
+        "9176751",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "466956",
+        "1790814359032038331",
+        "1790814359032038331"
+      ],
+      "stable9": true
+    },
+    "contract": {
+      "path": "/var/tmp/friday-astra-node-root-source-a080-successor-g1/launch-contract.json",
+      "bytes": 45320,
+      "sha256": "c0f0a9566ef9639d3189d3da65b94d93f2304beb5b15d7232e79ae347967ccd7",
+      "identity9_decimal_strings": [
+        "2050",
+        "3980335",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "45320",
+        "1790869065586342022",
+        "1790869065586342022"
+      ],
+      "stable9": true
+    },
+    "ffi": {
+      "path": "/usr/lib/x86_64-linux-gnu/libffi.so.8.2.0",
+      "bytes": 64184,
+      "sha256": "1a0dc86f787f73e025a6e521056360afcbe70f2a82cd808132fefc2b4ee95daa",
+      "identity9_decimal_strings": [
+        "2050",
+        "7631364",
+        "33188",
+        "0",
+        "0",
+        "1",
+        "64184",
+        "1774599998000000000",
+        "1784581430109030886"
+      ],
+      "stable9": true
+    },
+    "gpg": {
+      "path": "/usr/bin/gpg",
+      "bytes": 1186456,
+      "sha256": "c8f3dc07a34ab0a0a081368b482724b79a2a6d6b7aa856741c09edf7af854754",
+      "identity9_decimal_strings": [
+        "2050",
+        "7602949",
+        "33261",
+        "0",
+        "0",
+        "1",
+        "1186456",
+        "1788377917000000000",
+        "1788492750343617162"
+      ],
+      "stable9": true
+    },
+    "gpgv": {
+      "path": "/usr/bin/gpgv",
+      "bytes": 302296,
+      "sha256": "95ecd00d02b79d091f103af175b1dbf95b5b0c66503104bfcea447cca7e3829d",
+      "identity9_decimal_strings": [
+        "2050",
+        "7603893",
+        "33261",
+        "0",
+        "0",
+        "1",
+        "302296",
+        "1788377917000000000",
+        "1788492749979756867"
+      ],
+      "stable9": true
+    },
+    "key": {
+      "path": "/var/tmp/friday-astra-material-acquisition-20261001-a023-g1/metadata/node/publisher-key.asc",
+      "bytes": 3163,
+      "sha256": "e31e1aa40a8331f01d753cef475f7b9eab934fc25f5f0b36995bfd80bd66ad27",
+      "identity9_decimal_strings": [
+        "2050",
+        "6823493",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "3163",
+        "1790815403317057000",
+        "1790815403317057000"
+      ],
+      "stable9": true
+    },
+    "materialized": {
+      "path": "/home/jericho/.jericho/grok-takeover/ASTRA-E4-LAB830-ROOT-SOURCE-MATERIALIZED-20261001.json",
+      "bytes": 3724,
+      "sha256": "893dabaca55b8abe3d4fe80ef04593f30f6d1a133bd8df9c53868729965c7cbc",
+      "identity9_decimal_strings": [
+        "2050",
+        "8529582",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "3724",
+        "1790869065738857229",
+        "1790869065788860074"
+      ],
+      "stable9": true
+    },
+    "original_archive": {
+      "path": "/home/jericho/.jericho/runtime/friday-toolchain22.bSt8Uu/archives/node-v22.23.2-linux-x64.tar.xz",
+      "bytes": 31058332,
+      "sha256": "d60acfe00a2932254bb0ad20e01b0d74397a0875595de719654b214f4b03f307",
+      "identity9_decimal_strings": [
+        "2050",
+        "12073242",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "31058332",
+        "1786872629589802674",
+        "1786872629589802674"
+      ],
+      "stable9": true
+    },
+    "prlimit": {
+      "path": "/usr/bin/prlimit",
+      "bytes": 27616,
+      "sha256": "cb28811cb3902773c1a0f3ac0ea554c7a1e232724e9d4cae055ede54b65a7bc4",
+      "identity9_decimal_strings": [
+        "2050",
+        "7605447",
+        "33261",
+        "0",
+        "0",
+        "1",
+        "27616",
+        "1787149416000000000",
+        "1788318815864895069"
+      ],
+      "stable9": true
+    },
+    "python": {
+      "path": "/usr/bin/python3.14",
+      "bytes": 7477160,
+      "sha256": "52e0a13e60a981d8c4b6478be2ba5176f69da07948a056bf49cf6f077e30cb41",
+      "identity9_decimal_strings": [
+        "2050",
+        "7603281",
+        "33261",
+        "0",
+        "0",
+        "1",
+        "7477160",
+        "1787222518000000000",
+        "1789010692636990403"
+      ],
+      "stable9": true
+    },
+    "raw": {
+      "path": "/var/tmp/friday-astra-material-acquisition-20261001-a023-g1/metadata/node/SHASUMS256.txt.asc",
+      "bytes": 4696,
+      "sha256": "cfcf12eb3146d641be185d08ca018166b98495b1d8e5f7f94ab77f9965b651d2",
+      "identity9_decimal_strings": [
+        "2050",
+        "6823492",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "4696",
+        "1790815403055574089",
+        "1790815403055574089"
+      ],
+      "stable9": true
+    },
+    "receipts": {
+      "path": "/var/tmp/friday-astra-material-acquisition-20261001-a023-g1/transport-receipts.ndjson",
+      "bytes": 400979,
+      "sha256": "180c44ad4439a96f89335a62e35a5668327a228ce164d1f31b503b867b05fe9b",
+      "identity9_decimal_strings": [
+        "2050",
+        "4072710",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "400979",
+        "1790815410397447819",
+        "1790815410397447819"
+      ],
+      "stable9": true
+    },
+    "supervisor": {
+      "path": "/var/tmp/friday-astra-node-root-source-a080-successor-g1/supervisor.py",
+      "bytes": 84058,
+      "sha256": "1a80b686159a348777bfdc4e3281566de331583c29fcc4813c97efb60f5f14e8",
+      "identity9_decimal_strings": [
+        "2050",
+        "3980336",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "84058",
+        "1790869065589834822",
+        "1790869065589834822"
+      ],
+      "stable9": true
+    },
+    "verifier": {
+      "path": "/var/tmp/friday-astra-node-root-source-a080-successor-g1/verifier.py",
+      "bytes": 55895,
+      "sha256": "c571ed6114e1fb5231d600718d4a891ab17d1403598eb9172edf61f9c10b56e9",
+      "identity9_decimal_strings": [
+        "2050",
+        "3980334",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "55895",
+        "1790869065582810120",
+        "1790869065582810120"
+      ],
+      "stable9": true
+    },
+    "caller": {
+      "path": "/var/tmp/friday-astra-node-owned-stock-caller-a131-successor-g1/caller.py",
+      "bytes": 106870,
+      "sha256": "c98f1ff72c808785327cc7d37af2ee25c074682d21f833ed586a731aaaf50a9f",
+      "identity9_decimal_strings": [
+        "2050",
+        "4370257",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "106870",
+        "1790900083234541013",
+        "1790905750063496235"
+      ],
+      "stable9": true
+    },
+    "expectations": {
+      "path": "/var/tmp/friday-astra-node-owned-stock-caller-a131-successor-g1/expectations.json",
+      "bytes": 7202,
+      "sha256": "86cf7eaf3f681d9e67d3542df8740f63f201d0a82a21f167a9968c109d58d292",
+      "identity9_decimal_strings": [
+        "2050",
+        "4370258",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "7202",
+        "1790900103794713859",
+        "1790905750066704621"
+      ],
+      "stable9": true
+    },
+    "plain": {
+      "path": "/var/tmp/friday-astra-node-owned-stock-caller-a131-successor-g1/ordinary-surplus.txt",
+      "bytes": 158,
+      "sha256": "a21adfb2651cc9265aa37585b38adccec8b11fc627a7030493f76bfe0d5fec7e",
+      "identity9_decimal_strings": [
+        "2050",
+        "4370259",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "158",
+        "1790900042448682950",
+        "1790905750069987111"
+      ],
+      "stable9": true
+    }
+  },
+  "whole_current_A134": {
+    "pin": {
+      "path": "/home/jericho/.jericho/grok-takeover/ASTRA-E4-A134-SOURCE-REVIEW-RECEIVED-20261002.json",
+      "bytes": 2958,
+      "sha256": "7cf4c977d12e139a82a7589eef4709c689e2b9b24c23089fd38e6b3bb07ed1d5",
+      "identity9_decimal_strings": [
+        "2050",
+        "8532005",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "2958",
+        "1790902159237278984",
+        "1790902159292282150"
+      ],
+      "stable9": true
+    },
+    "summary": {
+      "assignment": "ASTRA-E4-NODE-A131-WHOLE-DISJOINT-PUBLICATION-INDEPENDENT-SOURCE-REVIEW-A134",
+      "generation": 1,
+      "whole_verdict": "ACCEPT_UNDER_EXPLICIT_QUALIFIED_STOCK_ENVELOPE",
+      "new_Root_before_effects_requirement": "Admit exact stock CPython3.14/JSON/codecs/int/ctypes/Linux/libc factories: complete messages<=900 ASCII chars, only JSON two-byte control escapes, type names<=32 ASCII chars, native scalar widths<=32, fixed filenames ASCII<=160, Root clock arguments canonical ASCII decimals<=32. Establish full factory format bounds, not merely sampled exceptions. libc C strerror <=256 ASCII chars over native errno domain/fallback is one required subfact. Exact16 fixed full9 and independently materialized Source3 identities required.",
+      "complete_bound_bytes": 2095321,
+      "margin_bytes": 1831,
+      "source_contradictions_found": [],
+      "current_stock900_measurement": "NOT_PERFORMED_NOT_CLAIMED",
+      "runtime": "NOT_RUN",
+      "gates": "NOT_RUN",
+      "GO": false
+    },
+    "terminal": {
+      "path": "/home/jericho/.jericho/runtime/subagent-lifecycle/ASTRA-E4-NODE-A131-WHOLE-DISJOINT-PUBLICATION-INDEPENDENT-SOURCE-REVIEW-A134-G1-RESULT.json",
+      "bytes": 6119,
+      "sha256": "444f46b1eda7353b503850d10d1c110ee77688cd799eb7055e82aaedc882cb08",
+      "identity9_decimal_strings": [
+        "2050",
+        "9177195",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "6119",
+        "1790901796340390337",
+        "1790901796340390337"
+      ],
+      "stable9": true
+    },
+    "manifest": {
+      "path": "/var/tmp/friday-astra-node-a131-whole-disjoint-publication-independent-source-review-a134-g1/manifest.json",
+      "bytes": 6318,
+      "sha256": "0bf75f46f37d6eb552c3f9d870a8d430cf8100beed3348698e183471c2236655",
+      "identity9_decimal_strings": [
+        "2050",
+        "3980451",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "6318",
+        "1790901796337390164",
+        "1790901796337390164"
+      ],
+      "stable9": true
+    }
+  },
+  "all35_complete_qualification": {
+    "path": "/home/jericho/.jericho/grok-takeover/ASTRA-E4-A161-INDEPENDENT-ALL35-STOCK-DATA-RESULT-RECEIVED-20261002.json",
+    "bytes": 18310,
+    "sha256": "7aee73be527a5635f2b69cbe9376f9451ffd66c24efc915fe2917d901979e3c5",
+    "identity9_decimal_strings": [
+      "2050",
+      "8532890",
+      "33152",
+      "1000",
+      "1000",
+      "1",
+      "18310",
+      "1790923384421762478",
+      "1790923384483534080"
+    ],
+    "stable9": true
+  },
+  "current_A164_stock_qualification": {
+    "path": "/home/jericho/.jericho/grok-takeover/ASTRA-E4-A164-ROOT-PREFLIGHT-RESULT-RECEIVED-20261002.json",
+    "bytes": 18362,
+    "sha256": "3f996ff220813f6ac741ddf89549a3796b556dc62c4179b8e208177b0c7d1252",
+    "identity9_decimal_strings": [
+      "2050",
+      "8533218",
+      "33152",
+      "1000",
+      "1000",
+      "1",
+      "18362",
+      "1790925271186565396",
+      "1790925271244568717"
+    ],
+    "stable9": true
+  },
+  "actual_native_A169_RED": {
+    "result_pin": {
+      "bytes": 35489,
+      "identity9_decimal_strings": [
+        "2050",
+        "8533449",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "35489",
+        "1790928160726986210",
+        "1790928160788989760"
+      ],
+      "path": "/home/jericho/.jericho/grok-takeover/ASTRA-E4-A169-NODE-EXACT-INT9-WHOLE-NATIVE-RESULT-20261002.json",
+      "sha256": "a2c34645498674d15ba07111da729ee55b59913929b6cccda69d1076a2408aa7",
+      "stable9": true
+    },
+    "protected_pins": [
+      {
+        "bytes": 3305,
+        "identity9_decimal_strings": [
+          "2050",
+          "4370994",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "3305",
+          "1790928160406967893",
+          "1790928160468971442"
+        ],
+        "path": "/var/tmp/friday-astra-node-a131-whole-qualified-run-a169-g1/actual-root-action.json",
+        "sha256": "7062fd565af78f724d1e2d21399f50a2eed1349a2af4ecba31b0ef20d2a83935",
+        "stable9": true
+      },
+      {
+        "bytes": 36024,
+        "identity9_decimal_strings": [
+          "2050",
+          "4370995",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "36024",
+          "1790928160512973961",
+          "1790928160576977624"
+        ],
+        "path": "/var/tmp/friday-astra-node-a131-whole-qualified-run-a169-g1/native-summary.json",
+        "sha256": "bb608865fabf424805329e7511175d68e69e46c35b065fc5422afb8ef377d851",
+        "stable9": true
+      },
+      {
+        "bytes": 47033,
+        "identity9_decimal_strings": [
+          "2050",
+          "4370991",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "47033",
+          "1790927798494252202",
+          "1790927798553255580"
+        ],
+        "path": "/var/tmp/friday-astra-node-a131-whole-qualified-run-a169-g1/root-action-plan-exact-int9.json",
+        "sha256": "50d5a6c8ad3ac868be7967472d1f6987e32f437cf43243194a1de59946736f18",
+        "stable9": true
+      },
+      {
+        "bytes": 11472,
+        "identity9_decimal_strings": [
+          "2050",
+          "4370990",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "11472",
+          "1790927798289375995",
+          "1790927798350243959"
+        ],
+        "path": "/var/tmp/friday-astra-node-a131-whole-qualified-run-a169-g1/root-preflight-exact-int9.json",
+        "sha256": "c50f20ff0a013918a8c64aa29b268af39932d8290123938d12ca472d75475cbb",
+        "stable9": true
+      },
+      {
+        "bytes": 5618,
+        "identity9_decimal_strings": [
+          "2050",
+          "4370981",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "5618",
+          "1790927704500872069",
+          "1790927704564875732"
+        ],
+        "path": "/var/tmp/friday-astra-node-a131-whole-qualified-run-a169-g1/root-selection-exact-int9.json",
+        "sha256": "bb35bc1cb68c8ade7008d881720ce8390cbc63618993bb21d678f231240c0567",
+        "stable9": true
+      },
+      {
+        "bytes": 6785,
+        "identity9_decimal_strings": [
+          "2050",
+          "4370982",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "6785",
+          "1790927704500872069",
+          "1790927704564875732"
+        ],
+        "path": "/var/tmp/friday-astra-node-a131-whole-qualified-run-a169-g1/root_stock_native_action.py",
+        "sha256": "fd33877072a25b3b0f53bffd3ae82279a0f2368449c847aaa82dbd0d3b24a771",
+        "stable9": true
+      },
+      {
+        "bytes": 0,
+        "identity9_decimal_strings": [
+          "2050",
+          "4370984",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "0",
+          "1790927820438508277",
+          "1790927820438508277"
+        ],
+        "path": "/var/tmp/friday-astra-node-a131-whole-qualified-run-a169-g1/source-stderr.native",
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stable9": true
+      },
+      {
+        "bytes": 191279,
+        "identity9_decimal_strings": [
+          "2050",
+          "4370983",
+          "33152",
+          "1000",
+          "1000",
+          "1",
+          "191279",
+          "1790927823394677486",
+          "1790927823394677486"
+        ],
+        "path": "/var/tmp/friday-astra-node-a131-whole-qualified-run-a169-g1/source-stdout.native",
+        "sha256": "b2fc3685c24bbb6545fb8f81461c37d26ff7846e131eaeaa6a86148303a1571f",
+        "stable9": true
+      }
+    ],
+    "raw_stdout_pin": {
+      "bytes": 191279,
+      "identity9_decimal_strings": [
+        "2050",
+        "4370983",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "191279",
+        "1790927823394677486",
+        "1790927823394677486"
+      ],
+      "path": "/var/tmp/friday-astra-node-a131-whole-qualified-run-a169-g1/source-stdout.native",
+      "sha256": "b2fc3685c24bbb6545fb8f81461c37d26ff7846e131eaeaa6a86148303a1571f",
+      "stable9": true
+    },
+    "raw_stderr_pin": {
+      "bytes": 0,
+      "identity9_decimal_strings": [
+        "2050",
+        "4370984",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "0",
+        "1790927820438508277",
+        "1790927820438508277"
+      ],
+      "path": "/var/tmp/friday-astra-node-a131-whole-qualified-run-a169-g1/source-stderr.native",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stable9": true
+    },
+    "complete_raw_capture_authoritative": true,
+    "all6_invoked": true,
+    "case_summary": [
+      {
+        "case": "startup-env-negative",
+        "exit_code": 0,
+        "failure": {
+          "message": "'current'",
+          "type": "KeyError"
+        },
+        "full_supervisor_receipt_summary": {
+          "call_count": 0,
+          "keys": [
+            "schema",
+            "assignment",
+            "generation",
+            "status",
+            "scope",
+            "qualified_trust",
+            "custody",
+            "resources",
+            "owned_processes",
+            "home",
+            "output",
+            "process_history",
+            "fork_registration",
+            "bootstrap_origin",
+            "kernel_policy",
+            "mode",
+            "child_read_carry",
+            "contract_argv_linkage",
+            "actual_launch",
+            "runtime_fd",
+            "custody_immediately_before_fork",
+            "custody_immediately_after_launch",
+            "inner_complete_evidence",
+            "inner_complete_transport",
+            "inner_evidence_validation",
+            "parent_exit",
+            "all_generation_registration_bound_to_actual_enumeration",
+            "owned_cleanup",
+            "custody_postexit",
+            "startup_control",
+            "custody_terminal",
+            "all_supervisor_owned_descriptors_closed",
+            "own_runtime_descriptor_closed",
+            "runtime_explicit_read_bytes",
+            "runtime_read_reset_or_subtracted",
+            "qualified",
+            "fork_state",
+            "runtime_read_scope",
+            "implicit_io",
+            "elapsed_seconds_from_supervisor_start",
+            "completed_msk"
+          ],
+          "qualified": true,
+          "status": "STARTUP_CONTROL_CAUSE_CONFIRMED"
+        },
+        "full_verifier_receipt_summary": {
+          "call_count": 0,
+          "failure": {
+            "message": "nonroot exact three-variable startup environment required",
+            "type": "Refusal"
+          },
+          "keys": [
+            "schema",
+            "assignment",
+            "generation",
+            "status",
+            "calls",
+            "custody",
+            "resources",
+            "cleanup",
+            "private_home_intent",
+            "authority",
+            "qualification",
+            "runtime_fd",
+            "runtime_explicit_read_bytes",
+            "runtime_read_reset_or_subtracted",
+            "reviewed_invocation",
+            "startup_observations",
+            "failure",
+            "final_custody_confirmed",
+            "own_scratch_bytes_final_before_cleanup",
+            "own_runtime_descriptor_closed",
+            "explicit_read_accounting",
+            "aggregate_gpg_output_bytes_including_written_key_and_body",
+            "completed_msk"
+          ],
+          "status": "NOT_PROVEN"
+        },
+        "keys": [
+          "case",
+          "status",
+          "reason",
+          "started_monotonic_ns",
+          "own_child_bootstrap_read_debit",
+          "ownership_index",
+          "actual_launch",
+          "fork_prepared",
+          "outer_running_sample",
+          "stdout_bytes",
+          "stdout_sha256",
+          "stdout_eof",
+          "stdout_overflow",
+          "stdout_text",
+          "stderr_bytes",
+          "stderr_sha256",
+          "stderr_eof",
+          "stderr_overflow",
+          "stderr_text",
+          "exit_code",
+          "raw_wait4_rusage",
+          "transport_complete",
+          "full_supervisor_receipt",
+          "full_verifier_receipt",
+          "failure",
+          "completed_monotonic_ns"
+        ],
+        "reason": null,
+        "status": "NOT_PROVEN"
+      },
+      {
+        "case": "startup-as-negative",
+        "exit_code": 0,
+        "failure": {
+          "message": "'current'",
+          "type": "KeyError"
+        },
+        "full_supervisor_receipt_summary": {
+          "call_count": 0,
+          "keys": [
+            "schema",
+            "assignment",
+            "generation",
+            "status",
+            "scope",
+            "qualified_trust",
+            "custody",
+            "resources",
+            "owned_processes",
+            "home",
+            "output",
+            "process_history",
+            "fork_registration",
+            "bootstrap_origin",
+            "kernel_policy",
+            "mode",
+            "child_read_carry",
+            "contract_argv_linkage",
+            "actual_launch",
+            "runtime_fd",
+            "custody_immediately_before_fork",
+            "custody_immediately_after_launch",
+            "inner_complete_evidence",
+            "inner_complete_transport",
+            "inner_evidence_validation",
+            "parent_exit",
+            "all_generation_registration_bound_to_actual_enumeration",
+            "owned_cleanup",
+            "custody_postexit",
+            "startup_control",
+            "custody_terminal",
+            "all_supervisor_owned_descriptors_closed",
+            "own_runtime_descriptor_closed",
+            "runtime_explicit_read_bytes",
+            "runtime_read_reset_or_subtracted",
+            "qualified",
+            "fork_state",
+            "runtime_read_scope",
+            "implicit_io",
+            "elapsed_seconds_from_supervisor_start",
+            "completed_msk"
+          ],
+          "qualified": true,
+          "status": "STARTUP_CONTROL_CAUSE_CONFIRMED"
+        },
+        "full_verifier_receipt_summary": {
+          "call_count": 0,
+          "failure": {
+            "message": "pre-interpreter inherited limit mismatch",
+            "type": "Refusal"
+          },
+          "keys": [
+            "schema",
+            "assignment",
+            "generation",
+            "status",
+            "calls",
+            "custody",
+            "resources",
+            "cleanup",
+            "private_home_intent",
+            "authority",
+            "qualification",
+            "runtime_fd",
+            "runtime_explicit_read_bytes",
+            "runtime_read_reset_or_subtracted",
+            "reviewed_invocation",
+            "startup_observations",
+            "failure",
+            "final_custody_confirmed",
+            "own_scratch_bytes_final_before_cleanup",
+            "own_runtime_descriptor_closed",
+            "explicit_read_accounting",
+            "aggregate_gpg_output_bytes_including_written_key_and_body",
+            "completed_msk"
+          ],
+          "status": "NOT_PROVEN"
+        },
+        "keys": [
+          "case",
+          "status",
+          "reason",
+          "started_monotonic_ns",
+          "own_child_bootstrap_read_debit",
+          "ownership_index",
+          "actual_launch",
+          "fork_prepared",
+          "outer_running_sample",
+          "stdout_bytes",
+          "stdout_sha256",
+          "stdout_eof",
+          "stdout_overflow",
+          "stdout_text",
+          "stderr_bytes",
+          "stderr_sha256",
+          "stderr_eof",
+          "stderr_overflow",
+          "stderr_text",
+          "exit_code",
+          "raw_wait4_rusage",
+          "transport_complete",
+          "full_supervisor_receipt",
+          "full_verifier_receipt",
+          "failure",
+          "completed_monotonic_ns"
+        ],
+        "reason": null,
+        "status": "NOT_PROVEN"
+      },
+      {
+        "case": "verify-node",
+        "exit_code": 2,
+        "failure": {
+          "message": "canonical complete outer success/transport/current binding required",
+          "type": "Refusal"
+        },
+        "full_supervisor_receipt_summary": {
+          "call_count": 0,
+          "failure": {
+            "message": "inner exit/status not complete success",
+            "type": "Refusal"
+          },
+          "keys": [
+            "schema",
+            "assignment",
+            "generation",
+            "status",
+            "scope",
+            "qualified_trust",
+            "custody",
+            "resources",
+            "owned_processes",
+            "home",
+            "output",
+            "process_history",
+            "fork_registration",
+            "bootstrap_origin",
+            "kernel_policy",
+            "mode",
+            "child_read_carry",
+            "contract_argv_linkage",
+            "actual_launch",
+            "runtime_fd",
+            "custody_immediately_before_fork",
+            "custody_immediately_after_launch",
+            "inner_complete_evidence",
+            "inner_complete_transport",
+            "inner_evidence_validation",
+            "parent_exit",
+            "all_generation_registration_bound_to_actual_enumeration",
+            "owned_cleanup",
+            "custody_postexit",
+            "failure",
+            "custody_terminal",
+            "all_supervisor_owned_descriptors_closed",
+            "own_runtime_descriptor_closed",
+            "runtime_explicit_read_bytes",
+            "runtime_read_reset_or_subtracted",
+            "qualified",
+            "fork_state",
+            "runtime_read_scope",
+            "implicit_io",
+            "elapsed_seconds_from_supervisor_start",
+            "completed_msk"
+          ],
+          "qualified": false,
+          "status": "NOT_PROVEN"
+        },
+        "full_verifier_receipt_summary": {
+          "call_count": 1,
+          "failure": {
+            "message": "key listing/check failed",
+            "type": "Refusal"
+          },
+          "keys": [
+            "schema",
+            "assignment",
+            "generation",
+            "status",
+            "calls",
+            "custody",
+            "resources",
+            "cleanup",
+            "private_home_intent",
+            "authority",
+            "qualification",
+            "runtime_fd",
+            "runtime_explicit_read_bytes",
+            "runtime_read_reset_or_subtracted",
+            "reviewed_invocation",
+            "startup_observations",
+            "historical_bill_labels_unchanged",
+            "raw_parse",
+            "private_home",
+            "failure",
+            "final_custody_confirmed",
+            "own_scratch_bytes_final_before_cleanup",
+            "own_runtime_descriptor_closed",
+            "explicit_read_accounting",
+            "aggregate_gpg_output_bytes_including_written_key_and_body",
+            "completed_msk"
+          ],
+          "status": "NOT_PROVEN"
+        },
+        "keys": [
+          "case",
+          "status",
+          "reason",
+          "started_monotonic_ns",
+          "own_child_bootstrap_read_debit",
+          "ownership_index",
+          "actual_launch",
+          "fork_prepared",
+          "outer_running_sample",
+          "stdout_bytes",
+          "stdout_sha256",
+          "stdout_eof",
+          "stdout_overflow",
+          "stdout_text",
+          "stderr_bytes",
+          "stderr_sha256",
+          "stderr_eof",
+          "stderr_overflow",
+          "stderr_text",
+          "exit_code",
+          "raw_wait4_rusage",
+          "transport_complete",
+          "full_supervisor_receipt",
+          "full_verifier_receipt",
+          "failure",
+          "completed_monotonic_ns"
+        ],
+        "reason": null,
+        "status": "NOT_PROVEN"
+      },
+      {
+        "case": "supervisor-entry-fd7",
+        "exit_code": 2,
+        "full_supervisor_receipt_summary": {
+          "call_count": 0,
+          "failure": {
+            "message": "unknown bootstrap inherited descriptor",
+            "type": "Refusal"
+          },
+          "keys": [
+            "schema",
+            "assignment",
+            "generation",
+            "status",
+            "scope",
+            "qualified_trust",
+            "custody",
+            "resources",
+            "owned_processes",
+            "home",
+            "output",
+            "process_history",
+            "fork_registration",
+            "bootstrap_origin",
+            "failure",
+            "custody_terminal",
+            "all_supervisor_owned_descriptors_closed",
+            "own_runtime_descriptor_closed",
+            "runtime_explicit_read_bytes",
+            "runtime_read_reset_or_subtracted",
+            "qualified",
+            "fork_state",
+            "runtime_read_scope",
+            "implicit_io",
+            "elapsed_seconds_from_supervisor_start",
+            "completed_msk"
+          ],
+          "qualified": false,
+          "status": "NOT_PROVEN"
+        },
+        "keys": [
+          "case",
+          "status",
+          "reason",
+          "started_monotonic_ns",
+          "own_child_bootstrap_read_debit",
+          "ownership_index",
+          "actual_launch",
+          "fork_prepared",
+          "outer_running_sample",
+          "stdout_bytes",
+          "stdout_sha256",
+          "stdout_eof",
+          "stdout_overflow",
+          "stdout_text",
+          "stderr_bytes",
+          "stderr_sha256",
+          "stderr_eof",
+          "stderr_overflow",
+          "stderr_text",
+          "exit_code",
+          "raw_wait4_rusage",
+          "transport_complete",
+          "full_supervisor_receipt",
+          "cause",
+          "cause_qualifier",
+          "completed_monotonic_ns"
+        ],
+        "reason": null,
+        "status": "CAUSE_CONFIRMED"
+      },
+      {
+        "case": "supervisor-entry-fd127",
+        "exit_code": 2,
+        "full_supervisor_receipt_summary": {
+          "call_count": 0,
+          "failure": {
+            "message": "unknown bootstrap inherited descriptor",
+            "type": "Refusal"
+          },
+          "keys": [
+            "schema",
+            "assignment",
+            "generation",
+            "status",
+            "scope",
+            "qualified_trust",
+            "custody",
+            "resources",
+            "owned_processes",
+            "home",
+            "output",
+            "process_history",
+            "fork_registration",
+            "bootstrap_origin",
+            "failure",
+            "custody_terminal",
+            "all_supervisor_owned_descriptors_closed",
+            "own_runtime_descriptor_closed",
+            "runtime_explicit_read_bytes",
+            "runtime_read_reset_or_subtracted",
+            "qualified",
+            "fork_state",
+            "runtime_read_scope",
+            "implicit_io",
+            "elapsed_seconds_from_supervisor_start",
+            "completed_msk"
+          ],
+          "qualified": false,
+          "status": "NOT_PROVEN"
+        },
+        "keys": [
+          "case",
+          "status",
+          "reason",
+          "started_monotonic_ns",
+          "own_child_bootstrap_read_debit",
+          "ownership_index",
+          "actual_launch",
+          "fork_prepared",
+          "outer_running_sample",
+          "exit_code",
+          "raw_wait4_rusage",
+          "stdout_bytes",
+          "stdout_sha256",
+          "stdout_eof",
+          "stdout_overflow",
+          "stdout_text",
+          "stderr_bytes",
+          "stderr_sha256",
+          "stderr_eof",
+          "stderr_overflow",
+          "stderr_text",
+          "transport_complete",
+          "full_supervisor_receipt",
+          "cause",
+          "cause_qualifier",
+          "completed_monotonic_ns"
+        ],
+        "reason": null,
+        "status": "CAUSE_CONFIRMED"
+      },
+      {
+        "case": "verifier-entry-fd7",
+        "exit_code": 1,
+        "keys": [
+          "case",
+          "status",
+          "reason",
+          "started_monotonic_ns",
+          "own_child_bootstrap_read_debit",
+          "ownership_index",
+          "actual_launch",
+          "own_control_private_name_absent_before",
+          "own_control_private_name",
+          "fork_prepared",
+          "outer_running_sample",
+          "exit_code",
+          "raw_wait4_rusage",
+          "stdout_bytes",
+          "stdout_sha256",
+          "stdout_eof",
+          "stdout_overflow",
+          "stdout_text",
+          "stderr_bytes",
+          "stderr_sha256",
+          "stderr_eof",
+          "stderr_overflow",
+          "stderr_text",
+          "transport_complete",
+          "own_control_private_name_absent_after",
+          "inner_receipt",
+          "inner_telemetry",
+          "inner_telemetry_unknown_reason",
+          "cause",
+          "cause_qualifier",
+          "completed_monotonic_ns"
+        ],
+        "reason": null,
+        "status": "CAUSE_CONFIRMED"
+      }
+    ],
+    "Source_status": "STOP_UNCONFIRMED",
+    "Source_owned_children_empty": true,
+    "Source_unconfirmed_lease_count": 10,
+    "Root_cleanup_not_green_Source": true
+  },
+  "LAB861_current_stock_primary_DATA": {
+    "path": "/home/jericho/.jericho/grok-takeover/ASTRA-E4-LAB861-STOCK-GPG-PRIMARY-DATA-RECEIVED-20261002.json",
+    "bytes": 16936,
+    "sha256": "f1bd90cec0abf20602c6efe93a879d478559eeb1934719bd03e6a9e24cb25e49",
+    "identity9_decimal_strings": [
+      "2050",
+      "8533510",
+      "33152",
+      "1000",
+      "1000",
+      "1",
+      "16936",
+      "1790930329756142685",
+      "1790930329811145833"
+    ],
+    "stable9": true
+  },
+  "prior_A175_whole_receipt": {
+    "path": "/home/jericho/.jericho/grok-takeover/ASTRA-E4-A175-INDEPENDENT-SOURCE-REVIEW-RECEIVED-20261002.json",
+    "bytes": 21886,
+    "sha256": "4e2391307a69d2f17eeb47b40f5eee025fd79598e5936636fadf0e188e23473f",
+    "identity9_decimal_strings": [
+      "2050",
+      "8533584",
+      "33152",
+      "1000",
+      "1000",
+      "1",
+      "21886",
+      "1790933375168582818",
+      "1790933375234586605"
+    ],
+    "stable9": true
+  },
+  "scope": "Different-author WHOLE exact LAB863 new six-file Node caller/expectations/plain/supervisor/verifier/contract and original all35/all6/all3; five changed files attempts F1 onceclose/F2 raw-error complete custody. Entire new error/default/normal/raw/cause/schema/resource graph, no automatic prior bound or acceptance transfer.",
+  "directions": [
+    "Read full originalpinned35/6 plusnewall30artifact sixSource body/transitive producersreceivers/closed factories. Preserve all3A172 actual typedresource/percall --no-keyringfirst2only/terminalproclease joins; historicalA169 RED10Refusals/Rootcleanup notSourcegreen and LAB8614 effects pending.",
+    "Whole supervisor close_launch_reserve and verifier close_own preowned attempted-once generation retirement before firstclose; sticky unknown no repeat/stale integer FD release/guessedfree. Full exception/default/secondaryerror/partialconstruction/inner+outer own-memory/raw objects/history/custody lifetimes originalend checked.",
+    "Whole verifier.call produced stdout/stderr/status/writable captures beforecleanup for timeout/resource/poll/read/strictdecode/spawn/prefix/firstfault errors, exact count/SHA/rc/outputcharges/custody. Original fullraw lossless requirement never replaced by hashonly/capped/dropped undecodable bytes or shortened 2MiB receipt. Partial failure honesty alone not complete required raw retention; inspect actual downstream caller/supervisor/publicreceivers and original accepted out-of-band custody if any.",
+    "Check author small oversized receipt stream-hash downgrade and decoder fallback semantics against original all35 disjoint5KiB error cells/complete2MiB cap, full hex/base64/raw/error/cause/optional/history/unknown field shape including ALLbranches. PriorA1752095321/margin1831 applies oldA172 only; calculate complete newfactories exactbound including fixedmetadata, original65536 aggregateGPG/65536callersupervisor/native262144 and errors, no oracle/capcut or budgettransfer.",
+    "Actual D1 prior metadata GPGCPU20/wall30/dynamicquota<=21845 firstcall vsauthor matrix30/32768 must be truthful newwhole. Fullnew19size72386093/read256MiB fixed+running arithmetic/hashsubset/Source5 bindings beforefutureRoot; six percall factories/alias groups/preopen/readonlyhome/agent/commonconf/worklimits unchanged.",
+    "Qualified trusted stock fence only; newSource whole runtime/currentstock/provider/GPG/proc/Rootclock/admission NOTRUN. Missing future fact alone notCODE; actual losingraw/control/resource contradiction is CODE. No universal hostileprovider/newRootrole/externalservice/unboundedparking/allowance/threshold/scenario/oraclecuts.",
+    "Result complete6/35/6/all3/F1F2 normalerror cause/prefix/end/custody/resource/schema/bounds matrix, genuine repairs and precise pendingCODE/qualification separate. Dangeroushistorical abstract REQUIRED_NOT_RUN; neveroperationalfixture/payload/generator/repro/exploitation/waiver. WholeRAM/IO unknownnotzero. NewSourceReady/Root/runtime/gates/GO notselfmint."
+  ],
+  "effects": "Own inert independent review TEXT/JSON + bounded trusted stock read/hash9 metadata only; NO supplied import/AST/compiler/eval/exec/tests/native/Root/GPG/GPGV/Node/archiveparse/extract/install/network/live/UI/model/gates or originalSource/Git/config/guards/models/locks mutation.",
+  "resources": {
+    "wall_seconds": 6600,
+    "seal_reserve_seconds": 600,
+    "cumulative_read_bytes": 268435456,
+    "memory_bytes": 8589934592,
+    "output_bytes": 16777216,
+    "local_workers": 4,
+    "model_children": 0,
+    "network": 0,
+    "retries": 0
+  },
+  "output": "/var/tmp/friday-astra-lab863-node-whole6-all35-all6-error-raw-onceclose-independent-source-review-a178-g1",
+  "terminal": "/home/jericho/.jericho/runtime/subagent-lifecycle/ASTRA-E4-LAB863-NODE-WHOLE6-ALL35-ALL6-ERROR-RAW-ONCECLOSE-INDEPENDENT-SOURCE-REVIEW-A178-G1-RESULT.json",
+  "SourceReady": false,
+  "Root_admission": false,
+  "compiler_ELF_ABI": "NOT_RUN",
+  "runtime": "NOT_RUN",
+  "gates": "NOT_RUN",
+  "GO": false
+}

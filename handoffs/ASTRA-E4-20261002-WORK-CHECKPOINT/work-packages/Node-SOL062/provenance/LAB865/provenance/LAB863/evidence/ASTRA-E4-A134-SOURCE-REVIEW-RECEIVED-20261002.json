@@ -1,0 +1,78 @@
+{
+  "schema": "friday.astra.e4.a134.root-received.v1",
+  "assignment": "ASTRA-E4-NODE-A131-WHOLE-DISJOINT-PUBLICATION-INDEPENDENT-SOURCE-REVIEW-A134",
+  "generation": 1,
+  "verified_msk": "2026-10-02T03:49:19.192849+03:00",
+  "terminal_pin": {
+    "path": "/home/jericho/.jericho/runtime/subagent-lifecycle/ASTRA-E4-NODE-A131-WHOLE-DISJOINT-PUBLICATION-INDEPENDENT-SOURCE-REVIEW-A134-G1-RESULT.json",
+    "bytes": 6119,
+    "sha256": "444f46b1eda7353b503850d10d1c110ee77688cd799eb7055e82aaedc882cb08",
+    "identity9_decimal_strings": [
+      "2050",
+      "9177195",
+      "33152",
+      "1000",
+      "1000",
+      "1",
+      "6119",
+      "1790901796340390337",
+      "1790901796340390337"
+    ],
+    "stable9": true
+  },
+  "manifest_pin": {
+    "path": "/var/tmp/friday-astra-node-a131-whole-disjoint-publication-independent-source-review-a134-g1/manifest.json",
+    "bytes": 6318,
+    "sha256": "0bf75f46f37d6eb552c3f9d870a8d430cf8100beed3348698e183471c2236655",
+    "identity9_decimal_strings": [
+      "2050",
+      "3980451",
+      "33152",
+      "1000",
+      "1000",
+      "1",
+      "6318",
+      "1790901796337390164",
+      "1790901796337390164"
+    ],
+    "stable9": true
+  },
+  "seal_pin": {
+    "path": "/var/tmp/friday-astra-node-a131-whole-disjoint-publication-independent-source-review-a134-g1/seal.json",
+    "bytes": 9373,
+    "sha256": "e13153bc2932ed24367e3410318213c778a6874afe892d555f477f156af2d36b",
+    "identity9_decimal_strings": [
+      "2050",
+      "3980452",
+      "33152",
+      "1000",
+      "1000",
+      "1",
+      "9373",
+      "1790901796338836971",
+      "1790901796338836971"
+    ],
+    "stable9": true
+  },
+  "private_SHA9_exact_pathset": true,
+  "verified_files": 12,
+  "known_read_bytes": 119317,
+  "result_summary": {
+    "assignment": "ASTRA-E4-NODE-A131-WHOLE-DISJOINT-PUBLICATION-INDEPENDENT-SOURCE-REVIEW-A134",
+    "generation": 1,
+    "whole_verdict": "ACCEPT_UNDER_EXPLICIT_QUALIFIED_STOCK_ENVELOPE",
+    "new_Root_before_effects_requirement": "Admit exact stock CPython3.14/JSON/codecs/int/ctypes/Linux/libc factories: complete messages<=900 ASCII chars, only JSON two-byte control escapes, type names<=32 ASCII chars, native scalar widths<=32, fixed filenames ASCII<=160, Root clock arguments canonical ASCII decimals<=32. Establish full factory format bounds, not merely sampled exceptions. libc C strerror <=256 ASCII chars over native errno domain/fallback is one required subfact. Exact16 fixed full9 and independently materialized Source3 identities required.",
+    "complete_bound_bytes": 2095321,
+    "margin_bytes": 1831,
+    "source_contradictions_found": [],
+    "current_stock900_measurement": "NOT_PERFORMED_NOT_CLAIMED",
+    "runtime": "NOT_RUN",
+    "gates": "NOT_RUN",
+    "GO": false
+  },
+  "root_decision": "ACCEPT_WHOLE_SOURCE_UNDER_EXPLICIT_QUALIFIED_STOCK_ENVELOPE_NEW_ROOT_QUALIFICATION_REQUIRED",
+  "Root_Image": false,
+  "runtime": "NOT_RUN",
+  "gates": "NOT_RUN",
+  "GO": false
+}

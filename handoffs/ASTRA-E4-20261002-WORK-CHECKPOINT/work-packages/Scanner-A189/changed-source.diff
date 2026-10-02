@@ -1,0 +1,1145 @@
+--- /var/tmp/friday-astra-lab862-a176-whole17-all52-all3-native-end-parenthood-raw-source-closure-a180-g1/native/source_owner.c
++++ /var/tmp/friday-astra-a180-a185-scanner-whole17-all52-all2-connected-native-raw-source-closure-a189-g1/native/source_owner.c
+@@ -104,6 +104,9 @@
+ static PyObject *parent_custody=NULL;
+ static PyObject *parent_error_type=NULL,*parent_error_value=NULL,*parent_error_traceback=NULL;
+ static PyObject *parent_result=NULL;
++/* Same ORIGINAL role/arena registry. No process, grant or private heap.
++ * It owns partial Source raw factory/meter/result graphs before projection. */
++static PyObject *source_raw_root=NULL;
+ static int parent_result_accepted=0,parent_native_consumer_entered=0;
+ static int parent_native_retired=0;
+ struct caller_error {PyObject *type,*value,*traceback;const char *operation;int error_number;};
+@@ -1364,7 +1367,41 @@
+      */
+     Py_RETURN_NONE;
+ }
++static PyObject *source_raw_custody(PyObject *self,PyObject *args) {
++    (void)self;PyObject *owner=NULL;
++    if(!PyArg_ParseTuple(args,"|O",&owner))return NULL;
++    if(!initialized || getpid()!=owner_pid || (caps.role!=1 && !existing_parent_entry)){
++        PyErr_SetString(PyExc_PermissionError,"same original initialized raw owner required");return NULL;
++    }
++    if(owner){
++        if(source_raw_root && source_raw_root!=owner){
++            PyErr_SetString(PyExc_RuntimeError,"original raw owner cannot be replaced");return NULL;
++        }
++        if(!source_raw_root){Py_INCREF(owner);source_raw_root=owner;}
++    }
++    if(source_raw_root){Py_INCREF(source_raw_root);return source_raw_root;}
++    Py_RETURN_NONE;
++}
++static PyObject *retain_source_raw_exception(PyObject *self,PyObject *exc) {
++    (void)self;
++    if(!initialized || getpid()!=owner_pid || (caps.role!=1 && !existing_parent_entry) || !PyExceptionInstance_Check(exc)){
++        PyErr_SetString(PyExc_RuntimeError,"exact preowned Source raw origin absent");return NULL;
++    }
++    if(caller_error_count>=16){
++        caller_error_lane_exhausted=1;failed=1;
++        /* Actual current thread-state root, not a fabricated policy exception.
++         * A exhausted fixed lane cannot continue or claim accepted retirement. */
++        PyErr_SetObject((PyObject *)Py_TYPE(exc),exc);return NULL;
++    }
++    struct caller_error *record=&caller_errors[caller_error_count++];
++    Py_INCREF(exc);record->value=exc;
++    Py_INCREF(Py_TYPE(exc));record->type=(PyObject *)Py_TYPE(exc);
++    record->operation="SourceRawOwner.pending_recorder";record->error_number=errno;
++    Py_RETURN_NONE;
++}
+ static PyMethodDef methods[]={
++    {"source_raw_custody",source_raw_custody,METH_VARARGS,NULL},
++    {"retain_source_raw_exception",retain_source_raw_exception,METH_O,NULL},
+     {"snapshot",snapshot,METH_NOARGS,NULL},{"begin_terminal",begin_terminal,METH_NOARGS,NULL},
+     {"recv_packet",receive_packet,METH_VARARGS,NULL},{"send_packet",send_packet,METH_VARARGS,NULL},
+     {"spawn_source",spawn_source,METH_VARARGS,NULL},
+@@ -1507,12 +1544,33 @@
+        (existing_observer_entry!=2 && !parent_delivery_accepted) || root_ledger[7]!=1)){
+         failed=1;error_end=1;
+     }
++    /* Confirm all currently registered description retirements BEFORE clearing
++     * complete raw202/caller state. Close uncertainty must still own that graph.
++     * This warm finite relation does not accept the unconfirmed hard-end prefix. */
++    if(initialized)for(int i=0;i<FD_MAX;i++){
++        int fd=fd_slots[i].fd;
++        if(!fd_slots[i].active || fd<0 || fd==2)continue;
++        if((fd==pending_pidfd && pending_child>=0 && !pending_reaped) ||
++           (fd==observed_root_pidfd && observed_root_child>=0 && !observed_root_reaped))continue;
++        if(retire_fd(fd)<0){failed=1;error_end=1;}
++    }
+     /* A failed/uncertain prefix is NOT permission to erase its raw graphs.
+      * Leave the complete VM, caller roots and original arenas in the SAME
+      * preowned native process. The eventual process/end survival relation
+      * remains A180-C2; this retention is not claimed as accepted adoption. */
+-    int can_finalize=!error_end && !failed;
++    /* A typed/recorder refusal alone need not strand an otherwise confirmed
++     * original native generation. Attempt finite warm error retirement only
++     * while every child/slot/description retirement is actually confirmed.
++     * Failed metrics remain failed; this establishes no external transfer. */
++    int retirement_uncertain=(pending_child>=0 && !pending_reaped) ||
++        (observed_root_child>=0 && !observed_root_reaped) || caller_error_lane_exhausted ||
++        parent_end_reached || !initialized || !deadline() || !parent_custody;
++    for(int i=0;i<FD_MAX;i++)if(fd_slots[i].uncertain ||
++        (fd_slots[i].active && fd_slots[i].fd>=0 && fd_slots[i].fd!=2))retirement_uncertain=1;
++    for(int i=0;i<4;i++)if(canonical_slots[i].acquired || canonical_slots[i].unlock_uncertain)retirement_uncertain=1;
++    int can_finalize=!retirement_uncertain;
+     if(Py_IsInitialized() && can_finalize){
++        Py_CLEAR(source_raw_root);
+         Py_CLEAR(parent_result);Py_CLEAR(parent_custody);
+         Py_CLEAR(parent_error_type);Py_CLEAR(parent_error_value);Py_CLEAR(parent_error_traceback);
+         for(unsigned i=0;i<caller_error_count;i++){
+@@ -1791,7 +1849,16 @@
+     /* fd4 is the exact selected held Source entry text, not caller input. Its
+      * selected runtime/import/root contract is consumed by worker_entry.py. */
+     FILE *entry=fdopen(4,"r");if(!entry) return ENTRY_REFUSAL("native entry contract or system operation refused");
+-    int result=PyRun_SimpleFileExFlags(entry,"<independently-selected-source-entry>",0,NULL);
++    /* Low-level trusted entry consumer preserves the actual loader/factory
++     * exception; the convenience SimpleFile API would print and clear it.
++     * No Source-controlled entry, importer, role or compiler authority is added. */
++    PyObject *entry_main=PyImport_AddModule("__main__");
++    PyObject *entry_globals=entry_main?PyModule_GetDict(entry_main):NULL;
++    PyObject *entry_done=entry_globals?PyRun_FileExFlags(entry,
++        "<independently-selected-source-entry>",Py_file_input,entry_globals,entry_globals,0,NULL):NULL;
++    int result=entry_done?0:125;
++    if(!entry_done){own_current_caller_error("Source.trusted_entry.loader_factory_or_return");failed=1;}
++    Py_XDECREF(entry_done);
+     in_terminal=1;
+     /* Source's own fixed native packet consumer is also actually called.
+      * Rejection/allocation errors never free raw/control/right history early.
+--- /var/tmp/friday-astra-lab862-a176-whole17-all52-all3-native-end-parenthood-raw-source-closure-a180-g1/source/bounds.py
++++ /var/tmp/friday-astra-a180-a185-scanner-whole17-all52-all2-connected-native-raw-source-closure-a189-g1/source/bounds.py
+@@ -137,6 +137,11 @@
+ 
+ def release_live(meter, amount):
+     if isinstance(meter, dict) and isinstance(amount, int) and not isinstance(amount, bool) and amount >= 0:
++        owner=meter.get('source_raw_owner')
++        if owner is not None and (owner.head is not None or owner.pending is not None or owner.pending_recorder is not None):
++            # Captured tracebacks may alias the producer's complete scratch.
++            # Logical release is not proof those native objects were freed.
++            return
+         meter["live_bytes"] = max(0, meter.get("live_bytes", 0) - amount)
+ 
+ 
+@@ -174,39 +179,50 @@
+         release_live(meter, amount)
+ 
+ 
+-def new_meter():
++def new_meter(raw_owner=None):
+     import time
+-    from tools.native_support import selected_owner
+-    native=selected_owner()
+-    physical=native.snapshot() if native is not None else None
+-    prepaid={'output_bytes':TERMINAL_OUTPUT_CAP,'work_bytes':TERMINAL_WORK_CAP,
+-             'live_bytes':TERMINAL_LIVE_CAP}
+-    if physical is not None:
+-        prepaid={'output_bytes':physical['terminal_output_bytes'],
+-                 'work_bytes':physical['terminal_work_bytes'],
+-                 'live_bytes':physical['terminal_live_bytes']}
+-    return {
+-        "bootstrap_started_ns": physical['started_ns'] if physical is not None else time.monotonic_ns(),
+-        "native_actual_entry_read_bytes": physical['actual_read_bytes'] if physical is not None else None,
+-        "read_bytes": 0,
+-        "expanded_bytes": 0,
+-        "output_bytes": 0,
+-        "work_bytes": 0,
+-        "members": 0,
+-        "fds": physical['fds'] if physical is not None else 0,
+-        "fds_peak": physical['fds'] if physical is not None else 0,
+-        "live_bytes": 0,
+-        "live_peak": 0,
+-        "terminal_prepaid": prepaid,
+-        "native_owner":native,
+-        "terminal_spent": False,
+-        "terminal_trace_capacity": {"output_bytes":0,"work_bytes":0,"live_bytes":0},
+-        "terminal_causal_capacity": {"output_bytes":0,"work_bytes":0,"live_bytes":0},
+-        "terminal_capacity_cause": None,
+-        "actual_read_bytes": 0,
+-        "phase_trace": [],
+-        "fd_close_uncertainties": [],
+-    }
++    from tools.native_support import selected_owner,source_raw_owner,_source_raw_scope
++    if raw_owner is None:raw_owner=source_raw_owner()
++    token=None
++    try:
++        token=_source_raw_scope.set(raw_owner)
++        native=selected_owner()
++        physical=native.snapshot() if native is not None else None
++        prepaid={'output_bytes':TERMINAL_OUTPUT_CAP,'work_bytes':TERMINAL_WORK_CAP,
++                 'live_bytes':TERMINAL_LIVE_CAP}
++        if physical is not None:
++            prepaid={'output_bytes':physical['terminal_output_bytes'],
++                     'work_bytes':physical['terminal_work_bytes'],
++                     'live_bytes':physical['terminal_live_bytes']}
++        return {
++            'source_raw_owner':raw_owner,
++            'source_raw_scope_token':token,
++            "bootstrap_started_ns": physical['started_ns'] if physical is not None else time.monotonic_ns(),
++            "native_actual_entry_read_bytes": physical['actual_read_bytes'] if physical is not None else None,
++            "read_bytes": 0,
++            "expanded_bytes": 0,
++            "output_bytes": 0,
++            "work_bytes": 0,
++            "members": 0,
++            "fds": physical['fds'] if physical is not None else 0,
++            "fds_peak": physical['fds'] if physical is not None else 0,
++            "live_bytes": 0,
++            "live_peak": 0,
++            "terminal_prepaid": prepaid,
++            "native_owner":native,
++            "terminal_spent": False,
++            "terminal_trace_capacity": {"output_bytes":0,"work_bytes":0,"live_bytes":0},
++            "terminal_causal_capacity": {"output_bytes":0,"work_bytes":0,"live_bytes":0},
++            "terminal_capacity_cause": None,
++            "actual_read_bytes": 0,
++            "phase_trace": [],
++            "fd_close_uncertainties": [],
++        }
++
++    except BaseException as exc:
++        raw_owner.capture(exc)
++        if token is not None:_source_raw_scope.reset(token)
++        raise
+ 
+ 
+ def terminal_meter(meter):
+@@ -231,7 +247,8 @@
+     limits={key:value+extra.get(key,0)+causal.get(key,0) for key,value in prepaid.items()}
+     lane = {"work_bytes": 0, "live_bytes": 0, "output_bytes": 0,
+             "terminal_lane": True, "terminal_limits": limits,
+-            "bootstrap_started_ns": meter["bootstrap_started_ns"]}
++            "bootstrap_started_ns": meter["bootstrap_started_ns"],
++            'source_raw_owner':meter.get('source_raw_owner')}
+     # The selected14-schema graph is already physically owned by this same
+     # call. Terminal validation borrows it; it must not create a new metadata
+     # IO/FD producer in a lane that admits only work/live/output.
+--- /var/tmp/friday-astra-lab862-a176-whole17-all52-all3-native-end-parenthood-raw-source-closure-a180-g1/source/canonical.py
++++ /var/tmp/friday-astra-a180-a185-scanner-whole17-all52-all2-connected-native-raw-source-closure-a189-g1/source/canonical.py
+@@ -68,7 +68,10 @@
+         else: raise ValueError('canonical_type')
+         if size>HARD_MAX_OUTPUT_BYTES: raise ValueError('canonical_size')
+     try: walk(obj,1)
+-    except (ValueError,RecursionError): return None
++    except (ValueError,RecursionError) as raw_origin:
++        from tools.native_support import retain_source_origin
++        retain_source_origin(None,raw_origin)
++        return None
+     return {'output_bytes':size,'work_bytes':work+size*4,
+             'live_bytes':size*4+overhead+98304}
+ 
+@@ -175,7 +178,9 @@
+         returned_live = len(result)
+         success = True
+         return result
+-    except _BoundExceeded:
++    except _BoundExceeded as raw_origin:
++        from tools.native_support import retain_source_origin
++        retain_source_origin(None,raw_origin)
+         return None
+     finally:
+         # On success the one returned bytes allocation transfers to the caller.
+@@ -205,6 +210,8 @@
+         digest = content_sha256(raw, resources, meter)
+         return digest, None
+     except DigestStop as stop:
++        from tools.native_support import retain_source_origin
++        retain_source_origin(meter,stop)
+         return None, stop.cause
+     finally:
+         from .bounds import release_live
+--- /var/tmp/friday-astra-lab862-a176-whole17-all52-all3-native-end-parenthood-raw-source-closure-a180-g1/source/causes.py
++++ /var/tmp/friday-astra-a180-a185-scanner-whole17-all52-all2-connected-native-raw-source-closure-a189-g1/source/causes.py
+@@ -239,3 +239,13 @@
+             'explicit_cause':visit(error.__cause__),
+             'implicit_context':visit(error.__context__)}
+     return visit(exc)
++
++
++def source_exception_detail(meter,exc):
++    """First accept the exact raw graph, then form its fallible typed view."""
++    from tools.native_support import retain_source_origin
++    retain_source_origin(meter,exc)
++    try:return exception_detail(exc)
++    except BaseException as recorder:
++        retain_source_origin(meter,recorder)
++        raise recorder from exc
+--- /var/tmp/friday-astra-lab862-a176-whole17-all52-all3-native-end-parenthood-raw-source-closure-a180-g1/source/compression.py
++++ /var/tmp/friday-astra-a180-a185-scanner-whole17-all52-all2-connected-native-raw-source-closure-a189-g1/source/compression.py
+@@ -237,8 +237,10 @@
+         returned=bytes(out)
+         return returned,None
+     except BudgetStop as stop:
+-        from .causes import exception_detail
+-        if isinstance(meter,dict):meter.setdefault('origin_failures',[]).append(exception_detail(stop))
++        from tools.native_support import retain_source_origin
++        retain_source_origin(meter,stop)
++        from .causes import source_exception_detail
++        if isinstance(meter,dict):meter.setdefault('origin_failures',[]).append(source_exception_detail(meter,stop))
+         return None,stop.cause
+     finally:
+         piece=None
+@@ -339,21 +341,35 @@
+                 raise BudgetStop("codec_capability_unsupported")
+             try:
+                 decoder = module.ZstdDecompressor(options={option: window})
+-            except (TypeError, ValueError, AttributeError):
++            except (TypeError, ValueError, AttributeError) as raw_origin:
++                from tools.native_support import retain_source_origin
++                retain_source_origin(meter,raw_origin)
+                 raise BudgetStop("codec_capability_unsupported")
+         yield from _feed_chunks(decoder,payload,limit,protocols[method],resources,meter)
+         return
+-    except BudgetStop:
++    except BudgetStop as raw_origin:
++        from tools.native_support import retain_source_origin
++        retain_source_origin(meter,raw_origin)
+         raise
+-    except ImportError:
++    except ImportError as raw_origin:
++        from tools.native_support import retain_source_origin
++        retain_source_origin(meter,raw_origin)
+         raise BudgetStop({"deflate": "runtime_zlib_module_absent", "gzip": "runtime_zlib_module_absent", "xz": "runtime_lzma_module_absent", "zstd": "runtime_zstd_module_absent"}[method])
+-    except MemoryError:
++    except MemoryError as raw_origin:
++        from tools.native_support import retain_source_origin
++        retain_source_origin(meter,raw_origin)
+         raise BudgetStop("resource_ceiling_exceeded")
+-    except (TypeError, AttributeError):
++    except (TypeError, AttributeError) as raw_origin:
++        from tools.native_support import retain_source_origin
++        retain_source_origin(meter,raw_origin)
+         raise BudgetStop("codec_capability_unsupported")
+     except DigestStop as stop:
++        from tools.native_support import retain_source_origin
++        retain_source_origin(meter,stop)
+         raise BudgetStop(stop.cause)
+-    except Exception:
++    except Exception as raw_origin:
++        from tools.native_support import retain_source_origin
++        retain_source_origin(meter,raw_origin)
+         raise BudgetStop("compressed_stream_malformed")
+     finally:
+         decoder=None
+--- /var/tmp/friday-astra-lab862-a176-whole17-all52-all3-native-end-parenthood-raw-source-closure-a180-g1/source/context.py
++++ /var/tmp/friday-astra-a180-a185-scanner-whole17-all52-all2-connected-native-raw-source-closure-a189-g1/source/context.py
+@@ -115,7 +115,9 @@
+             return "ingress_context_unbound"
+         try:
+             decoded[role] = _administrative(raw)
+-        except (ValueError, MemoryError, UnicodeError):
++        except (ValueError, MemoryError, UnicodeError) as raw_origin:
++            from tools.native_support import retain_source_origin
++            retain_source_origin(meter,raw_origin)
+             return "ingress_context_unbound"
+     raw_sha = content_sha256(index_raw,resources,meter)
+     if context.get("index_sha256") != raw_sha or context.get("index_size") != len(index_raw):
+@@ -320,7 +322,9 @@
+         document = _administrative(raw)
+         selected = document["urls"][ordinal]
+         info = document["info"]
+-    except (ValueError, TypeError, KeyError, IndexError):
++    except (ValueError, TypeError, KeyError, IndexError) as raw_origin:
++        from tools.native_support import retain_source_origin
++        retain_source_origin(meter,raw_origin)
+         return "ingress_context_unbound"
+     if (not isinstance(selected, dict) or selected.get("filename") != row["filename"] or
+         selected.get("digests", {}).get("sha256") != row.get("sha256", row.get("expected_sha256")) or
+--- /var/tmp/friday-astra-lab862-a176-whole17-all52-all3-native-end-parenthood-raw-source-closure-a180-g1/source/controls.py
++++ /var/tmp/friday-astra-a180-a185-scanner-whole17-all52-all2-connected-native-raw-source-closure-a189-g1/source/controls.py
+@@ -109,8 +109,12 @@
+     try:
+         typed = validate_role('ordinary_contract',independent_contract,None,comparator_meter)
+     except DigestStop as stop:
++        from tools.native_support import retain_source_origin
++        retain_source_origin(None,stop)
+         typed = stop.cause
+-    except (MemoryError,OSError,ValueError,KeyError,TypeError):
++    except (MemoryError,OSError,ValueError,KeyError,TypeError) as raw_origin:
++        from tools.native_support import retain_source_origin
++        retain_source_origin(None,raw_origin)
+         typed = 'control_output_unbound'
+     if typed:
+         return {"status":"FAIL","cause":typed,"comparator_owner":"separate_metadata_owner_not_whole_resource_PASS"}
+--- /var/tmp/friday-astra-lab862-a176-whole17-all52-all3-native-end-parenthood-raw-source-closure-a180-g1/source/custody.py
++++ /var/tmp/friday-astra-a180-a185-scanner-whole17-all52-all2-connected-native-raw-source-closure-a189-g1/source/custody.py
+@@ -135,8 +135,13 @@
+             hello=None
+             from .bounds import release_live
+             release_live(meter,16384*16)
+-        except BaseException:
+-            self.close()
++        except BaseException as exc:
++            from tools.native_support import retain_source_origin
++            retain_source_origin(meter,exc)
++            try:self.close()
++            except BaseException as cleanup:
++                retain_source_origin(meter,cleanup)
++                raise
+             raise
+ 
+     def _send(self,message):
+@@ -326,7 +331,9 @@
+             self._check()
+             self.meter["range_return_live"]=self.meter.get("range_return_live",0)+size+32
+             return raw
+-        except BaseException:
++        except BaseException as exc:
++            from tools.native_support import retain_source_origin
++            retain_source_origin(self.meter,exc)
+             release_live(self.meter,size+32)
+             raise
+         finally:
+@@ -674,7 +681,9 @@
+                 opened_fd = os.open(path, flags)
+             else:
+                 opened_fd = os.open(path, flags, dir_fd=dir_fd)
+-        except OSError:
++        except OSError as exc:
++            from tools.native_support import retain_source_origin
++            retain_source_origin(meter,exc)
+             if isinstance(meter, dict) and meter.get("fds", 0) > 0:
+                 meter["fds"] = meter["fds"] - 1
+             raise
+@@ -995,7 +1004,9 @@
+         tick=reserve(resources,meter,fds=1,work_bytes=4096,live_bytes=4096)
+         if tick: raise DigestStop(tick)
+         try: return os.open(path,flags,dir_fd=parent)
+-        except BaseException:
++        except BaseException as exc:
++            from tools.native_support import retain_source_origin
++            retain_source_origin(meter,exc)
+             meter['fds']-=1
+             raise
+     def closed(fd,path):
+@@ -1204,8 +1215,9 @@
+             "held_after_named_after_checked": True,
+             "scope": "per-material-complete-observation-generation.v1"}
+     except DigestStop as stop:
+-        from .causes import exception_detail
+-        meter.setdefault('origin_failures',[]).append(exception_detail(stop))
++        from .causes import source_exception_detail
++        detail=source_exception_detail(meter,stop)
++        meter.setdefault('origin_failures',[]).append(detail)
+         cause = stop.cause
+     finally:
+         # Checks are still against this original descriptor.  Close is not a new
+@@ -1213,8 +1225,9 @@
+         try:
+             final = close_whole_custody(meter)
+         except (OSError,KeyError,TypeError,ValueError,RuntimeError) as cleanup_exc:
+-            from .causes import exception_detail
+-            meter.setdefault('origin_failures',[]).append(exception_detail(cleanup_exc))
++            from .causes import source_exception_detail
++            detail=source_exception_detail(meter,cleanup_exc)
++            meter.setdefault('origin_failures',[]).append(detail)
+             final = "held_fd_unretained"
+         cause = cause or final
+         if blob is not None:
+--- /var/tmp/friday-astra-lab862-a176-whole17-all52-all3-native-end-parenthood-raw-source-closure-a180-g1/source/deb_archive.py
++++ /var/tmp/friday-astra-a180-a185-scanner-whole17-all52-all2-connected-native-raw-source-closure-a189-g1/source/deb_archive.py
+@@ -71,7 +71,9 @@
+         return None
+     try:
+         return int(text, 10)
+-    except (ValueError, OverflowError):
++    except (ValueError, OverflowError) as raw_origin:
++        from tools.native_support import retain_source_origin
++        retain_source_origin(None,raw_origin)
+         return None
+ 
+ 
+@@ -123,7 +125,9 @@
+                 return None, "truncated_ar_header"
+             try:
+                 name = raw_name.decode("utf-8")
+-            except UnicodeError:
++            except UnicodeError as raw_origin:
++                from tools.native_support import retain_source_origin
++                retain_source_origin(meter,raw_origin)
+                 return None, "member_name_undecodable"
+             payload = payload.part(name_len,len(payload)) if streaming else payload[name_len:]
+             content_size = header_size - name_len
+@@ -132,7 +136,9 @@
+         else:
+             try:
+                 text = name_field.decode("ascii")
+-            except UnicodeError:
++            except UnicodeError as raw_origin:
++                from tools.native_support import retain_source_origin
++                retain_source_origin(meter,raw_origin)
+                 return None, "member_name_undecodable"
+             trimmed = text.rstrip(" ")
+             slash = trimmed.endswith("/")
+@@ -160,7 +166,9 @@
+             uid = int(uid_text, 10)
+             gid = int(gid_text, 10)
+             mode = int(mode_text, 8)
+-        except ValueError:
++        except ValueError as raw_origin:
++            from tools.native_support import retain_source_origin
++            retain_source_origin(meter,raw_origin)
+             return None, "truncated_ar_header"
+         if uid > 0xFFFFFFFF or gid > 0xFFFFFFFF or mode > 0o777777:
+             return None, "truncated_ar_header"
+@@ -240,7 +248,9 @@
+         return None
+     try:
+         number = int(value)
+-    except (ValueError, OverflowError):
++    except (ValueError, OverflowError) as raw_origin:
++        from tools.native_support import retain_source_origin
++        retain_source_origin(None,raw_origin)
+         return None
+     if number > 9223372036854775807:
+         return None
+@@ -276,7 +286,9 @@
+         return None, "tar_pax_malformed"
+     try:
+         return head.decode("utf-8"), None
+-    except UnicodeError:
++    except UnicodeError as raw_origin:
++        from tools.native_support import retain_source_origin
++        retain_source_origin(None,raw_origin)
+         return None, "member_name_undecodable"
+ 
+ 
+@@ -326,7 +338,9 @@
+             return None
+         try:
+             length = int(length_token, 10)
+-        except ValueError:
++        except ValueError as raw_origin:
++            from tools.native_support import retain_source_origin
++            retain_source_origin(None,raw_origin)
+             return None
+         if length < 5 or pos + length > len(payload):
+             return None
+@@ -340,7 +354,9 @@
+         try:
+             key_text = key.decode("utf-8")
+             value_text = value.decode("utf-8")
+-        except UnicodeError:
++        except UnicodeError as raw_origin:
++            from tools.native_support import retain_source_origin
++            retain_source_origin(None,raw_origin)
+             return None
+         if not key_text or any(char not in "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789._" for char in key_text):
+             return None
+@@ -404,7 +420,9 @@
+             return None, tick
+         try:
+             stored = _octal(header[148:156])
+-        except ValueError:
++        except ValueError as raw_origin:
++            from tools.native_support import retain_source_origin
++            retain_source_origin(meter,raw_origin)
+             return None, "tar_checksum_mismatch"
+         if stored != _tar_checksum(header):
+             return None, "tar_checksum_mismatch"
+@@ -424,7 +442,9 @@
+             prefix = ""
+             if dialect == "posix":
+                 prefix = _header_text(header[345:500])
+-        except UnicodeError:
++        except UnicodeError as raw_origin:
++            from tools.native_support import retain_source_origin
++            retain_source_origin(meter,raw_origin)
+             return None, "member_name_undecodable"
+         if prefix:
+             name = prefix + "/" + name
+@@ -439,9 +459,13 @@
+                 gnu_ctime = _numeric(header[357:369])
+                 extension_records.append({"kind": "gnu_atime", "value": gnu_atime,"header_offset":header_offset})
+                 extension_records.append({"kind": "gnu_ctime", "value": gnu_ctime,"header_offset":header_offset})
+-        except _NumericUnsupported:
++        except _NumericUnsupported as raw_origin:
++            from tools.native_support import retain_source_origin
++            retain_source_origin(meter,raw_origin)
+             return None, "tar_numeric_unsupported"
+-        except ValueError:
++        except ValueError as raw_origin:
++            from tools.native_support import retain_source_origin
++            retain_source_origin(meter,raw_origin)
+             return None, "truncated_tar_header"
+         if uid < 0 or gid < 0 or mode < 0 or size < 0:
+             return None, "tar_numeric_unsupported"
+@@ -484,7 +508,9 @@
+                 return None, "tar_header_fields_unsupported"
+             if dialect == "posix" and any(byte not in (0, 32) for byte in header[500:512]):
+                 return None, "tar_header_fields_unsupported"
+-        except (ValueError, _NumericUnsupported):
++        except (ValueError, _NumericUnsupported) as raw_origin:
++            from tools.native_support import retain_source_origin
++            retain_source_origin(meter,raw_origin)
+             return None, "tar_header_fields_unsupported"
+         if member_type == "extension" and size > 1048576:
+             return None, "resource_ceiling_exceeded"
+@@ -869,7 +895,9 @@
+     for part in parts:
+         try:
+             lines.append(part.decode("utf-8"))
+-        except UnicodeError:
++        except UnicodeError as raw_origin:
++            from tools.native_support import retain_source_origin
++            retain_source_origin(meter,raw_origin)
+             return None
+     folded = {}
+     raw = {}
+@@ -1093,6 +1121,8 @@
+                 parsed_tars[item["name"]]=parsed
+                 tar_framing[item['name']]=envelope
+             except BudgetStop as stop:
++                from tools.native_support import retain_source_origin
++                retain_source_origin(meter,stop)
+                 from .public import exception_owned_result
+                 return exception_owned_result(meter,stop)
+             finally:
+@@ -1239,9 +1269,13 @@
+     try:
+         result = _scan_deb(expected, held, resources, publisher_evidence, meter)
+     except DigestStop as stop:
++        from tools.native_support import retain_source_origin
++        retain_source_origin(meter,stop)
+         from .public import exception_owned_result
+         result = exception_owned_result(meter,stop)
+     except (MemoryError,OSError,ValueError,UnicodeError,KeyError,TypeError,IndexError,RuntimeError) as exc:
++        from tools.native_support import retain_source_origin
++        retain_source_origin(meter,exc)
+         from .public import exception_owned_result
+         result=exception_owned_result(meter,exc)
+     finally:
+--- /var/tmp/friday-astra-lab862-a176-whole17-all52-all3-native-end-parenthood-raw-source-closure-a180-g1/source/digests.py
++++ /var/tmp/friday-astra-a180-a185-scanner-whole17-all52-all2-connected-native-raw-source-closure-a189-g1/source/digests.py
+@@ -99,9 +99,13 @@
+             zlib = selected["module"]
+         else:
+             import zlib
+-    except ImportError:
++    except ImportError as raw_origin:
++        from tools.native_support import retain_source_origin
++        retain_source_origin(meter,raw_origin)
+         return None, "runtime_zlib_module_absent"
+-    except MemoryError:
++    except MemoryError as raw_origin:
++        from tools.native_support import retain_source_origin
++        retain_source_origin(meter,raw_origin)
+         return None, "resource_ceiling_exceeded"
+     state = 0
+     chunks=_chunks(data, resources, meter)
+@@ -109,6 +113,8 @@
+         for piece in chunks:
+             state = zlib.crc32(piece, state)
+     except DigestStop as stop:
++        from tools.native_support import retain_source_origin
++        retain_source_origin(meter,stop)
+         return None, stop.cause
+     finally:
+         piece=None
+--- /var/tmp/friday-astra-lab862-a176-whole17-all52-all3-native-end-parenthood-raw-source-closure-a180-g1/source/public.py
++++ /var/tmp/friday-astra-a180-a185-scanner-whole17-all52-all2-connected-native-raw-source-closure-a189-g1/source/public.py
+@@ -669,6 +669,8 @@
+     try:
+         result = _scan_rows(rows,held_entries,resources,publisher_evidence,mode,owned)
+     except (DigestStop,BudgetStop,MemoryError,OSError,ValueError,UnicodeError,KeyError,TypeError,IndexError,RuntimeError) as exc:
++        from tools.native_support import retain_source_origin
++        retain_source_origin(meter,exc)
+         result = exception_owned_result(owned,exc)
+     return finish_owned(result,resources,owned)
+ 
+@@ -773,6 +775,8 @@
+         try:
+             output_digest = content_sha256(blob,resources,meter)
+         except DigestStop as stop:
++            from tools.native_support import retain_source_origin
++            retain_source_origin(None,stop)
+             output_digest = None
+             amount=len(blob); blob=None
+             release_live(meter,amount)
+@@ -851,6 +855,8 @@
+     try:
+         admission = canonical_loads(admission_raw, max_bytes=1000000, max_depth=16)
+     except ValueError as exc:
++        from tools.native_support import retain_source_origin
++        retain_source_origin(meter,exc)
+         return pack("REFUSED", "canonical_ingress_refused", detail={"cause": str(exc)})
+     cause = validate_document(admission, ADMISSION_SCHEMA, meter=meter)
+     if cause is not None:
+@@ -873,6 +879,8 @@
+         index = canonical_loads(index_raw, max_bytes=2000000, max_depth=16)
+         held = canonical_loads(held_raw, max_bytes=held_cap, max_depth=16)
+     except ValueError as exc:
++        from tools.native_support import retain_source_origin
++        retain_source_origin(meter,exc)
+         return pack("REFUSED", "canonical_ingress_refused", detail={"cause": str(exc)})
+     from .digests import content_sha256
+     raw_sha = content_sha256(index_raw,resources,meter)
+@@ -931,30 +939,44 @@
+ 
+ def _run_owned(index_raw, held_raw, admission_raw, stock_context=None):
+     """One entry, one shared meter and one custody completion for every route."""
+-    from .custody import complete_custody
+-    meter = new_meter()
+-    result = None
+-    from .digests import DigestStop
+-    from .compression import BudgetStop
++    from tools.native_support import source_raw_owner,leave_source_scope
++    raw_owner=source_raw_owner()
++    meter=None
+     try:
+-        result = _scan_retained(index_raw, held_raw, admission_raw, stock_context, meter)
+-    except (DigestStop,BudgetStop,MemoryError,OSError,ValueError,UnicodeError,KeyError,TypeError,IndexError,RuntimeError) as exc:
+-        result = exception_owned_result(meter,exc)
+-    resources = meter.get("active_resources")
+-    result = finish_owned(result,resources,meter)
+-    from tools.native_support import transfer_result
+-    return transfer_result(result,meter['final_output_bytes'],meter)
++        from .custody import complete_custody
++        meter = new_meter(raw_owner)
++        result = None
++        from .digests import DigestStop
++        from .compression import BudgetStop
++        try:
++            result = _scan_retained(index_raw, held_raw, admission_raw, stock_context, meter)
++        except (DigestStop,BudgetStop,MemoryError,OSError,ValueError,UnicodeError,KeyError,TypeError,IndexError,RuntimeError) as exc:
++            from tools.native_support import retain_source_origin
++            retain_source_origin(None,exc)
++            result = exception_owned_result(meter,exc)
++        resources = meter.get("active_resources")
++        result = finish_owned(result,resources,meter)
++        from tools.native_support import transfer_result
++        return transfer_result(result,meter['final_output_bytes'],meter)
++
++    except BaseException as exc:
++        raw_owner.capture(exc)
++        raise
++    finally:
++        if meter is not None:leave_source_scope(meter)
+ 
+ 
+ def exception_owned_result(meter,exc):
+     from .digests import DigestStop
+     from .compression import BudgetStop
+-    from .causes import causal_refusal,exception_detail
++    from .causes import causal_refusal,source_exception_detail
++    from tools.native_support import retain_source_origin
++    retain_source_origin(meter,exc)
+     cause=exc.cause if isinstance(exc,(DigestStop,BudgetStop)) else 'resource_ceiling_exceeded' if isinstance(exc,MemoryError) else 'nofollow_open_failed' if isinstance(exc,OSError) else 'expected_shape_invalid'
+     primary=meter.get('pending_terminal_result')
+     if not isinstance(primary,dict): primary=pack('REFUSED',cause,stage=meter.get('reached_stage'))
+     return causal_refusal(primary,cause,meter,exception_class=type(exc).__name__,
+-        failure_detail=exception_detail(exc))
++        failure_detail=source_exception_detail(meter,exc))
+ 
+ 
+ def _with_origin_successor(result,meter):
+@@ -1015,6 +1037,8 @@
+         from tools.native_support import own_map
+         return own_map(result,meter)
+     except (DigestStop,BudgetStop,MemoryError,OSError,ValueError,UnicodeError,KeyError,TypeError,IndexError,RuntimeError) as exc:
++        from tools.native_support import retain_source_origin
++        retain_source_origin(meter,exc)
+         from tools.native_support import own_map
+         return own_map(_finish_exception_refusal(meter.get("pending_terminal_result",result),resources,meter,exc),meter)
+ 
+@@ -1025,6 +1049,8 @@
+     A truly unavailable physical terminal allocation remains STOP_UNCONFIRMED;
+     no Python Source can fabricate successful bytes after that host failure.
+     """
++    from tools.native_support import retain_source_origin
++    retain_source_origin(meter,exc)
+     from .custody import close_whole_custody,release_retained_fd,release_archive_live
+     from .bounds import terminal_meter,release_live,reserve
+     from .canonical import canonical_bytes_bounded
+@@ -1032,27 +1058,33 @@
+     from .compression import BudgetStop
+     cause=exc.cause if isinstance(exc,(DigestStop,BudgetStop)) else "resource_ceiling_exceeded" if isinstance(exc,MemoryError) else "held_fd_unretained" if isinstance(exc,OSError) else "expected_shape_invalid"
+     cleanup=[];cleanup_details=[]
+-    from .causes import exception_detail
++    from .causes import source_exception_detail
+     for closer in (close_whole_custody,release_retained_fd):
+         try:
+             value=closer(meter)
+             problem=value.get("cause") if isinstance(value,dict) else value
+             if problem: cleanup.append(problem)
+         except (MemoryError,OSError,ValueError,KeyError,TypeError,RuntimeError) as cleanup_exc:
++            from tools.native_support import retain_source_origin
++            retain_source_origin(meter,cleanup_exc)
+             cleanup.append("held_fd_unretained")
+-            cleanup_details.append(exception_detail(cleanup_exc))
++            retain_source_origin(meter,cleanup_exc)
++            cleanup_details.append(source_exception_detail(meter,cleanup_exc))
+     client=meter.get('root_holder_client')
+     if client is not None:
+         try:
+             client.close()
+             if meter.get('fd_close_uncertainties'): cleanup.append('held_fd_unretained')
+         except (MemoryError,OSError,ValueError,KeyError,TypeError,RuntimeError) as cleanup_exc:
++            from tools.native_support import retain_source_origin
++            retain_source_origin(meter,cleanup_exc)
+             cleanup.append('held_fd_unretained')
+-            cleanup_details.append(exception_detail(cleanup_exc))
++            retain_source_origin(meter,cleanup_exc)
++            cleanup_details.append(source_exception_detail(meter,cleanup_exc))
+     primary=primary if isinstance(primary,dict) else pack("REFUSED",cause)
+     from .causes import causal_refusal
+     result=causal_refusal(primary,cause,meter,exception_class=type(exc).__name__,cleanup_causes=cleanup,
+-        failure_detail={'origin':exception_detail(exc),'cleanup_exceptions':cleanup_details,
++        failure_detail={'origin':source_exception_detail(meter,exc),'cleanup_exceptions':cleanup_details,
+             'full_leaf_origins':meter.get('origin_failures',[])[:]})
+     previous=meter.pop("final_output_bytes",None)
+     if previous is not None:
+@@ -1081,6 +1113,8 @@
+     try:
+         document = canonical_loads(raw, max_bytes=2000000, max_depth=16)
+     except ValueError as exc:
++        from tools.native_support import retain_source_origin
++        retain_source_origin(None,exc)
+         return pack("REFUSED", "canonical_ingress_refused", detail={"cause": str(exc)})
+     cause = validate_document(document, RETAINED_INDEX_SCHEMA)
+     if cause is not None:
+--- /var/tmp/friday-astra-lab862-a176-whole17-all52-all3-native-end-parenthood-raw-source-closure-a180-g1/source/raw_relations.py
++++ /var/tmp/friday-astra-a180-a185-scanner-whole17-all52-all2-connected-native-raw-source-closure-a189-g1/source/raw_relations.py
+@@ -164,7 +164,9 @@
+                 return "schema_rejected"
+         else:
+             return "schema_rejected"
+-    except (ValueError,UnicodeError,KeyError,TypeError,IndexError,struct.error,_NumericUnsupported):
++    except (ValueError,UnicodeError,KeyError,TypeError,IndexError,struct.error,_NumericUnsupported) as raw_origin:
++        from tools.native_support import retain_source_origin
++        retain_source_origin(meter,raw_origin)
+         return "schema_rejected"
+     return None
+ 
+@@ -274,7 +276,9 @@
+         selected = meter.get("content_companion",{}).get(observation["relative_path"]) if isinstance(meter,dict) else None
+         if selected is not None and (companion["publisher_raw_sha256"],companion["publisher_record_ordinal"],companion["selected_metadata_content_sha256"]) != (selected["publisher_raw_sha256"],selected["publisher_record_ordinal"],selected["metadata_content_sha256"]):
+             return "schema_rejected"
+-    except (ValueError,UnicodeError,KeyError,TypeError,IndexError,struct.error):
++    except (ValueError,UnicodeError,KeyError,TypeError,IndexError,struct.error) as raw_origin:
++        from tools.native_support import retain_source_origin
++        retain_source_origin(meter,raw_origin)
+         return "schema_rejected"
+     return None
+ 
+@@ -358,7 +362,10 @@
+         tail=envelope['tail_zero_bytes']
+         if index!=len(members) or offset!=envelope['terminator_offset'] or envelope['zero_terminator_blocks']!=2 or type(tail) is not int or tail<0 or tail%512 or envelope['expanded_stream_size']!=offset+1024+tail:return 'schema_rejected'
+         if local_state or gnu_name is not None or gnu_link is not None:return 'schema_rejected'
+-    except (ValueError,UnicodeError,KeyError,TypeError,IndexError,_NumericUnsupported):return 'schema_rejected'
++    except (ValueError,UnicodeError,KeyError,TypeError,IndexError,_NumericUnsupported) as raw_origin:
++        from tools.native_support import retain_source_origin
++        retain_source_origin(meter,raw_origin)
++        return 'schema_rejected'
+     return None
+ 
+ 
+@@ -419,6 +426,8 @@
+         for key,name in (("package","Package"),("version","Version"),("architecture","Architecture")):
+             if fields[key] != _case_field(reconstructed["folded_fields"],name):
+                 return "schema_rejected"
+-    except (ValueError,UnicodeError,KeyError,TypeError,IndexError):
++    except (ValueError,UnicodeError,KeyError,TypeError,IndexError) as raw_origin:
++        from tools.native_support import retain_source_origin
++        retain_source_origin(meter,raw_origin)
+         return "schema_rejected"
+     return None
+--- /var/tmp/friday-astra-lab862-a176-whole17-all52-all3-native-end-parenthood-raw-source-closure-a180-g1/source/schema_validate.py
++++ /var/tmp/friday-astra-a180-a185-scanner-whole17-all52-all2-connected-native-raw-source-closure-a189-g1/source/schema_validate.py
+@@ -150,7 +150,9 @@
+         if "pattern" in schema:
+             try:
+                 matched = re.fullmatch(schema["pattern"], value) is not None
+-            except re.error:
++            except re.error as raw_origin:
++                from tools.native_support import retain_source_origin
++                retain_source_origin(None,raw_origin)
+                 return False
+             if not matched:
+                 return False
+--- /var/tmp/friday-astra-lab862-a176-whole17-all52-all3-native-end-parenthood-raw-source-closure-a180-g1/source/zip_wheel.py
++++ /var/tmp/friday-astra-a180-a185-scanner-whole17-all52-all2-connected-native-raw-source-closure-a189-g1/source/zip_wheel.py
+@@ -167,7 +167,9 @@
+         total = _u16(data, eocd + 10)
+         cd_size = _u32(data, eocd + 12)
+         cd_offset = _u32(data, eocd + 16)
+-    except struct.error:
++    except struct.error as raw_origin:
++        from tools.native_support import retain_source_origin
++        retain_source_origin(meter,raw_origin)
+         return pack("REFUSED", "truncated_zip_header")
+     zip64 = (
+         cd_offset == 0xFFFFFFFF
+@@ -235,7 +237,9 @@
+             if adopt_cause is not None:
+                 return pack("REFUSED", adopt_cause)
+             z64_off = z64
+-        except struct.error:
++        except struct.error as raw_origin:
++            from tools.native_support import retain_source_origin
++            retain_source_origin(None,raw_origin)
+             return pack("REFUSED", "truncated_zip_header")
+     if disk != 0 or disk_start != 0 or entries_here != total:
+         return pack("REFUSED", "zip_disk_count")
+@@ -307,7 +311,9 @@
+             return pack("REFUSED", "resource_ceiling_exceeded", detail={"limit": "max_expanded_bytes"})
+         try:
+             name = _decode_name(name_raw, flags)
+-        except UnicodeError:
++        except UnicodeError as raw_origin:
++            from tools.native_support import retain_source_origin
++            retain_source_origin(None,raw_origin)
+             return pack("REFUSED", "member_name_undecodable")
+         normalized, path_cause = normalize_member_path(
+             name, ceilings["max_member_name_bytes"], ceilings["max_depth"]
+@@ -413,6 +419,8 @@
+                 if reader._fill():
+                     return pack("REFUSED","zip_inflated_size_mismatch",detail={"member":normalized})
+             except BudgetStop as stop:
++                from tools.native_support import retain_source_origin
++                retain_source_origin(None,stop)
+                 from .public import exception_owned_result
+                 return exception_owned_result(meter,stop)
+             finally:
+@@ -485,7 +493,9 @@
+             member_type = "symlink"
+             try:
+                 link_target = raw.decode("utf-8")
+-            except UnicodeError:
++            except UnicodeError as raw_origin:
++                from tools.native_support import retain_source_origin
++                retain_source_origin(None,raw_origin)
+                 return pack("REFUSED", "symlink_target_undecodable", detail={"member": normalized})
+             if symlink_escapes(normalized, link_target):
+                 recipe = resources.get("install_recipe") if isinstance(resources, dict) else None
+@@ -641,9 +651,13 @@
+         return None, "record_row_shape"
+     try:
+         value = int(text)
+-    except (ValueError, OverflowError):
++    except (ValueError, OverflowError) as raw_origin:
++        from tools.native_support import retain_source_origin
++        retain_source_origin(None,raw_origin)
+         return None, "record_row_shape"
+-    except MemoryError:
++    except MemoryError as raw_origin:
++        from tools.native_support import retain_source_origin
++        retain_source_origin(None,raw_origin)
+         return None, "resource_ceiling_exceeded"
+     if value < 0 or (isinstance(limit, int) and not isinstance(limit, bool) and value > limit):
+         return None, "resource_ceiling_exceeded"
+@@ -713,7 +727,9 @@
+         if fields or buf or closed:
+             fields.append("".join(buf))
+             rows.append(fields)
+-    except MemoryError:
++    except MemoryError as raw_origin:
++        from tools.native_support import retain_source_origin
++        retain_source_origin(meter,raw_origin)
+         return None, "resource_ceiling_exceeded"
+     return rows, None
+ 
+@@ -767,7 +783,9 @@
+         meta_text = meta_item["payload"].decode("utf-8")
+         wheel_text = wheel_item["payload"].decode("utf-8")
+         record_text = record_item["payload"].decode("utf-8")
+-    except UnicodeError:
++    except UnicodeError as raw_origin:
++        from tools.native_support import retain_source_origin
++        retain_source_origin(meter,raw_origin)
+         return pack("REFUSED", "metadata_not_utf8")
+     headers = _header_map(meta_text)
+     wheel_headers = _header_map(wheel_text)
+@@ -1027,7 +1045,9 @@
+     if isinstance(chunk, str):
+         try:
+             return base64.b64decode(chunk, validate=True), None
+-        except (ValueError, binascii.Error):
++        except (ValueError, binascii.Error) as raw_origin:
++            from tools.native_support import retain_source_origin
++            retain_source_origin(None,raw_origin)
+             return None, "held_bytes_absent"
+     if isinstance(chunk, (bytes, bytearray)):
+         return bytes(chunk), None
+@@ -1290,9 +1310,13 @@
+     try:
+         result = _scan_wheel(expected, held, resources, publisher_evidence, meter)
+     except DigestStop as stop:
++        from tools.native_support import retain_source_origin
++        retain_source_origin(meter,stop)
+         from .public import exception_owned_result
+         result = exception_owned_result(meter,stop)
+     except (MemoryError,OSError,ValueError,UnicodeError,KeyError,TypeError,IndexError,RuntimeError) as exc:
++        from tools.native_support import retain_source_origin
++        retain_source_origin(meter,exc)
+         from .public import exception_owned_result
+         result=exception_owned_result(meter,exc)
+     finally:
+--- /var/tmp/friday-astra-lab862-a176-whole17-all52-all3-native-end-parenthood-raw-source-closure-a180-g1/tools/native_support.py
++++ /var/tmp/friday-astra-a180-a185-scanner-whole17-all52-all2-connected-native-raw-source-closure-a189-g1/tools/native_support.py
+@@ -5,6 +5,92 @@
+ """
+ import sys
+ import types
++from contextvars import ContextVar
++
++_source_raw_scope=ContextVar('friday_same_original_source_raw_owner',default=None)
++
++class SourceRawOrigin:
++    __slots__=('exception','previous')
++
++class SourceRawOwner:
++    """Exact raw objects rooted before any fallible evidence projection.
++
++    Pending slots precede recorder allocation. The original native registry
++    owns this graph before meter/decoder construction; ResultOwner borrows that
++    same graph. Native allocation remains charged, including captured frames.
++    """
++    __slots__=('native','head','pending','pending_recorder')
++    def __init__(self,native):
++        self.native=native;self.head=None;self.pending=None;self.pending_recorder=None
++
++    def capture(self,exc):
++        if self.pending is not None:
++            if exc is self.pending or exc is self.pending_recorder:return
++            # Never overwrite an uncommitted origin or recorder. The existing
++            # fixed native error lane owns this next actual origin first.
++            if self.native is not None:self.native.retain_source_raw_exception(exc)
++            raise exc
++        self.pending=exc
++        try:
++            if self.native is not None:self.native.begin_terminal()
++            existing=self.head
++            while existing is not None:
++                if existing.exception is exc:
++                    self.pending=None
++                    return
++                existing=existing.previous
++            node=SourceRawOrigin.__new__(SourceRawOrigin)
++            node.exception=exc;node.previous=self.head
++            self.head=node;self.pending=None
++        except BaseException as recorder:
++            self.pending_recorder=recorder
++            raise recorder from exc
++
++def source_raw_owner():
++    native=selected_owner()
++    previous=native.source_raw_custody() if native is not None else None
++    if previous is not None:return previous
++    try:
++        owner=SourceRawOwner.__new__(SourceRawOwner)
++        # Commit partial ownership before constructor or subsequent meter factory.
++        if native is not None:native.source_raw_custody(owner)
++        SourceRawOwner.__init__(owner,native)
++    except BaseException as exc:
++        # The ORIGINAL preinit fixed error lane precedes even this __new__.
++        if native is not None:native.retain_source_raw_exception(exc)
++        raise
++    return owner
++
++def retain_source_origin(meter,exc):
++    owner=meter.get('source_raw_owner') if isinstance(meter,dict) else _source_raw_scope.get()
++    if owner is None:
++        native=selected_owner()
++        if native is None:return
++        owner=source_raw_owner()
++    owner.capture(exc)
++
++def source_raw_state_matches(scope,native):
++    """Called stock-state consumer of this exact original native root.
++
++    This checks registered records, not an inferred universal interpreter heap.
++    Full allocations/frames still require the original native producer fence.
++    """
++    if scope is not _source_raw_scope:return False
++    from contextvars import copy_context
++    actual_context=copy_context()
++    owner=native.source_raw_custody()
++    if type(owner) is not SourceRawOwner or scope.get() is not owner:return False
++    if len(actual_context)!=1 or actual_context.get(scope) is not owner:return False
++    if owner.native is not native:return False
++    node=owner.head;seen=set()
++    while node is not None:
++        if type(node) is not SourceRawOrigin or id(node) in seen or not isinstance(node.exception,BaseException):return False
++        seen.add(id(node));node=node.previous
++    return all(value is None or isinstance(value,BaseException) for value in (owner.pending,owner.pending_recorder))
++
++def leave_source_scope(meter):
++    token=meter.pop('source_raw_scope_token',None)
++    if token is not None:_source_raw_scope.reset(token)
+ 
+ _selected=None
+ 
+@@ -28,6 +114,8 @@
+     received_history=property(lambda self:self[16])
+     bind_original_consumer_end=property(lambda self:self[17])
+     retire_direct_children=property(lambda self:self[18])
++    source_raw_custody=property(lambda self:self[19])
++    retain_source_raw_exception=property(lambda self:self[20])
+ 
+ 
+ def selected_owner():
+@@ -41,7 +129,8 @@
+                  'send_root_completion','capture_root_ledger','direct_source_wait','direct_root_wait',
+                  'claim_existing_parent_custody','accept_existing_parent_delivery',
+                  'accept_existing_parent_result','bind_observed_root','lock_canonical_slot',
+-                 'unlock_canonical_slots','received_history','bind_original_consumer_end','retire_direct_children'):
++                 'unlock_canonical_slots','received_history','bind_original_consumer_end','retire_direct_children',
++                 'source_raw_custody','retain_source_raw_exception'):
+         value=getattr(module,name,None)
+         if not isinstance(value,types.BuiltinFunctionType) or value.__self__ is not module:
+             return None
+@@ -53,7 +142,8 @@
+          'send_root_completion','capture_root_ledger','direct_source_wait','direct_root_wait',
+          'claim_existing_parent_custody','accept_existing_parent_delivery',
+          'accept_existing_parent_result','bind_observed_root','lock_canonical_slot',
+-         'unlock_canonical_slots','received_history','bind_original_consumer_end','retire_direct_children')))
++         'unlock_canonical_slots','received_history','bind_original_consumer_end','retire_direct_children',
++         'source_raw_custody','retain_source_raw_exception')))
+     return _selected
+ 
+ 
+@@ -92,6 +182,7 @@
+     """
+     def __init__(self,meter):
+         self.meter=meter
++        self.raw_owner=meter['source_raw_owner']
+         self.native=selected_owner()
+         # Alias the selected native owner, not a repeated full packet copy for
+         # every leaf/map. Its actually called C terminal consumer owns complete
+@@ -102,6 +193,7 @@
+     def release(self):
+         self.released=True
+         self.meter=None
++        self.raw_owner=None
+         self.native=None
+         self.native_packet_history_owner=None
+ 
+@@ -133,12 +225,16 @@
+     meter.pop('pending_terminal_result',None)
+     result._source_owner=owner
+     blob._source_owner=owner
++    leave_source_scope(meter)
+     return result,blob
+ 
+ 
+ def own_map(result,meter):
+-    if isinstance(result,OwnedMap):return result
++    if isinstance(result,OwnedMap):
++        leave_source_scope(meter)
++        return result
+     view=OwnedMap(result);view._source_owner=ResultOwner(meter)
++    leave_source_scope(meter)
+     return view
+ 
+ 
+--- /var/tmp/friday-astra-lab862-a176-whole17-all52-all3-native-end-parenthood-raw-source-closure-a180-g1/tools/state_binding.py
++++ /var/tmp/friday-astra-a180-a185-scanner-whole17-all52-all2-connected-native-raw-source-closure-a189-g1/tools/state_binding.py
+@@ -209,6 +209,9 @@
+                 if current._stderr is not sys.stderr or sys.stderr.fileno()!=2:return 'ingress_context_unbound'
+             elif name=='_frozen_importlib' and key in ('_module_locks','_blocking_on') and kind=='closed-import-lock-state':
+                 if cache!={}:return 'ingress_context_unbound'
++            elif name=='tools.native_support' and key=='_source_raw_scope' and kind=='prospective-original-source-raw-owner.v1':
++                from tools.native_support import source_raw_state_matches
++                if not source_raw_state_matches(cache,native):return 'ingress_context_unbound'
+             else:return 'ingress_context_unbound'
+     # Exact native module set is independently selected; a newly loaded module
+     # cannot silently acquire an allocation/API/state exemption.

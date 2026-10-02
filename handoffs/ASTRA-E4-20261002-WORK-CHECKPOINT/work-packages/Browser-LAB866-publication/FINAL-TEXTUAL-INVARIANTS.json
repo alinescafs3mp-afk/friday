@@ -1,0 +1,16 @@
+{
+  "schema": "friday.a171.literal-byte-JSON-invariants.v1",
+  "supplied_AST_import_compile_eval_exec_tests": false,
+  "both_full_oracle_text_identical": true,
+  "both_typed_operand_validator_text_identical": true,
+  "literal_table_is_exact_pinned216_JSON_literal": true,
+  "all_original_expected_fields_preserved": true,
+  "old65_candidate_label_not_result_credit": false,
+  "new_actual_candidate65_is_not_qualification_credit": true,
+  "new_specific_code_residual100": true,
+  "MATERIALIZATION_json": "INITIAL_ASSEMBLY_ONLY; its initial eight SHA pins are stale after subsequent author manual Source edits; CURRENT-SOURCE209 and final manifest alone designate final Source",
+  "A171_INPUT_OPERATIONS_templates_and_a171_materialize": "INITIAL_AUTHOR_WORKNOTES_NOT_REPLAYABLE_FINAL_SOURCE_BUILDER; never load supplied Source",
+  "python_syntax": "NOT_CHECKED_TASK_PROHIBITS_COMPILE_AST_OR_SUPPLIED_EXECUTION",
+  "observed_metadata_helper_peak_self_KiB": 615856,
+  "whole_assignment_RAM_implicit_IO_model_cost": "UNKNOWN_NOT_ZERO"
+}

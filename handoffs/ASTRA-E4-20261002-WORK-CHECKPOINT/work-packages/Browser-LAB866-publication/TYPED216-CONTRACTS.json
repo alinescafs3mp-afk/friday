@@ -1,0 +1,4978 @@
+{
+  "schema": "friday.a171.exact-whole216-contracts.v1",
+  "rows": [
+    {
+      "position": 0,
+      "id": "actual_pinned_registry_browsers_cft_positive",
+      "expected": {
+        "consumer": "mapping_check",
+        "cause": null,
+        "stage": "mapping_check",
+        "started_routes": 0,
+        "hashes": "none",
+        "owned_children": 0,
+        "minimum_consumer_calls": 1,
+        "forbidden_effects": {
+          "network": 0,
+          "exec": 0,
+          "original_write": 0
+        },
+        "state": "CONSUMER_ACCEPTED_NO_ADMISSION"
+      },
+      "active": true,
+      "producer": "mapping_check",
+      "effect_domain": "owned_child_bounded_inert_consumer",
+      "safety_classification": "ALLOWLISTED_BOUNDED_INERT_SOURCE"
+    },
+    {
+      "position": 1,
+      "id": "helper_path",
+      "expected": {
+        "consumer": "mapping_check/tokens/container/route_object",
+        "cause": "EXACT_CFT_HELPER_AND_TAIL",
+        "stage": "mapping_check",
+        "started_routes": 0,
+        "hashes": "none",
+        "owned_children": 0,
+        "minimum_consumer_calls": 1,
+        "forbidden_effects": {
+          "network": 0,
+          "exec": 0,
+          "original_write": 0
+        },
+        "state": "REFUSED"
+      },
+      "active": true,
+      "producer": "mapping_check",
+      "effect_domain": "owned_child_bounded_inert_consumer",
+      "safety_classification": "ALLOWLISTED_BOUNDED_INERT_SOURCE"
+    },
+    {
+      "position": 2,
+      "id": "helper_mirror",
+      "expected": {
+        "consumer": "mapping_check/tokens/container/route_object",
+        "cause": "EXACT_CFT_HELPER_AND_TAIL",
+        "stage": "mapping_check",
+        "started_routes": 0,
+        "hashes": "none",
+        "owned_children": 0,
+        "minimum_consumer_calls": 1,
+        "forbidden_effects": {
+          "network": 0,
+          "exec": 0,
+          "original_write": 0
+        },
+        "state": "REFUSED"
+      },
+      "active": true,
+      "producer": "mapping_check",
+      "effect_domain": "owned_child_bounded_inert_consumer",
+      "safety_classification": "ALLOWLISTED_BOUNDED_INERT_SOURCE"
+    },
+    {
+      "position": 3,
+      "id": "helper_tail",
+      "expected": {
+        "consumer": "mapping_check/tokens/container/route_object",
+        "cause": "EXACT_CFT_HELPER_AND_TAIL",
+        "stage": "mapping_check",
+        "started_routes": 0,
+        "hashes": "none",
+        "owned_children": 0,
+        "minimum_consumer_calls": 1,
+        "forbidden_effects": {
+          "network": 0,
+          "exec": 0,
+          "original_write": 0
+        },
+        "state": "REFUSED"
+      },
+      "active": true,
+      "producer": "mapping_check",
+      "effect_domain": "owned_child_bounded_inert_consumer",
+      "safety_classification": "ALLOWLISTED_BOUNDED_INERT_SOURCE"
+    },
+    {
+      "position": 4,
+      "id": "helper_unknown",
+      "expected": {
+        "consumer": "mapping_check/tokens/container/route_object",
+        "cause": "EXACT_CFT_HELPER_AND_TAIL",
+        "stage": "mapping_check",
+        "started_routes": 0,
+        "hashes": "none",
+        "owned_children": 0,
+        "minimum_consumer_calls": 1,
+        "forbidden_effects": {
+          "network": 0,
+          "exec": 0,
+          "original_write": 0
+        },
+        "state": "REFUSED"
+      },
+      "active": true,
+      "producer": "mapping_check",
+      "effect_domain": "owned_child_bounded_inert_consumer",
+      "safety_classification": "ALLOWLISTED_BOUNDED_INERT_SOURCE"
+    },
+    {
+      "position": 5,
+      "id": "platform_value",
+      "expected": {
+        "consumer": "mapping_check/tokens/container/route_object",
+        "cause": "EXACT_PLATFORM_ROUTE",
+        "stage": "mapping_check",
+        "started_routes": 0,
+        "hashes": "none",
+        "owned_children": 0,
+        "minimum_consumer_calls": 1,
+        "forbidden_effects": {
+          "network": 0,
+          "exec": 0,
+          "original_write": 0
+        },
+        "state": "REFUSED"
+      },
+      "active": true,
+      "producer": "mapping_check",
+      "effect_domain": "owned_child_bounded_inert_consumer",
+      "safety_classification": "ALLOWLISTED_BOUNDED_INERT_SOURCE"
+    },
+    {
+      "position": 6,
+      "id": "platform_unknown",
+      "expected": {
+        "consumer": "mapping_check/tokens/container/route_object",
+        "cause": "EXACT_ALL_PLATFORM_KEYS",
+        "stage": "mapping_check",
+        "started_routes": 0,
+        "hashes": "none",
+        "owned_children": 0,
+        "minimum_consumer_calls": 1,
+        "forbidden_effects": {
+          "network": 0,
+          "exec": 0,
+          "original_write": 0
+        },
+        "state": "REFUSED"
+      },
+      "active": true,
+      "producer": "mapping_check",
+      "effect_domain": "owned_child_bounded_inert_consumer",
+      "safety_classification": "ALLOWLISTED_BOUNDED_INERT_SOURCE"
+    },
+    {
+      "position": 7,
+      "id": "platform_duplicate",
+      "expected": {
+        "consumer": "mapping_check/tokens/container/route_object",
+        "cause": "PLATFORM_DUPLICATE",
+        "stage": "mapping_check",
+        "started_routes": 0,
+        "hashes": "none",
+        "owned_children": 0,
+        "minimum_consumer_calls": 1,
+        "forbidden_effects": {
+          "network": 0,
+          "exec": 0,
+          "original_write": 0
+        },
+        "state": "REFUSED"
+      },
+      "active": true,
+      "producer": "mapping_check",
+      "effect_domain": "owned_child_bounded_inert_consumer",
+      "safety_classification": "ALLOWLISTED_BOUNDED_INERT_SOURCE"
+    },
+    {
+      "position": 8,
+      "id": "unknown_fallback",
+      "expected": {
+        "consumer": "mapping_check/tokens/container/route_object",
+        "cause": "PLATFORM_SET_UNKNOWN",
+        "stage": "mapping_check",
+        "started_routes": 0,
+        "hashes": "none",
+        "owned_children": 0,
+        "minimum_consumer_calls": 1,
+        "forbidden_effects": {
+          "network": 0,
+          "exec": 0,
+          "original_write": 0
+        },
+        "state": "REFUSED"
+      },
+      "active": true,
+      "producer": "mapping_check",
+      "effect_domain": "owned_child_bounded_inert_consumer",
+      "safety_classification": "ALLOWLISTED_BOUNDED_INERT_SOURCE"
+    },
+    {
+      "position": 9,
+      "id": "route_tail",
+      "expected": {
+        "consumer": "mapping_check/tokens/container/route_object",
+        "cause": "PLATFORM_VALUE_TAIL",
+        "stage": "mapping_check",
+        "started_routes": 0,
+        "hashes": "none",
+        "owned_children": 0,
+        "minimum_consumer_calls": 1,
+        "forbidden_effects": {
+          "network": 0,
+          "exec": 0,
+          "original_write": 0
+        },
+        "state": "REFUSED"
+      },
+      "active": true,
+      "producer": "mapping_check",
+      "effect_domain": "owned_child_bounded_inert_consumer",
+      "safety_classification": "ALLOWLISTED_BOUNDED_INERT_SOURCE"
+    },
+    {
+      "position": 10,
+      "id": "ffmpeg_route",
+      "expected": {
+        "consumer": "mapping_check/tokens/container/route_object",
+        "cause": "EXACT_PLATFORM_ROUTE",
+        "stage": "mapping_check",
+        "started_routes": 0,
+        "hashes": "none",
+        "owned_children": 0,
+        "minimum_consumer_calls": 1,
+        "forbidden_effects": {
+          "network": 0,
+          "exec": 0,
+          "original_write": 0
+        },
+        "state": "REFUSED"
+      },
+      "active": true,
+      "producer": "mapping_check",
+      "effect_domain": "owned_child_bounded_inert_consumer",
+      "safety_classification": "ALLOWLISTED_BOUNDED_INERT_SOURCE"
+    },
+    {
+      "position": 11,
+      "id": "revision",
+      "expected": {
+        "consumer": "mapping_check/tokens/container/route_object",
+        "cause": "BROWSER_REVISION",
+        "stage": "mapping_check",
+        "started_routes": 0,
+        "hashes": "none",
+        "owned_children": 0,
+        "minimum_consumer_calls": 1,
+        "forbidden_effects": {
+          "network": 0,
+          "exec": 0,
+          "original_write": 0
+        },
+        "state": "REFUSED"
+      },
+      "active": true,
+      "producer": "mapping_check",
+      "effect_domain": "owned_child_bounded_inert_consumer",
+      "safety_classification": "ALLOWLISTED_BOUNDED_INERT_SOURCE"
+    },
+    {
+      "position": 12,
+      "id": "version",
+      "expected": {
+        "consumer": "mapping_check/tokens/container/route_object",
+        "cause": "BROWSER_VERSION",
+        "stage": "mapping_check",
+        "started_routes": 0,
+        "hashes": "none",
+        "owned_children": 0,
+        "minimum_consumer_calls": 1,
+        "forbidden_effects": {
+          "network": 0,
+          "exec": 0,
+          "original_write": 0
+        },
+        "state": "REFUSED"
+      },
+      "active": true,
+      "producer": "mapping_check",
+      "effect_domain": "owned_child_bounded_inert_consumer",
+      "safety_classification": "ALLOWLISTED_BOUNDED_INERT_SOURCE"
+    },
+    {
+      "position": 13,
+      "id": "revision_type",
+      "expected": {
+        "consumer": "mapping_check/tokens/container/route_object",
+        "cause": "BROWSER_REVISION",
+        "stage": "mapping_check",
+        "started_routes": 0,
+        "hashes": "none",
+        "owned_children": 0,
+        "minimum_consumer_calls": 1,
+        "forbidden_effects": {
+          "network": 0,
+          "exec": 0,
+          "original_write": 0
+        },
+        "state": "REFUSED"
+      },
+      "active": true,
+      "producer": "mapping_check",
+      "effect_domain": "owned_child_bounded_inert_consumer",
+      "safety_classification": "ALLOWLISTED_BOUNDED_INERT_SOURCE"
+    },
+    {
+      "position": 14,
+      "id": "duplicate_browser",
+      "expected": {
+        "consumer": "mapping_check/tokens/container/route_object",
+        "cause": "BROWSER_REVISION",
+        "stage": "mapping_check",
+        "started_routes": 0,
+        "hashes": "none",
+        "owned_children": 0,
+        "minimum_consumer_calls": 1,
+        "forbidden_effects": {
+          "network": 0,
+          "exec": 0,
+          "original_write": 0
+        },
+        "state": "REFUSED"
+      },
+      "active": true,
+      "producer": "mapping_check",
+      "effect_domain": "owned_child_bounded_inert_consumer",
+      "safety_classification": "ALLOWLISTED_BOUNDED_INERT_SOURCE"
+    },
+    {
+      "position": 15,
+      "id": "browsers_type",
+      "expected": {
+        "consumer": "mapping_check/tokens/container/route_object",
+        "cause": "BROWSER_MAP_TYPE",
+        "stage": "mapping_check",
+        "started_routes": 0,
+        "hashes": "none",
+        "owned_children": 0,
+        "minimum_consumer_calls": 1,
+        "forbidden_effects": {
+          "network": 0,
+          "exec": 0,
+          "original_write": 0
+        },
+        "state": "REFUSED"
+      },
+      "active": true,
+      "producer": "mapping_check",
+      "effect_domain": "owned_child_bounded_inert_consumer",
+      "safety_classification": "ALLOWLISTED_BOUNDED_INERT_SOURCE"
+    },
+    {
+      "position": 16,
+      "id": "cft_version",
+      "expected": {
+        "consumer": "mapping_check/tokens/container/route_object",
+        "cause": "CFT_VERSION_TYPE",
+        "stage": "mapping_check",
+        "started_routes": 0,
+        "hashes": "none",
+        "owned_children": 0,
+        "minimum_consumer_calls": 1,
+        "forbidden_effects": {
+          "network": 0,
+          "exec": 0,
+          "original_write": 0
+        },
+        "state": "REFUSED"
+      },
+      "active": true,
+      "producer": "mapping_check",
+      "effect_domain": "owned_child_bounded_inert_consumer",
+      "safety_classification": "ALLOWLISTED_BOUNDED_INERT_SOURCE"
+    },
+    {
+      "position": 17,
+      "id": "cft_url",
+      "expected": {
+        "consumer": "mapping_check/tokens/container/route_object",
+        "cause": "EXACT_CFT_URL",
+        "stage": "mapping_check",
+        "started_routes": 0,
+        "hashes": "none",
+        "owned_children": 0,
+        "minimum_consumer_calls": 1,
+        "forbidden_effects": {
+          "network": 0,
+          "exec": 0,
+          "original_write": 0
+        },
+        "state": "REFUSED"
+      },
+      "active": true,
+      "producer": "mapping_check",
+      "effect_domain": "owned_child_bounded_inert_consumer",
+      "safety_classification": "ALLOWLISTED_BOUNDED_INERT_SOURCE"
+    },
+    {
+      "position": 18,
+      "id": "cft_platform",
+      "expected": {
+        "consumer": "mapping_check/tokens/container/route_object",
+        "cause": "EXACT_CFT_URL",
+        "stage": "mapping_check",
+        "started_routes": 0,
+        "hashes": "none",
+        "owned_children": 0,
+        "minimum_consumer_calls": 1,
+        "forbidden_effects": {
+          "network": 0,
+          "exec": 0,
+          "original_write": 0
+        },
+        "state": "REFUSED"
+      },
+      "active": true,
+      "producer": "mapping_check",
+      "effect_domain": "owned_child_bounded_inert_consumer",
+      "safety_classification": "ALLOWLISTED_BOUNDED_INERT_SOURCE"
+    },
+    {
+      "position": 19,
+      "id": "cft_duplicate_linux",
+      "expected": {
+        "consumer": "mapping_check/tokens/container/route_object",
+        "cause": "EXACT_CFT_URL",
+        "stage": "mapping_check",
+        "started_routes": 0,
+        "hashes": "none",
+        "owned_children": 0,
+        "minimum_consumer_calls": 1,
+        "forbidden_effects": {
+          "network": 0,
+          "exec": 0,
+          "original_write": 0
+        },
+        "state": "REFUSED"
+      },
+      "active": true,
+      "producer": "mapping_check",
+      "effect_domain": "owned_child_bounded_inert_consumer",
+      "safety_classification": "ALLOWLISTED_BOUNDED_INERT_SOURCE"
+    },
+    {
+      "position": 20,
+      "id": "cft_download_type",
+      "expected": {
+        "consumer": "mapping_check/tokens/container/route_object",
+        "cause": "CFT_DOWNLOAD_TYPE",
+        "stage": "mapping_check",
+        "started_routes": 0,
+        "hashes": "none",
+        "owned_children": 0,
+        "minimum_consumer_calls": 1,
+        "forbidden_effects": {
+          "network": 0,
+          "exec": 0,
+          "original_write": 0
+        },
+        "state": "REFUSED"
+      },
+      "active": true,
+      "producer": "mapping_check",
+      "effect_domain": "owned_child_bounded_inert_consumer",
+      "safety_classification": "ALLOWLISTED_BOUNDED_INERT_SOURCE"
+    },
+    {
+      "position": 21,
+      "id": "owner_pin",
+      "expected": {
+        "consumer": "compile_bill",
+        "cause": "OWNER_PIN",
+        "stage": "compile_bill",
+        "started_routes": 0,
+        "hashes": "none",
+        "owned_children": 0,
+        "minimum_consumer_calls": 1,
+        "forbidden_effects": {
+          "network": 0,
+          "exec": 0,
+          "original_write": 0
+        },
+        "state": "REFUSED"
+      },
+      "active": true,
+      "producer": "compile_bill",
+      "effect_domain": "owned_child_bounded_inert_consumer",
+      "safety_classification": "ALLOWLISTED_BOUNDED_INERT_SOURCE"
+    },
+    {
+      "position": 22,
+      "id": "helper_digest",
+      "expected": {
+        "consumer": "compile_bill",
+        "cause": "HELPER_PINS",
+        "stage": "compile_bill",
+        "started_routes": 0,
+        "hashes": "none",
+        "owned_children": 0,
+        "minimum_consumer_calls": 1,
+        "forbidden_effects": {
+          "network": 0,
+          "exec": 0,
+          "original_write": 0
+        },
+        "state": "REFUSED"
+      },
+      "active": true,
+      "producer": "compile_bill",
+      "effect_domain": "owned_child_bounded_inert_consumer",
+      "safety_classification": "ALLOWLISTED_BOUNDED_INERT_SOURCE"
+    },
+    {
+      "position": 23,
+      "id": "browser_route",
+      "expected": {
+        "consumer": "compile_bill",
+        "cause": "EXACT_BROWSER_ROW",
+        "stage": "compile_bill",
+        "started_routes": 0,
+        "hashes": "none",
+        "owned_children": 0,
+        "minimum_consumer_calls": 1,
+        "forbidden_effects": {
+          "network": 0,
+          "exec": 0,
+          "original_write": 0
+        },
+        "state": "REFUSED"
+      },
+      "active": true,
+      "producer": "compile_bill",
+      "effect_domain": "owned_child_bounded_inert_consumer",
+      "safety_classification": "ALLOWLISTED_BOUNDED_INERT_SOURCE"
+    },
+    {
+      "position": 24,
+      "id": "browser_cap_type",
+      "expected": {
+        "consumer": "compile_bill",
+        "cause": "EXACT_BROWSER_ROW",
+        "stage": "compile_bill",
+        "started_routes": 0,
+        "hashes": "none",
+        "owned_children": 0,
+        "minimum_consumer_calls": 1,
+        "forbidden_effects": {
+          "network": 0,
+          "exec": 0,
+          "original_write": 0
+        },
+        "state": "REFUSED"
+      },
+      "active": true,
+      "producer": "compile_bill",
+      "effect_domain": "owned_child_bounded_inert_consumer",
+      "safety_classification": "ALLOWLISTED_BOUNDED_INERT_SOURCE"
+    },
+    {
+      "position": 25,
+      "id": "resource_type",
+      "expected": {
+        "consumer": "compile_bill",
+        "cause": "BILL_LIMITS",
+        "stage": "compile_bill",
+        "started_routes": 0,
+        "hashes": "none",
+        "owned_children": 0,
+        "minimum_consumer_calls": 1,
+        "forbidden_effects": {
+          "network": 0,
+          "exec": 0,
+          "original_write": 0
+        },
+        "state": "REFUSED"
+      },
+      "active": true,
+      "producer": "compile_bill",
+      "effect_domain": "owned_child_bounded_inert_consumer",
+      "safety_classification": "ALLOWLISTED_BOUNDED_INERT_SOURCE"
+    },
+    {
+      "position": 26,
+      "id": "fourth_browser",
+      "expected": {
+        "consumer": "compile_bill",
+        "cause": "BROWSER_COUNT",
+        "stage": "compile_bill",
+        "started_routes": 0,
+        "hashes": "none",
+        "owned_children": 0,
+        "minimum_consumer_calls": 1,
+        "forbidden_effects": {
+          "network": 0,
+          "exec": 0,
+          "original_write": 0
+        },
+        "state": "REFUSED"
+      },
+      "active": true,
+      "producer": "compile_bill",
+      "effect_domain": "owned_child_bounded_inert_consumer",
+      "safety_classification": "ALLOWLISTED_BOUNDED_INERT_SOURCE"
+    },
+    {
+      "position": 27,
+      "id": "target_change",
+      "expected": {
+        "consumer": "compile_bill",
+        "cause": "BILL_LIMITS",
+        "stage": "compile_bill",
+        "started_routes": 0,
+        "hashes": "none",
+        "owned_children": 0,
+        "minimum_consumer_calls": 1,
+        "forbidden_effects": {
+          "network": 0,
+          "exec": 0,
+          "original_write": 0
+        },
+        "state": "REFUSED"
+      },
+      "active": true,
+      "producer": "compile_bill",
+      "effect_domain": "owned_child_bounded_inert_consumer",
+      "safety_classification": "ALLOWLISTED_BOUNDED_INERT_SOURCE"
+    },
+    {
+      "position": 28,
+      "id": "real_owner_wrong_digest",
+      "expected": {
+        "consumer": "sealed_bytes",
+        "cause": "PIN_SHA",
+        "stage": "sealed_bytes",
+        "started_routes": 0,
+        "hashes": "none",
+        "owned_children": 0,
+        "minimum_consumer_calls": 1,
+        "forbidden_effects": {
+          "network": 0,
+          "exec": 0,
+          "original_write": 0
+        },
+        "state": "REFUSED"
+      },
+      "active": true,
+      "producer": "a171_actual",
+      "effect_domain": "original_bounded_owned_operands_actual_consumer_or_explicit_code_gap",
+      "safety_classification": "BENIGN_FUNCTIONAL_OBLIGATION_HISTORICAL_METHOD_NOT_AUTHORIZED"
+    },
+    {
+      "position": 29,
+      "id": "real_metadata_wrong_digest",
+      "expected": {
+        "consumer": "sealed_bytes",
+        "cause": "PIN_SHA",
+        "stage": "sealed_bytes",
+        "started_routes": 0,
+        "hashes": "none",
+        "owned_children": 0,
+        "minimum_consumer_calls": 1,
+        "forbidden_effects": {
+          "network": 0,
+          "exec": 0,
+          "original_write": 0
+        },
+        "state": "REFUSED"
+      },
+      "active": true,
+      "producer": "a171_actual",
+      "effect_domain": "original_bounded_owned_operands_actual_consumer_or_explicit_code_gap",
+      "safety_classification": "BENIGN_FUNCTIONAL_OBLIGATION_HISTORICAL_METHOD_NOT_AUTHORIZED"
+    },
+    {
+      "position": 30,
+      "id": "header64KiB_cap",
+      "expected": {
+        "consumer": "G1.HeaderReader.readline",
+        "cause": "HEADERS_OR_CHUNK_FRAMING_CAP",
+        "stage": "G1.HeaderReader.readline",
+        "started_routes": 0,
+        "hashes": "none",
+        "owned_children": 0,
+        "minimum_consumer_calls": 1,
+        "forbidden_effects": {
+          "network": 0,
+          "exec": 0,
+          "original_write": 0
+        },
+        "state": "REFUSED"
+      },
+      "active": true,
+      "producer": "header_reader",
+      "effect_domain": "owned_child_bounded_inert_consumer",
+      "safety_classification": "ALLOWLISTED_BOUNDED_INERT_SOURCE"
+    },
+    {
+      "position": 31,
+      "id": "mapping_source262KiB_cap",
+      "expected": {
+        "consumer": "tokens",
+        "cause": "MAPPING_SOURCE_CAP",
+        "stage": "tokens",
+        "started_routes": 0,
+        "hashes": "none",
+        "owned_children": 0,
+        "minimum_consumer_calls": 1,
+        "forbidden_effects": {
+          "network": 0,
+          "exec": 0,
+          "original_write": 0
+        },
+        "state": "REFUSED"
+      },
+      "active": true,
+      "producer": "tokens",
+      "effect_domain": "owned_child_bounded_inert_consumer",
+      "safety_classification": "ALLOWLISTED_BOUNDED_INERT_SOURCE"
+    },
+    {
+      "position": 32,
+      "id": "duplicate_json_key",
+      "expected": {
+        "consumer": "G1.inert_json",
+        "cause": "JSON_DUPLICATE_KEY",
+        "stage": "G1.inert_json",
+        "started_routes": 0,
+        "hashes": "none",
+        "owned_children": 0,
+        "minimum_consumer_calls": 1,
+        "forbidden_effects": {
+          "network": 0,
+          "exec": 0,
+          "original_write": 0
+        },
+        "state": "REFUSED"
+      },
+      "active": true,
+      "producer": "inert_json",
+      "effect_domain": "owned_child_bounded_inert_consumer",
+      "safety_classification": "ALLOWLISTED_BOUNDED_INERT_SOURCE"
+    },
+    {
+      "position": 33,
+      "id": "nonfinite_json",
+      "expected": {
+        "consumer": "G1.inert_json",
+        "cause": "JSON_CONSTANT",
+        "stage": "G1.inert_json",
+        "started_routes": 0,
+        "hashes": "none",
+        "owned_children": 0,
+        "minimum_consumer_calls": 1,
+        "forbidden_effects": {
+          "network": 0,
+          "exec": 0,
+          "original_write": 0
+        },
+        "state": "REFUSED"
+      },
+      "active": true,
+      "producer": "inert_json",
+      "effect_domain": "owned_child_bounded_inert_consumer",
+      "safety_classification": "ALLOWLISTED_BOUNDED_INERT_SOURCE"
+    },
+    {
+      "position": 34,
+      "id": "json_depth",
+      "expected": {
+        "consumer": "G1.inert_json",
+        "cause": "JSON_DEPTH",
+        "stage": "G1.inert_json",
+        "started_routes": 0,
+        "hashes": "none",
+        "owned_children": 0,
+        "minimum_consumer_calls": 1,
+        "forbidden_effects": {
+          "network": 0,
+          "exec": 0,
+          "original_write": 0
+        },
+        "state": "REFUSED"
+      },
+      "active": true,
+      "producer": "inert_json",
+      "effect_domain": "owned_child_bounded_inert_consumer",
+      "safety_classification": "ALLOWLISTED_BOUNDED_INERT_SOURCE"
+    },
+    {
+      "position": 35,
+      "id": "whole3_actual_G1_worker_positive",
+      "expected": {
+        "consumer": "execute_core/R4.run_wave/G1.worker",
+        "cause": null,
+        "stage": "network_schedule",
+        "started_routes": 3,
+        "hashes": "exact3",
+        "owned_children": 3,
+        "minimum_consumer_calls": 1,
+        "forbidden_effects": {
+          "network": 0,
+          "exec": 0,
+          "original_write": 0
+        },
+        "state": "BROWSER3_FETCH_FINISHED_WITH_EXPLICIT_ACCEPTANCE_GAPS"
+      },
+      "active": true,
+      "producer": "a171_actual",
+      "effect_domain": "original_bounded_owned_operands_actual_consumer_or_explicit_code_gap",
+      "safety_classification": "BENIGN_FUNCTIONAL_OBLIGATION_HISTORICAL_METHOD_NOT_AUTHORIZED"
+    },
+    {
+      "position": 36,
+      "id": "whole3_redirect",
+      "expected": {
+        "consumer": "R4.drain/collect/G1.worker",
+        "cause": "THREE_BODY_RECEIPTS",
+        "stage": "event_drain",
+        "started_routes": 3,
+        "hashes": "at_least1",
+        "owned_children": 3,
+        "minimum_consumer_calls": 1,
+        "forbidden_effects": {
+          "network": 0,
+          "exec": 0,
+          "original_write": 0
+        },
+        "state": "CONTOUR_ABORTED"
+      },
+      "active": true,
+      "producer": "a171_actual",
+      "effect_domain": "original_bounded_owned_operands_actual_consumer_or_explicit_code_gap",
+      "safety_classification": "BENIGN_FUNCTIONAL_OBLIGATION_HISTORICAL_METHOD_NOT_AUTHORIZED"
+    },
+    {
+      "position": 37,
+      "id": "whole3_http404",
+      "expected": {
+        "consumer": "R4.drain/collect/G1.worker",
+        "cause": "THREE_BODY_RECEIPTS",
+        "stage": "event_drain",
+        "started_routes": 3,
+        "hashes": "at_least1",
+        "owned_children": 3,
+        "minimum_consumer_calls": 1,
+        "forbidden_effects": {
+          "network": 0,
+          "exec": 0,
+          "original_write": 0
+        },
+        "state": "CONTOUR_ABORTED"
+      },
+      "active": true,
+      "producer": "a171_actual",
+      "effect_domain": "original_bounded_owned_operands_actual_consumer_or_explicit_code_gap",
+      "safety_classification": "BENIGN_FUNCTIONAL_OBLIGATION_HISTORICAL_METHOD_NOT_AUTHORIZED"
+    },
+    {
+      "position": 38,
+      "id": "whole3_tls_certificate",
+      "expected": {
+        "consumer": "R4.drain/collect/G1.worker",
+        "cause": "SECURITY_INTEGRITY_PROTOCOL:SSLCertVerificationError",
+        "stage": "event_drain",
+        "started_routes": 3,
+        "hashes": "at_least1",
+        "owned_children": 3,
+        "minimum_consumer_calls": 1,
+        "forbidden_effects": {
+          "network": 0,
+          "exec": 0,
+          "original_write": 0
+        },
+        "state": "CONTOUR_ABORTED"
+      },
+      "active": true,
+      "producer": "a171_actual",
+      "effect_domain": "original_bounded_owned_operands_actual_consumer_or_explicit_code_gap",
+      "safety_classification": "BENIGN_FUNCTIONAL_OBLIGATION_HISTORICAL_METHOD_NOT_AUTHORIZED"
+    },
+    {
+      "position": 39,
+      "id": "whole3_tls_protocol",
+      "expected": {
+        "consumer": "R4.drain/collect/G1.worker",
+        "cause": "SECURITY_INTEGRITY_PROTOCOL:TLS_EVIDENCE",
+        "stage": "event_drain",
+        "started_routes": 3,
+        "hashes": "at_least1",
+        "owned_children": 3,
+        "minimum_consumer_calls": 1,
+        "forbidden_effects": {
+          "network": 0,
+          "exec": 0,
+          "original_write": 0
+        },
+        "state": "CONTOUR_ABORTED"
+      },
+      "active": true,
+      "producer": "a171_actual",
+      "effect_domain": "original_bounded_owned_operands_actual_consumer_or_explicit_code_gap",
+      "safety_classification": "BENIGN_FUNCTIONAL_OBLIGATION_HISTORICAL_METHOD_NOT_AUTHORIZED"
+    },
+    {
+      "position": 40,
+      "id": "whole3_encoding",
+      "expected": {
+        "consumer": "R4.drain/collect/G1.worker",
+        "cause": "SECURITY_INTEGRITY_PROTOCOL:CONTENT_ENCODING",
+        "stage": "event_drain",
+        "started_routes": 3,
+        "hashes": "at_least1",
+        "owned_children": 3,
+        "minimum_consumer_calls": 1,
+        "forbidden_effects": {
+          "network": 0,
+          "exec": 0,
+          "original_write": 0
+        },
+        "state": "CONTOUR_ABORTED"
+      },
+      "active": true,
+      "producer": "a171_actual",
+      "effect_domain": "original_bounded_owned_operands_actual_consumer_or_explicit_code_gap",
+      "safety_classification": "BENIGN_FUNCTIONAL_OBLIGATION_HISTORICAL_METHOD_NOT_AUTHORIZED"
+    },
+    {
+      "position": 41,
+      "id": "whole3_framing",
+      "expected": {
+        "consumer": "R4.drain/collect/G1.worker",
+        "cause": "SECURITY_INTEGRITY_PROTOCOL:HTTP_FRAMING",
+        "stage": "event_drain",
+        "started_routes": 3,
+        "hashes": "at_least1",
+        "owned_children": 3,
+        "minimum_consumer_calls": 1,
+        "forbidden_effects": {
+          "network": 0,
+          "exec": 0,
+          "original_write": 0
+        },
+        "state": "CONTOUR_ABORTED"
+      },
+      "active": true,
+      "producer": "a171_actual",
+      "effect_domain": "original_bounded_owned_operands_actual_consumer_or_explicit_code_gap",
+      "safety_classification": "BENIGN_FUNCTIONAL_OBLIGATION_HISTORICAL_METHOD_NOT_AUTHORIZED"
+    },
+    {
+      "position": 42,
+      "id": "whole3_duplicate_length",
+      "expected": {
+        "consumer": "R4.drain/collect/G1.worker",
+        "cause": "SECURITY_INTEGRITY_PROTOCOL:HTTP_FRAMING",
+        "stage": "event_drain",
+        "started_routes": 3,
+        "hashes": "at_least1",
+        "owned_children": 3,
+        "minimum_consumer_calls": 1,
+        "forbidden_effects": {
+          "network": 0,
+          "exec": 0,
+          "original_write": 0
+        },
+        "state": "CONTOUR_ABORTED"
+      },
+      "active": true,
+      "producer": "a171_actual",
+      "effect_domain": "original_bounded_owned_operands_actual_consumer_or_explicit_code_gap",
+      "safety_classification": "BENIGN_FUNCTIONAL_OBLIGATION_HISTORICAL_METHOD_NOT_AUTHORIZED"
+    },
+    {
+      "position": 43,
+      "id": "whole3_length_cap",
+      "expected": {
+        "consumer": "R4.drain/collect/G1.worker",
+        "cause": "SECURITY_INTEGRITY_PROTOCOL:DECLARED_BODY_SIZE",
+        "stage": "event_drain",
+        "started_routes": 3,
+        "hashes": "at_least1",
+        "owned_children": 3,
+        "minimum_consumer_calls": 1,
+        "forbidden_effects": {
+          "network": 0,
+          "exec": 0,
+          "original_write": 0
+        },
+        "state": "CONTOUR_ABORTED"
+      },
+      "active": true,
+      "producer": "a171_actual",
+      "effect_domain": "original_bounded_owned_operands_actual_consumer_or_explicit_code_gap",
+      "safety_classification": "BENIGN_FUNCTIONAL_OBLIGATION_HISTORICAL_METHOD_NOT_AUTHORIZED"
+    },
+    {
+      "position": 44,
+      "id": "whole3_truncated",
+      "expected": {
+        "consumer": "R4.drain/collect/G1.worker",
+        "cause": "SECURITY_INTEGRITY_PROTOCOL:BODY_TRUNCATED",
+        "stage": "event_drain",
+        "started_routes": 3,
+        "hashes": "at_least1",
+        "owned_children": 3,
+        "minimum_consumer_calls": 1,
+        "forbidden_effects": {
+          "network": 0,
+          "exec": 0,
+          "original_write": 0
+        },
+        "state": "CONTOUR_ABORTED"
+      },
+      "active": true,
+      "producer": "a171_actual",
+      "effect_domain": "original_bounded_owned_operands_actual_consumer_or_explicit_code_gap",
+      "safety_classification": "BENIGN_FUNCTIONAL_OBLIGATION_HISTORICAL_METHOD_NOT_AUTHORIZED"
+    },
+    {
+      "position": 45,
+      "id": "whole3_hostname",
+      "expected": {
+        "consumer": "R4.drain/collect/G1.worker",
+        "cause": "TLS_EVIDENCE",
+        "stage": "event_drain",
+        "started_routes": 3,
+        "hashes": "at_least1",
+        "owned_children": 3,
+        "minimum_consumer_calls": 1,
+        "forbidden_effects": {
+          "network": 0,
+          "exec": 0,
+          "original_write": 0
+        },
+        "state": "CONTOUR_ABORTED"
+      },
+      "active": true,
+      "producer": "a171_actual",
+      "effect_domain": "original_bounded_owned_operands_actual_consumer_or_explicit_code_gap",
+      "safety_classification": "BENIGN_FUNCTIONAL_OBLIGATION_HISTORICAL_METHOD_NOT_AUTHORIZED"
+    },
+    {
+      "position": 46,
+      "id": "whole3_verify_mode",
+      "expected": {
+        "consumer": "R4.drain/collect/G1.worker",
+        "cause": "TLS_EVIDENCE",
+        "stage": "event_drain",
+        "started_routes": 3,
+        "hashes": "at_least1",
+        "owned_children": 3,
+        "minimum_consumer_calls": 1,
+        "forbidden_effects": {
+          "network": 0,
+          "exec": 0,
+          "original_write": 0
+        },
+        "state": "CONTOUR_ABORTED"
+      },
+      "active": true,
+      "producer": "a171_actual",
+      "effect_domain": "original_bounded_owned_operands_actual_consumer_or_explicit_code_gap",
+      "safety_classification": "BENIGN_FUNCTIONAL_OBLIGATION_HISTORICAL_METHOD_NOT_AUTHORIZED"
+    },
+    {
+      "position": 47,
+      "id": "whole3_verified_type",
+      "expected": {
+        "consumer": "R4.drain/collect/G1.worker",
+        "cause": "TLS_EVIDENCE",
+        "stage": "event_drain",
+        "started_routes": 3,
+        "hashes": "at_least1",
+        "owned_children": 3,
+        "minimum_consumer_calls": 1,
+        "forbidden_effects": {
+          "network": 0,
+          "exec": 0,
+          "original_write": 0
+        },
+        "state": "CONTOUR_ABORTED"
+      },
+      "active": true,
+      "producer": "a171_actual",
+      "effect_domain": "original_bounded_owned_operands_actual_consumer_or_explicit_code_gap",
+      "safety_classification": "BENIGN_FUNCTIONAL_OBLIGATION_HISTORICAL_METHOD_NOT_AUTHORIZED"
+    },
+    {
+      "position": 48,
+      "id": "whole3_cert_digest",
+      "expected": {
+        "consumer": "R4.drain/collect/G1.worker",
+        "cause": "TLS_EVIDENCE",
+        "stage": "event_drain",
+        "started_routes": 3,
+        "hashes": "at_least1",
+        "owned_children": 3,
+        "minimum_consumer_calls": 1,
+        "forbidden_effects": {
+          "network": 0,
+          "exec": 0,
+          "original_write": 0
+        },
+        "state": "CONTOUR_ABORTED"
+      },
+      "active": true,
+      "producer": "a171_actual",
+      "effect_domain": "original_bounded_owned_operands_actual_consumer_or_explicit_code_gap",
+      "safety_classification": "BENIGN_FUNCTIONAL_OBLIGATION_HISTORICAL_METHOD_NOT_AUTHORIZED"
+    },
+    {
+      "position": 49,
+      "id": "whole3_accounting",
+      "expected": {
+        "consumer": "R4.drain/collect/G1.worker",
+        "cause": "WORKER_ACCOUNTING_DRIFT",
+        "stage": "event_drain",
+        "started_routes": 3,
+        "hashes": "at_least1",
+        "owned_children": 3,
+        "minimum_consumer_calls": 1,
+        "forbidden_effects": {
+          "network": 0,
+          "exec": 0,
+          "original_write": 0
+        },
+        "state": "CONTOUR_ABORTED"
+      },
+      "active": true,
+      "producer": "a171_actual",
+      "effect_domain": "original_bounded_owned_operands_actual_consumer_or_explicit_code_gap",
+      "safety_classification": "BENIGN_FUNCTIONAL_OBLIGATION_HISTORICAL_METHOD_NOT_AUTHORIZED"
+    },
+    {
+      "position": 50,
+      "id": "whole3_digest",
+      "expected": {
+        "consumer": "R4.drain/collect/G1.worker",
+        "cause": "WORKER_ACCOUNTING_DRIFT",
+        "stage": "event_drain",
+        "started_routes": 3,
+        "hashes": "at_least1",
+        "owned_children": 3,
+        "minimum_consumer_calls": 1,
+        "forbidden_effects": {
+          "network": 0,
+          "exec": 0,
+          "original_write": 0
+        },
+        "state": "CONTOUR_ABORTED"
+      },
+      "active": true,
+      "producer": "a171_actual",
+      "effect_domain": "original_bounded_owned_operands_actual_consumer_or_explicit_code_gap",
+      "safety_classification": "BENIGN_FUNCTIONAL_OBLIGATION_HISTORICAL_METHOD_NOT_AUTHORIZED"
+    },
+    {
+      "position": 51,
+      "id": "whole3_acceptance",
+      "expected": {
+        "consumer": "R4.drain/collect/G1.worker",
+        "cause": "UNPINNED_ACCEPTANCE",
+        "stage": "event_drain",
+        "started_routes": 3,
+        "hashes": "at_least1",
+        "owned_children": 3,
+        "minimum_consumer_calls": 1,
+        "forbidden_effects": {
+          "network": 0,
+          "exec": 0,
+          "original_write": 0
+        },
+        "state": "CONTOUR_ABORTED"
+      },
+      "active": true,
+      "producer": "a171_actual",
+      "effect_domain": "original_bounded_owned_operands_actual_consumer_or_explicit_code_gap",
+      "safety_classification": "BENIGN_FUNCTIONAL_OBLIGATION_HISTORICAL_METHOD_NOT_AUTHORIZED"
+    },
+    {
+      "position": 52,
+      "id": "whole3_unknown_final",
+      "expected": {
+        "consumer": "R4.drain/collect/G1.worker",
+        "cause": "WORKER_RECEIPT_INCOMPLETE",
+        "stage": "event_drain",
+        "started_routes": 3,
+        "hashes": "none",
+        "owned_children": 3,
+        "minimum_consumer_calls": 1,
+        "forbidden_effects": {
+          "network": 0,
+          "exec": 0,
+          "original_write": 0
+        },
+        "state": "CONTOUR_ABORTED"
+      },
+      "active": true,
+      "producer": "a171_actual",
+      "effect_domain": "original_bounded_owned_operands_actual_consumer_or_explicit_code_gap",
+      "safety_classification": "BENIGN_FUNCTIONAL_OBLIGATION_HISTORICAL_METHOD_NOT_AUTHORIZED"
+    },
+    {
+      "position": 53,
+      "id": "whole3_duplicate_final",
+      "expected": {
+        "consumer": "R4.drain/collect/G1.worker",
+        "cause": "EVENT_COUNT",
+        "stage": "event_drain",
+        "started_routes": 3,
+        "hashes": "none",
+        "owned_children": 3,
+        "minimum_consumer_calls": 1,
+        "forbidden_effects": {
+          "network": 0,
+          "exec": 0,
+          "original_write": 0
+        },
+        "state": "CONTOUR_ABORTED"
+      },
+      "active": true,
+      "producer": "a171_actual",
+      "effect_domain": "original_bounded_owned_operands_actual_consumer_or_explicit_code_gap",
+      "safety_classification": "BENIGN_FUNCTIONAL_OBLIGATION_HISTORICAL_METHOD_NOT_AUTHORIZED"
+    },
+    {
+      "position": 54,
+      "id": "late_input",
+      "expected": {
+        "consumer": "RetainedTree.check",
+        "cause": "PARTIAL_LATE_INPUT_DRIFT",
+        "stage": "retained_partial_custody",
+        "started_routes": 0,
+        "hashes": "none",
+        "owned_children": 0,
+        "minimum_consumer_calls": 1,
+        "forbidden_effects": {
+          "network": 0,
+          "exec": 0,
+          "original_write": 0
+        },
+        "state": "CONTOUR_ABORTED"
+      },
+      "active": true,
+      "producer": "a171_actual",
+      "effect_domain": "original_bounded_owned_operands_actual_consumer_or_explicit_code_gap",
+      "safety_classification": "BENIGN_FUNCTIONAL_OBLIGATION_HISTORICAL_METHOD_NOT_AUTHORIZED"
+    },
+    {
+      "position": 55,
+      "id": "aggregate_RSS",
+      "expected": {
+        "consumer": "R4.run_wave/G1.process_status",
+        "cause": "RSS_CAP",
+        "stage": "network_schedule",
+        "started_routes": 3,
+        "hashes": "none",
+        "owned_children": 3,
+        "minimum_consumer_calls": 1,
+        "forbidden_effects": {
+          "network": 0,
+          "exec": 0,
+          "original_write": 0
+        },
+        "state": "CONTOUR_ABORTED"
+      },
+      "active": true,
+      "producer": "a171_actual",
+      "effect_domain": "original_bounded_owned_operands_actual_consumer_or_explicit_code_gap",
+      "safety_classification": "BENIGN_FUNCTIONAL_OBLIGATION_HISTORICAL_METHOD_NOT_AUTHORIZED"
+    },
+    {
+      "position": 56,
+      "id": "deadline_create_fresh_browser3",
+      "expected": {
+        "consumer": "Run.guard",
+        "cause": "WALL_TIMEOUT:create_fresh_browser3",
+        "stage": "create_fresh_browser3",
+        "started_routes": 0,
+        "hashes": "none",
+        "owned_children": 0,
+        "minimum_consumer_calls": 1,
+        "forbidden_effects": {
+          "network": 0,
+          "exec": 0,
+          "original_write": 0
+        },
+        "state": "CONTOUR_ABORTED"
+      },
+      "active": true,
+      "producer": "a171_actual",
+      "effect_domain": "original_bounded_owned_operands_actual_consumer_or_explicit_code_gap",
+      "safety_classification": "BENIGN_FUNCTIONAL_OBLIGATION_HISTORICAL_METHOD_NOT_AUTHORIZED"
+    },
+    {
+      "position": 57,
+      "id": "deadline_receipt_write",
+      "expected": {
+        "consumer": "Run.guard",
+        "cause": "WALL_TIMEOUT:receipt_write",
+        "stage": "receipt_write",
+        "started_routes": 3,
+        "hashes": "stage_dependent",
+        "owned_children": 3,
+        "minimum_consumer_calls": 1,
+        "forbidden_effects": {
+          "network": 0,
+          "exec": 0,
+          "original_write": 0
+        },
+        "state": "CONTOUR_ABORTED"
+      },
+      "active": true,
+      "producer": "a171_actual",
+      "effect_domain": "original_bounded_owned_operands_actual_consumer_or_explicit_code_gap",
+      "safety_classification": "BENIGN_FUNCTIONAL_OBLIGATION_HISTORICAL_METHOD_NOT_AUTHORIZED"
+    },
+    {
+      "position": 58,
+      "id": "deadline_receipts_fsynced",
+      "expected": {
+        "consumer": "Run.guard",
+        "cause": "WALL_TIMEOUT:receipts_fsynced",
+        "stage": "receipts_fsynced",
+        "started_routes": 3,
+        "hashes": "stage_dependent",
+        "owned_children": 3,
+        "minimum_consumer_calls": 1,
+        "forbidden_effects": {
+          "network": 0,
+          "exec": 0,
+          "original_write": 0
+        },
+        "state": "CONTOUR_ABORTED"
+      },
+      "active": true,
+      "producer": "a171_actual",
+      "effect_domain": "original_bounded_owned_operands_actual_consumer_or_explicit_code_gap",
+      "safety_classification": "BENIGN_FUNCTIONAL_OBLIGATION_HISTORICAL_METHOD_NOT_AUTHORIZED"
+    },
+    {
+      "position": 59,
+      "id": "deadline_inventory_write",
+      "expected": {
+        "consumer": "Run.guard",
+        "cause": "WALL_TIMEOUT:inventory_write",
+        "stage": "inventory_write",
+        "started_routes": 3,
+        "hashes": "stage_dependent",
+        "owned_children": 3,
+        "minimum_consumer_calls": 1,
+        "forbidden_effects": {
+          "network": 0,
+          "exec": 0,
+          "original_write": 0
+        },
+        "state": "CONTOUR_ABORTED"
+      },
+      "active": true,
+      "producer": "a171_actual",
+      "effect_domain": "original_bounded_owned_operands_actual_consumer_or_explicit_code_gap",
+      "safety_classification": "BENIGN_FUNCTIONAL_OBLIGATION_HISTORICAL_METHOD_NOT_AUTHORIZED"
+    },
+    {
+      "position": 60,
+      "id": "deadline_inventory_fsynced",
+      "expected": {
+        "consumer": "Run.guard",
+        "cause": "WALL_TIMEOUT:inventory_fsynced",
+        "stage": "inventory_fsynced",
+        "started_routes": 3,
+        "hashes": "stage_dependent",
+        "owned_children": 3,
+        "minimum_consumer_calls": 1,
+        "forbidden_effects": {
+          "network": 0,
+          "exec": 0,
+          "original_write": 0
+        },
+        "state": "CONTOUR_ABORTED"
+      },
+      "active": true,
+      "producer": "a171_actual",
+      "effect_domain": "original_bounded_owned_operands_actual_consumer_or_explicit_code_gap",
+      "safety_classification": "BENIGN_FUNCTIONAL_OBLIGATION_HISTORICAL_METHOD_NOT_AUTHORIZED"
+    },
+    {
+      "position": 61,
+      "id": "deadline_terminal_seal",
+      "expected": {
+        "consumer": "Run.guard",
+        "cause": "WALL_TIMEOUT:terminal_seal",
+        "stage": "terminal_seal",
+        "started_routes": 3,
+        "hashes": "stage_dependent",
+        "owned_children": 3,
+        "minimum_consumer_calls": 1,
+        "forbidden_effects": {
+          "network": 0,
+          "exec": 0,
+          "original_write": 0
+        },
+        "state": "CONTOUR_ABORTED"
+      },
+      "active": true,
+      "producer": "a171_actual",
+      "effect_domain": "original_bounded_owned_operands_actual_consumer_or_explicit_code_gap",
+      "safety_classification": "BENIGN_FUNCTIONAL_OBLIGATION_HISTORICAL_METHOD_NOT_AUTHORIZED"
+    },
+    {
+      "position": 62,
+      "id": "deadline_closed_terminal",
+      "expected": {
+        "consumer": "Run.guard",
+        "cause": "WALL_TIMEOUT:closed_terminal",
+        "stage": "closed_terminal",
+        "started_routes": 3,
+        "hashes": "stage_dependent",
+        "owned_children": 3,
+        "minimum_consumer_calls": 1,
+        "forbidden_effects": {
+          "network": 0,
+          "exec": 0,
+          "original_write": 0
+        },
+        "state": "CONTOUR_ABORTED"
+      },
+      "active": true,
+      "producer": "a171_actual",
+      "effect_domain": "original_bounded_owned_operands_actual_consumer_or_explicit_code_gap",
+      "safety_classification": "BENIGN_FUNCTIONAL_OBLIGATION_HISTORICAL_METHOD_NOT_AUTHORIZED"
+    },
+    {
+      "position": 63,
+      "id": "owner_stop",
+      "expected": {
+        "consumer": "Run.guard",
+        "cause": "OWNER_STOP",
+        "stage": "network_schedule",
+        "started_routes": 0,
+        "hashes": "none",
+        "owned_children": 0,
+        "minimum_consumer_calls": 1,
+        "forbidden_effects": {
+          "network": 0,
+          "exec": 0,
+          "original_write": 0
+        },
+        "state": "CONTOUR_ABORTED"
+      },
+      "active": true,
+      "producer": "a171_actual",
+      "effect_domain": "original_bounded_owned_operands_actual_consumer_or_explicit_code_gap",
+      "safety_classification": "BENIGN_FUNCTIONAL_OBLIGATION_HISTORICAL_METHOD_NOT_AUTHORIZED"
+    },
+    {
+      "position": 64,
+      "id": "sticky_cleanup",
+      "expected": {
+        "consumer": "R4.close_fd",
+        "cause": "CLEANUP:PRIVATE_CLEANUP_FAULT",
+        "stage": "cleanup_descriptor",
+        "started_routes": 0,
+        "hashes": "none",
+        "owned_children": 0,
+        "minimum_consumer_calls": 1,
+        "forbidden_effects": {
+          "network": 0,
+          "exec": 0,
+          "original_write": 0
+        },
+        "state": "CONTOUR_ABORTED"
+      },
+      "active": true,
+      "producer": "a171_actual",
+      "effect_domain": "original_bounded_owned_operands_actual_consumer_or_explicit_code_gap",
+      "safety_classification": "BENIGN_FUNCTIONAL_OBLIGATION_HISTORICAL_METHOD_NOT_AUTHORIZED"
+    },
+    {
+      "position": 65,
+      "id": "unknown_owned_child_sticky",
+      "expected": {
+        "consumer": "R4.stop_child/collect",
+        "cause": "FORCE_OWNED_CHILD_STOP",
+        "stage": "event_drain",
+        "started_routes": 3,
+        "hashes": "none",
+        "owned_children": 3,
+        "minimum_consumer_calls": 1,
+        "forbidden_effects": {
+          "network": 0,
+          "exec": 0,
+          "original_write": 0
+        },
+        "state": "STOP_UNCONFIRMED"
+      },
+      "active": true,
+      "producer": "a171_actual",
+      "effect_domain": "original_bounded_owned_operands_actual_consumer_or_explicit_code_gap",
+      "safety_classification": "BENIGN_FUNCTIONAL_OBLIGATION_HISTORICAL_METHOD_NOT_AUTHORIZED"
+    },
+    {
+      "position": 66,
+      "id": "existing_target",
+      "expected": {
+        "consumer": "require_absent_target",
+        "cause": "EXISTING_TARGET",
+        "stage": "require_absent_target",
+        "started_routes": 0,
+        "hashes": "none",
+        "owned_children": 0,
+        "minimum_consumer_calls": 1,
+        "forbidden_effects": {
+          "network": 0,
+          "exec": 0,
+          "original_write": 0
+        },
+        "state": "REFUSED"
+      },
+      "active": true,
+      "producer": "a171_actual",
+      "effect_domain": "original_bounded_owned_operands_actual_consumer_or_explicit_code_gap",
+      "safety_classification": "BENIGN_FUNCTIONAL_OBLIGATION_HISTORICAL_METHOD_NOT_AUTHORIZED"
+    },
+    {
+      "position": 67,
+      "id": "wrong_mode",
+      "expected": {
+        "consumer": "sealed_bytes",
+        "cause": "PIN_CUSTODY",
+        "stage": "sealed_bytes",
+        "started_routes": 0,
+        "hashes": "none",
+        "owned_children": 0,
+        "minimum_consumer_calls": 1,
+        "forbidden_effects": {
+          "network": 0,
+          "exec": 0,
+          "original_write": 0
+        },
+        "state": "REFUSED"
+      },
+      "active": true,
+      "producer": "a171_actual",
+      "effect_domain": "original_bounded_owned_operands_actual_consumer_or_explicit_code_gap",
+      "safety_classification": "BENIGN_FUNCTIONAL_OBLIGATION_HISTORICAL_METHOD_NOT_AUTHORIZED"
+    },
+    {
+      "position": 68,
+      "id": "hardlink",
+      "expected": {
+        "consumer": "sealed_bytes",
+        "cause": "PIN_CUSTODY",
+        "stage": "sealed_bytes",
+        "started_routes": 0,
+        "hashes": "none",
+        "owned_children": 0,
+        "minimum_consumer_calls": 1,
+        "forbidden_effects": {
+          "network": 0,
+          "exec": 0,
+          "original_write": 0
+        },
+        "state": "REFUSED"
+      },
+      "active": true,
+      "producer": "a171_actual",
+      "effect_domain": "original_bounded_owned_operands_actual_consumer_or_explicit_code_gap",
+      "safety_classification": "BENIGN_FUNCTIONAL_OBLIGATION_HISTORICAL_METHOD_NOT_AUTHORIZED"
+    },
+    {
+      "position": 69,
+      "id": "symlink",
+      "expected": {
+        "consumer": "sealed_bytes",
+        "cause": "OSError:40",
+        "stage": "sealed_bytes",
+        "started_routes": 0,
+        "hashes": "none",
+        "owned_children": 0,
+        "minimum_consumer_calls": 1,
+        "forbidden_effects": {
+          "network": 0,
+          "exec": 0,
+          "original_write": 0
+        },
+        "state": "REFUSED"
+      },
+      "active": true,
+      "producer": "a171_actual",
+      "effect_domain": "original_bounded_owned_operands_actual_consumer_or_explicit_code_gap",
+      "safety_classification": "BENIGN_FUNCTIONAL_OBLIGATION_HISTORICAL_METHOD_NOT_AUTHORIZED"
+    },
+    {
+      "position": 70,
+      "id": "outer_mirror",
+      "expected": {
+        "consumer": "mapping_check/container",
+        "cause": "EXACT_MIRRORS",
+        "stage": "mapping_check",
+        "started_routes": 0,
+        "hashes": "none",
+        "owned_children": 0,
+        "minimum_consumer_calls": 1,
+        "forbidden_effects": {
+          "network": 0,
+          "exec": 0,
+          "original_write": 0
+        },
+        "state": "REFUSED"
+      },
+      "active": true,
+      "producer": "mapping_check",
+      "effect_domain": "owned_child_bounded_inert_consumer",
+      "safety_classification": "ALLOWLISTED_BOUNDED_INERT_SOURCE"
+    },
+    {
+      "position": 71,
+      "id": "retained_positive",
+      "expected": {
+        "consumer": "RetainedTree.check",
+        "cause": null,
+        "stage": "retained_partial_custody",
+        "started_routes": 0,
+        "hashes": "none",
+        "owned_children": 0,
+        "minimum_consumer_calls": 1,
+        "forbidden_effects": {
+          "network": 0,
+          "exec": 0,
+          "original_write": 0
+        },
+        "state": "CONSUMER_ACCEPTED_NO_ADMISSION"
+      },
+      "active": true,
+      "producer": "a171_actual",
+      "effect_domain": "original_bounded_owned_operands_actual_consumer_or_explicit_code_gap",
+      "safety_classification": "BENIGN_FUNCTIONAL_OBLIGATION_HISTORICAL_METHOD_NOT_AUTHORIZED"
+    },
+    {
+      "position": 72,
+      "id": "retained_content",
+      "expected": {
+        "consumer": "RetainedTree.check",
+        "cause": "PARTIAL_LATE_INPUT_DRIFT",
+        "stage": "retained_partial_custody",
+        "started_routes": 0,
+        "hashes": "none",
+        "owned_children": 0,
+        "minimum_consumer_calls": 1,
+        "forbidden_effects": {
+          "network": 0,
+          "exec": 0,
+          "original_write": 0
+        },
+        "state": "REFUSED"
+      },
+      "active": true,
+      "producer": "a171_actual",
+      "effect_domain": "original_bounded_owned_operands_actual_consumer_or_explicit_code_gap",
+      "safety_classification": "BENIGN_FUNCTIONAL_OBLIGATION_HISTORICAL_METHOD_NOT_AUTHORIZED"
+    },
+    {
+      "position": 73,
+      "id": "retained_path",
+      "expected": {
+        "consumer": "RetainedTree.check",
+        "cause": "PARTIAL_LATE_INPUT_DRIFT",
+        "stage": "retained_partial_custody",
+        "started_routes": 0,
+        "hashes": "none",
+        "owned_children": 0,
+        "minimum_consumer_calls": 1,
+        "forbidden_effects": {
+          "network": 0,
+          "exec": 0,
+          "original_write": 0
+        },
+        "state": "REFUSED"
+      },
+      "active": true,
+      "producer": "a171_actual",
+      "effect_domain": "original_bounded_owned_operands_actual_consumer_or_explicit_code_gap",
+      "safety_classification": "BENIGN_FUNCTIONAL_OBLIGATION_HISTORICAL_METHOD_NOT_AUTHORIZED"
+    },
+    {
+      "position": 74,
+      "id": "retained_fd",
+      "expected": {
+        "consumer": "RetainedTree.check",
+        "cause": "OSError:9",
+        "stage": "retained_partial_custody",
+        "started_routes": 0,
+        "hashes": "none",
+        "owned_children": 0,
+        "minimum_consumer_calls": 1,
+        "forbidden_effects": {
+          "network": 0,
+          "exec": 0,
+          "original_write": 0
+        },
+        "state": "REFUSED"
+      },
+      "active": true,
+      "producer": "a171_actual",
+      "effect_domain": "original_bounded_owned_operands_actual_consumer_or_explicit_code_gap",
+      "safety_classification": "BENIGN_FUNCTIONAL_OBLIGATION_HISTORICAL_METHOD_NOT_AUTHORIZED"
+    },
+    {
+      "position": 75,
+      "id": "retained_directory",
+      "expected": {
+        "consumer": "RetainedTree.check",
+        "cause": "PARTIAL_DIRECTORY_PATH",
+        "stage": "retained_partial_custody",
+        "started_routes": 0,
+        "hashes": "none",
+        "owned_children": 0,
+        "minimum_consumer_calls": 1,
+        "forbidden_effects": {
+          "network": 0,
+          "exec": 0,
+          "original_write": 0
+        },
+        "state": "REFUSED"
+      },
+      "active": true,
+      "producer": "a171_actual",
+      "effect_domain": "original_bounded_owned_operands_actual_consumer_or_explicit_code_gap",
+      "safety_classification": "BENIGN_FUNCTIONAL_OBLIGATION_HISTORICAL_METHOD_NOT_AUTHORIZED"
+    },
+    {
+      "position": 76,
+      "id": "retained_membership",
+      "expected": {
+        "consumer": "RetainedTree.check",
+        "cause": "PARTIAL_MEMBERSHIP",
+        "stage": "retained_partial_custody",
+        "started_routes": 0,
+        "hashes": "none",
+        "owned_children": 0,
+        "minimum_consumer_calls": 1,
+        "forbidden_effects": {
+          "network": 0,
+          "exec": 0,
+          "original_write": 0
+        },
+        "state": "REFUSED"
+      },
+      "active": true,
+      "producer": "a171_actual",
+      "effect_domain": "original_bounded_owned_operands_actual_consumer_or_explicit_code_gap",
+      "safety_classification": "BENIGN_FUNCTIONAL_OBLIGATION_HISTORICAL_METHOD_NOT_AUTHORIZED"
+    },
+    {
+      "position": 77,
+      "id": "output_positive",
+      "expected": {
+        "consumer": "BoundedOutput/G1.Output.check/create",
+        "cause": null,
+        "stage": "output_custody",
+        "started_routes": 0,
+        "hashes": "none",
+        "owned_children": 0,
+        "minimum_consumer_calls": 1,
+        "forbidden_effects": {
+          "network": 0,
+          "exec": 0,
+          "original_write": 0
+        },
+        "state": "CONSUMER_ACCEPTED_NO_ADMISSION"
+      },
+      "active": true,
+      "producer": "a171_actual",
+      "effect_domain": "original_bounded_owned_operands_actual_consumer_or_explicit_code_gap",
+      "safety_classification": "BENIGN_FUNCTIONAL_OBLIGATION_HISTORICAL_METHOD_NOT_AUTHORIZED"
+    },
+    {
+      "position": 78,
+      "id": "output_mode",
+      "expected": {
+        "consumer": "BoundedOutput/G1.Output.check/create",
+        "cause": "FILE_CUSTODY",
+        "stage": "output_custody",
+        "started_routes": 0,
+        "hashes": "none",
+        "owned_children": 0,
+        "minimum_consumer_calls": 1,
+        "forbidden_effects": {
+          "network": 0,
+          "exec": 0,
+          "original_write": 0
+        },
+        "state": "REFUSED"
+      },
+      "active": true,
+      "producer": "a171_actual",
+      "effect_domain": "original_bounded_owned_operands_actual_consumer_or_explicit_code_gap",
+      "safety_classification": "BENIGN_FUNCTIONAL_OBLIGATION_HISTORICAL_METHOD_NOT_AUTHORIZED"
+    },
+    {
+      "position": 79,
+      "id": "output_hardlink",
+      "expected": {
+        "consumer": "BoundedOutput/G1.Output.check/create",
+        "cause": "FILE_CUSTODY",
+        "stage": "output_custody",
+        "started_routes": 0,
+        "hashes": "none",
+        "owned_children": 0,
+        "minimum_consumer_calls": 1,
+        "forbidden_effects": {
+          "network": 0,
+          "exec": 0,
+          "original_write": 0
+        },
+        "state": "REFUSED"
+      },
+      "active": true,
+      "producer": "a171_actual",
+      "effect_domain": "original_bounded_owned_operands_actual_consumer_or_explicit_code_gap",
+      "safety_classification": "BENIGN_FUNCTIONAL_OBLIGATION_HISTORICAL_METHOD_NOT_AUTHORIZED"
+    },
+    {
+      "position": 80,
+      "id": "output_symlink",
+      "expected": {
+        "consumer": "BoundedOutput/G1.Output.check/create",
+        "cause": "FILE_CUSTODY",
+        "stage": "output_custody",
+        "started_routes": 0,
+        "hashes": "none",
+        "owned_children": 0,
+        "minimum_consumer_calls": 1,
+        "forbidden_effects": {
+          "network": 0,
+          "exec": 0,
+          "original_write": 0
+        },
+        "state": "REFUSED"
+      },
+      "active": true,
+      "producer": "a171_actual",
+      "effect_domain": "original_bounded_owned_operands_actual_consumer_or_explicit_code_gap",
+      "safety_classification": "BENIGN_FUNCTIONAL_OBLIGATION_HISTORICAL_METHOD_NOT_AUTHORIZED"
+    },
+    {
+      "position": 81,
+      "id": "output_membership",
+      "expected": {
+        "consumer": "BoundedOutput/G1.Output.check/create",
+        "cause": "UNEXPECTED_TREE_ENTRY",
+        "stage": "output_custody",
+        "started_routes": 0,
+        "hashes": "none",
+        "owned_children": 0,
+        "minimum_consumer_calls": 1,
+        "forbidden_effects": {
+          "network": 0,
+          "exec": 0,
+          "original_write": 0
+        },
+        "state": "REFUSED"
+      },
+      "active": true,
+      "producer": "a171_actual",
+      "effect_domain": "original_bounded_owned_operands_actual_consumer_or_explicit_code_gap",
+      "safety_classification": "BENIGN_FUNCTIONAL_OBLIGATION_HISTORICAL_METHOD_NOT_AUTHORIZED"
+    },
+    {
+      "position": 82,
+      "id": "output_root",
+      "expected": {
+        "consumer": "BoundedOutput/G1.Output.check/create",
+        "cause": "ROOT_CUSTODY",
+        "stage": "output_custody",
+        "started_routes": 0,
+        "hashes": "none",
+        "owned_children": 0,
+        "minimum_consumer_calls": 1,
+        "forbidden_effects": {
+          "network": 0,
+          "exec": 0,
+          "original_write": 0
+        },
+        "state": "REFUSED"
+      },
+      "active": true,
+      "producer": "a171_actual",
+      "effect_domain": "original_bounded_owned_operands_actual_consumer_or_explicit_code_gap",
+      "safety_classification": "BENIGN_FUNCTIONAL_OBLIGATION_HISTORICAL_METHOD_NOT_AUTHORIZED"
+    },
+    {
+      "position": 83,
+      "id": "output_directory",
+      "expected": {
+        "consumer": "BoundedOutput/G1.Output.check/create",
+        "cause": "DIRECTORY_REPLACED",
+        "stage": "output_custody",
+        "started_routes": 0,
+        "hashes": "none",
+        "owned_children": 0,
+        "minimum_consumer_calls": 1,
+        "forbidden_effects": {
+          "network": 0,
+          "exec": 0,
+          "original_write": 0
+        },
+        "state": "REFUSED"
+      },
+      "active": true,
+      "producer": "a171_actual",
+      "effect_domain": "original_bounded_owned_operands_actual_consumer_or_explicit_code_gap",
+      "safety_classification": "BENIGN_FUNCTIONAL_OBLIGATION_HISTORICAL_METHOD_NOT_AUTHORIZED"
+    },
+    {
+      "position": 84,
+      "id": "output_disk",
+      "expected": {
+        "consumer": "BoundedOutput/G1.Output.check/create",
+        "cause": "FINAL_DISK_CAP",
+        "stage": "output_custody",
+        "started_routes": 0,
+        "hashes": "none",
+        "owned_children": 0,
+        "minimum_consumer_calls": 1,
+        "forbidden_effects": {
+          "network": 0,
+          "exec": 0,
+          "original_write": 0
+        },
+        "state": "REFUSED"
+      },
+      "active": true,
+      "producer": "a171_actual",
+      "effect_domain": "original_bounded_owned_operands_actual_consumer_or_explicit_code_gap",
+      "safety_classification": "BENIGN_FUNCTIONAL_OBLIGATION_HISTORICAL_METHOD_NOT_AUTHORIZED"
+    },
+    {
+      "position": 85,
+      "id": "output_collision",
+      "expected": {
+        "consumer": "BoundedOutput/G1.Output.check/create",
+        "cause": "OUTPUT_COLLISION",
+        "stage": "output_custody",
+        "started_routes": 0,
+        "hashes": "none",
+        "owned_children": 0,
+        "minimum_consumer_calls": 1,
+        "forbidden_effects": {
+          "network": 0,
+          "exec": 0,
+          "original_write": 0
+        },
+        "state": "REFUSED"
+      },
+      "active": true,
+      "producer": "a171_actual",
+      "effect_domain": "original_bounded_owned_operands_actual_consumer_or_explicit_code_gap",
+      "safety_classification": "BENIGN_FUNCTIONAL_OBLIGATION_HISTORICAL_METHOD_NOT_AUTHORIZED"
+    },
+    {
+      "position": 86,
+      "id": "reservation",
+      "expected": {
+        "consumer": "reservations",
+        "cause": "BODY_RESERVATION",
+        "stage": "reservations",
+        "started_routes": 0,
+        "hashes": "none",
+        "owned_children": 0,
+        "minimum_consumer_calls": 1,
+        "forbidden_effects": {
+          "network": 0,
+          "exec": 0,
+          "original_write": 0
+        },
+        "state": "REFUSED"
+      },
+      "active": true,
+      "producer": "reservations",
+      "effect_domain": "owned_child_bounded_inert_consumer",
+      "safety_classification": "ALLOWLISTED_BOUNDED_INERT_SOURCE"
+    },
+    {
+      "position": 87,
+      "id": "file_count",
+      "expected": {
+        "consumer": "BoundedOutput.__init__",
+        "cause": "OUTPUT_FILE_LIMIT",
+        "stage": "BoundedOutput.__init__",
+        "started_routes": 0,
+        "hashes": "none",
+        "owned_children": 0,
+        "minimum_consumer_calls": 1,
+        "forbidden_effects": {
+          "network": 0,
+          "exec": 0,
+          "original_write": 0
+        },
+        "state": "REFUSED"
+      },
+      "active": true,
+      "producer": "output_count_refusal",
+      "effect_domain": "owned_child_bounded_inert_consumer",
+      "safety_classification": "ALLOWLISTED_BOUNDED_INERT_SOURCE"
+    },
+    {
+      "position": 88,
+      "id": "dir_count",
+      "expected": {
+        "consumer": "BoundedOutput.__init__",
+        "cause": "OUTPUT_DIRECTORY_LIMIT",
+        "stage": "BoundedOutput.__init__",
+        "started_routes": 0,
+        "hashes": "none",
+        "owned_children": 0,
+        "minimum_consumer_calls": 1,
+        "forbidden_effects": {
+          "network": 0,
+          "exec": 0,
+          "original_write": 0
+        },
+        "state": "REFUSED"
+      },
+      "active": true,
+      "producer": "output_count_refusal",
+      "effect_domain": "owned_child_bounded_inert_consumer",
+      "safety_classification": "ALLOWLISTED_BOUNDED_INERT_SOURCE"
+    },
+    {
+      "position": 89,
+      "id": "pinned_body_file_cap",
+      "expected": {
+        "consumer": "R4.guarded_digest",
+        "cause": "INPUT_SIZE",
+        "stage": "hash_network",
+        "started_routes": 0,
+        "hashes": "none",
+        "owned_children": 0,
+        "minimum_consumer_calls": 1,
+        "forbidden_effects": {
+          "network": 0,
+          "exec": 0,
+          "original_write": 0
+        },
+        "state": "REFUSED"
+      },
+      "active": true,
+      "producer": "a171_actual",
+      "effect_domain": "original_bounded_owned_operands_actual_consumer_or_explicit_code_gap",
+      "safety_classification": "BENIGN_FUNCTIONAL_OBLIGATION_HISTORICAL_METHOD_NOT_AUTHORIZED"
+    },
+    {
+      "position": 90,
+      "id": "guarded_hash",
+      "expected": {
+        "consumer": "R4.guarded_digest",
+        "cause": "WALL_TIMEOUT:guarded_hash",
+        "stage": "guarded_hash",
+        "started_routes": 0,
+        "hashes": "none",
+        "owned_children": 0,
+        "minimum_consumer_calls": 1,
+        "forbidden_effects": {
+          "network": 0,
+          "exec": 0,
+          "original_write": 0
+        },
+        "state": "REFUSED"
+      },
+      "active": true,
+      "producer": "a171_actual",
+      "effect_domain": "original_bounded_owned_operands_actual_consumer_or_explicit_code_gap",
+      "safety_classification": "BENIGN_FUNCTIONAL_OBLIGATION_HISTORICAL_METHOD_NOT_AUTHORIZED"
+    },
+    {
+      "position": 91,
+      "id": "guarded_write",
+      "expected": {
+        "consumer": "R4.guarded_write",
+        "cause": "WALL_TIMEOUT:guarded_write",
+        "stage": "guarded_write",
+        "started_routes": 0,
+        "hashes": "none",
+        "owned_children": 0,
+        "minimum_consumer_calls": 1,
+        "forbidden_effects": {
+          "network": 0,
+          "exec": 0,
+          "original_write": 0
+        },
+        "state": "REFUSED"
+      },
+      "active": true,
+      "producer": "a171_actual",
+      "effect_domain": "original_bounded_owned_operands_actual_consumer_or_explicit_code_gap",
+      "safety_classification": "BENIGN_FUNCTIONAL_OBLIGATION_HISTORICAL_METHOD_NOT_AUTHORIZED"
+    },
+    {
+      "position": 92,
+      "id": "actual_CA_wrong_digest",
+      "expected": {
+        "consumer": "ca_context/R4.guarded_digest",
+        "cause": "INPUT_SHA",
+        "stage": "ca_preflight",
+        "started_routes": 0,
+        "hashes": "none",
+        "owned_children": 0,
+        "minimum_consumer_calls": 1,
+        "forbidden_effects": {
+          "network": 0,
+          "exec": 0,
+          "original_write": 0
+        },
+        "state": "REFUSED"
+      },
+      "active": true,
+      "producer": "a171_actual",
+      "effect_domain": "original_bounded_owned_operands_actual_consumer_or_explicit_code_gap",
+      "safety_classification": "BENIGN_FUNCTIONAL_OBLIGATION_HISTORICAL_METHOD_NOT_AUTHORIZED"
+    },
+    {
+      "position": 93,
+      "id": "actual_CA_parse",
+      "expected": {
+        "consumer": "ca_context/SSLContext.load_verify_locations",
+        "cause": "NO_CERTIFICATE_OR_CRL_FOUND",
+        "stage": "ca_preflight",
+        "started_routes": 0,
+        "hashes": "none",
+        "owned_children": 0,
+        "minimum_consumer_calls": 1,
+        "forbidden_effects": {
+          "network": 0,
+          "exec": 0,
+          "original_write": 0
+        },
+        "state": "REFUSED"
+      },
+      "active": true,
+      "producer": "a171_actual",
+      "effect_domain": "original_bounded_owned_operands_actual_consumer_or_explicit_code_gap",
+      "safety_classification": "BENIGN_FUNCTIONAL_OBLIGATION_HISTORICAL_METHOD_NOT_AUTHORIZED"
+    },
+    {
+      "position": 94,
+      "id": "actual_resources_positive",
+      "expected": {
+        "consumer": "G1.resources",
+        "cause": null,
+        "stage": "G1.resources",
+        "started_routes": 0,
+        "hashes": "none",
+        "owned_children": 0,
+        "minimum_consumer_calls": 1,
+        "forbidden_effects": {
+          "network": 0,
+          "exec": 0,
+          "original_write": 0
+        },
+        "state": "CONSUMER_ACCEPTED_NO_ADMISSION"
+      },
+      "active": true,
+      "producer": "a171_actual",
+      "effect_domain": "original_bounded_owned_operands_actual_consumer_or_explicit_code_gap",
+      "safety_classification": "BENIGN_FUNCTIONAL_OBLIGATION_HISTORICAL_METHOD_NOT_AUTHORIZED"
+    },
+    {
+      "position": 95,
+      "id": "actual_resources_leaf",
+      "expected": {
+        "consumer": "G1.resources",
+        "cause": "CGROUP_LEAF_UNKNOWN",
+        "stage": "G1.resources",
+        "started_routes": 0,
+        "hashes": "none",
+        "owned_children": 0,
+        "minimum_consumer_calls": 1,
+        "forbidden_effects": {
+          "network": 0,
+          "exec": 0,
+          "original_write": 0
+        },
+        "state": "REFUSED"
+      },
+      "active": true,
+      "producer": "a171_actual",
+      "effect_domain": "original_bounded_owned_operands_actual_consumer_or_explicit_code_gap",
+      "safety_classification": "BENIGN_FUNCTIONAL_OBLIGATION_HISTORICAL_METHOD_NOT_AUTHORIZED"
+    },
+    {
+      "position": 96,
+      "id": "actual_resources_limit",
+      "expected": {
+        "consumer": "G1.resources",
+        "cause": "CGROUP_MEMORY_LIMIT_UNKNOWN",
+        "stage": "G1.resources",
+        "started_routes": 0,
+        "hashes": "none",
+        "owned_children": 0,
+        "minimum_consumer_calls": 1,
+        "forbidden_effects": {
+          "network": 0,
+          "exec": 0,
+          "original_write": 0
+        },
+        "state": "REFUSED"
+      },
+      "active": true,
+      "producer": "a171_actual",
+      "effect_domain": "original_bounded_owned_operands_actual_consumer_or_explicit_code_gap",
+      "safety_classification": "BENIGN_FUNCTIONAL_OBLIGATION_HISTORICAL_METHOD_NOT_AUTHORIZED"
+    },
+    {
+      "position": 97,
+      "id": "actual_resources_memory",
+      "expected": {
+        "consumer": "G1.resources",
+        "cause": "CGROUP_MEMORY_SHORTFALL",
+        "stage": "G1.resources",
+        "started_routes": 0,
+        "hashes": "none",
+        "owned_children": 0,
+        "minimum_consumer_calls": 1,
+        "forbidden_effects": {
+          "network": 0,
+          "exec": 0,
+          "original_write": 0
+        },
+        "state": "REFUSED"
+      },
+      "active": true,
+      "producer": "a171_actual",
+      "effect_domain": "original_bounded_owned_operands_actual_consumer_or_explicit_code_gap",
+      "safety_classification": "BENIGN_FUNCTIONAL_OBLIGATION_HISTORICAL_METHOD_NOT_AUTHORIZED"
+    },
+    {
+      "position": 98,
+      "id": "actual_resources_ancestor",
+      "expected": {
+        "consumer": "G1.resources",
+        "cause": "CGROUP_ANCESTOR_MEMORY_SHORTFALL",
+        "stage": "G1.resources",
+        "started_routes": 0,
+        "hashes": "none",
+        "owned_children": 0,
+        "minimum_consumer_calls": 1,
+        "forbidden_effects": {
+          "network": 0,
+          "exec": 0,
+          "original_write": 0
+        },
+        "state": "REFUSED"
+      },
+      "active": true,
+      "producer": "a171_actual",
+      "effect_domain": "original_bounded_owned_operands_actual_consumer_or_explicit_code_gap",
+      "safety_classification": "BENIGN_FUNCTIONAL_OBLIGATION_HISTORICAL_METHOD_NOT_AUTHORIZED"
+    },
+    {
+      "position": 99,
+      "id": "actual_resources_disk",
+      "expected": {
+        "consumer": "G1.resources",
+        "cause": "DISK_SHORTFALL",
+        "stage": "G1.resources",
+        "started_routes": 0,
+        "hashes": "none",
+        "owned_children": 0,
+        "minimum_consumer_calls": 1,
+        "forbidden_effects": {
+          "network": 0,
+          "exec": 0,
+          "original_write": 0
+        },
+        "state": "REFUSED"
+      },
+      "active": true,
+      "producer": "a171_actual",
+      "effect_domain": "original_bounded_owned_operands_actual_consumer_or_explicit_code_gap",
+      "safety_classification": "BENIGN_FUNCTIONAL_OBLIGATION_HISTORICAL_METHOD_NOT_AUTHORIZED"
+    },
+    {
+      "position": 100,
+      "id": "actual_resources_host_memory",
+      "expected": {
+        "consumer": "G1.resources",
+        "cause": "MEMORY_SHORTFALL",
+        "stage": "G1.resources",
+        "started_routes": 0,
+        "hashes": "none",
+        "owned_children": 0,
+        "minimum_consumer_calls": 1,
+        "forbidden_effects": {
+          "network": 0,
+          "exec": 0,
+          "original_write": 0
+        },
+        "state": "REFUSED"
+      },
+      "active": true,
+      "producer": "a171_actual",
+      "effect_domain": "original_bounded_owned_operands_actual_consumer_or_explicit_code_gap",
+      "safety_classification": "BENIGN_FUNCTIONAL_OBLIGATION_HISTORICAL_METHOD_NOT_AUTHORIZED"
+    },
+    {
+      "position": 101,
+      "id": "whole3_bounded_header",
+      "expected": {
+        "consumer": "G1.worker/BoundedResponse/HeaderReader",
+        "cause": "SECURITY_INTEGRITY_PROTOCOL:HEADERS_OR_CHUNK_FRAMING_CAP",
+        "stage": "event_drain",
+        "started_routes": 3,
+        "hashes": "at_least1",
+        "owned_children": 3,
+        "minimum_consumer_calls": 1,
+        "forbidden_effects": {
+          "network": 0,
+          "exec": 0,
+          "original_write": 0
+        },
+        "state": "CONTOUR_ABORTED"
+      },
+      "active": true,
+      "producer": "a171_actual",
+      "effect_domain": "original_bounded_owned_operands_actual_consumer_or_explicit_code_gap",
+      "safety_classification": "BENIGN_FUNCTIONAL_OBLIGATION_HISTORICAL_METHOD_NOT_AUTHORIZED"
+    },
+    {
+      "position": 102,
+      "id": "late_during_work",
+      "expected": {
+        "consumer": "RetainedTree.check",
+        "cause": "PARTIAL_LATE_INPUT_DRIFT",
+        "stage": "retained_partial_custody",
+        "started_routes": 3,
+        "hashes": "exact3",
+        "owned_children": 3,
+        "minimum_consumer_calls": 1,
+        "forbidden_effects": {
+          "network": 0,
+          "exec": 0,
+          "original_write": 0
+        },
+        "state": "CONTOUR_ABORTED"
+      },
+      "active": true,
+      "producer": "a171_actual",
+      "effect_domain": "original_bounded_owned_operands_actual_consumer_or_explicit_code_gap",
+      "safety_classification": "BENIGN_FUNCTIONAL_OBLIGATION_HISTORICAL_METHOD_NOT_AUTHORIZED"
+    },
+    {
+      "position": 103,
+      "id": "actual_output_close",
+      "expected": {
+        "consumer": "BoundedOutput/G1.Output.close",
+        "cause": "OUTPUT_CLOSE:OSError:5",
+        "stage": "output_close",
+        "started_routes": 3,
+        "hashes": "exact3",
+        "owned_children": 3,
+        "minimum_consumer_calls": 1,
+        "forbidden_effects": {
+          "network": 0,
+          "exec": 0,
+          "original_write": 0
+        },
+        "state": "CONTOUR_ABORTED"
+      },
+      "active": true,
+      "producer": "a171_actual",
+      "effect_domain": "original_bounded_owned_operands_actual_consumer_or_explicit_code_gap",
+      "safety_classification": "BENIGN_FUNCTIONAL_OBLIGATION_HISTORICAL_METHOD_NOT_AUTHORIZED"
+    },
+    {
+      "position": 104,
+      "id": "actual_signal_restore",
+      "expected": {
+        "consumer": "execute_core/signal.signal",
+        "cause": "SIGNAL_RESTORE:OSError:5",
+        "stage": "signal_restore",
+        "started_routes": 3,
+        "hashes": "exact3",
+        "owned_children": 3,
+        "minimum_consumer_calls": 1,
+        "forbidden_effects": {
+          "network": 0,
+          "exec": 0,
+          "original_write": 0
+        },
+        "state": "CONTOUR_ABORTED"
+      },
+      "active": true,
+      "producer": "a171_actual",
+      "effect_domain": "original_bounded_owned_operands_actual_consumer_or_explicit_code_gap",
+      "safety_classification": "BENIGN_FUNCTIONAL_OBLIGATION_HISTORICAL_METHOD_NOT_AUTHORIZED"
+    },
+    {
+      "position": 105,
+      "id": "active_owned_stop",
+      "expected": {
+        "consumer": "Run.guard/R4.stop_child",
+        "cause": "OWNER_STOP",
+        "stage": "event_drain",
+        "started_routes": 3,
+        "hashes": "none",
+        "owned_children": 3,
+        "minimum_consumer_calls": 1,
+        "forbidden_effects": {
+          "network": 0,
+          "exec": 0,
+          "original_write": 0
+        },
+        "state": "CONTOUR_ABORTED"
+      },
+      "active": true,
+      "producer": "a171_actual",
+      "effect_domain": "original_bounded_owned_operands_actual_consumer_or_explicit_code_gap",
+      "safety_classification": "BENIGN_FUNCTIONAL_OBLIGATION_HISTORICAL_METHOD_NOT_AUTHORIZED"
+    },
+    {
+      "position": 106,
+      "id": "public_admission_positive",
+      "expected": {
+        "consumer": "public_admission",
+        "cause": null,
+        "stage": "public_admission",
+        "started_routes": 0,
+        "hashes": "none",
+        "owned_children": 0,
+        "minimum_consumer_calls": 1,
+        "forbidden_effects": {
+          "network": 0,
+          "exec": 0,
+          "original_write": 0
+        },
+        "state": "CONSUMER_ACCEPTED_NO_ADMISSION"
+      },
+      "active": true,
+      "producer": "public_admission",
+      "effect_domain": "owned_child_bounded_inert_consumer",
+      "safety_classification": "ALLOWLISTED_BOUNDED_INERT_SOURCE"
+    },
+    {
+      "position": 107,
+      "id": "public_unknown",
+      "expected": {
+        "consumer": "public_admission",
+        "cause": "EXTERNAL_ROOT_PINS_REQUIRED",
+        "stage": "public_admission",
+        "started_routes": 0,
+        "hashes": "none",
+        "owned_children": 0,
+        "minimum_consumer_calls": 1,
+        "forbidden_effects": {
+          "network": 0,
+          "exec": 0,
+          "original_write": 0
+        },
+        "state": "REFUSED"
+      },
+      "active": true,
+      "producer": "public_admission",
+      "effect_domain": "owned_child_bounded_inert_consumer",
+      "safety_classification": "ALLOWLISTED_BOUNDED_INERT_SOURCE"
+    },
+    {
+      "position": 108,
+      "id": "public_environment",
+      "expected": {
+        "consumer": "public_admission",
+        "cause": "ISOLATED_ENV",
+        "stage": "public_admission",
+        "started_routes": 0,
+        "hashes": "none",
+        "owned_children": 0,
+        "minimum_consumer_calls": 1,
+        "forbidden_effects": {
+          "network": 0,
+          "exec": 0,
+          "original_write": 0
+        },
+        "state": "REFUSED"
+      },
+      "active": true,
+      "producer": "public_admission",
+      "effect_domain": "owned_child_bounded_inert_consumer",
+      "safety_classification": "ALLOWLISTED_BOUNDED_INERT_SOURCE"
+    },
+    {
+      "position": 109,
+      "id": "public_self_pin",
+      "expected": {
+        "consumer": "public_admission",
+        "cause": "PIN_SHA:SELF",
+        "stage": "public_admission",
+        "started_routes": 0,
+        "hashes": "none",
+        "owned_children": 0,
+        "minimum_consumer_calls": 1,
+        "forbidden_effects": {
+          "network": 0,
+          "exec": 0,
+          "original_write": 0
+        },
+        "state": "REFUSED"
+      },
+      "active": true,
+      "producer": "public_admission",
+      "effect_domain": "owned_child_bounded_inert_consumer",
+      "safety_classification": "ALLOWLISTED_BOUNDED_INERT_SOURCE"
+    },
+    {
+      "position": 110,
+      "id": "public_bill_pin",
+      "expected": {
+        "consumer": "public_admission",
+        "cause": "EXTERNAL_BILL_PIN",
+        "stage": "public_admission",
+        "started_routes": 0,
+        "hashes": "none",
+        "owned_children": 0,
+        "minimum_consumer_calls": 1,
+        "forbidden_effects": {
+          "network": 0,
+          "exec": 0,
+          "original_write": 0
+        },
+        "state": "REFUSED"
+      },
+      "active": true,
+      "producer": "public_admission",
+      "effect_domain": "owned_child_bounded_inert_consumer",
+      "safety_classification": "ALLOWLISTED_BOUNDED_INERT_SOURCE"
+    },
+    {
+      "position": 111,
+      "id": "public_controls_pin",
+      "expected": {
+        "consumer": "public_admission",
+        "cause": "PIN_SHA:CONTROLS",
+        "stage": "public_admission",
+        "started_routes": 0,
+        "hashes": "none",
+        "owned_children": 0,
+        "minimum_consumer_calls": 1,
+        "forbidden_effects": {
+          "network": 0,
+          "exec": 0,
+          "original_write": 0
+        },
+        "state": "REFUSED"
+      },
+      "active": true,
+      "producer": "public_admission",
+      "effect_domain": "owned_child_bounded_inert_consumer",
+      "safety_classification": "ALLOWLISTED_BOUNDED_INERT_SOURCE"
+    },
+    {
+      "position": 112,
+      "id": "deadline_final_retained_hash",
+      "expected": {
+        "consumer": "Run.guard/R4.guarded_digest",
+        "cause": "WALL_TIMEOUT:final_retained_hash",
+        "stage": "final_retained_hash",
+        "started_routes": 3,
+        "hashes": "exact3",
+        "owned_children": 3,
+        "minimum_consumer_calls": 1,
+        "forbidden_effects": {
+          "network": 0,
+          "exec": 0,
+          "original_write": 0
+        },
+        "state": "CONTOUR_ABORTED"
+      },
+      "active": true,
+      "producer": "a171_actual",
+      "effect_domain": "original_bounded_owned_operands_actual_consumer_or_explicit_code_gap",
+      "safety_classification": "BENIGN_FUNCTIONAL_OBLIGATION_HISTORICAL_METHOD_NOT_AUTHORIZED"
+    },
+    {
+      "position": 113,
+      "id": "deadline_inventory_serialization",
+      "expected": {
+        "consumer": "Run.guard/R4.guarded_digest",
+        "cause": "WALL_TIMEOUT:inventory_serialization",
+        "stage": "inventory_serialization",
+        "started_routes": 3,
+        "hashes": "exact3",
+        "owned_children": 3,
+        "minimum_consumer_calls": 1,
+        "forbidden_effects": {
+          "network": 0,
+          "exec": 0,
+          "original_write": 0
+        },
+        "state": "CONTOUR_ABORTED"
+      },
+      "active": true,
+      "producer": "a171_actual",
+      "effect_domain": "original_bounded_owned_operands_actual_consumer_or_explicit_code_gap",
+      "safety_classification": "BENIGN_FUNCTIONAL_OBLIGATION_HISTORICAL_METHOD_NOT_AUTHORIZED"
+    },
+    {
+      "position": 114,
+      "id": "deadline_inventory_serialized",
+      "expected": {
+        "consumer": "Run.guard/R4.guarded_digest",
+        "cause": "WALL_TIMEOUT:inventory_serialized",
+        "stage": "inventory_serialized",
+        "started_routes": 3,
+        "hashes": "exact3",
+        "owned_children": 3,
+        "minimum_consumer_calls": 1,
+        "forbidden_effects": {
+          "network": 0,
+          "exec": 0,
+          "original_write": 0
+        },
+        "state": "CONTOUR_ABORTED"
+      },
+      "active": true,
+      "producer": "a171_actual",
+      "effect_domain": "original_bounded_owned_operands_actual_consumer_or_explicit_code_gap",
+      "safety_classification": "BENIGN_FUNCTIONAL_OBLIGATION_HISTORICAL_METHOD_NOT_AUTHORIZED"
+    },
+    {
+      "position": 115,
+      "id": "terminal_serialization",
+      "expected": {
+        "consumer": "terminal_bytes/Run.guard",
+        "cause": "WALL_TIMEOUT:terminal_serialization",
+        "stage": "terminal_serialization",
+        "started_routes": 0,
+        "hashes": "none",
+        "owned_children": 0,
+        "minimum_consumer_calls": 1,
+        "forbidden_effects": {
+          "network": 0,
+          "exec": 0,
+          "original_write": 0
+        },
+        "state": "CONTOUR_ABORTED"
+      },
+      "active": true,
+      "producer": "a171_actual",
+      "effect_domain": "original_bounded_owned_operands_actual_consumer_or_explicit_code_gap",
+      "safety_classification": "BENIGN_FUNCTIONAL_OBLIGATION_HISTORICAL_METHOD_NOT_AUTHORIZED"
+    },
+    {
+      "position": 116,
+      "id": "terminal_serialized",
+      "expected": {
+        "consumer": "terminal_bytes/Run.guard",
+        "cause": "WALL_TIMEOUT:terminal_serialized",
+        "stage": "terminal_serialized",
+        "started_routes": 0,
+        "hashes": "none",
+        "owned_children": 0,
+        "minimum_consumer_calls": 1,
+        "forbidden_effects": {
+          "network": 0,
+          "exec": 0,
+          "original_write": 0
+        },
+        "state": "CONTOUR_ABORTED"
+      },
+      "active": true,
+      "producer": "a171_actual",
+      "effect_domain": "original_bounded_owned_operands_actual_consumer_or_explicit_code_gap",
+      "safety_classification": "BENIGN_FUNCTIONAL_OBLIGATION_HISTORICAL_METHOD_NOT_AUTHORIZED"
+    },
+    {
+      "position": 117,
+      "id": "serialization_failure",
+      "expected": {
+        "consumer": "terminal_bytes",
+        "cause": "SERIALIZATION_FAULT",
+        "stage": "terminal_serialization",
+        "started_routes": 0,
+        "hashes": "none",
+        "owned_children": 0,
+        "minimum_consumer_calls": 1,
+        "forbidden_effects": {
+          "network": 0,
+          "exec": 0,
+          "original_write": 0
+        },
+        "state": "CONTOUR_ABORTED"
+      },
+      "active": true,
+      "producer": "a171_actual",
+      "effect_domain": "original_bounded_owned_operands_actual_consumer_or_explicit_code_gap",
+      "safety_classification": "BENIGN_FUNCTIONAL_OBLIGATION_HISTORICAL_METHOD_NOT_AUTHORIZED"
+    },
+    {
+      "position": 118,
+      "id": "sticky_serialization",
+      "expected": {
+        "consumer": "terminal_bytes",
+        "cause": "SERIALIZATION_FAULT",
+        "stage": "sticky_uncertainty",
+        "started_routes": 0,
+        "hashes": "none",
+        "owned_children": 0,
+        "minimum_consumer_calls": 1,
+        "forbidden_effects": {
+          "network": 0,
+          "exec": 0,
+          "original_write": 0
+        },
+        "state": "STOP_UNCONFIRMED"
+      },
+      "active": true,
+      "producer": "a171_actual",
+      "effect_domain": "original_bounded_owned_operands_actual_consumer_or_explicit_code_gap",
+      "safety_classification": "BENIGN_FUNCTIONAL_OBLIGATION_HISTORICAL_METHOD_NOT_AUTHORIZED"
+    },
+    {
+      "position": 119,
+      "id": "terminal_output_path",
+      "expected": {
+        "consumer": "emit_terminal",
+        "cause": "TERMINAL_SINK:TERMINAL_OUTPUT_NOT_PIPE",
+        "stage": "terminal_sink",
+        "started_routes": 0,
+        "hashes": "none",
+        "owned_children": 0,
+        "minimum_consumer_calls": 1,
+        "forbidden_effects": {
+          "network": 0,
+          "exec": 0,
+          "original_write": 0
+        },
+        "state": "TERMINAL_EMISSION_FAILED"
+      },
+      "active": true,
+      "producer": "a171_actual",
+      "effect_domain": "original_bounded_owned_operands_actual_consumer_or_explicit_code_gap",
+      "safety_classification": "BENIGN_FUNCTIONAL_OBLIGATION_HISTORICAL_METHOD_NOT_AUTHORIZED"
+    },
+    {
+      "position": 120,
+      "id": "connect15_unconnected",
+      "expected": {
+        "consumer": "R4.run_wave/stop_child",
+        "cause": "REQUEST_TIMEOUT",
+        "stage": "event_drain",
+        "started_routes": 3,
+        "hashes": "none",
+        "owned_children": 3,
+        "minimum_consumer_calls": 1,
+        "forbidden_effects": {
+          "network": 0,
+          "exec": 0,
+          "original_write": 0
+        },
+        "state": "CONTOUR_ABORTED"
+      },
+      "active": true,
+      "producer": "a171_actual",
+      "effect_domain": "original_bounded_owned_operands_actual_consumer_or_explicit_code_gap",
+      "safety_classification": "BENIGN_FUNCTIONAL_OBLIGATION_HISTORICAL_METHOD_NOT_AUTHORIZED"
+    },
+    {
+      "position": 121,
+      "id": "request300_connected",
+      "expected": {
+        "consumer": "R4.run_wave/stop_child",
+        "cause": "REQUEST_TIMEOUT",
+        "stage": "event_drain",
+        "started_routes": 3,
+        "hashes": "none",
+        "owned_children": 3,
+        "minimum_consumer_calls": 1,
+        "forbidden_effects": {
+          "network": 0,
+          "exec": 0,
+          "original_write": 0
+        },
+        "state": "CONTOUR_ABORTED"
+      },
+      "active": true,
+      "producer": "a171_actual",
+      "effect_domain": "original_bounded_owned_operands_actual_consumer_or_explicit_code_gap",
+      "safety_classification": "BENIGN_FUNCTIONAL_OBLIGATION_HISTORICAL_METHOD_NOT_AUTHORIZED"
+    },
+    {
+      "position": 122,
+      "id": "work1140_boundary",
+      "expected": {
+        "consumer": "Run.guard",
+        "cause": "WALL_TIMEOUT:work_boundary",
+        "stage": "work_boundary",
+        "started_routes": 0,
+        "hashes": "none",
+        "owned_children": 0,
+        "minimum_consumer_calls": 1,
+        "forbidden_effects": {
+          "network": 0,
+          "exec": 0,
+          "original_write": 0
+        },
+        "state": "REFUSED"
+      },
+      "active": true,
+      "producer": "a171_actual",
+      "effect_domain": "original_bounded_owned_operands_actual_consumer_or_explicit_code_gap",
+      "safety_classification": "BENIGN_FUNCTIONAL_OBLIGATION_HISTORICAL_METHOD_NOT_AUTHORIZED"
+    },
+    {
+      "position": 123,
+      "id": "hard1200_boundary",
+      "expected": {
+        "consumer": "Run.guard",
+        "cause": "WALL_TIMEOUT:terminal_reserve",
+        "stage": "terminal_reserve",
+        "started_routes": 0,
+        "hashes": "none",
+        "owned_children": 0,
+        "minimum_consumer_calls": 1,
+        "forbidden_effects": {
+          "network": 0,
+          "exec": 0,
+          "original_write": 0
+        },
+        "state": "REFUSED"
+      },
+      "active": true,
+      "producer": "a171_actual",
+      "effect_domain": "original_bounded_owned_operands_actual_consumer_or_explicit_code_gap",
+      "safety_classification": "BENIGN_FUNCTIONAL_OBLIGATION_HISTORICAL_METHOD_NOT_AUTHORIZED"
+    },
+    {
+      "position": 124,
+      "id": "work1140_active",
+      "expected": {
+        "consumer": "R4.run_wave/Run.guard",
+        "cause": "WALL_TIMEOUT:network_schedule",
+        "stage": "network_schedule",
+        "started_routes": 3,
+        "hashes": "none",
+        "owned_children": 3,
+        "minimum_consumer_calls": 1,
+        "forbidden_effects": {
+          "network": 0,
+          "exec": 0,
+          "original_write": 0
+        },
+        "state": "CONTOUR_ABORTED"
+      },
+      "active": true,
+      "producer": "a171_actual",
+      "effect_domain": "original_bounded_owned_operands_actual_consumer_or_explicit_code_gap",
+      "safety_classification": "BENIGN_FUNCTIONAL_OBLIGATION_HISTORICAL_METHOD_NOT_AUTHORIZED"
+    },
+    {
+      "position": 125,
+      "id": "body_eof_at_cap",
+      "expected": {
+        "consumer": "G1.worker/BoundedResponse/write_all",
+        "cause": null,
+        "stage": "hash_network",
+        "started_routes": 3,
+        "hashes": "exact3",
+        "owned_children": 3,
+        "minimum_consumer_calls": 1,
+        "forbidden_effects": {
+          "network": 0,
+          "exec": 0,
+          "original_write": 0
+        },
+        "state": "BROWSER3_FETCH_FINISHED_WITH_EXPLICIT_ACCEPTANCE_GAPS"
+      },
+      "active": true,
+      "producer": "a171_actual",
+      "effect_domain": "original_bounded_owned_operands_actual_consumer_or_explicit_code_gap",
+      "safety_classification": "BENIGN_FUNCTIONAL_OBLIGATION_HISTORICAL_METHOD_NOT_AUTHORIZED"
+    },
+    {
+      "position": 126,
+      "id": "body_cap_without_eof",
+      "expected": {
+        "consumer": "G1.worker/BoundedResponse/write_all",
+        "cause": "SECURITY_INTEGRITY_PROTOCOL:CAP_REACHED_WITHOUT_EOF",
+        "stage": "hash_network",
+        "started_routes": 3,
+        "hashes": "at_least1",
+        "owned_children": 3,
+        "minimum_consumer_calls": 1,
+        "forbidden_effects": {
+          "network": 0,
+          "exec": 0,
+          "original_write": 0
+        },
+        "state": "CONTOUR_ABORTED"
+      },
+      "active": true,
+      "producer": "a171_actual",
+      "effect_domain": "original_bounded_owned_operands_actual_consumer_or_explicit_code_gap",
+      "safety_classification": "BENIGN_FUNCTIONAL_OBLIGATION_HISTORICAL_METHOD_NOT_AUTHORIZED"
+    },
+    {
+      "position": 127,
+      "id": "body_short_write",
+      "expected": {
+        "consumer": "G1.worker/BoundedResponse/write_all",
+        "cause": "SECURITY_INTEGRITY_PROTOCOL:SHORT_WRITE",
+        "stage": "hash_network",
+        "started_routes": 3,
+        "hashes": "at_least1",
+        "owned_children": 3,
+        "minimum_consumer_calls": 1,
+        "forbidden_effects": {
+          "network": 0,
+          "exec": 0,
+          "original_write": 0
+        },
+        "state": "CONTOUR_ABORTED"
+      },
+      "active": true,
+      "producer": "a171_actual",
+      "effect_domain": "original_bounded_owned_operands_actual_consumer_or_explicit_code_gap",
+      "safety_classification": "BENIGN_FUNCTIONAL_OBLIGATION_HISTORICAL_METHOD_NOT_AUTHORIZED"
+    },
+    {
+      "position": 128,
+      "id": "body_partial_write",
+      "expected": {
+        "consumer": "G1.worker/BoundedResponse/write_all",
+        "cause": null,
+        "stage": "hash_network",
+        "started_routes": 3,
+        "hashes": "exact3",
+        "owned_children": 3,
+        "minimum_consumer_calls": 1,
+        "forbidden_effects": {
+          "network": 0,
+          "exec": 0,
+          "original_write": 0
+        },
+        "state": "BROWSER3_FETCH_FINISHED_WITH_EXPLICIT_ACCEPTANCE_GAPS"
+      },
+      "active": true,
+      "producer": "a171_actual",
+      "effect_domain": "original_bounded_owned_operands_actual_consumer_or_explicit_code_gap",
+      "safety_classification": "BENIGN_FUNCTIONAL_OBLIGATION_HISTORICAL_METHOD_NOT_AUTHORIZED"
+    },
+    {
+      "position": 129,
+      "id": "disk_reservation_positive",
+      "expected": {
+        "consumer": "disk_reservation",
+        "cause": null,
+        "stage": "disk_reservation",
+        "started_routes": 0,
+        "hashes": "none",
+        "owned_children": 0,
+        "minimum_consumer_calls": 1,
+        "forbidden_effects": {
+          "network": 0,
+          "exec": 0,
+          "original_write": 0
+        },
+        "state": "CONSUMER_ACCEPTED_NO_ADMISSION"
+      },
+      "active": true,
+      "producer": "disk_reservation",
+      "effect_domain": "owned_child_bounded_inert_consumer",
+      "safety_classification": "ALLOWLISTED_BOUNDED_INERT_SOURCE"
+    },
+    {
+      "position": 130,
+      "id": "disk_reservation_boundary",
+      "expected": {
+        "consumer": "disk_reservation",
+        "cause": "RESERVATION",
+        "stage": "disk_reservation",
+        "started_routes": 0,
+        "hashes": "none",
+        "owned_children": 0,
+        "minimum_consumer_calls": 1,
+        "forbidden_effects": {
+          "network": 0,
+          "exec": 0,
+          "original_write": 0
+        },
+        "state": "REFUSED"
+      },
+      "active": true,
+      "producer": "disk_reservation",
+      "effect_domain": "owned_child_bounded_inert_consumer",
+      "safety_classification": "ALLOWLISTED_BOUNDED_INERT_SOURCE"
+    },
+    {
+      "position": 131,
+      "id": "moving_owned_collect_no_hash",
+      "expected": {
+        "consumer": "R4.collect",
+        "cause": "STOP_UNCONFIRMED",
+        "stage": "receipt_write",
+        "started_routes": 1,
+        "hashes": "none",
+        "owned_children": 1,
+        "minimum_consumer_calls": 1,
+        "forbidden_effects": {
+          "network": 0,
+          "exec": 0,
+          "original_write": 0
+        },
+        "state": "UNKNOWN_PARTIAL"
+      },
+      "active": true,
+      "producer": "a171_actual",
+      "effect_domain": "original_bounded_owned_operands_actual_consumer_or_explicit_code_gap",
+      "safety_classification": "BENIGN_FUNCTIONAL_OBLIGATION_HISTORICAL_METHOD_NOT_AUTHORIZED"
+    },
+    {
+      "position": 132,
+      "id": "combined_active_unknown_close_serialization",
+      "expected": {
+        "consumer": "R4.stop_child/G1.Output.close/terminal_bytes",
+        "cause": "COMBINED_ACTIVE_UNKNOWN",
+        "stage": "event_drain",
+        "started_routes": 3,
+        "hashes": "none",
+        "owned_children": 3,
+        "minimum_consumer_calls": 1,
+        "forbidden_effects": {
+          "network": 0,
+          "exec": 0,
+          "original_write": 0
+        },
+        "state": "STOP_UNCONFIRMED"
+      },
+      "active": true,
+      "producer": "a171_actual",
+      "effect_domain": "original_bounded_owned_operands_actual_consumer_or_explicit_code_gap",
+      "safety_classification": "BENIGN_FUNCTIONAL_OBLIGATION_HISTORICAL_METHOD_NOT_AUTHORIZED"
+    },
+    {
+      "position": 133,
+      "id": "terminal_sink_partial_positive",
+      "expected": {
+        "consumer": "emit_terminal",
+        "cause": null,
+        "stage": "terminal_sink",
+        "started_routes": 0,
+        "hashes": "none",
+        "owned_children": 0,
+        "minimum_consumer_calls": 1,
+        "forbidden_effects": {
+          "network": 0,
+          "exec": 0,
+          "original_write": 0
+        },
+        "state": "TERMINAL_EMITTED"
+      },
+      "active": true,
+      "producer": "a171_actual",
+      "effect_domain": "original_bounded_owned_operands_actual_consumer_or_explicit_code_gap",
+      "safety_classification": "BENIGN_FUNCTIONAL_OBLIGATION_HISTORICAL_METHOD_NOT_AUTHORIZED"
+    },
+    {
+      "position": 134,
+      "id": "terminal_sink_zero",
+      "expected": {
+        "consumer": "emit_terminal",
+        "cause": "TERMINAL_SINK:TERMINAL_SHORT_WRITE",
+        "stage": "terminal_sink",
+        "started_routes": 0,
+        "hashes": "none",
+        "owned_children": 0,
+        "minimum_consumer_calls": 1,
+        "forbidden_effects": {
+          "network": 0,
+          "exec": 0,
+          "original_write": 0
+        },
+        "state": "TERMINAL_EMISSION_FAILED"
+      },
+      "active": true,
+      "producer": "a171_actual",
+      "effect_domain": "original_bounded_owned_operands_actual_consumer_or_explicit_code_gap",
+      "safety_classification": "BENIGN_FUNCTIONAL_OBLIGATION_HISTORICAL_METHOD_NOT_AUTHORIZED"
+    },
+    {
+      "position": 135,
+      "id": "terminal_sink_failed",
+      "expected": {
+        "consumer": "emit_terminal",
+        "cause": "TERMINAL_SINK:OSError:5",
+        "stage": "terminal_sink",
+        "started_routes": 0,
+        "hashes": "none",
+        "owned_children": 0,
+        "minimum_consumer_calls": 1,
+        "forbidden_effects": {
+          "network": 0,
+          "exec": 0,
+          "original_write": 0
+        },
+        "state": "TERMINAL_EMISSION_FAILED"
+      },
+      "active": true,
+      "producer": "a171_actual",
+      "effect_domain": "original_bounded_owned_operands_actual_consumer_or_explicit_code_gap",
+      "safety_classification": "BENIGN_FUNCTIONAL_OBLIGATION_HISTORICAL_METHOD_NOT_AUTHORIZED"
+    },
+    {
+      "position": 136,
+      "id": "terminal_sink_blocked",
+      "expected": {
+        "consumer": "emit_terminal",
+        "cause": "TERMINAL_SINK:TERMINAL_DRAIN_TIMEOUT",
+        "stage": "terminal_sink",
+        "started_routes": 0,
+        "hashes": "none",
+        "owned_children": 0,
+        "minimum_consumer_calls": 1,
+        "forbidden_effects": {
+          "network": 0,
+          "exec": 0,
+          "original_write": 0
+        },
+        "state": "TERMINAL_EMISSION_FAILED"
+      },
+      "active": true,
+      "producer": "a171_actual",
+      "effect_domain": "original_bounded_owned_operands_actual_consumer_or_explicit_code_gap",
+      "safety_classification": "BENIGN_FUNCTIONAL_OBLIGATION_HISTORICAL_METHOD_NOT_AUTHORIZED"
+    },
+    {
+      "position": 137,
+      "id": "terminal_sink_partial_failed",
+      "expected": {
+        "consumer": "emit_terminal",
+        "cause": "TERMINAL_SINK:OSError:5",
+        "stage": "terminal_sink",
+        "started_routes": 0,
+        "hashes": "none",
+        "owned_children": 0,
+        "minimum_consumer_calls": 1,
+        "forbidden_effects": {
+          "network": 0,
+          "exec": 0,
+          "original_write": 0
+        },
+        "state": "TERMINAL_EMISSION_FAILED"
+      },
+      "active": true,
+      "producer": "a171_actual",
+      "effect_domain": "original_bounded_owned_operands_actual_consumer_or_explicit_code_gap",
+      "safety_classification": "BENIGN_FUNCTIONAL_OBLIGATION_HISTORICAL_METHOD_NOT_AUTHORIZED"
+    },
+    {
+      "position": 138,
+      "id": "outer_positive",
+      "expected": {
+        "consumer": "supervise_owned/terminal_check",
+        "cause": null,
+        "stage": "bounded_drain_reap",
+        "started_routes": 0,
+        "hashes": "none",
+        "owned_children": 1,
+        "minimum_consumer_calls": 1,
+        "forbidden_effects": {
+          "network": 0,
+          "exec": 0,
+          "original_write": 0
+        },
+        "state": "OUTER_BOUNDED_DRAINED_FINISHED"
+      },
+      "active": true,
+      "producer": "a171_actual",
+      "effect_domain": "original_bounded_owned_operands_actual_consumer_or_explicit_code_gap",
+      "safety_classification": "BENIGN_FUNCTIONAL_OBLIGATION_HISTORICAL_METHOD_NOT_AUTHORIZED"
+    },
+    {
+      "position": 139,
+      "id": "outer_partial",
+      "expected": {
+        "consumer": "supervise_owned/terminal_check",
+        "cause": "PARTIAL_OR_MULTIPLE_TERMINAL",
+        "stage": "bounded_drain_reap",
+        "started_routes": 0,
+        "hashes": "none",
+        "owned_children": 1,
+        "minimum_consumer_calls": 1,
+        "forbidden_effects": {
+          "network": 0,
+          "exec": 0,
+          "original_write": 0
+        },
+        "state": "OUTER_FAILED"
+      },
+      "active": true,
+      "producer": "a171_actual",
+      "effect_domain": "original_bounded_owned_operands_actual_consumer_or_explicit_code_gap",
+      "safety_classification": "BENIGN_FUNCTIONAL_OBLIGATION_HISTORICAL_METHOD_NOT_AUTHORIZED"
+    },
+    {
+      "position": 140,
+      "id": "outer_json",
+      "expected": {
+        "consumer": "supervise_owned/terminal_check",
+        "cause": "JSON_PARSE",
+        "stage": "bounded_drain_reap",
+        "started_routes": 0,
+        "hashes": "none",
+        "owned_children": 1,
+        "minimum_consumer_calls": 1,
+        "forbidden_effects": {
+          "network": 0,
+          "exec": 0,
+          "original_write": 0
+        },
+        "state": "OUTER_FAILED"
+      },
+      "active": true,
+      "producer": "a171_actual",
+      "effect_domain": "original_bounded_owned_operands_actual_consumer_or_explicit_code_gap",
+      "safety_classification": "BENIGN_FUNCTIONAL_OBLIGATION_HISTORICAL_METHOD_NOT_AUTHORIZED"
+    },
+    {
+      "position": 141,
+      "id": "outer_multiple",
+      "expected": {
+        "consumer": "supervise_owned/terminal_check",
+        "cause": "PARTIAL_OR_MULTIPLE_TERMINAL",
+        "stage": "bounded_drain_reap",
+        "started_routes": 0,
+        "hashes": "none",
+        "owned_children": 1,
+        "minimum_consumer_calls": 1,
+        "forbidden_effects": {
+          "network": 0,
+          "exec": 0,
+          "original_write": 0
+        },
+        "state": "OUTER_FAILED"
+      },
+      "active": true,
+      "producer": "a171_actual",
+      "effect_domain": "original_bounded_owned_operands_actual_consumer_or_explicit_code_gap",
+      "safety_classification": "BENIGN_FUNCTIONAL_OBLIGATION_HISTORICAL_METHOD_NOT_AUTHORIZED"
+    },
+    {
+      "position": 142,
+      "id": "outer_false_success",
+      "expected": {
+        "consumer": "supervise_owned/terminal_check",
+        "cause": "INNER_FAILURE",
+        "stage": "bounded_drain_reap",
+        "started_routes": 0,
+        "hashes": "none",
+        "owned_children": 1,
+        "minimum_consumer_calls": 1,
+        "forbidden_effects": {
+          "network": 0,
+          "exec": 0,
+          "original_write": 0
+        },
+        "state": "OUTER_FAILED"
+      },
+      "active": true,
+      "producer": "a171_actual",
+      "effect_domain": "original_bounded_owned_operands_actual_consumer_or_explicit_code_gap",
+      "safety_classification": "BENIGN_FUNCTIONAL_OBLIGATION_HISTORICAL_METHOD_NOT_AUTHORIZED"
+    },
+    {
+      "position": 143,
+      "id": "outer_exit",
+      "expected": {
+        "consumer": "supervise_owned/terminal_check",
+        "cause": "INNER_EXIT",
+        "stage": "bounded_drain_reap",
+        "started_routes": 0,
+        "hashes": "none",
+        "owned_children": 1,
+        "minimum_consumer_calls": 1,
+        "forbidden_effects": {
+          "network": 0,
+          "exec": 0,
+          "original_write": 0
+        },
+        "state": "OUTER_FAILED"
+      },
+      "active": true,
+      "producer": "a171_actual",
+      "effect_domain": "original_bounded_owned_operands_actual_consumer_or_explicit_code_gap",
+      "safety_classification": "BENIGN_FUNCTIONAL_OBLIGATION_HISTORICAL_METHOD_NOT_AUTHORIZED"
+    },
+    {
+      "position": 144,
+      "id": "outer_stderr",
+      "expected": {
+        "consumer": "supervise_owned/terminal_check",
+        "cause": "INNER_STDERR",
+        "stage": "bounded_drain_reap",
+        "started_routes": 0,
+        "hashes": "none",
+        "owned_children": 1,
+        "minimum_consumer_calls": 1,
+        "forbidden_effects": {
+          "network": 0,
+          "exec": 0,
+          "original_write": 0
+        },
+        "state": "OUTER_FAILED"
+      },
+      "active": true,
+      "producer": "a171_actual",
+      "effect_domain": "original_bounded_owned_operands_actual_consumer_or_explicit_code_gap",
+      "safety_classification": "BENIGN_FUNCTIONAL_OBLIGATION_HISTORICAL_METHOD_NOT_AUTHORIZED"
+    },
+    {
+      "position": 145,
+      "id": "outer_stdout_cap",
+      "expected": {
+        "consumer": "supervise_owned/terminal_check",
+        "cause": "OUTER_PIPE_CAP",
+        "stage": "bounded_drain_reap",
+        "started_routes": 0,
+        "hashes": "none",
+        "owned_children": 1,
+        "minimum_consumer_calls": 1,
+        "forbidden_effects": {
+          "network": 0,
+          "exec": 0,
+          "original_write": 0
+        },
+        "state": "OUTER_FAILED"
+      },
+      "active": true,
+      "producer": "a171_actual",
+      "effect_domain": "original_bounded_owned_operands_actual_consumer_or_explicit_code_gap",
+      "safety_classification": "BENIGN_FUNCTIONAL_OBLIGATION_HISTORICAL_METHOD_NOT_AUTHORIZED"
+    },
+    {
+      "position": 146,
+      "id": "outer_stderr_cap",
+      "expected": {
+        "consumer": "supervise_owned/terminal_check",
+        "cause": "OUTER_PIPE_CAP",
+        "stage": "bounded_drain_reap",
+        "started_routes": 0,
+        "hashes": "none",
+        "owned_children": 1,
+        "minimum_consumer_calls": 1,
+        "forbidden_effects": {
+          "network": 0,
+          "exec": 0,
+          "original_write": 0
+        },
+        "state": "OUTER_FAILED"
+      },
+      "active": true,
+      "producer": "a171_actual",
+      "effect_domain": "original_bounded_owned_operands_actual_consumer_or_explicit_code_gap",
+      "safety_classification": "BENIGN_FUNCTIONAL_OBLIGATION_HISTORICAL_METHOD_NOT_AUTHORIZED"
+    },
+    {
+      "position": 147,
+      "id": "outer_blocked",
+      "expected": {
+        "consumer": "supervise_owned/terminal_check",
+        "cause": "OUTER_WORK_TIMEOUT",
+        "stage": "bounded_drain_reap",
+        "started_routes": 0,
+        "hashes": "none",
+        "owned_children": 1,
+        "minimum_consumer_calls": 1,
+        "forbidden_effects": {
+          "network": 0,
+          "exec": 0,
+          "original_write": 0
+        },
+        "state": "OUTER_FAILED"
+      },
+      "active": true,
+      "producer": "a171_actual",
+      "effect_domain": "original_bounded_owned_operands_actual_consumer_or_explicit_code_gap",
+      "safety_classification": "BENIGN_FUNCTIONAL_OBLIGATION_HISTORICAL_METHOD_NOT_AUTHORIZED"
+    },
+    {
+      "position": 148,
+      "id": "outer_rss",
+      "expected": {
+        "consumer": "supervise_owned/terminal_check",
+        "cause": "OUTER_RSS_CAP",
+        "stage": "bounded_drain_reap",
+        "started_routes": 0,
+        "hashes": "none",
+        "owned_children": 1,
+        "minimum_consumer_calls": 1,
+        "forbidden_effects": {
+          "network": 0,
+          "exec": 0,
+          "original_write": 0
+        },
+        "state": "STOP_UNCONFIRMED"
+      },
+      "active": true,
+      "producer": "a171_actual",
+      "effect_domain": "original_bounded_owned_operands_actual_consumer_or_explicit_code_gap",
+      "safety_classification": "BENIGN_FUNCTIONAL_OBLIGATION_HISTORICAL_METHOD_NOT_AUTHORIZED"
+    },
+    {
+      "position": 149,
+      "id": "outer_unknown_member",
+      "expected": {
+        "consumer": "supervise_owned/terminal_check",
+        "cause": "UNKNOWN_CGROUP_MEMBER",
+        "stage": "bounded_drain_reap",
+        "started_routes": 0,
+        "hashes": "none",
+        "owned_children": 1,
+        "minimum_consumer_calls": 1,
+        "forbidden_effects": {
+          "network": 0,
+          "exec": 0,
+          "original_write": 0
+        },
+        "state": "STOP_UNCONFIRMED"
+      },
+      "active": true,
+      "producer": "a171_actual",
+      "effect_domain": "original_bounded_owned_operands_actual_consumer_or_explicit_code_gap",
+      "safety_classification": "BENIGN_FUNCTIONAL_OBLIGATION_HISTORICAL_METHOD_NOT_AUTHORIZED"
+    },
+    {
+      "position": 150,
+      "id": "outer_stop_unknown",
+      "expected": {
+        "consumer": "supervise_owned/terminal_check",
+        "cause": "OUTER_WORK_TIMEOUT",
+        "stage": "bounded_drain_reap",
+        "started_routes": 0,
+        "hashes": "none",
+        "owned_children": 1,
+        "minimum_consumer_calls": 1,
+        "forbidden_effects": {
+          "network": 0,
+          "exec": 0,
+          "original_write": 0
+        },
+        "state": "STOP_UNCONFIRMED"
+      },
+      "active": true,
+      "producer": "a171_actual",
+      "effect_domain": "original_bounded_owned_operands_actual_consumer_or_explicit_code_gap",
+      "safety_classification": "BENIGN_FUNCTIONAL_OBLIGATION_HISTORICAL_METHOD_NOT_AUTHORIZED"
+    },
+    {
+      "position": 151,
+      "id": "outer_owner_stop",
+      "expected": {
+        "consumer": "supervise_owned/terminal_check",
+        "cause": "OUTER_OWNER_STOP",
+        "stage": "bounded_drain_reap",
+        "started_routes": 0,
+        "hashes": "none",
+        "owned_children": 1,
+        "minimum_consumer_calls": 1,
+        "forbidden_effects": {
+          "network": 0,
+          "exec": 0,
+          "original_write": 0
+        },
+        "state": "OUTER_FAILED"
+      },
+      "active": true,
+      "producer": "a171_actual",
+      "effect_domain": "original_bounded_owned_operands_actual_consumer_or_explicit_code_gap",
+      "safety_classification": "BENIGN_FUNCTIONAL_OBLIGATION_HISTORICAL_METHOD_NOT_AUTHORIZED"
+    },
+    {
+      "position": 152,
+      "id": "outer_unknown_pin",
+      "expected": {
+        "consumer": "Supervisor.seal",
+        "cause": "UNKNOWN_PIN",
+        "stage": "Supervisor.seal",
+        "started_routes": 0,
+        "hashes": "none",
+        "owned_children": 0,
+        "minimum_consumer_calls": 1,
+        "forbidden_effects": {
+          "network": 0,
+          "exec": 0,
+          "original_write": 0
+        },
+        "state": "REFUSED"
+      },
+      "active": true,
+      "producer": "a171_actual",
+      "effect_domain": "original_bounded_owned_operands_actual_consumer_or_explicit_code_gap",
+      "safety_classification": "BENIGN_FUNCTIONAL_OBLIGATION_HISTORICAL_METHOD_NOT_AUTHORIZED"
+    },
+    {
+      "position": 153,
+      "id": "outer_runtime_path",
+      "expected": {
+        "consumer": "Supervisor.runtime_preflight",
+        "cause": "RUNTIME_PATH",
+        "stage": "Supervisor.runtime_preflight",
+        "started_routes": 0,
+        "hashes": "none",
+        "owned_children": 0,
+        "minimum_consumer_calls": 1,
+        "forbidden_effects": {
+          "network": 0,
+          "exec": 0,
+          "original_write": 0
+        },
+        "state": "REFUSED"
+      },
+      "active": true,
+      "producer": "a171_actual",
+      "effect_domain": "original_bounded_owned_operands_actual_consumer_or_explicit_code_gap",
+      "safety_classification": "BENIGN_FUNCTIONAL_OBLIGATION_HISTORICAL_METHOD_NOT_AUTHORIZED"
+    },
+    {
+      "position": 154,
+      "id": "outer_sink_short",
+      "expected": {
+        "consumer": "Supervisor.write_terminal",
+        "cause": "OUTER_TERMINAL_SHORT_WRITE",
+        "stage": "outer_terminal_sink",
+        "started_routes": 0,
+        "hashes": "none",
+        "owned_children": 0,
+        "minimum_consumer_calls": 1,
+        "forbidden_effects": {
+          "network": 0,
+          "exec": 0,
+          "original_write": 0
+        },
+        "state": "TERMINAL_EMISSION_FAILED"
+      },
+      "active": true,
+      "producer": "a171_actual",
+      "effect_domain": "original_bounded_owned_operands_actual_consumer_or_explicit_code_gap",
+      "safety_classification": "BENIGN_FUNCTIONAL_OBLIGATION_HISTORICAL_METHOD_NOT_AUTHORIZED"
+    },
+    {
+      "position": 155,
+      "id": "outer_sink_failed",
+      "expected": {
+        "consumer": "Supervisor.write_terminal",
+        "cause": "OSError:5",
+        "stage": "outer_terminal_sink",
+        "started_routes": 0,
+        "hashes": "none",
+        "owned_children": 0,
+        "minimum_consumer_calls": 1,
+        "forbidden_effects": {
+          "network": 0,
+          "exec": 0,
+          "original_write": 0
+        },
+        "state": "TERMINAL_EMISSION_FAILED"
+      },
+      "active": true,
+      "producer": "a171_actual",
+      "effect_domain": "original_bounded_owned_operands_actual_consumer_or_explicit_code_gap",
+      "safety_classification": "BENIGN_FUNCTIONAL_OBLIGATION_HISTORICAL_METHOD_NOT_AUTHORIZED"
+    },
+    {
+      "position": 156,
+      "id": "outer_sink_blocked",
+      "expected": {
+        "consumer": "Supervisor.write_terminal",
+        "cause": "OUTER_TERMINAL_TIMEOUT",
+        "stage": "outer_terminal_sink",
+        "started_routes": 0,
+        "hashes": "none",
+        "owned_children": 0,
+        "minimum_consumer_calls": 1,
+        "forbidden_effects": {
+          "network": 0,
+          "exec": 0,
+          "original_write": 0
+        },
+        "state": "TERMINAL_EMISSION_FAILED"
+      },
+      "active": true,
+      "producer": "a171_actual",
+      "effect_domain": "original_bounded_owned_operands_actual_consumer_or_explicit_code_gap",
+      "safety_classification": "BENIGN_FUNCTIONAL_OBLIGATION_HISTORICAL_METHOD_NOT_AUTHORIZED"
+    },
+    {
+      "position": 157,
+      "id": "held_positive",
+      "expected": {
+        "consumer": "Supervisor.bounded_fd_bytes",
+        "cause": null,
+        "stage": "Supervisor.bounded_fd_bytes",
+        "started_routes": 0,
+        "hashes": "none",
+        "owned_children": 0,
+        "minimum_consumer_calls": 1,
+        "forbidden_effects": {
+          "network": 0,
+          "exec": 0,
+          "original_write": 0
+        },
+        "state": "CONSUMER_ACCEPTED_NO_ADMISSION"
+      },
+      "active": true,
+      "producer": "bounded_fd_bytes",
+      "effect_domain": "owned_child_bounded_inert_consumer",
+      "safety_classification": "ALLOWLISTED_BOUNDED_INERT_SOURCE"
+    },
+    {
+      "position": 158,
+      "id": "held_path_replaced_exact_bytes",
+      "expected": {
+        "consumer": "Supervisor.HeldSource.bytes",
+        "cause": null,
+        "stage": "Supervisor.HeldSource.bytes",
+        "started_routes": 0,
+        "hashes": "none",
+        "owned_children": 0,
+        "minimum_consumer_calls": 1,
+        "forbidden_effects": {
+          "network": 0,
+          "exec": 0,
+          "original_write": 0
+        },
+        "state": "CONSUMER_ACCEPTED_NO_ADMISSION"
+      },
+      "active": true,
+      "producer": "a171_actual",
+      "effect_domain": "original_bounded_owned_operands_actual_consumer_or_explicit_code_gap",
+      "safety_classification": "BENIGN_FUNCTIONAL_OBLIGATION_HISTORICAL_METHOD_NOT_AUTHORIZED"
+    },
+    {
+      "position": 159,
+      "id": "held_wrong_sha",
+      "expected": {
+        "consumer": "Supervisor.bounded_fd_bytes",
+        "cause": "HELD_FD_SHA",
+        "stage": "Supervisor.bounded_fd_bytes",
+        "started_routes": 0,
+        "hashes": "none",
+        "owned_children": 0,
+        "minimum_consumer_calls": 1,
+        "forbidden_effects": {
+          "network": 0,
+          "exec": 0,
+          "original_write": 0
+        },
+        "state": "REFUSED"
+      },
+      "active": true,
+      "producer": "bounded_fd_bytes",
+      "effect_domain": "owned_child_bounded_inert_consumer",
+      "safety_classification": "ALLOWLISTED_BOUNDED_INERT_SOURCE"
+    },
+    {
+      "position": 160,
+      "id": "held_cap",
+      "expected": {
+        "consumer": "Supervisor.bounded_fd_bytes",
+        "cause": "HELD_FD_CUSTODY",
+        "stage": "Supervisor.bounded_fd_bytes",
+        "started_routes": 0,
+        "hashes": "none",
+        "owned_children": 0,
+        "minimum_consumer_calls": 1,
+        "forbidden_effects": {
+          "network": 0,
+          "exec": 0,
+          "original_write": 0
+        },
+        "state": "REFUSED"
+      },
+      "active": true,
+      "producer": "bounded_fd_bytes",
+      "effect_domain": "owned_child_bounded_inert_consumer",
+      "safety_classification": "ALLOWLISTED_BOUNDED_INERT_SOURCE"
+    },
+    {
+      "position": 161,
+      "id": "held_root_authority_missing",
+      "expected": {
+        "consumer": "Supervisor.bounded_fd_bytes",
+        "cause": "HELD_ROOT_AUTHORITY",
+        "stage": "Supervisor.bounded_fd_bytes",
+        "started_routes": 0,
+        "hashes": "none",
+        "owned_children": 0,
+        "minimum_consumer_calls": 1,
+        "forbidden_effects": {
+          "network": 0,
+          "exec": 0,
+          "original_write": 0
+        },
+        "state": "REFUSED"
+      },
+      "active": true,
+      "producer": "bounded_fd_bytes",
+      "effect_domain": "owned_child_bounded_inert_consumer",
+      "safety_classification": "ALLOWLISTED_BOUNDED_INERT_SOURCE"
+    },
+    {
+      "position": 162,
+      "id": "held_read_timeout",
+      "expected": {
+        "consumer": "Supervisor.bounded_fd_bytes",
+        "cause": "HELD_READ_TIMEOUT",
+        "stage": "Supervisor.bounded_fd_bytes",
+        "started_routes": 0,
+        "hashes": "none",
+        "owned_children": 0,
+        "minimum_consumer_calls": 1,
+        "forbidden_effects": {
+          "network": 0,
+          "exec": 0,
+          "original_write": 0
+        },
+        "state": "REFUSED"
+      },
+      "active": true,
+      "producer": "bounded_fd_bytes",
+      "effect_domain": "owned_child_bounded_inert_consumer",
+      "safety_classification": "ALLOWLISTED_BOUNDED_INERT_SOURCE"
+    },
+    {
+      "position": 163,
+      "id": "held_kernel_write_refused",
+      "expected": {
+        "consumer": "Supervisor.HeldSource.bytes",
+        "cause": null,
+        "stage": "Supervisor.HeldSource.bytes",
+        "started_routes": 0,
+        "hashes": "none",
+        "owned_children": 0,
+        "minimum_consumer_calls": 1,
+        "forbidden_effects": {
+          "network": 0,
+          "exec": 0,
+          "original_write": 0
+        },
+        "state": "CONSUMER_ACCEPTED_NO_ADMISSION"
+      },
+      "active": true,
+      "producer": "a171_actual",
+      "effect_domain": "original_bounded_owned_operands_actual_consumer_or_explicit_code_gap",
+      "safety_classification": "BENIGN_FUNCTIONAL_OBLIGATION_HISTORICAL_METHOD_NOT_AUTHORIZED"
+    },
+    {
+      "position": 164,
+      "id": "native_launcher_authority_missing",
+      "expected": {
+        "consumer": "Supervisor.NativeLaunchAdapter",
+        "cause": "HELD_ROOT_AUTHORITY",
+        "stage": "Supervisor.NativeLaunchAdapter",
+        "started_routes": 0,
+        "hashes": "none",
+        "owned_children": 0,
+        "minimum_consumer_calls": 1,
+        "forbidden_effects": {
+          "network": 0,
+          "exec": 0,
+          "original_write": 0
+        },
+        "state": "REFUSED"
+      },
+      "active": true,
+      "producer": "a171_actual",
+      "effect_domain": "original_bounded_owned_operands_actual_consumer_or_explicit_code_gap",
+      "safety_classification": "BENIGN_FUNCTIONAL_OBLIGATION_HISTORICAL_METHOD_NOT_AUTHORIZED"
+    },
+    {
+      "position": 165,
+      "id": "held_unsealed",
+      "expected": {
+        "consumer": "Supervisor.bounded_fd_bytes",
+        "cause": "HELD_KERNEL_SEALS",
+        "stage": "Supervisor.bounded_fd_bytes",
+        "started_routes": 0,
+        "hashes": "none",
+        "owned_children": 0,
+        "minimum_consumer_calls": 1,
+        "forbidden_effects": {
+          "network": 0,
+          "exec": 0,
+          "original_write": 0
+        },
+        "state": "REFUSED"
+      },
+      "active": true,
+      "producer": "bounded_fd_bytes",
+      "effect_domain": "owned_child_bounded_inert_consumer",
+      "safety_classification": "ALLOWLISTED_BOUNDED_INERT_SOURCE"
+    },
+    {
+      "position": 166,
+      "id": "owned_registration_pidfd",
+      "expected": {
+        "consumer": "Supervisor.supervise_owned",
+        "cause": "OUTER_PIDFD:38",
+        "stage": "Supervisor.supervise_owned",
+        "started_routes": 0,
+        "hashes": "none",
+        "owned_children": 1,
+        "minimum_consumer_calls": 1,
+        "forbidden_effects": {
+          "network": 0,
+          "exec": 0,
+          "original_write": 0
+        },
+        "state": "OUTER_FAILED"
+      },
+      "active": true,
+      "producer": "a171_actual",
+      "effect_domain": "original_bounded_owned_operands_actual_consumer_or_explicit_code_gap",
+      "safety_classification": "BENIGN_FUNCTIONAL_OBLIGATION_HISTORICAL_METHOD_NOT_AUTHORIZED"
+    },
+    {
+      "position": 167,
+      "id": "owned_registration_proc",
+      "expected": {
+        "consumer": "Supervisor.supervise_owned",
+        "cause": "OWNED_PROC_FIXTURE",
+        "stage": "Supervisor.supervise_owned",
+        "started_routes": 0,
+        "hashes": "none",
+        "owned_children": 1,
+        "minimum_consumer_calls": 1,
+        "forbidden_effects": {
+          "network": 0,
+          "exec": 0,
+          "original_write": 0
+        },
+        "state": "OUTER_FAILED"
+      },
+      "active": true,
+      "producer": "a171_actual",
+      "effect_domain": "original_bounded_owned_operands_actual_consumer_or_explicit_code_gap",
+      "safety_classification": "BENIGN_FUNCTIONAL_OBLIGATION_HISTORICAL_METHOD_NOT_AUTHORIZED"
+    },
+    {
+      "position": 168,
+      "id": "owned_registration_after_spawn",
+      "expected": {
+        "consumer": "Supervisor.supervise_owned",
+        "cause": "OWNED_POST_FORK_FIXTURE",
+        "stage": "Supervisor.supervise_owned",
+        "started_routes": 0,
+        "hashes": "none",
+        "owned_children": 1,
+        "minimum_consumer_calls": 1,
+        "forbidden_effects": {
+          "network": 0,
+          "exec": 0,
+          "original_write": 0
+        },
+        "state": "OUTER_FAILED"
+      },
+      "active": true,
+      "producer": "a171_actual",
+      "effect_domain": "original_bounded_owned_operands_actual_consumer_or_explicit_code_gap",
+      "safety_classification": "BENIGN_FUNCTIONAL_OBLIGATION_HISTORICAL_METHOD_NOT_AUTHORIZED"
+    },
+    {
+      "position": 169,
+      "id": "owned_registration_race",
+      "expected": {
+        "consumer": "Supervisor.supervise_owned",
+        "cause": "OWNERSHIP_RACE",
+        "stage": "Supervisor.supervise_owned",
+        "started_routes": 0,
+        "hashes": "none",
+        "owned_children": 1,
+        "minimum_consumer_calls": 1,
+        "forbidden_effects": {
+          "network": 0,
+          "exec": 0,
+          "original_write": 0
+        },
+        "state": "OUTER_FAILED"
+      },
+      "active": true,
+      "producer": "a171_actual",
+      "effect_domain": "original_bounded_owned_operands_actual_consumer_or_explicit_code_gap",
+      "safety_classification": "BENIGN_FUNCTIONAL_OBLIGATION_HISTORICAL_METHOD_NOT_AUTHORIZED"
+    },
+    {
+      "position": 170,
+      "id": "owned_registration_post_custody",
+      "expected": {
+        "consumer": "Supervisor.supervise_owned",
+        "cause": "OWNED_POST_CUSTODY_FIXTURE",
+        "stage": "Supervisor.supervise_owned",
+        "started_routes": 0,
+        "hashes": "none",
+        "owned_children": 1,
+        "minimum_consumer_calls": 1,
+        "forbidden_effects": {
+          "network": 0,
+          "exec": 0,
+          "original_write": 0
+        },
+        "state": "OUTER_FAILED"
+      },
+      "active": true,
+      "producer": "a171_actual",
+      "effect_domain": "original_bounded_owned_operands_actual_consumer_or_explicit_code_gap",
+      "safety_classification": "BENIGN_FUNCTIONAL_OBLIGATION_HISTORICAL_METHOD_NOT_AUTHORIZED"
+    },
+    {
+      "position": 171,
+      "id": "runtime_positive",
+      "expected": {
+        "consumer": "Supervisor.runtime_preflight",
+        "cause": null,
+        "stage": "Supervisor.runtime_preflight",
+        "started_routes": 0,
+        "hashes": "none",
+        "owned_children": 0,
+        "minimum_consumer_calls": 1,
+        "forbidden_effects": {
+          "network": 0,
+          "exec": 0,
+          "original_write": 0
+        },
+        "state": "CONSUMER_ACCEPTED_NO_ADMISSION"
+      },
+      "active": true,
+      "producer": "a171_actual",
+      "effect_domain": "original_bounded_owned_operands_actual_consumer_or_explicit_code_gap",
+      "safety_classification": "BENIGN_FUNCTIONAL_OBLIGATION_HISTORICAL_METHOD_NOT_AUTHORIZED"
+    },
+    {
+      "position": 172,
+      "id": "runtime_schema",
+      "expected": {
+        "consumer": "Supervisor.runtime_preflight",
+        "cause": "RUNTIME_SCHEMA",
+        "stage": "Supervisor.runtime_preflight",
+        "started_routes": 0,
+        "hashes": "none",
+        "owned_children": 0,
+        "minimum_consumer_calls": 1,
+        "forbidden_effects": {
+          "network": 0,
+          "exec": 0,
+          "original_write": 0
+        },
+        "state": "REFUSED"
+      },
+      "active": true,
+      "producer": "a171_actual",
+      "effect_domain": "original_bounded_owned_operands_actual_consumer_or_explicit_code_gap",
+      "safety_classification": "BENIGN_FUNCTIONAL_OBLIGATION_HISTORICAL_METHOD_NOT_AUTHORIZED"
+    },
+    {
+      "position": 173,
+      "id": "runtime_file_set",
+      "expected": {
+        "consumer": "Supervisor.runtime_preflight",
+        "cause": "RUNTIME_FILE_SET",
+        "stage": "Supervisor.runtime_preflight",
+        "started_routes": 0,
+        "hashes": "none",
+        "owned_children": 0,
+        "minimum_consumer_calls": 1,
+        "forbidden_effects": {
+          "network": 0,
+          "exec": 0,
+          "original_write": 0
+        },
+        "state": "REFUSED"
+      },
+      "active": true,
+      "producer": "a171_actual",
+      "effect_domain": "original_bounded_owned_operands_actual_consumer_or_explicit_code_gap",
+      "safety_classification": "BENIGN_FUNCTIONAL_OBLIGATION_HISTORICAL_METHOD_NOT_AUTHORIZED"
+    },
+    {
+      "position": 174,
+      "id": "runtime_stdlib_absent",
+      "expected": {
+        "consumer": "Supervisor.runtime_preflight",
+        "cause": "RUNTIME_STDLIB_ABSENT",
+        "stage": "Supervisor.runtime_preflight",
+        "started_routes": 0,
+        "hashes": "none",
+        "owned_children": 0,
+        "minimum_consumer_calls": 1,
+        "forbidden_effects": {
+          "network": 0,
+          "exec": 0,
+          "original_write": 0
+        },
+        "state": "REFUSED"
+      },
+      "active": true,
+      "producer": "a171_actual",
+      "effect_domain": "original_bounded_owned_operands_actual_consumer_or_explicit_code_gap",
+      "safety_classification": "BENIGN_FUNCTIONAL_OBLIGATION_HISTORICAL_METHOD_NOT_AUTHORIZED"
+    },
+    {
+      "position": 175,
+      "id": "runtime_directory",
+      "expected": {
+        "consumer": "Supervisor.runtime_preflight",
+        "cause": "RUNTIME_DIRECTORY_CUSTODY",
+        "stage": "Supervisor.runtime_preflight",
+        "started_routes": 0,
+        "hashes": "none",
+        "owned_children": 0,
+        "minimum_consumer_calls": 1,
+        "forbidden_effects": {
+          "network": 0,
+          "exec": 0,
+          "original_write": 0
+        },
+        "state": "REFUSED"
+      },
+      "active": true,
+      "producer": "a171_actual",
+      "effect_domain": "original_bounded_owned_operands_actual_consumer_or_explicit_code_gap",
+      "safety_classification": "BENIGN_FUNCTIONAL_OBLIGATION_HISTORICAL_METHOD_NOT_AUTHORIZED"
+    },
+    {
+      "position": 176,
+      "id": "runtime_symlink",
+      "expected": {
+        "consumer": "Supervisor.runtime_preflight",
+        "cause": "RUNTIME_SYMLINK",
+        "stage": "Supervisor.runtime_preflight",
+        "started_routes": 0,
+        "hashes": "none",
+        "owned_children": 0,
+        "minimum_consumer_calls": 1,
+        "forbidden_effects": {
+          "network": 0,
+          "exec": 0,
+          "original_write": 0
+        },
+        "state": "REFUSED"
+      },
+      "active": true,
+      "producer": "a171_actual",
+      "effect_domain": "original_bounded_owned_operands_actual_consumer_or_explicit_code_gap",
+      "safety_classification": "BENIGN_FUNCTIONAL_OBLIGATION_HISTORICAL_METHOD_NOT_AUTHORIZED"
+    },
+    {
+      "position": 177,
+      "id": "runtime_zip",
+      "expected": {
+        "consumer": "Supervisor.runtime_preflight",
+        "cause": "UNKNOWN_RUNTIME_ZIP",
+        "stage": "Supervisor.runtime_preflight",
+        "started_routes": 0,
+        "hashes": "none",
+        "owned_children": 0,
+        "minimum_consumer_calls": 1,
+        "forbidden_effects": {
+          "network": 0,
+          "exec": 0,
+          "original_write": 0
+        },
+        "state": "REFUSED"
+      },
+      "active": true,
+      "producer": "a171_actual",
+      "effect_domain": "original_bounded_owned_operands_actual_consumer_or_explicit_code_gap",
+      "safety_classification": "BENIGN_FUNCTIONAL_OBLIGATION_HISTORICAL_METHOD_NOT_AUTHORIZED"
+    },
+    {
+      "position": 178,
+      "id": "runtime_preload",
+      "expected": {
+        "consumer": "Supervisor.runtime_preflight",
+        "cause": "RUNTIME_LIBRARY_PATHS",
+        "stage": "Supervisor.runtime_preflight",
+        "started_routes": 0,
+        "hashes": "none",
+        "owned_children": 0,
+        "minimum_consumer_calls": 1,
+        "forbidden_effects": {
+          "network": 0,
+          "exec": 0,
+          "original_write": 0
+        },
+        "state": "REFUSED"
+      },
+      "active": true,
+      "producer": "a171_actual",
+      "effect_domain": "original_bounded_owned_operands_actual_consumer_or_explicit_code_gap",
+      "safety_classification": "BENIGN_FUNCTIONAL_OBLIGATION_HISTORICAL_METHOD_NOT_AUTHORIZED"
+    },
+    {
+      "position": 179,
+      "id": "runtime_library_path",
+      "expected": {
+        "consumer": "Supervisor.runtime_preflight",
+        "cause": "RUNTIME_LIBRARY_PATHS",
+        "stage": "Supervisor.runtime_preflight",
+        "started_routes": 0,
+        "hashes": "none",
+        "owned_children": 0,
+        "minimum_consumer_calls": 1,
+        "forbidden_effects": {
+          "network": 0,
+          "exec": 0,
+          "original_write": 0
+        },
+        "state": "REFUSED"
+      },
+      "active": true,
+      "producer": "a171_actual",
+      "effect_domain": "original_bounded_owned_operands_actual_consumer_or_explicit_code_gap",
+      "safety_classification": "BENIGN_FUNCTIONAL_OBLIGATION_HISTORICAL_METHOD_NOT_AUTHORIZED"
+    },
+    {
+      "position": 180,
+      "id": "runtime_membership",
+      "expected": {
+        "consumer": "Supervisor.runtime_preflight",
+        "cause": "RUNTIME_MEMBERSHIP",
+        "stage": "Supervisor.runtime_preflight",
+        "started_routes": 0,
+        "hashes": "none",
+        "owned_children": 0,
+        "minimum_consumer_calls": 1,
+        "forbidden_effects": {
+          "network": 0,
+          "exec": 0,
+          "original_write": 0
+        },
+        "state": "REFUSED"
+      },
+      "active": true,
+      "producer": "a171_actual",
+      "effect_domain": "original_bounded_owned_operands_actual_consumer_or_explicit_code_gap",
+      "safety_classification": "BENIGN_FUNCTIONAL_OBLIGATION_HISTORICAL_METHOD_NOT_AUTHORIZED"
+    },
+    {
+      "position": 181,
+      "id": "runtime_pin_row",
+      "expected": {
+        "consumer": "Supervisor.runtime_preflight",
+        "cause": "RUNTIME_PIN_ROW",
+        "stage": "Supervisor.runtime_preflight",
+        "started_routes": 0,
+        "hashes": "none",
+        "owned_children": 0,
+        "minimum_consumer_calls": 1,
+        "forbidden_effects": {
+          "network": 0,
+          "exec": 0,
+          "original_write": 0
+        },
+        "state": "REFUSED"
+      },
+      "active": true,
+      "producer": "a171_actual",
+      "effect_domain": "original_bounded_owned_operands_actual_consumer_or_explicit_code_gap",
+      "safety_classification": "BENIGN_FUNCTIONAL_OBLIGATION_HISTORICAL_METHOD_NOT_AUTHORIZED"
+    },
+    {
+      "position": 182,
+      "id": "runtime_read_cap",
+      "expected": {
+        "consumer": "Supervisor.runtime_preflight",
+        "cause": "RUNTIME_READ_CAP",
+        "stage": "Supervisor.runtime_preflight",
+        "started_routes": 0,
+        "hashes": "none",
+        "owned_children": 0,
+        "minimum_consumer_calls": 1,
+        "forbidden_effects": {
+          "network": 0,
+          "exec": 0,
+          "original_write": 0
+        },
+        "state": "REFUSED"
+      },
+      "active": true,
+      "producer": "a171_actual",
+      "effect_domain": "original_bounded_owned_operands_actual_consumer_or_explicit_code_gap",
+      "safety_classification": "BENIGN_FUNCTIONAL_OBLIGATION_HISTORICAL_METHOD_NOT_AUTHORIZED"
+    },
+    {
+      "position": 183,
+      "id": "runtime_unknown_pin",
+      "expected": {
+        "consumer": "Supervisor.runtime_preflight",
+        "cause": "UNKNOWN_PIN",
+        "stage": "Supervisor.runtime_preflight",
+        "started_routes": 0,
+        "hashes": "none",
+        "owned_children": 0,
+        "minimum_consumer_calls": 1,
+        "forbidden_effects": {
+          "network": 0,
+          "exec": 0,
+          "original_write": 0
+        },
+        "state": "REFUSED"
+      },
+      "active": true,
+      "producer": "a171_actual",
+      "effect_domain": "original_bounded_owned_operands_actual_consumer_or_explicit_code_gap",
+      "safety_classification": "BENIGN_FUNCTIONAL_OBLIGATION_HISTORICAL_METHOD_NOT_AUTHORIZED"
+    },
+    {
+      "position": 184,
+      "id": "runtime_pin_sha",
+      "expected": {
+        "consumer": "Supervisor.runtime_preflight",
+        "cause": "HELD_FD_SHA",
+        "stage": "Supervisor.runtime_preflight",
+        "started_routes": 0,
+        "hashes": "none",
+        "owned_children": 0,
+        "minimum_consumer_calls": 1,
+        "forbidden_effects": {
+          "network": 0,
+          "exec": 0,
+          "original_write": 0
+        },
+        "state": "REFUSED"
+      },
+      "active": true,
+      "producer": "a171_actual",
+      "effect_domain": "original_bounded_owned_operands_actual_consumer_or_explicit_code_gap",
+      "safety_classification": "BENIGN_FUNCTIONAL_OBLIGATION_HISTORICAL_METHOD_NOT_AUTHORIZED"
+    },
+    {
+      "position": 185,
+      "id": "runtime_pin_custody",
+      "expected": {
+        "consumer": "Supervisor.runtime_preflight",
+        "cause": "PIN_CUSTODY",
+        "stage": "Supervisor.runtime_preflight",
+        "started_routes": 0,
+        "hashes": "none",
+        "owned_children": 0,
+        "minimum_consumer_calls": 1,
+        "forbidden_effects": {
+          "network": 0,
+          "exec": 0,
+          "original_write": 0
+        },
+        "state": "REFUSED"
+      },
+      "active": true,
+      "producer": "a171_actual",
+      "effect_domain": "original_bounded_owned_operands_actual_consumer_or_explicit_code_gap",
+      "safety_classification": "BENIGN_FUNCTIONAL_OBLIGATION_HISTORICAL_METHOD_NOT_AUTHORIZED"
+    },
+    {
+      "position": 186,
+      "id": "runtime_soname_map",
+      "expected": {
+        "consumer": "Supervisor.runtime_preflight",
+        "cause": "RUNTIME_SONAME_MAP",
+        "stage": "Supervisor.runtime_preflight",
+        "started_routes": 0,
+        "hashes": "none",
+        "owned_children": 0,
+        "minimum_consumer_calls": 1,
+        "forbidden_effects": {
+          "network": 0,
+          "exec": 0,
+          "original_write": 0
+        },
+        "state": "REFUSED"
+      },
+      "active": true,
+      "producer": "a171_actual",
+      "effect_domain": "original_bounded_owned_operands_actual_consumer_or_explicit_code_gap",
+      "safety_classification": "BENIGN_FUNCTIONAL_OBLIGATION_HISTORICAL_METHOD_NOT_AUTHORIZED"
+    },
+    {
+      "position": 187,
+      "id": "runtime_cache_format",
+      "expected": {
+        "consumer": "Supervisor.runtime_preflight",
+        "cause": "RUNTIME_CACHE_FORMAT",
+        "stage": "Supervisor.runtime_preflight",
+        "started_routes": 0,
+        "hashes": "none",
+        "owned_children": 0,
+        "minimum_consumer_calls": 1,
+        "forbidden_effects": {
+          "network": 0,
+          "exec": 0,
+          "original_write": 0
+        },
+        "state": "REFUSED"
+      },
+      "active": true,
+      "producer": "a171_actual",
+      "effect_domain": "original_bounded_owned_operands_actual_consumer_or_explicit_code_gap",
+      "safety_classification": "BENIGN_FUNCTIONAL_OBLIGATION_HISTORICAL_METHOD_NOT_AUTHORIZED"
+    },
+    {
+      "position": 188,
+      "id": "runtime_cache_cap",
+      "expected": {
+        "consumer": "Supervisor.runtime_preflight",
+        "cause": "RUNTIME_CACHE_CAP",
+        "stage": "Supervisor.runtime_preflight",
+        "started_routes": 0,
+        "hashes": "none",
+        "owned_children": 0,
+        "minimum_consumer_calls": 1,
+        "forbidden_effects": {
+          "network": 0,
+          "exec": 0,
+          "original_write": 0
+        },
+        "state": "REFUSED"
+      },
+      "active": true,
+      "producer": "a171_actual",
+      "effect_domain": "original_bounded_owned_operands_actual_consumer_or_explicit_code_gap",
+      "safety_classification": "BENIGN_FUNCTIONAL_OBLIGATION_HISTORICAL_METHOD_NOT_AUTHORIZED"
+    },
+    {
+      "position": 189,
+      "id": "runtime_cache_string",
+      "expected": {
+        "consumer": "Supervisor.runtime_preflight",
+        "cause": "RUNTIME_CACHE_STRING",
+        "stage": "Supervisor.runtime_preflight",
+        "started_routes": 0,
+        "hashes": "none",
+        "owned_children": 0,
+        "minimum_consumer_calls": 1,
+        "forbidden_effects": {
+          "network": 0,
+          "exec": 0,
+          "original_write": 0
+        },
+        "state": "REFUSED"
+      },
+      "active": true,
+      "producer": "a171_actual",
+      "effect_domain": "original_bounded_owned_operands_actual_consumer_or_explicit_code_gap",
+      "safety_classification": "BENIGN_FUNCTIONAL_OBLIGATION_HISTORICAL_METHOD_NOT_AUTHORIZED"
+    },
+    {
+      "position": 190,
+      "id": "runtime_cache_resolution",
+      "expected": {
+        "consumer": "Supervisor.runtime_preflight",
+        "cause": "RUNTIME_CACHE_RESOLUTION",
+        "stage": "Supervisor.runtime_preflight",
+        "started_routes": 0,
+        "hashes": "none",
+        "owned_children": 0,
+        "minimum_consumer_calls": 1,
+        "forbidden_effects": {
+          "network": 0,
+          "exec": 0,
+          "original_write": 0
+        },
+        "state": "REFUSED"
+      },
+      "active": true,
+      "producer": "a171_actual",
+      "effect_domain": "original_bounded_owned_operands_actual_consumer_or_explicit_code_gap",
+      "safety_classification": "BENIGN_FUNCTIONAL_OBLIGATION_HISTORICAL_METHOD_NOT_AUTHORIZED"
+    },
+    {
+      "position": 191,
+      "id": "runtime_interpreter",
+      "expected": {
+        "consumer": "Supervisor.runtime_preflight",
+        "cause": "RUNTIME_INTERPRETER_ELF",
+        "stage": "Supervisor.runtime_preflight",
+        "started_routes": 0,
+        "hashes": "none",
+        "owned_children": 0,
+        "minimum_consumer_calls": 1,
+        "forbidden_effects": {
+          "network": 0,
+          "exec": 0,
+          "original_write": 0
+        },
+        "state": "REFUSED"
+      },
+      "active": true,
+      "producer": "a171_actual",
+      "effect_domain": "original_bounded_owned_operands_actual_consumer_or_explicit_code_gap",
+      "safety_classification": "BENIGN_FUNCTIONAL_OBLIGATION_HISTORICAL_METHOD_NOT_AUTHORIZED"
+    },
+    {
+      "position": 192,
+      "id": "runtime_elf_format",
+      "expected": {
+        "consumer": "Supervisor.runtime_preflight",
+        "cause": "RUNTIME_ELF_FORMAT",
+        "stage": "Supervisor.runtime_preflight",
+        "started_routes": 0,
+        "hashes": "none",
+        "owned_children": 0,
+        "minimum_consumer_calls": 1,
+        "forbidden_effects": {
+          "network": 0,
+          "exec": 0,
+          "original_write": 0
+        },
+        "state": "REFUSED"
+      },
+      "active": true,
+      "producer": "a171_actual",
+      "effect_domain": "original_bounded_owned_operands_actual_consumer_or_explicit_code_gap",
+      "safety_classification": "BENIGN_FUNCTIONAL_OBLIGATION_HISTORICAL_METHOD_NOT_AUTHORIZED"
+    },
+    {
+      "position": 193,
+      "id": "runtime_elf_headers",
+      "expected": {
+        "consumer": "Supervisor.runtime_preflight",
+        "cause": "RUNTIME_ELF_HEADERS",
+        "stage": "Supervisor.runtime_preflight",
+        "started_routes": 0,
+        "hashes": "none",
+        "owned_children": 0,
+        "minimum_consumer_calls": 1,
+        "forbidden_effects": {
+          "network": 0,
+          "exec": 0,
+          "original_write": 0
+        },
+        "state": "REFUSED"
+      },
+      "active": true,
+      "producer": "a171_actual",
+      "effect_domain": "original_bounded_owned_operands_actual_consumer_or_explicit_code_gap",
+      "safety_classification": "BENIGN_FUNCTIONAL_OBLIGATION_HISTORICAL_METHOD_NOT_AUTHORIZED"
+    },
+    {
+      "position": 194,
+      "id": "runtime_dynamic_cap",
+      "expected": {
+        "consumer": "Supervisor.runtime_preflight",
+        "cause": "RUNTIME_DYNAMIC_CAP",
+        "stage": "Supervisor.runtime_preflight",
+        "started_routes": 0,
+        "hashes": "none",
+        "owned_children": 0,
+        "minimum_consumer_calls": 1,
+        "forbidden_effects": {
+          "network": 0,
+          "exec": 0,
+          "original_write": 0
+        },
+        "state": "REFUSED"
+      },
+      "active": true,
+      "producer": "a171_actual",
+      "effect_domain": "original_bounded_owned_operands_actual_consumer_or_explicit_code_gap",
+      "safety_classification": "BENIGN_FUNCTIONAL_OBLIGATION_HISTORICAL_METHOD_NOT_AUTHORIZED"
+    },
+    {
+      "position": 195,
+      "id": "runtime_dynamic_search",
+      "expected": {
+        "consumer": "Supervisor.runtime_preflight",
+        "cause": "RUNTIME_DYNAMIC_SEARCH",
+        "stage": "Supervisor.runtime_preflight",
+        "started_routes": 0,
+        "hashes": "none",
+        "owned_children": 0,
+        "minimum_consumer_calls": 1,
+        "forbidden_effects": {
+          "network": 0,
+          "exec": 0,
+          "original_write": 0
+        },
+        "state": "REFUSED"
+      },
+      "active": true,
+      "producer": "a171_actual",
+      "effect_domain": "original_bounded_owned_operands_actual_consumer_or_explicit_code_gap",
+      "safety_classification": "BENIGN_FUNCTIONAL_OBLIGATION_HISTORICAL_METHOD_NOT_AUTHORIZED"
+    },
+    {
+      "position": 196,
+      "id": "runtime_strtab",
+      "expected": {
+        "consumer": "Supervisor.runtime_preflight",
+        "cause": "RUNTIME_STRTAB",
+        "stage": "Supervisor.runtime_preflight",
+        "started_routes": 0,
+        "hashes": "none",
+        "owned_children": 0,
+        "minimum_consumer_calls": 1,
+        "forbidden_effects": {
+          "network": 0,
+          "exec": 0,
+          "original_write": 0
+        },
+        "state": "REFUSED"
+      },
+      "active": true,
+      "producer": "a171_actual",
+      "effect_domain": "original_bounded_owned_operands_actual_consumer_or_explicit_code_gap",
+      "safety_classification": "BENIGN_FUNCTIONAL_OBLIGATION_HISTORICAL_METHOD_NOT_AUTHORIZED"
+    },
+    {
+      "position": 197,
+      "id": "runtime_soname",
+      "expected": {
+        "consumer": "Supervisor.runtime_preflight",
+        "cause": "RUNTIME_SONAME",
+        "stage": "Supervisor.runtime_preflight",
+        "started_routes": 0,
+        "hashes": "none",
+        "owned_children": 0,
+        "minimum_consumer_calls": 1,
+        "forbidden_effects": {
+          "network": 0,
+          "exec": 0,
+          "original_write": 0
+        },
+        "state": "REFUSED"
+      },
+      "active": true,
+      "producer": "a171_actual",
+      "effect_domain": "original_bounded_owned_operands_actual_consumer_or_explicit_code_gap",
+      "safety_classification": "BENIGN_FUNCTIONAL_OBLIGATION_HISTORICAL_METHOD_NOT_AUTHORIZED"
+    },
+    {
+      "position": 198,
+      "id": "runtime_dependency",
+      "expected": {
+        "consumer": "Supervisor.runtime_preflight",
+        "cause": "UNKNOWN_RUNTIME_DEPENDENCY",
+        "stage": "Supervisor.runtime_preflight",
+        "started_routes": 0,
+        "hashes": "none",
+        "owned_children": 0,
+        "minimum_consumer_calls": 1,
+        "forbidden_effects": {
+          "network": 0,
+          "exec": 0,
+          "original_write": 0
+        },
+        "state": "REFUSED"
+      },
+      "active": true,
+      "producer": "a171_actual",
+      "effect_domain": "original_bounded_owned_operands_actual_consumer_or_explicit_code_gap",
+      "safety_classification": "BENIGN_FUNCTIONAL_OBLIGATION_HISTORICAL_METHOD_NOT_AUTHORIZED"
+    },
+    {
+      "position": 199,
+      "id": "runtime_loader_pin",
+      "expected": {
+        "consumer": "Supervisor.runtime_preflight",
+        "cause": "RUNTIME_LOADER_PIN",
+        "stage": "Supervisor.runtime_preflight",
+        "started_routes": 0,
+        "hashes": "none",
+        "owned_children": 0,
+        "minimum_consumer_calls": 1,
+        "forbidden_effects": {
+          "network": 0,
+          "exec": 0,
+          "original_write": 0
+        },
+        "state": "REFUSED"
+      },
+      "active": true,
+      "producer": "a171_actual",
+      "effect_domain": "original_bounded_owned_operands_actual_consumer_or_explicit_code_gap",
+      "safety_classification": "BENIGN_FUNCTIONAL_OBLIGATION_HISTORICAL_METHOD_NOT_AUTHORIZED"
+    },
+    {
+      "position": 200,
+      "id": "runtime_loader_custody",
+      "expected": {
+        "consumer": "Supervisor.runtime_preflight",
+        "cause": "RUNTIME_LOADER_CUSTODY",
+        "stage": "Supervisor.runtime_preflight",
+        "started_routes": 0,
+        "hashes": "none",
+        "owned_children": 0,
+        "minimum_consumer_calls": 1,
+        "forbidden_effects": {
+          "network": 0,
+          "exec": 0,
+          "original_write": 0
+        },
+        "state": "REFUSED"
+      },
+      "active": true,
+      "producer": "a171_actual",
+      "effect_domain": "original_bounded_owned_operands_actual_consumer_or_explicit_code_gap",
+      "safety_classification": "BENIGN_FUNCTIONAL_OBLIGATION_HISTORICAL_METHOD_NOT_AUTHORIZED"
+    },
+    {
+      "position": 201,
+      "id": "runtime_timeout",
+      "expected": {
+        "consumer": "Supervisor.runtime_preflight",
+        "cause": "PREFLIGHT_TIMEOUT",
+        "stage": "Supervisor.runtime_preflight",
+        "started_routes": 0,
+        "hashes": "none",
+        "owned_children": 0,
+        "minimum_consumer_calls": 1,
+        "forbidden_effects": {
+          "network": 0,
+          "exec": 0,
+          "original_write": 0
+        },
+        "state": "REFUSED"
+      },
+      "active": true,
+      "producer": "a171_actual",
+      "effect_domain": "original_bounded_owned_operands_actual_consumer_or_explicit_code_gap",
+      "safety_classification": "BENIGN_FUNCTIONAL_OBLIGATION_HISTORICAL_METHOD_NOT_AUTHORIZED"
+    },
+    {
+      "position": 202,
+      "id": "resource_envelope_positive",
+      "expected": {
+        "consumer": "acquisition_resources",
+        "cause": null,
+        "stage": "acquisition_resources",
+        "started_routes": 0,
+        "hashes": "none",
+        "owned_children": 0,
+        "minimum_consumer_calls": 1,
+        "forbidden_effects": {
+          "network": 0,
+          "exec": 0,
+          "original_write": 0
+        },
+        "state": "CONSUMER_ACCEPTED_NO_ADMISSION"
+      },
+      "active": true,
+      "producer": "a171_actual",
+      "effect_domain": "original_bounded_owned_operands_actual_consumer_or_explicit_code_gap",
+      "safety_classification": "BENIGN_FUNCTIONAL_OBLIGATION_HISTORICAL_METHOD_NOT_AUTHORIZED"
+    },
+    {
+      "position": 203,
+      "id": "resource_envelope_membership",
+      "expected": {
+        "consumer": "acquisition_resources",
+        "cause": "RESOURCE_CGROUP_MEMBERSHIP",
+        "stage": "acquisition_resources",
+        "started_routes": 0,
+        "hashes": "none",
+        "owned_children": 0,
+        "minimum_consumer_calls": 1,
+        "forbidden_effects": {
+          "network": 0,
+          "exec": 0,
+          "original_write": 0
+        },
+        "state": "REFUSED"
+      },
+      "active": true,
+      "producer": "a171_actual",
+      "effect_domain": "original_bounded_owned_operands_actual_consumer_or_explicit_code_gap",
+      "safety_classification": "BENIGN_FUNCTIONAL_OBLIGATION_HISTORICAL_METHOD_NOT_AUTHORIZED"
+    },
+    {
+      "position": 204,
+      "id": "resource_envelope_mount",
+      "expected": {
+        "consumer": "acquisition_resources",
+        "cause": "RESOURCE_CGROUP_MOUNT",
+        "stage": "acquisition_resources",
+        "started_routes": 0,
+        "hashes": "none",
+        "owned_children": 0,
+        "minimum_consumer_calls": 1,
+        "forbidden_effects": {
+          "network": 0,
+          "exec": 0,
+          "original_write": 0
+        },
+        "state": "REFUSED"
+      },
+      "active": true,
+      "producer": "a171_actual",
+      "effect_domain": "original_bounded_owned_operands_actual_consumer_or_explicit_code_gap",
+      "safety_classification": "BENIGN_FUNCTIONAL_OBLIGATION_HISTORICAL_METHOD_NOT_AUTHORIZED"
+    },
+    {
+      "position": 205,
+      "id": "resource_envelope_envelope",
+      "expected": {
+        "consumer": "acquisition_resources",
+        "cause": "RESOURCE_KERNEL_ENVELOPE",
+        "stage": "acquisition_resources",
+        "started_routes": 0,
+        "hashes": "none",
+        "owned_children": 0,
+        "minimum_consumer_calls": 1,
+        "forbidden_effects": {
+          "network": 0,
+          "exec": 0,
+          "original_write": 0
+        },
+        "state": "REFUSED"
+      },
+      "active": true,
+      "producer": "a171_actual",
+      "effect_domain": "original_bounded_owned_operands_actual_consumer_or_explicit_code_gap",
+      "safety_classification": "BENIGN_FUNCTIONAL_OBLIGATION_HISTORICAL_METHOD_NOT_AUTHORIZED"
+    },
+    {
+      "position": 206,
+      "id": "resource_envelope_memory",
+      "expected": {
+        "consumer": "acquisition_resources",
+        "cause": "RESOURCE_INNER_MEMORY",
+        "stage": "acquisition_resources",
+        "started_routes": 0,
+        "hashes": "none",
+        "owned_children": 0,
+        "minimum_consumer_calls": 1,
+        "forbidden_effects": {
+          "network": 0,
+          "exec": 0,
+          "original_write": 0
+        },
+        "state": "REFUSED"
+      },
+      "active": true,
+      "producer": "a171_actual",
+      "effect_domain": "original_bounded_owned_operands_actual_consumer_or_explicit_code_gap",
+      "safety_classification": "BENIGN_FUNCTIONAL_OBLIGATION_HISTORICAL_METHOD_NOT_AUTHORIZED"
+    },
+    {
+      "position": 207,
+      "id": "resource_envelope_ancestor",
+      "expected": {
+        "consumer": "acquisition_resources",
+        "cause": "CGROUP_ANCESTOR_MEMORY_SHORTFALL",
+        "stage": "acquisition_resources",
+        "started_routes": 0,
+        "hashes": "none",
+        "owned_children": 0,
+        "minimum_consumer_calls": 1,
+        "forbidden_effects": {
+          "network": 0,
+          "exec": 0,
+          "original_write": 0
+        },
+        "state": "REFUSED"
+      },
+      "active": true,
+      "producer": "a171_actual",
+      "effect_domain": "original_bounded_owned_operands_actual_consumer_or_explicit_code_gap",
+      "safety_classification": "BENIGN_FUNCTIONAL_OBLIGATION_HISTORICAL_METHOD_NOT_AUTHORIZED"
+    },
+    {
+      "position": 208,
+      "id": "resource_envelope_host",
+      "expected": {
+        "consumer": "acquisition_resources",
+        "cause": "MEMORY_SHORTFALL",
+        "stage": "acquisition_resources",
+        "started_routes": 0,
+        "hashes": "none",
+        "owned_children": 0,
+        "minimum_consumer_calls": 1,
+        "forbidden_effects": {
+          "network": 0,
+          "exec": 0,
+          "original_write": 0
+        },
+        "state": "REFUSED"
+      },
+      "active": true,
+      "producer": "a171_actual",
+      "effect_domain": "original_bounded_owned_operands_actual_consumer_or_explicit_code_gap",
+      "safety_classification": "BENIGN_FUNCTIONAL_OBLIGATION_HISTORICAL_METHOD_NOT_AUTHORIZED"
+    },
+    {
+      "position": 209,
+      "id": "resource_envelope_disk",
+      "expected": {
+        "consumer": "acquisition_resources",
+        "cause": "DISK_SHORTFALL",
+        "stage": "acquisition_resources",
+        "started_routes": 0,
+        "hashes": "none",
+        "owned_children": 0,
+        "minimum_consumer_calls": 1,
+        "forbidden_effects": {
+          "network": 0,
+          "exec": 0,
+          "original_write": 0
+        },
+        "state": "REFUSED"
+      },
+      "active": true,
+      "producer": "a171_actual",
+      "effect_domain": "original_bounded_owned_operands_actual_consumer_or_explicit_code_gap",
+      "safety_classification": "BENIGN_FUNCTIONAL_OBLIGATION_HISTORICAL_METHOD_NOT_AUTHORIZED"
+    },
+    {
+      "position": 210,
+      "id": "resource_envelope_cpu",
+      "expected": {
+        "consumer": "acquisition_resources",
+        "cause": "RESOURCE_CPU_AFFINITY",
+        "stage": "acquisition_resources",
+        "started_routes": 0,
+        "hashes": "none",
+        "owned_children": 0,
+        "minimum_consumer_calls": 1,
+        "forbidden_effects": {
+          "network": 0,
+          "exec": 0,
+          "original_write": 0
+        },
+        "state": "REFUSED"
+      },
+      "active": true,
+      "producer": "a171_actual",
+      "effect_domain": "original_bounded_owned_operands_actual_consumer_or_explicit_code_gap",
+      "safety_classification": "BENIGN_FUNCTIONAL_OBLIGATION_HISTORICAL_METHOD_NOT_AUTHORIZED"
+    },
+    {
+      "position": 211,
+      "id": "resource_envelope_cap",
+      "expected": {
+        "consumer": "acquisition_resources",
+        "cause": "RESOURCE_READ_CAP",
+        "stage": "acquisition_resources",
+        "started_routes": 0,
+        "hashes": "none",
+        "owned_children": 0,
+        "minimum_consumer_calls": 1,
+        "forbidden_effects": {
+          "network": 0,
+          "exec": 0,
+          "original_write": 0
+        },
+        "state": "REFUSED"
+      },
+      "active": true,
+      "producer": "a171_actual",
+      "effect_domain": "original_bounded_owned_operands_actual_consumer_or_explicit_code_gap",
+      "safety_classification": "BENIGN_FUNCTIONAL_OBLIGATION_HISTORICAL_METHOD_NOT_AUTHORIZED"
+    },
+    {
+      "position": 212,
+      "id": "cgroup_values_positive",
+      "expected": {
+        "consumer": "Supervisor.cgroup_values",
+        "cause": null,
+        "stage": "Supervisor.cgroup_values",
+        "started_routes": 0,
+        "hashes": "none",
+        "owned_children": 0,
+        "minimum_consumer_calls": 1,
+        "forbidden_effects": {
+          "network": 0,
+          "exec": 0,
+          "original_write": 0
+        },
+        "state": "CONSUMER_ACCEPTED_NO_ADMISSION"
+      },
+      "active": true,
+      "producer": "a171_actual",
+      "effect_domain": "original_bounded_owned_operands_actual_consumer_or_explicit_code_gap",
+      "safety_classification": "BENIGN_FUNCTIONAL_OBLIGATION_HISTORICAL_METHOD_NOT_AUTHORIZED"
+    },
+    {
+      "position": 213,
+      "id": "cgroup_values_bound",
+      "expected": {
+        "consumer": "Supervisor.cgroup_values",
+        "cause": "CGROUP_BOUND_UNKNOWN",
+        "stage": "Supervisor.cgroup_values",
+        "started_routes": 0,
+        "hashes": "none",
+        "owned_children": 0,
+        "minimum_consumer_calls": 1,
+        "forbidden_effects": {
+          "network": 0,
+          "exec": 0,
+          "original_write": 0
+        },
+        "state": "REFUSED"
+      },
+      "active": true,
+      "producer": "a171_actual",
+      "effect_domain": "original_bounded_owned_operands_actual_consumer_or_explicit_code_gap",
+      "safety_classification": "BENIGN_FUNCTIONAL_OBLIGATION_HISTORICAL_METHOD_NOT_AUTHORIZED"
+    },
+    {
+      "position": 214,
+      "id": "cgroup_values_populated",
+      "expected": {
+        "consumer": "Supervisor.cgroup_values",
+        "cause": "CGROUP_NOT_EXCLUSIVE_EMPTY",
+        "stage": "Supervisor.cgroup_values",
+        "started_routes": 0,
+        "hashes": "none",
+        "owned_children": 0,
+        "minimum_consumer_calls": 1,
+        "forbidden_effects": {
+          "network": 0,
+          "exec": 0,
+          "original_write": 0
+        },
+        "state": "REFUSED"
+      },
+      "active": true,
+      "producer": "a171_actual",
+      "effect_domain": "original_bounded_owned_operands_actual_consumer_or_explicit_code_gap",
+      "safety_classification": "BENIGN_FUNCTIONAL_OBLIGATION_HISTORICAL_METHOD_NOT_AUTHORIZED"
+    },
+    {
+      "position": 215,
+      "id": "cgroup_values_events",
+      "expected": {
+        "consumer": "Supervisor.cgroup_values",
+        "cause": "CGROUP_NOT_EXCLUSIVE_EMPTY",
+        "stage": "Supervisor.cgroup_values",
+        "started_routes": 0,
+        "hashes": "none",
+        "owned_children": 0,
+        "minimum_consumer_calls": 1,
+        "forbidden_effects": {
+          "network": 0,
+          "exec": 0,
+          "original_write": 0
+        },
+        "state": "REFUSED"
+      },
+      "active": true,
+      "producer": "a171_actual",
+      "effect_domain": "original_bounded_owned_operands_actual_consumer_or_explicit_code_gap",
+      "safety_classification": "BENIGN_FUNCTIONAL_OBLIGATION_HISTORICAL_METHOD_NOT_AUTHORIZED"
+    }
+  ],
+  "original_expected_and_order_exact": true,
+  "selector_connected_count": 216,
+  "new_complete_credit_claimed": 0,
+  "SourceReady": false,
+  "GO": false
+}

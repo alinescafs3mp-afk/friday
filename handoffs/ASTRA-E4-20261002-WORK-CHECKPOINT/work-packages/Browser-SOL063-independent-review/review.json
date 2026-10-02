@@ -1,0 +1,385 @@
+{
+  "schema": "friday.sol063.independent-static-decisions.v1",
+  "assignment": "ASTRA-E4-LAB866-BROWSER-WHOLE209-ALL216-ALL29-INDEPENDENT-SOURCE-REVIEW-SOL063",
+  "generation": 1,
+  "decision": "REJECT_CURRENT_WHOLE_SOURCE",
+  "review_kind": "INDEPENDENT_INERT_CONNECTED_SOURCE_REVIEW_NOT_RUNTIME_ACCEPTANCE",
+  "SourceReady": false,
+  "Root_admission": false,
+  "runtime": "NOT_RUN",
+  "gates": "NOT_RUN_REQUIRED_NOT_WAIVED",
+  "GO": false,
+  "findings": [
+    {
+      "id": "SOL063-C01",
+      "class": "CODE",
+      "normative": "SOL063 requirements 1-3; LAB866 B04/B05; original per-ID ownership/registry/producer/oracle contract",
+      "title": "New coordinator/observer routes are not joined to the two existing receivers and Root selection protocol",
+      "sites": [
+        [
+          "A071-CONTROLS.py",
+          874,
+          936
+        ],
+        [
+          "A071-CONTROLS.py",
+          955,
+          1038
+        ],
+        [
+          "A071-SUPERVISOR.py",
+          970,
+          979
+        ],
+        [
+          "A087-PUBLIC-DRIVER.py",
+          674,
+          775
+        ],
+        [
+          "A071-BOOTSTRAP.c",
+          565,
+          589
+        ]
+      ],
+      "proof": "controls_whole216 diverts every nonzero-owned target and G1.resources/acquisition_resources before fr_controller_prepare. Observer receipt sets producer_called/child_created false, session_after/native_child/native_evidence null and streams empty. Supervisor still requires producer_called and child_created true. A087 still requires one registered/reaped selected producer, registry sequence7, sessions2->5, two indexed complete producer streams, actual selected actor/delegation/Root start+finish/private wait/ACK/close. Coordinator receipts instead have operation-labelled raw records and null native evidence. Root's whole216 child REGISTER selection and producer FINISH-before-REAP requirements were not changed. These are concrete incompatible producer/consumer contracts, not just a missing future Root grant.",
+      "scope": "All63 owned-target plus17 resource rows; partial local operation credit is retained. Do not add an extra waiting producer merely to satisfy old labels: original coordinator+3 within inner4 remains required.",
+      "runtime_observed": false
+    },
+    {
+      "id": "SOL063-C02",
+      "class": "CODE",
+      "normative": "B02, A153-02, LAB864 complete bounded full raw through both receivers; original held/byte/error complement",
+      "title": "Length framing is restored by Controls but not consumed by unchanged A087",
+      "sites": [
+        [
+          "A071-CONTROLS.py",
+          938,
+          953
+        ],
+        [
+          "A071-CONTROLS.py",
+          1064,
+          1090
+        ],
+        [
+          "A071-CONTROLS.py",
+          1110,
+          1166
+        ],
+        [
+          "A071-CONTROLS.py",
+          1388,
+          1399
+        ],
+        [
+          "A087-PUBLIC-DRIVER.py",
+          709,
+          730
+        ]
+      ],
+      "proof": "a171_result_bytes emits raw>1024 bytes as a stdout length frame, initially raw_hex=null. Controls splits producer JSON at the first newline and restores each framed raw_hex. A087 requires original producer stdout to have exactly one final newline and then json_DATA of the entire stdout, and requires that parsed object equal the restored inner producer. It has no trailer consumer/restorer. Even if a particular trailer happens not to contain newline, JSON trailing data and original-null versus restored-hex equality remain incompatible. Genuine Controls-side framing/hash/count/tail validation is not whole-receiver closure.",
+      "scope": "Delegated operation raw framing, both success and refusal. No new operational fixture is supplied."
+    },
+    {
+      "id": "SOL063-C03",
+      "class": "CODE",
+      "normative": "LAB866 binding constraints and LAB864 unchanged raw/terminal bounds; original all6 resources/copies",
+      "title": "Permitted full operation raw is duplicated beyond the outer terminal bound",
+      "sites": [
+        [
+          "A071-CONTROLS.py",
+          1388,
+          1399
+        ],
+        [
+          "A071-CONTROLS.py",
+          938,
+          953
+        ],
+        [
+          "A071-CONTROLS.py",
+          1160,
+          1197
+        ],
+        [
+          "A071-EXECUTOR.py",
+          860,
+          878
+        ]
+      ],
+      "proof": "The permitted a171_result_bytes boundary is262144 bytes. Complete original producer stdout must contain at least those262144 raw frame bytes. Controller receipt includes producer_streams original stdout raw_hex (at least524288 characters) and restored producer operation_raw raw_hex (another524288). Their sum is1048576 before JSON keys, frame length/producer metadata/other streams, so Executor.terminal_bytes cannot fit the declared full receipt into1048576 bytes and falls back INCOMPLETE. This is a static lower-bound argument, not an executed capacity measurement. At smaller inputs acceptance is not asserted; no cap increase, raw truncation or hash-only replacement is proposed.",
+      "scope": "Declared bounded positive held consumer capacity and equivalent error/raw paths; full tuple/copy budgets remain open."
+    },
+    {
+      "id": "SOL063-C04",
+      "class": "CODE",
+      "normative": "B02 original immutable full streams/first and secondary error/custody",
+      "title": "Returned outer bytes are retained prefixes, not full original stream evidence",
+      "sites": [
+        [
+          "A071-SUPERVISOR.py",
+          554,
+          571
+        ],
+        [
+          "A071-SUPERVISOR.py",
+          625,
+          648
+        ],
+        [
+          "A071-SUPERVISOR.py",
+          658,
+          719
+        ],
+        [
+          "A071-CONTROLS.py",
+          691,
+          696
+        ],
+        [
+          "A071-CONTROLS.py",
+          815,
+          830
+        ]
+      ],
+      "proof": "Supervisor now genuinely returns immutable stdout/stderr and hashes. On a chunk crossing PIPE_CAP it drops the entire chunk, both during operation and cleanup. Returned rows expose neither actual total_seen nor per-stream EOF/overflow/read/retention/close facts. a171_complete_stream marks complete_bytes/hash_only=false from the retained bytes only. Supervisor fail keeps at most128 cause strings and caught exceptions are converted to strings/types; the original outer error object and all secondary errors are not transported. Do not reinterpret retainedprefix as original_complete, nor strings as the complete original causal error graph.",
+      "scope": "All14 outer controls, including positive, overflow, drain/close/refusal/stop paths. Normal finite stop/reap and genuine returned bytes retain scoped credit."
+    },
+    {
+      "id": "SOL063-C05",
+      "class": "CODE",
+      "normative": "B01/B02 original once-generation retirement, sticky uncertainty and first-fault cleanup",
+      "title": "Coordinator receipt computes pass before retirement and ignores observation cleanup failure",
+      "sites": [
+        [
+          "A071-CONTROLS.py",
+          644,
+          689
+        ],
+        [
+          "A071-CONTROLS.py",
+          874,
+          936
+        ],
+        [
+          "A071-CONTROLS.py",
+          955,
+          1017
+        ]
+      ],
+      "proof": "Genuine retirement repair skips already reaped/retirement_consumed records and uses bounded WNOHANG, eliminating the former ordinary stale repeat. However coordinator passed=true is set before finally:a171_consume_retirement. Its cleanup errors and failed before/after observation merely append cleanup strings and never revoke passed/terminal_completion. Observer similarly ignores failed before observation for its pass. Exact current owner/generation/first-error and auxiliary cleanup must gate both receivers; a literal owner=supervisor journal created after fork is not the full original native generation relation.",
+      "scope": "Owned coordinator and resource observer exceptional paths. No assertion that unchanged native retirement code signals every reaped child."
+    },
+    {
+      "id": "SOL063-C06",
+      "class": "CODE",
+      "normative": "B04, original G1.resources256MiB versus inner192MiB, original negative first-cause controls/topology",
+      "title": "Observer moved before delegated join but remains inside the incompatible original inner leaf",
+      "sites": [
+        [
+          "A071-CONTROLS.py",
+          955,
+          1017
+        ],
+        [
+          "A071-CONTROLS.py",
+          1019,
+          1038
+        ],
+        [
+          "A071-CONTROLS.py",
+          1199,
+          1240
+        ],
+        [
+          "A071-BOOTSTRAP.c",
+          678,
+          695
+        ],
+        [
+          "G1.py",
+          735,
+          786
+        ],
+        [
+          "A071-EXECUTOR.py",
+          768,
+          810
+        ]
+      ],
+      "proof": "New observer genuinely invokes original resources before delegated prepare/join. But Bootstrap.run clone3 uses CLONE_INTO_CGROUP fd121 before executing Supervisor/Controls: the coordinator already runs in the unchanged192MiB inner leaf. G1.resources observes its actual /proc membership and requires finite leaf memory.max-memory.current>=256MiB, a concrete impossible leaf predicate under that192MiB maximum. Text fields entered_inner_leaf=false do not change execution domain. acquisition_resources also needs its original preparer parent relation. All17 resource rows take arguments={} and call the same real environment observer without per-ID selected fault operands, so later negative first faults cannot be individually demonstrated by generic entry. No extra Root service/grant or resetting original caps is authorized.",
+      "scope": "Original7 G1 resource rows and10 envelope rows; actual runtime environment remains unobserved, not assumed to be zero."
+    },
+    {
+      "id": "SOL063-C07",
+      "class": "CODE",
+      "normative": "B03/B05, original safe100/65 obligations, all216 including29 functionals",
+      "title": "Safe original target/registration/body/deadline functionality remains missing behind partial operations",
+      "sites": [
+        [
+          "A071-CONTROLS.py",
+          628,
+          632
+        ],
+        [
+          "A071-CONTROLS.py",
+          775,
+          872
+        ],
+        [
+          "A071-CONTROLS.py",
+          1257,
+          1298
+        ],
+        [
+          "A071-CONTROLS.py",
+          1518,
+          1812
+        ]
+      ],
+      "proof": "Token classifier removal is genuine but a171_unsafe_historical alwaysFalse is not an exact per-ID safety classifier.63 owned rows route as14 actual outer attempts,5 registration rows using the same immediate-exit child,9 Run.guard-only deadline rows with no actual3 children/body/hash/stage-end relation,4 real module write_all small-pipe attempts without G1.worker/BoundedResponse or original3 receipts/hashes,31 abstract fallbacks. Original safe positive whole3, RSS, ordinary EOF/write/deadline/cleanup remain mandatory, not waived because old operational implementations are unauthorized. Resource17 and delegated zero-owned residuals likewise need authentic first faults. x.m.write_all exists and is actually found; do not claim it is absent. Immutable prior51/49/16 credits remain scoped, not newly qualified.",
+      "scope": "No historical hostile bodies, payloads, fixtures, generators, reproductions or exploits are supplied. Genuine unsafe mechanisms are ABSTRACT_REQUIRED_NOT_RUN, required=true waiver=false."
+    },
+    {
+      "id": "SOL063-C08",
+      "class": "CODE",
+      "normative": "A174-03 and original ordinary dependency FD/error/once-close custody; A153-03 normal first-acquisition coverage",
+      "title": "Normal dependency acquisition and attempted-close history is not covered by post-success FD scans",
+      "sites": [
+        [
+          "A071-CONTROLS.py",
+          1320,
+          1379
+        ],
+        [
+          "A071-CONTROLS.py",
+          1415,
+          1500
+        ],
+        [
+          "A071-EXECUTOR.py",
+          376,
+          458
+        ],
+        [
+          "A071-EXECUTOR.py",
+          499,
+          562
+        ],
+        [
+          "A071-SUPERVISOR.py",
+          546,
+          610
+        ],
+        [
+          "R4.py",
+          243,
+          256
+        ]
+      ],
+      "proof": "Explicit A171 records genuinely have a close-attempt flag, and run.reason/run.errors/sticky uncertainty are now checked. Dependency journal scans only fds/dirs/holds/inner after successful construction; RetainedTree internally closes/clears on construction failure before that object can be journalled. R4.close_fd retries os.close after its first close/hook exception. Later EBADF/live-identity scans cannot reconstruct original close attempt/error history. Supervisor's two os.pipe acquisitions occur before the operation try: failure allocating the second leaves the first pair outside its cleanup. These are concrete normal owned dependency error sites, not arbitrary hostile private heap/kernel expansion.",
+      "scope": "Actual retained/output and outer acquisition dependency paths; prospective guard/ledger fixes in FULL/A079 are preserved and not falsely accused."
+    },
+    {
+      "id": "SOL063-C09",
+      "class": "CODE",
+      "normative": "A174-06/LAB864 sparse2GiB+1 versus Source FSIZE2GiB unchanged",
+      "title": "output_disk still skips its decisive original operand under the canonical file-size limit",
+      "sites": [
+        [
+          "A071-CONTROLS.py",
+          1456,
+          1499
+        ]
+      ],
+      "proof": "The disk path chooses target2147483649 and ftruncate only when soft RLIMIT_FSIZE>=target; otherwise it performs no controlled disk-bound operation and calls the checker. Canonical FSIZE is2147483648. Thus the original selected output-disk first cause is not exercised by this route. This is a remaining normal Source role/domain defect, not an absence of future authorization and not a reason to raise caps.",
+      "scope": "Original position84 output_disk; bounded output primitive positives/negatives retain prior scoped credit."
+    },
+    {
+      "id": "SOL063-M01",
+      "class": "METADATA_SOURCE_JOIN_OPEN",
+      "normative": "Full current209/actual8 gaplessdelta/equalcomplement and exact producer-consumer binders",
+      "title": "Correct new publication coexists with un-rebound older internal current/source/delta views",
+      "sites": [
+        [
+          "CURRENT-SOURCE209.json",
+          1,
+          1
+        ],
+        [
+          "SOURCE-REFERENCE-MANIFEST.json",
+          1,
+          1
+        ],
+        [
+          "DELTA-RAW-GAPLESS.json",
+          1,
+          1
+        ],
+        [
+          "MANIFEST.json",
+          1,
+          1
+        ],
+        [
+          "current209-bindings.json",
+          1,
+          1
+        ]
+      ],
+      "proof": "Top47 publication and new current209-bindings are verified and are not corrupt. However CURRENT-SOURCE209, SOURCE-REFERENCE-MANIFEST, old MANIFEST/SEAL and per-ID old source matrices retain LAB864 Controls/Supervisor hashes; DELTA-RAW-GAPLESS is the earlier A158->LAB864 delta, not current LAB864->LAB866. They may remain historical/normative but cannot be presented as a current gapless delta or current consumer binder for new2. The independent review supplies exact2changed207equal/full old-new8 hash/byte partition witnesses without unsafe body copies. A087 also keeps its original A158 source-manifest schema/assignment requirement; a future actual bundle must coherently bind the exact current Source, not merely reuse this old view.",
+      "scope": "Publication integrity is PASS; current internal semantic binder/delta completion is OPEN. Future actual compiled/image/Root bundle assembly alone is not counted as CODE."
+    }
+  ],
+  "genuine_repairs": [
+    "B01 normal already-reaped/retirement-consumed skip in Supervisor and bounded retirement consume, no unnecessary blocking wait; exceptional closure remains C05/C08.",
+    "B02 immutable returned stdout/stderr bytes and both hashes are genuine retained-byte improvements, not original EOF/full/error closure C04.",
+    "B03 removal of heuristic consumer/cause token rejection is genuine; remaining generic abstractions do not waive benign original functionals C07.",
+    "B04 real resource observer call before delegated prepare/join is genuine ordering improvement, but coordinator original leaf/domain and both-receiver join remain C01/C06.",
+    "B05 authentic supervise_owned, original module write_all and Run.guard calls are genuine partial operations, not original registration faults/3-worker body/stage/hash completion C07.",
+    "LAB864 genuine firstfault run.reason/run.errors/sticky uncertainty, outer_terminal_sink label, frame length/hash/count/tail and A104 historical-not-current description repairs retained. Do not repeat A174-07 historical-description accusation.",
+    "Exact unchanged A1164/A1523/A1562 receiving/ownership/resource-guard fixes and prior scoped51/49/16 primitive credits retained only on matching bytes. No new runtime acceptance or blanket all216 closure."
+  ],
+  "future_qualification_not_CODE": [
+    "Different-author acceptance of repaired exact Source and actual fresh compiler/static ELF/ABI on that snapshot.",
+    "Actual immutable OS9/image17/full recipes/current9/runtime117/111/Root122 admission and selected stock execution with original provider/clock/grant; none performed here.",
+    "All4 modes, mode4 HTTP5, full63/original216, ordinary45/A08744, root19/seal18, all3 positive FIRST, full30/F0-F11/live/full mandatory gates/final release remain required NOT_RUN, no waiver.",
+    "Whole runtime RAM/implicit IO/CPU/affinity/quota/pressure and actual cleanup/negative-control observations remain unknown, not zero."
+  ],
+  "preserved_caps": {
+    "outer_processes": 1,
+    "outer_bytes": 67108864,
+    "inner_processes": 4,
+    "inner_bytes": 201326592,
+    "aggregate_bytes": 268435456,
+    "actor_AS_bytes": 50331648,
+    "raw_each_bytes": 1048576,
+    "FSIZE_bytes": 2147483648,
+    "normal_wall_seconds": 180,
+    "normal_reserve_seconds": 10,
+    "production_wall_seconds": 1200,
+    "production_reserve_seconds": 60
+  },
+  "coverage": {
+    "full47_publication": "VERIFIED",
+    "current209": "FULL_SHA9_2CHANGED_207EQUAL_VERIFIED",
+    "original216": "EXACT_TYPES_ORDER_FIELDS_ALL216_INDEPENDENT_JOIN_MATRIX",
+    "original29": "EXACT29_REQUIRED_SAFE_AND_ABSTRACT_UNSAFE_NO_WAIVER",
+    "all6": "FULL_CONNECTED_DIMENSION_MATRIX",
+    "all_methods": "FULLBYTE_LEXICAL_METHOD_COMPLEMENT_INDEX; affected semantic dependencies manually reviewed; exact prior unchanged static evidence reused",
+    "both_receivers": "INCOMPATIBLE C01/C02",
+    "source_execution": "NOT_RUN"
+  },
+  "proof_files": [
+    "publication47.json",
+    "actual-delta8-equal207.json",
+    "finding-code-sites.json",
+    "whole209-independent.json",
+    "whole216-independent.json",
+    "exact29-independent.json",
+    "all6-independent.json",
+    "full-methods-byte-index.json",
+    "current-binders-review.json"
+  ]
+}

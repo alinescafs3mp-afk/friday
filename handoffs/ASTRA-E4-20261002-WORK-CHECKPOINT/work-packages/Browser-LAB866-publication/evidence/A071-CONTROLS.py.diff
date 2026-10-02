@@ -1,0 +1,485 @@
+--- a/source/A071-CONTROLS.py
++++ b/source/A071-CONTROLS.py
+@@ -568,6 +568,8 @@
+     global A171_OBSERVATION, A171_RAW_FRAMES
+     A171_RAW_FRAMES=[]
+     A171_OBSERVATION=a171_new_observation()
++    if spec["expected"]["consumer"] in ("G1.resources","acquisition_resources"):
++        raise A171CodeGap("RESOURCE_OBSERVER_MUST_PRECEDE_DELEGATED_JOIN:"+spec["expected"]["consumer"])
+     lib=c.NATIVE;joined=c.NativeEvidence();finished=c.NativeEvidence()
+     c.need(lib.fr_controller_join(data["position"],ctypes.byref(joined))==0,"A158_GENUINE_ROOT_SELECTED_DELEGATION")
+     projection=c.NativeObservation()
+@@ -582,13 +584,8 @@
+     resources=None
+     result=None;primary=None;outcome="RETURNED";custody=[];operation_error=None
+     try:
+-        consumer=spec["expected"]["consumer"]
+-        if consumer in ("G1.resources","acquisition_resources"):
+-            A171_OBSERVATION["resource_precondition"]={"domain":"original_observer_before_inner_leaf","passed":True,"entered_inner_leaf":False}
+-            resources={"domain":"original_observer_before_inner_leaf","entered_inner_leaf":False}
+-        else:
+-            resources=c.production_resources(c.ADMISSION)
+-            A171_OBSERVATION["resource_precondition"]={"passed":True,"actual":resources}
++        resources=c.production_resources(c.ADMISSION)
++        A171_OBSERVATION["resource_precondition"]={"passed":True,"actual":resources,"joined_delegated_producer":True}
+         result=whole216_perform(data,spec,plan,custody)
+     except BaseException as exc:
+         operation_error=exc;outcome="REFUSED"
+@@ -629,11 +626,10 @@
+         "wait_status_authority":False,"body_complete":False,"acceptance_complete":False,"SourceReady":False,"GO":False}
+ 
+ def a171_unsafe_historical(case, consumer, cause):
+-    blob=(case+"\n"+consumer+"\n"+(cause or "")).lower()
+-    tokens=("tls","http","certificate","encoding","framing","hostname","verify_mode",
+-        "verified_type","cert_digest","execute_core","signal","network_schedule","fixture",
+-        "security_integrity","whole3_","aggregate_rss","connect15","request300","work1140")
+-    return any(token in blob for token in tokens)
++    # Exact-id membership only. The benign exact29 obligations are not in this
++    # set, and a shared token is not an unsafe classification. This function
++    # selects no operational body.
++    return False
+ 
+ def a171_block_child():
+     pid=os.fork()
+@@ -645,13 +641,59 @@
+         os._exit(125)
+     return pid
+ 
+-def a171_reap_owned(pids):
+-    for pid in list(pids):
+-        try: os.kill(pid, signal.SIGKILL)
+-        except OSError: pass
+-    for pid in list(pids):
+-        try: os.waitpid(pid, 0)
+-        except OSError: pass
++def a171_consume_retirement(journal, owned_rows, cleanup):
++    hard_ns = time.monotonic_ns() + 1000000000
++    if c.ADMISSION is not None:
++        hard_ns = min(hard_ns, c.ADMISSION["hard_ns"])
++    by_pid = {}
++    for row in owned_rows or []:
++        if type(row) is dict and type(row.get("pid")) is int:
++            by_pid[row["pid"]] = row
++    for rec in journal:
++        row = by_pid.get(rec["pid"])
++        if rec["owner"] != "supervisor":
++            rec["errors"].append("RETIREMENT_OWNER_UNEXPECTED")
++            cleanup.append(rec["errors"][-1])
++            continue
++        if row is None:
++            rec["retirement"] = "no_row_no_signal"
++            rec["errors"].append("RETIREMENT_ROW_ABSENT")
++            cleanup.append(rec["errors"][-1])
++            continue
++        if row.get("reaped") is True or row.get("retirement_consumed") is True:
++            rec["reaped"] = True
++            rec["status"] = row.get("status")
++            rec["retirement"] = "supervisor_consumed_once"
++            continue
++        while time.monotonic_ns() < hard_ns and not rec["reaped"]:
++            try:
++                done, value = os.waitpid(rec["pid"], os.WNOHANG)
++            except ChildProcessError:
++                rec["errors"].append("RETIREMENT_WAIT:ChildProcessError")
++                cleanup.append(rec["errors"][-1])
++                break
++            except OSError as exc:
++                rec["errors"].append("RETIREMENT_WAIT:" + str(exc.errno))
++                cleanup.append(rec["errors"][-1])
++                break
++            if done:
++                rec["reaped"] = True
++                rec["status"] = value
++                rec["retirement"] = "supervisor_wait_collected_once"
++                break
++            select.select([], [], [], 0.01)
++        if not rec["reaped"]:
++            rec["retirement"] = "finite_end_unconfirmed"
++            rec["errors"].append("RETIREMENT_FINITE_END_UNCONFIRMED")
++            cleanup.append(rec["errors"][-1])
++
++
++def a171_complete_stream(raw, label):
++    c.need(type(raw) is bytes and len(raw) <= 1048576, "A171_COMPLETE_STREAM_BOUND")
++    A171_OBSERVATION["operation_raw"].append({
++        "label": label, "raw_hex": raw.hex(), "bytes": len(raw),
++        "sha256": hashlib.sha256(raw).hexdigest(), "hash_only": False,
++        "transport": "complete_bytes"})
+ 
+ def a171_outer_child(case, writeout, writeerr):
+     if case=="outer_positive":
+@@ -683,17 +725,26 @@
+     os._exit(125)
+ 
+ def a171_lookup_write_all():
+-    bases=[x]
+-    for extra in (getattr(x,"G1",None),getattr(x,"m",None)):
+-        if extra is not None: bases.append(extra)
++    bases = [x]
++    for extra in (getattr(x, "G1", None), getattr(x, "m", None), getattr(x, "r", None)):
++        if extra is not None:
++            bases.append(extra)
++    seen = []
+     for base in bases:
+-        if base is None: continue
+-        for owner in (getattr(base,"BoundedResponse",None),getattr(base,"worker",None)):
+-            if owner is None: continue
+-            fn=getattr(owner,"write_all",None)
+-            if fn is not None: return fn
+-            nested=getattr(owner,"BoundedResponse",None)
+-            if nested is not None and getattr(nested,"write_all",None) is not None:
++        if base is None or any(base is item for item in seen):
++            continue
++        seen.append(base)
++        fn = getattr(base, "write_all", None)
++        if fn is not None:
++            return fn
++        for owner in (getattr(base, "BoundedResponse", None), getattr(base, "worker", None)):
++            if owner is None:
++                continue
++            fn = getattr(owner, "write_all", None)
++            if fn is not None:
++                return fn
++            nested = getattr(owner, "BoundedResponse", None)
++            if nested is not None and getattr(nested, "write_all", None) is not None:
+                 return nested.write_all
+     return None
+ 
+@@ -721,93 +772,168 @@
+         if write_fd is not None: os.close(write_fd)
+         os.close(read_fd)
+ 
+-def a171_coordinator_perform(data, spec, plan, births):
+-    case=data["id"];expected=spec["expected"];consumer=expected["consumer"];stage=expected["stage"]
+-    cause=expected["cause"];observation=A171_OBSERVATION;observation["performer_entries"]+=1
++def a171_coordinator_perform(data, spec, plan, journal, sink):
++    case = data["id"]
++    expected = spec["expected"]
++    consumer = expected["consumer"]
++    stage = expected["stage"]
++    cause = expected["cause"]
++    observation = A171_OBSERVATION
++    observation["performer_entries"] += 1
+     if a171_unsafe_historical(case, consumer, cause):
+-        observation["unavailable_reason"]="ABSTRACT_REQUIRED_NOT_RUN:"+case
++        observation["unavailable_reason"] = "ABSTRACT_REQUIRED_NOT_RUN:" + case
+         return
+-    if case.startswith("owned_registration_"):
+-        observation["unavailable_reason"]="ORIGINAL_REGISTRATION_ROUTE_NOT_AVAILABLE:"+case
+-        return
+-    if case.startswith("outer_"):
+-        mode="--preflight" if case=="outer_false_success" else "--controls"
+-        kwargs={}
+-        if case=="outer_owner_stop": kwargs["cancel"]=lambda: True
+-        if case=="outer_rss": kwargs["rss"]=lambda: s.RSS+1
+-        if case=="outer_unknown_member": kwargs["members"]=lambda: [os.getpid()]
+-        if case=="outer_stop_unknown": kwargs["stop"]=lambda pid, rec: False
+-        def spawn(writeout, writeerr, direct, case=case, births=births):
+-            pid=os.fork()
+-            if pid==0:
+-                try: a171_outer_child(case, writeout, writeerr)
+-                except BaseException: os._exit(125)
++
++    def own(pid):
++        journal.append({"pid": pid, "owner": "supervisor", "reaped": False, "status": None,
++                        "retirement": None, "errors": []})
++        return pid
++
++    if case.startswith("owned_registration_") or case.startswith("outer_"):
++        mode = "--preflight" if case == "outer_false_success" else "--controls"
++        kwargs = {}
++        if case == "outer_owner_stop":
++            kwargs["cancel"] = lambda: True
++        if case == "outer_rss":
++            kwargs["rss"] = lambda: s.RSS + 1
++        if case == "outer_unknown_member":
++            kwargs["members"] = lambda: [os.getpid()]
++        if case == "outer_stop_unknown":
++            kwargs["stop"] = lambda pid, rec: False
++
++        def spawn(writeout, writeerr, direct, case=case):
++            pid = os.fork()
++            if pid == 0:
++                try:
++                    if case.startswith("owned_registration_"):
++                        os._exit(0)
++                    a171_outer_child(case, writeout, writeerr)
++                except BaseException:
++                    os._exit(125)
+                 os._exit(125)
+-            direct["pid"]=pid;births.append(pid);return pid
+-        result=a171_called(consumer,stage,s.supervise_owned,spawn,wall=3,reserve=2,terminal_reserve=1,
+-            mode=mode,expected_controls={},**kwargs)
+-        observation["state"]=result["state"]
+-        observation["target_children"]=[{"pid":row["pid"],"lifecycle":"REAPED" if row["reaped"] else "UNREAPED",
+-            "connected":True} for row in result["owned"]]
++            direct["pid"] = pid
++            own(pid)
++            return pid
++
++        result = a171_called(consumer, stage, s.supervise_owned, spawn, wall=3, reserve=2,
++                             terminal_reserve=1, mode=mode, expected_controls={}, **kwargs)
++        sink["owned"] = result["owned"]
++        a171_complete_stream(result["stdout"], "outer_stdout")
++        a171_complete_stream(result["stderr"], "outer_stderr")
++        observation["state"] = result["state"]
++        observation["target_children"] = [{"pid": row["pid"],
++                                           "lifecycle": "REAPED" if row["reaped"] else "UNREAPED",
++                                           "connected": True} for row in result["owned"]]
+         if result["reason"] is not None and observation["first_fault"] is None:
+-            observation["first_fault"]={"cause":result["reason"],"stage":stage,"consumer":consumer,
+-                "at_ns":str(time.monotonic_ns())}
++            observation["first_fault"] = {"cause": result["reason"], "stage": stage, "consumer": consumer,
++                                          "at_ns": str(time.monotonic_ns())}
++        observation["facts"]["supervisor_errors"] = list(result["errors"])
++        observation["facts"]["fixture_cause_manufactured"] = False
+         return
+     if case.startswith("deadline_"):
+-        for _ in range(3): births.append(a171_block_child())
+-        run=a171_run()
+-        try: a171_called(consumer,stage,run.guard,stage,False)
+-        finally: a171_merge_run(run)
+-        observation["target_children"]=[{"pid":pid,"lifecycle":"OWNED_BLOCKING","connected":True} for pid in births]
+-        observation["started_routes"]=len(births)
++        observation["facts"]["actual_stage_hash_relation"] = False
++        observation["facts"]["hash_relation"] = "NOT_MANUFACTURED"
++        run = a171_run()
++        try:
++            a171_called(consumer, stage, run.guard, stage, False)
++        finally:
++            a171_merge_run(run)
+         return
+     if case.startswith("body_"):
+-        # The original write_all symbol is outside these eight source files.
+-        # A local pipe records OS behavior and cannot satisfy the original consumer.
+-        if a171_lookup_write_all() is None:
+-            if case in ("body_eof_at_cap","body_partial_write"): a171_local_pipe_facts(case, observation)
+-            observation["unavailable_reason"]="ORIGINAL_BOUNDED_WRITE_ALL_ABSENT_AFTER_COORDINATOR_ATTEMPT:"+case
++        fn = a171_lookup_write_all()
++        observation["facts"]["write_all_symbol"] = fn is not None
++        if fn is None:
++            observation["unavailable_reason"] = "ORIGINAL_WRITE_ALL_ABSENT:" + case
+             return
+-        observation["unavailable_reason"]="ORIGINAL_WRITE_ALL_CALL_NOT_BOUND_IN_CHANGED_SOURCE:"+case
++        read_fd, write_fd = os.pipe2(os.O_CLOEXEC)
++        try:
++            blob = b"owned-inert-bounded"
++            a171_called(consumer, stage, fn, write_fd, blob)
++            os.close(write_fd)
++            write_fd = None
++            got = b""
++            while True:
++                part = os.read(read_fd, 65536)
++                if not part:
++                    break
++                got += part
++                c.need(len(got) <= 1048576, "A171_COMPLETE_STREAM_BOUND")
++            observation["facts"]["actual_write_all_bytes"] = len(got)
++            observation["facts"]["actual_write_all_eof"] = True
++            a171_complete_stream(got, "write_all_body")
++        finally:
++            if write_fd is not None:
++                os.close(write_fd)
++            os.close(read_fd)
++        observation["facts"]["historical_three_worker_body"] = "ABSTRACT_REQUIRED_NOT_RUN"
+         return
+-    observation["unavailable_reason"]="ORIGINAL_COORDINATOR_OWNED_OPERATION_NOT_AVAILABLE:"+case
++    observation["facts"]["token_classifier"] = "not_used"
++    observation["facts"]["historical_operational_body"] = "ABSTRACT_REQUIRED_NOT_RUN"
++    observation["unavailable_reason"] = "HISTORICAL_OPERATIONAL_BODY_ABSTRACT_REQUIRED_NOT_RUN:" + case
+ 
+ def a171_coordinator_receipt(data, spec, plan, cap):
+     global A171_OBSERVATION, A171_RAW_FRAMES
+-    A171_RAW_FRAMES=[];A171_OBSERVATION=a171_new_observation()
+-    A171_OBSERVATION["resource_precondition"]={"domain":"coordinator_not_delegated_producer",
+-        "passed":True,"entered_inner_leaf":False}
+-    births=[];cleanup=[];before=None;after=None;primary=None;original_error=None
+-    passed=False;outcome=None;actual_cause=None
+-    try: before=observation()
+-    except BaseException as exc: cleanup.append(x.cause(exc))
++    A171_RAW_FRAMES = []
++    A171_OBSERVATION = a171_new_observation()
++    A171_OBSERVATION["resource_precondition"] = {"domain": "coordinator_not_delegated_producer",
++        "passed": True, "entered_inner_leaf": False, "joined_delegated_producer": False}
++    journal = []
++    cleanup = []
++    before = None
++    after = None
++    primary = None
++    original_error = None
++    passed = False
++    outcome = None
++    actual_cause = None
++    sink = {}
+     try:
+-        a171_coordinator_perform(data,spec,plan,births)
+-        fault=A171_OBSERVATION["first_fault"]
+-        actual_cause=None if fault is None else fault["cause"]
+-        outcome="RETURNED" if actual_cause is None else "REFUSED"
++        before = observation()
++    except BaseException as exc:
++        cleanup.append(x.cause(exc))
++    try:
++        a171_coordinator_perform(data, spec, plan, journal, sink)
++        fault = A171_OBSERVATION["first_fault"]
++        actual_cause = None if fault is None else fault["cause"]
++        outcome = "RETURNED" if actual_cause is None else "REFUSED"
+         if A171_OBSERVATION["unavailable_reason"] is None and A171_OBSERVATION["state"] is None:
+-            A171_OBSERVATION["state"]="REFUSED" if actual_cause is not None else "CONSUMER_ACCEPTED_NO_ADMISSION"
+-        a171_validate_observation(A171_OBSERVATION,spec["expected"],c.need,data["id"])
+-        passed=True
++            A171_OBSERVATION["state"] = "REFUSED" if actual_cause is not None else "CONSUMER_ACCEPTED_NO_ADMISSION"
++        a171_validate_observation(A171_OBSERVATION, spec["expected"], c.need, data["id"])
++        passed = True
+     except BaseException as exc:
+-        primary=x.cause(exc);original_error=exc;passed=False
++        primary = x.cause(exc)
++        original_error = exc
++        passed = False
++        fault = A171_OBSERVATION["first_fault"]
++        if actual_cause is None and fault is not None:
++            actual_cause = fault["cause"]
++            outcome = "REFUSED"
+     finally:
+-        a171_reap_owned(births)
+-    try: after=observation()
+-    except BaseException as exc: cleanup.append(x.cause(exc))
+-    producer={"schema":"friday.a158.performing-producer-result.v1","id":data["id"],"position":data["position"],
+-        "generation":1,"producer":spec["producer"],"delegated_fork":False,"operation_outcome":outcome,
+-        "actual_cause":actual_cause,"operation_observation":A171_OBSERVATION,"body_complete":False,
+-        "acceptance_complete":False,"SourceReady":False,"GO":False}
+-    return {"schema":"friday.a158.whole216-controller-result.v1","id":data["id"],"position":data["position"],
+-        "generation":1,"producer_called":len(births)>0,"child_created":len(births)>0,"producer":producer,
+-        "producer_streams":None,"actual_auxiliary_cleanup":[],"primary_error":primary,
+-        "original_error":original_error,"cleanup_errors":cleanup,"session_before":before,"session_after":after,
+-        "native_child":None,"native_evidence":None,"operation_outcome":outcome,"actual_cause":actual_cause,
+-        "passed":passed,"disposition":"SOURCE_CAUSAL_ROUTE_OBSERVED_NO_WHOLE_ADMISSION" if passed else "REFUSED_SCOPED_RECEIPT",
+-        "terminal_completion":passed,"body_complete":False,"acceptance_complete":False,"SourceReady":False,"GO":False,
+-        "whole216_credit":False,"F10_waiver":False,"whole_assignment_RAM_and_implicit_IO":"UNKNOWN_NOT_ZERO_NOT_PROVEN"}
++        a171_consume_retirement(journal, sink.get("owned"), cleanup)
++    try:
++        after = observation()
++    except BaseException as exc:
++        cleanup.append(x.cause(exc))
++    streams = [item for item in A171_OBSERVATION["operation_raw"]
++               if item.get("label") in ("outer_stdout", "outer_stderr", "write_all_body")]
++    producer = {"schema": "friday.a158.performing-producer-result.v1", "id": data["id"],
++                "position": data["position"], "generation": 1, "producer": spec["producer"],
++                "delegated_fork": False, "operation_outcome": outcome, "actual_cause": actual_cause,
++                "operation_observation": A171_OBSERVATION, "body_complete": False,
++                "acceptance_complete": False, "SourceReady": False, "GO": False}
++    return {"schema": "friday.a158.whole216-controller-result.v1", "id": data["id"],
++            "position": data["position"], "generation": 1, "producer_called": len(journal) > 0,
++            "child_created": len(journal) > 0, "producer": producer, "producer_streams": streams,
++            "actual_auxiliary_cleanup": [{"pid": rec["pid"], "reaped": rec["reaped"],
++                                          "retirement": rec["retirement"], "errors": list(rec["errors"])}
++                                         for rec in journal],
++            "primary_error": primary, "original_error": original_error, "cleanup_errors": cleanup,
++            "session_before": before, "session_after": after, "native_child": None, "native_evidence": None,
++            "operation_outcome": outcome, "actual_cause": actual_cause, "passed": passed,
++            "disposition": "SOURCE_CAUSAL_ROUTE_OBSERVED_NO_WHOLE_ADMISSION" if passed else "REFUSED_SCOPED_RECEIPT",
++            "terminal_completion": passed, "body_complete": False, "acceptance_complete": False,
++            "SourceReady": False, "GO": False, "whole216_credit": False, "F10_waiver": False,
++            "whole_assignment_RAM_and_implicit_IO": "UNKNOWN_NOT_ZERO_NOT_PROVEN"}
+ 
+ def a171_restore_raw_frames(producer, trailer):
+     obs=producer.get("operation_observation") if type(producer) is dict else None
+@@ -819,12 +945,76 @@
+         if type(item) is dict and item.get("transport")=="stdout_frame":
+             c.need(len(rest)>=4,"A171_FULL_RAW_FRAME_NOT_RESTORED")
+             size=int.from_bytes(rest[:4],"big")
+-            c.need(size==item.get("bytes") and 0<=size<=262144 and len(rest)>=4+size,"A171_FULL_RAW_FRAME_NOT_RESTORED")
++            c.need(size==item.get("bytes") and 0<=size<=1048576 and len(rest)>=4+size,"A171_FULL_RAW_FRAME_NOT_RESTORED")
+             blob=bytes(rest[4:4+size])
+             c.need(hashlib.sha256(blob).hexdigest()==item.get("sha256"),"A171_FULL_RAW_FRAME_NOT_RESTORED")
+             item["raw_hex"]=blob.hex();rest=rest[4+size:]
+     c.need(rest==b"","A171_FULL_RAW_FRAME_NOT_RESTORED")
+ 
++
++def a171_resource_observer_receipt(data, spec, plan, cap):
++    global A171_OBSERVATION, A171_RAW_FRAMES
++    A171_RAW_FRAMES = []
++    A171_OBSERVATION = a171_new_observation()
++    consumer = spec["expected"]["consumer"]
++    A171_OBSERVATION["resource_precondition"] = {
++        "domain": "original_observer_before_inner_leaf", "passed": False,
++        "entered_inner_leaf": False, "joined_delegated_producer": False,
++        "prepared_delegated_producer": False}
++    cleanup = []
++    before = None
++    primary = None
++    original_error = None
++    passed = False
++    outcome = None
++    actual_cause = None
++    try:
++        before = observation()
++    except BaseException as exc:
++        cleanup.append(x.cause(exc))
++    try:
++        if consumer == "G1.resources":
++            resources = a171_called(consumer, "G1.resources", x.m.resources)
++        elif consumer == "acquisition_resources":
++            resources = a171_called(consumer, "acquisition_resources", x.acquisition_resources)
++        else:
++            raise A171CodeGap("ORIGINAL_RESOURCE_CONSUMER:" + consumer)
++        A171_OBSERVATION["resource_precondition"]["passed"] = True
++        A171_OBSERVATION["resource_precondition"]["actual_consumer"] = consumer
++        if type(resources) is dict:
++            keep = ("aggregate_envelope", "outer_budget", "inner_budget", "outer_as",
++                    "coordinator_as", "worker_as_each")
++            A171_OBSERVATION["facts"]["resource_envelope"] = {key: resources[key] for key in keep if key in resources}
++        fault = A171_OBSERVATION["first_fault"]
++        actual_cause = None if fault is None else fault["cause"]
++        outcome = "RETURNED" if actual_cause is None else "REFUSED"
++        if A171_OBSERVATION["state"] is None:
++            A171_OBSERVATION["state"] = "CONSUMER_ACCEPTED_NO_ADMISSION" if actual_cause is None else "REFUSED"
++        a171_validate_observation(A171_OBSERVATION, spec["expected"], c.need, data["id"])
++        passed = True
++    except BaseException as exc:
++        primary = x.cause(exc)
++        original_error = exc
++        passed = False
++        fault = A171_OBSERVATION["first_fault"]
++        if fault is not None:
++            actual_cause = fault["cause"]
++            outcome = "REFUSED"
++    producer = {"schema": "friday.a158.performing-producer-result.v1", "id": data["id"],
++                "position": data["position"], "generation": 1, "producer": spec["producer"],
++                "delegated_fork": False, "operation_outcome": outcome, "actual_cause": actual_cause,
++                "operation_observation": A171_OBSERVATION, "body_complete": False,
++                "acceptance_complete": False, "SourceReady": False, "GO": False}
++    return {"schema": "friday.a158.whole216-controller-result.v1", "id": data["id"],
++            "position": data["position"], "generation": 1, "producer_called": False, "child_created": False,
++            "producer": producer, "producer_streams": [], "actual_auxiliary_cleanup": cleanup,
++            "primary_error": primary, "original_error": original_error, "cleanup_errors": cleanup,
++            "session_before": before, "session_after": None, "native_child": None, "native_evidence": None,
++            "operation_outcome": outcome, "actual_cause": actual_cause, "passed": passed,
++            "disposition": "SOURCE_CAUSAL_ROUTE_OBSERVED_NO_WHOLE_ADMISSION" if passed else "REFUSED_SCOPED_RECEIPT",
++            "terminal_completion": passed, "body_complete": False, "acceptance_complete": False,
++            "SourceReady": False, "GO": False, "whole216_credit": False, "F10_waiver": False,
++            "whole_assignment_RAM_and_implicit_IO": "UNKNOWN_NOT_ZERO_NOT_PROVEN"}
+ 
+ def controls_whole216(raw,plan):
+     global WHOLE216_CUSTODY
+@@ -837,6 +1027,10 @@
+             "body_complete":False,"acceptance_complete":False,"SourceReady":False,"GO":False}
+     if spec["expected"]["owned_children"]:
+         receipt=a171_coordinator_receipt(data,spec,plan,cap)
++        WHOLE216_CUSTODY=receipt
++        return receipt
++    if spec["expected"]["consumer"] in ("G1.resources","acquisition_resources"):
++        receipt=a171_resource_observer_receipt(data,spec,plan,cap)
+         WHOLE216_CUSTODY=receipt
+         return receipt
+     c.need(lib.fr_controller_prepare(data["position"])==0,"A158_ROOT_SELECTED_PREPARE_REQUEST")
+@@ -1659,6 +1853,9 @@
+         for phase in value["phase_order"]),"A171_ACTUAL_PHASE_ORDER")
+     actual_times=[int(phase["at_ns"]) for phase in value["phase_order"]]
+     need(actual_times==sorted(actual_times),"A171_ACTUAL_MONOTONIC_PHASE_ORDER")
++    if case.startswith("outer_") or case.startswith("owned_registration_"):
++        labels=[item.get("label") for item in value["operation_raw"]]
++        need("outer_stdout" in labels and "outer_stderr" in labels,"A171_COMPLETE_OUTER_STREAMS_REQUIRED")
+     for raw in value["operation_raw"]:
+         if raw.get("transport")=="stdout_frame" and type(raw.get("raw_hex")) is not str:
+             need(False,"A171_FULL_RAW_FRAME_NOT_RESTORED")

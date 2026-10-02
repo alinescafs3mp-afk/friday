@@ -1,0 +1,43 @@
+{
+  "api_call_order": [
+    "recorder.check.state",
+    "recorder.check.state",
+    "syscall"
+  ],
+  "checks_skipped": false,
+  "cleanup_rule": "name endswith .close or name is Session.cleanup",
+  "consumer": "source/ordinary_root_consumers.py",
+  "error_post_state": [
+    "type",
+    "errno",
+    "text",
+    "args"
+  ],
+  "executed": false,
+  "first_fault": "earliest actual predicate whose result is not True",
+  "fixed_refusal_reintroduced": false,
+  "historical_operational_bodies": "ABSTRACT_REQUIRED_NOT_RUN",
+  "n02_preserved": {
+    "controller_report": "RUN_RETURNED",
+    "entrypoint_returncodes": [
+      1
+    ],
+    "native_exit": 125,
+    "source_files_rewritten": false,
+    "source_status": "RUN_REPORTED"
+  },
+  "producer_byte_equal": [
+    "caller.py",
+    "controller.py",
+    "native_grammar.py",
+    "root_native_launcher.py",
+    "source_grammar.py",
+    "staged_sender.py"
+  ],
+  "producer_order_before_body": [
+    "method.enter",
+    "recorder.check.state",
+    "recorder.check.state"
+  ],
+  "schema": "friday.grok.lab867.connected-join.v1"
+}

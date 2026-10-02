@@ -1,0 +1,413 @@
+{
+  "schema": "friday.sol063.private-full9-pathset.v1",
+  "leaves": [
+    {
+      "path": "/var/tmp/friday-sol063-lab866-browser-whole209-all216-all29-independent-source-review/README-SOL063.txt",
+      "bytes": 7128,
+      "sha256": "b501ff258a0a061e393a3526474a3257a21d12976d8909d8f5f143ad44d5c966",
+      "identity9_decimal_strings": [
+        "2050",
+        "3980474",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "7128",
+        "1790944775699708993",
+        "1790944775749711706"
+      ]
+    },
+    {
+      "path": "/var/tmp/friday-sol063-lab866-browser-whole209-all216-all29-independent-source-review/actual-delta8-equal207.json",
+      "bytes": 43956,
+      "sha256": "4ea4ee99dc35167e4a705c1f5fe81b73c73be3c5cc1c314979c44d6fcc2b7d16",
+      "identity9_decimal_strings": [
+        "2050",
+        "3980464",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "43956",
+        "1790944559636588993",
+        "1790944559636588993"
+      ]
+    },
+    {
+      "path": "/var/tmp/friday-sol063-lab866-browser-whole209-all216-all29-independent-source-review/all6-independent.json",
+      "bytes": 3334,
+      "sha256": "6f6b543c47f2f7675737d6a67454da2338bc5cf818b6705ff6807c183b28fb38",
+      "identity9_decimal_strings": [
+        "2050",
+        "3980471",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "3334",
+        "1790944559706440488",
+        "1790944559706440488"
+      ]
+    },
+    {
+      "path": "/var/tmp/friday-sol063-lab866-browser-whole209-all216-all29-independent-source-review/author/expected-pins.json",
+      "bytes": 233138,
+      "sha256": "0c13bab9b267b8b509745964c8b3369ca629e0c9b95673de187a9da40e473ad3",
+      "identity9_decimal_strings": [
+        "2050",
+        "3980458",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "233138",
+        "1790943663166464726",
+        "1790943663166464726"
+      ]
+    },
+    {
+      "path": "/var/tmp/friday-sol063-lab866-browser-whole209-all216-all29-independent-source-review/author/intake-structural-summary.json",
+      "bytes": 25589,
+      "sha256": "7a5b506ed97e485b89a75916324adf2959c155b60a2d67b52e1ff2b304c88bfa",
+      "identity9_decimal_strings": [
+        "2050",
+        "3980460",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "25589",
+        "1790943663172694182",
+        "1790943663172694182"
+      ]
+    },
+    {
+      "path": "/var/tmp/friday-sol063-lab866-browser-whole209-all216-all29-independent-source-review/author/intake-verification.json",
+      "bytes": 157661,
+      "sha256": "fe22b7ec262b0db4cb649235941629b4727aaccac7ac62a852119a2064765b3d",
+      "identity9_decimal_strings": [
+        "2050",
+        "3980457",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "157661",
+        "1790943663165776886",
+        "1790943663165776886"
+      ]
+    },
+    {
+      "path": "/var/tmp/friday-sol063-lab866-browser-whole209-all216-all29-independent-source-review/author/intake.py",
+      "bytes": 6128,
+      "sha256": "d6625f07736ea3959c0db0ff46a6e61f5ad573df8afcdeefc52788cf494db81f",
+      "identity9_decimal_strings": [
+        "2050",
+        "3980456",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "6128",
+        "1790943663005392727",
+        "1790943663050395288"
+      ]
+    },
+    {
+      "path": "/var/tmp/friday-sol063-lab866-browser-whole209-all216-all29-independent-source-review/author/materialization-read-ledger.json",
+      "bytes": 131436,
+      "sha256": "7c8974d57b29fa48536c5f2bf7ea2510f9ad68d1af0be791f0f304e8e9df49f5",
+      "identity9_decimal_strings": [
+        "2050",
+        "3980473",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "131436",
+        "1790944559707018021",
+        "1790944559707018021"
+      ]
+    },
+    {
+      "path": "/var/tmp/friday-sol063-lab866-browser-whole209-all216-all29-independent-source-review/author/materialize-review.py",
+      "bytes": 25647,
+      "sha256": "6aad340e0868f548ac3a11cce0e7aa5fcec29f39e5b8a7c7a9a27543d8c86f14",
+      "identity9_decimal_strings": [
+        "2050",
+        "3980462",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "25647",
+        "1790944531112791041",
+        "1790944531163793944"
+      ]
+    },
+    {
+      "path": "/var/tmp/friday-sol063-lab866-browser-whole209-all216-all29-independent-source-review/author/normative-inputs.json",
+      "bytes": 970332,
+      "sha256": "3cce02eae17b2592074cafd95080be904f821a4f720e52f98a5e62cccce16955",
+      "identity9_decimal_strings": [
+        "2050",
+        "3980459",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "970332",
+        "1790943663172178653",
+        "1790943663172178653"
+      ]
+    },
+    {
+      "path": "/var/tmp/friday-sol063-lab866-browser-whole209-all216-all29-independent-source-review/author/received.json",
+      "bytes": 777,
+      "sha256": "1a9b2ce42651c57aaf040a70006abd48aa1057f40ccbf8b61863e0d2ffc548cb",
+      "identity9_decimal_strings": [
+        "2050",
+        "3980455",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "777",
+        "1790943663004392670",
+        "1790943663050395288"
+      ]
+    },
+    {
+      "path": "/var/tmp/friday-sol063-lab866-browser-whole209-all216-all29-independent-source-review/author/review-decisions.json",
+      "bytes": 15866,
+      "sha256": "c6ebae7f5372840a298e6f7a58ba529c95b48f5b0812aca59f4485ea165c00d8",
+      "identity9_decimal_strings": [
+        "2050",
+        "3933872",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "15866",
+        "1790944551682961547",
+        "1790944551682961547"
+      ]
+    },
+    {
+      "path": "/var/tmp/friday-sol063-lab866-browser-whole209-all216-all29-independent-source-review/author/seal-review.py",
+      "bytes": 7446,
+      "sha256": "cb45817ff6b037794b0603b69a3fc13efedf7b022eacf014fb4c6a0859893711",
+      "identity9_decimal_strings": [
+        "2050",
+        "3980475",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "7446",
+        "1790944775699708993",
+        "1790944775749711706"
+      ]
+    },
+    {
+      "path": "/var/tmp/friday-sol063-lab866-browser-whole209-all216-all29-independent-source-review/costs.json",
+      "bytes": 1714,
+      "sha256": "a4b63e2a52d16f1e65b4ec445f1ed40d5bf6e621f40c9a7669c839135f7973b7",
+      "identity9_decimal_strings": [
+        "2050",
+        "3980477",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "1714",
+        "1790944797202932464",
+        "1790944797202932464"
+      ]
+    },
+    {
+      "path": "/var/tmp/friday-sol063-lab866-browser-whole209-all216-all29-independent-source-review/current-binders-review.json",
+      "bytes": 2758,
+      "sha256": "15e08c7d443bf378a8a0e3b6645623561639d74561739021adb93f6b655b6f59",
+      "identity9_decimal_strings": [
+        "2050",
+        "3980470",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "2758",
+        "1790944559706273479",
+        "1790944559706273479"
+      ]
+    },
+    {
+      "path": "/var/tmp/friday-sol063-lab866-browser-whole209-all216-all29-independent-source-review/exact29-independent.json",
+      "bytes": 43702,
+      "sha256": "478ffbee6e5fd88bdf15318590a26f1ea13e9d5f3aede03d60c87966cc763176",
+      "identity9_decimal_strings": [
+        "2050",
+        "3980468",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "43702",
+        "1790944559700512949",
+        "1790944559700512949"
+      ]
+    },
+    {
+      "path": "/var/tmp/friday-sol063-lab866-browser-whole209-all216-all29-independent-source-review/final-witness-revalidation.json",
+      "bytes": 220,
+      "sha256": "41d27c67a1daa4987f79a58353e2209a522ecc583dfed1556e393f73dc6609df",
+      "identity9_decimal_strings": [
+        "2050",
+        "3980476",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "220",
+        "1790944797202651940",
+        "1790944797202651940"
+      ]
+    },
+    {
+      "path": "/var/tmp/friday-sol063-lab866-browser-whole209-all216-all29-independent-source-review/finding-code-sites.json",
+      "bytes": 28384,
+      "sha256": "d04823d76dbb49d60db858dc4bff0e77346592d14ee4dca972a246b07b14bfe6",
+      "identity9_decimal_strings": [
+        "2050",
+        "3980466",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "28384",
+        "1790944559666713417",
+        "1790944559666713417"
+      ]
+    },
+    {
+      "path": "/var/tmp/friday-sol063-lab866-browser-whole209-all216-all29-independent-source-review/full-methods-byte-index.json",
+      "bytes": 655012,
+      "sha256": "6621f0e045b63699abbce699c0b02cd5ea19c929c6888b96769278f2cefb91ce",
+      "identity9_decimal_strings": [
+        "2050",
+        "3980465",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "655012",
+        "1790944559662443172",
+        "1790944559662443172"
+      ]
+    },
+    {
+      "path": "/var/tmp/friday-sol063-lab866-browser-whole209-all216-all29-independent-source-review/publication47.json",
+      "bytes": 2373,
+      "sha256": "64a9090a2866355fe0e74fe67c32fe04a969ada93b5c2bcf3885951e4d3de9e1",
+      "identity9_decimal_strings": [
+        "2050",
+        "3980463",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "2373",
+        "1790944559594411735",
+        "1790944559594411735"
+      ]
+    },
+    {
+      "path": "/var/tmp/friday-sol063-lab866-browser-whole209-all216-all29-independent-source-review/review.json",
+      "bytes": 19114,
+      "sha256": "c51d0216bdc584c2f0b292a0c97c85ee63e86a311ac3e7b2b0069f5f8e6d6b69",
+      "identity9_decimal_strings": [
+        "2050",
+        "3980472",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "19114",
+        "1790944559706606998",
+        "1790944559706606998"
+      ]
+    },
+    {
+      "path": "/var/tmp/friday-sol063-lab866-browser-whole209-all216-all29-independent-source-review/whole209-independent.json",
+      "bytes": 288931,
+      "sha256": "861e10e986597b6f96bc0f38f185b2dae9518dd68dba7e16f3864ada6d835089",
+      "identity9_decimal_strings": [
+        "2050",
+        "3980469",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "288931",
+        "1790944559703027793",
+        "1790944559703027793"
+      ]
+    },
+    {
+      "path": "/var/tmp/friday-sol063-lab866-browser-whole209-all216-all29-independent-source-review/whole216-independent.json",
+      "bytes": 950354,
+      "sha256": "7e78d2699c459b2c055fe7e39b8c594f287571d1a5937b1d2a20a29389b17b49",
+      "identity9_decimal_strings": [
+        "2050",
+        "3980467",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "950354",
+        "1790944559699690002",
+        "1790944559699690002"
+      ]
+    }
+  ],
+  "exact_pathset_including_seal_manifest": [
+    "README-SOL063.txt",
+    "actual-delta8-equal207.json",
+    "all6-independent.json",
+    "author/expected-pins.json",
+    "author/intake-structural-summary.json",
+    "author/intake-verification.json",
+    "author/intake.py",
+    "author/materialization-read-ledger.json",
+    "author/materialize-review.py",
+    "author/normative-inputs.json",
+    "author/received.json",
+    "author/review-decisions.json",
+    "author/seal-review.py",
+    "costs.json",
+    "current-binders-review.json",
+    "exact29-independent.json",
+    "final-witness-revalidation.json",
+    "finding-code-sites.json",
+    "full-methods-byte-index.json",
+    "manifest.json",
+    "publication47.json",
+    "review.json",
+    "seal/pathset.json",
+    "whole209-independent.json",
+    "whole216-independent.json"
+  ],
+  "identity9_fields": [
+    "dev",
+    "ino",
+    "mode",
+    "uid",
+    "gid",
+    "nlink",
+    "size",
+    "mtime_ns",
+    "ctime_ns"
+  ],
+  "private_dirs0700_files0600_nlink1": true,
+  "DAG": "leaves -> seal/pathset -> manifest -> external RESULT; exact names for seal/manifest not cyclic content hashes"
+}

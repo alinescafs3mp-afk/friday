@@ -1,0 +1,281 @@
+{
+  "exact_metadata_read_bytes": 900852,
+  "rows": [
+    {
+      "path": "/var/tmp/friday-sol060-lab863-node-whole6-all35-all6-connected-error-raw-source-closure/author/input.json",
+      "bytes": 36975,
+      "sha256": "942b90a238ea573e7bf5910325742a23313c641d3912bdec00b2d6f92e5c3294",
+      "identity9_decimal_strings": [
+        "2050",
+        "6979760",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "36975",
+        "1790934337138867822",
+        "1790934337138867822"
+      ]
+    },
+    {
+      "path": "/var/tmp/friday-sol060-lab863-node-whole6-all35-all6-connected-error-raw-source-closure/caller.py",
+      "bytes": 130483,
+      "sha256": "d52f956b01be01bb693f183b8eed7f5e7810113461ab0b23d3de2d33fa2e4608",
+      "identity9_decimal_strings": [
+        "2050",
+        "6979728",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "130483",
+        "1790935293602158135",
+        "1790935293602158135"
+      ]
+    },
+    {
+      "path": "/var/tmp/friday-lab863-a172-node-whole6-all35-error-raw-onceclose-source-closure/caller.py",
+      "bytes": 116904,
+      "sha256": "d739a7e3705c5f76563fdf1a0dfff5bd90490689037b5eb6e187086c5d4d1236",
+      "identity9_decimal_strings": [
+        "2050",
+        "6979657",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "116904",
+        "1790932727343413470",
+        "1790932727343413470"
+      ]
+    },
+    {
+      "path": "/var/tmp/friday-sol060-lab863-node-whole6-all35-all6-connected-error-raw-source-closure/supervisor.py",
+      "bytes": 99751,
+      "sha256": "6b41511574416232d8a5bb6651f48b3fc65e3dc72e6e03b01cb221471f414ac2",
+      "identity9_decimal_strings": [
+        "2050",
+        "6979752",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "99751",
+        "1790935293600985868",
+        "1790935293600985868"
+      ]
+    },
+    {
+      "path": "/var/tmp/friday-lab863-a172-node-whole6-all35-error-raw-onceclose-source-closure/supervisor.py",
+      "bytes": 89782,
+      "sha256": "bcd0fb9f0c5d68468aa896b4a6f9a36f5e32a5d62dc11c6c3bc3787cfa128d10",
+      "identity9_decimal_strings": [
+        "2050",
+        "6979658",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "89782",
+        "1790932727344413527",
+        "1790932727344413527"
+      ]
+    },
+    {
+      "path": "/var/tmp/friday-sol060-lab863-node-whole6-all35-all6-connected-error-raw-source-closure/verifier.py",
+      "bytes": 71834,
+      "sha256": "aa1828a6b6d852e2ea8d87b22573439c213e7614d8e0321c0790e53236c0224e",
+      "identity9_decimal_strings": [
+        "2050",
+        "6979753",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "71834",
+        "1790935293599199965",
+        "1790935293599199965"
+      ]
+    },
+    {
+      "path": "/var/tmp/friday-lab863-a172-node-whole6-all35-error-raw-onceclose-source-closure/verifier.py",
+      "bytes": 62097,
+      "sha256": "9d906e5e6fb2c8f54929da2ef50399138afceef1fb16a1092ca965fcb3efa8d9",
+      "identity9_decimal_strings": [
+        "2050",
+        "6979659",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "62097",
+        "1790932727345413585",
+        "1790932727345413585"
+      ]
+    },
+    {
+      "path": "/var/tmp/friday-sol060-lab863-node-whole6-all35-all6-connected-error-raw-source-closure/launch-contract.json",
+      "bytes": 48583,
+      "sha256": "ed4c5043e0c2fbb6022f15b4998dd142cc14eafe3846666f38070f21d27396ff",
+      "identity9_decimal_strings": [
+        "2050",
+        "6979745",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "48583",
+        "1790935293599653903",
+        "1790935293599653903"
+      ]
+    },
+    {
+      "path": "/var/tmp/friday-lab863-a172-node-whole6-all35-error-raw-onceclose-source-closure/launch-contract.json",
+      "bytes": 48250,
+      "sha256": "587b0beeb6b2b45980463c1d1032efc5c4430d7798f36c42d0e54279c8fd6418",
+      "identity9_decimal_strings": [
+        "2050",
+        "6979660",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "48250",
+        "1790932727346413642",
+        "1790932727346413642"
+      ]
+    },
+    {
+      "path": "/var/tmp/friday-sol060-lab863-node-whole6-all35-all6-connected-error-raw-source-closure/expectations.json",
+      "bytes": 9542,
+      "sha256": "13139e16e468522ce4403e75f0928f8b64df8fc3717084b78a752b210143730e",
+      "identity9_decimal_strings": [
+        "2050",
+        "6979742",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "9542",
+        "1790935293602607061",
+        "1790935293602607061"
+      ]
+    },
+    {
+      "path": "/var/tmp/friday-lab863-a172-node-whole6-all35-error-raw-onceclose-source-closure/expectations.json",
+      "bytes": 9128,
+      "sha256": "c6c2635abb11aa3df34d662ef0d7495e0c96ce4940664af62a01f343085eb5cc",
+      "identity9_decimal_strings": [
+        "2050",
+        "6979661",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "9128",
+        "1790932727347413700",
+        "1790932727347413700"
+      ]
+    },
+    {
+      "path": "/var/tmp/friday-sol060-lab863-node-whole6-all35-all6-connected-error-raw-source-closure/ordinary-surplus.txt",
+      "bytes": 158,
+      "sha256": "a21adfb2651cc9265aa37585b38adccec8b11fc627a7030493f76bfe0d5fec7e",
+      "identity9_decimal_strings": [
+        "2050",
+        "6979746",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "158",
+        "1790934337137143523",
+        "1790934337137143523"
+      ]
+    },
+    {
+      "path": "/var/tmp/friday-lab863-a172-node-whole6-all35-error-raw-onceclose-source-closure/ordinary-surplus.txt",
+      "bytes": 158,
+      "sha256": "a21adfb2651cc9265aa37585b38adccec8b11fc627a7030493f76bfe0d5fec7e",
+      "identity9_decimal_strings": [
+        "2050",
+        "6979643",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "158",
+        "1790932727328412608",
+        "1790932727328412608"
+      ]
+    },
+    {
+      "path": "/var/tmp/friday-lab863-a172-node-whole6-all35-error-raw-onceclose-source-closure/expectations.json",
+      "bytes": 9128,
+      "sha256": "c6c2635abb11aa3df34d662ef0d7495e0c96ce4940664af62a01f343085eb5cc",
+      "identity9_decimal_strings": [
+        "2050",
+        "6979661",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "9128",
+        "1790932727347413700",
+        "1790932727347413700"
+      ]
+    },
+    {
+      "path": "/var/tmp/friday-sol060-lab863-node-whole6-all35-all6-connected-error-raw-source-closure/provenance/LAB863/evidence/all35-producer-consumer-matrix.json",
+      "bytes": 82184,
+      "sha256": "86491544550cb1001ae8f8942c3b22f3cf56cbdbd15cbd405c3451e8caef9a1a",
+      "identity9_decimal_strings": [
+        "2050",
+        "6979740",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "82184",
+        "1790934337136279973",
+        "1790934337136279973"
+      ]
+    },
+    {
+      "path": "/home/jericho/.jericho/grok-takeover/ASTRA-E4-A178-INPUT-20261002.json",
+      "bytes": 82439,
+      "sha256": "c7d2d1c4264d79f03a6ab7f406e57aa63258314625f71e1a7a0ce20e893d28ed",
+      "identity9_decimal_strings": [
+        "2050",
+        "8533586",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "82439",
+        "1790933478782527721",
+        "1790933478852465230"
+      ]
+    },
+    {
+      "path": "/var/tmp/friday-sol060-lab863-node-whole6-all35-all6-connected-error-raw-source-closure/provenance/LAB863/performing-read-budget.json",
+      "bytes": 3456,
+      "sha256": "7e334c42c53210732d5350835140e1510fff689b7175438fb0f76b3993881078",
+      "identity9_decimal_strings": [
+        "2050",
+        "6979747",
+        "33152",
+        "1000",
+        "1000",
+        "1",
+        "3456",
+        "1790934337137281131",
+        "1790934337137281131"
+      ]
+    }
+  ],
+  "whole_IO_RAM": "UNKNOWN_NOT_ZERO",
+  "tool_patch_literal_helpers_read_reserve_bytes": 100663296,
+  "intake_exact": 4794480,
+  "no_supplied_syntax_AST_compile_import_exec_tests": true
+}

@@ -1,0 +1,74 @@
+{
+  "schema": "friday.a192.independent.current-code-findings.v1",
+  "verdict": "REJECT_CURRENT_SOURCE_CLOSURE",
+  "review_key": "A189-terminal87610b46-manifest21bf7d65-whole52-16changed36equal-code28-schema14-ref61-all17-6-3-2-202",
+  "findings": [
+    {
+      "id": "A192-C1-FINAL-ORIGINAL-ROOT-CUSTODY-PARENTHOOD-UNACCEPTED",
+      "severity": "MANDATORY_ORIGINAL_CODE_EDGE",
+      "normative": [
+        "A162 INPUT mandatory_edges[1..4], full original authority",
+        "A168 INPUT mandatory_edges/directions",
+        "SOL058 INPUT original required relation",
+        "A180 INPUT original_mandatory_edges[1..4], directions[1..3]",
+        "A189 INPUT directions[1,3,4]"
+      ],
+      "actual_producers": [
+        "native/source_owner.c:257 existing_parent_deadline",
+        "native/source_owner.c:1520 native_caller_destruct",
+        "native/source_owner.c:1701 native_cold_original_caller_consume",
+        "native/source_owner.c:1737 run_selected_existing_caller",
+        "tools/native_owner.py:1351 retain_selected_final_caller_capsule",
+        "tools/root_holder.py:515 complete_selected_root"
+      ],
+      "actual_cause": "The selected existing final Root TGID still solely owns the registered original raw/caller/packet/slot/FD/full202 state and any uncommitted direct Source/Root child relation when its original hard/minimum end, startup/task-confirmation exit, uncertain warm destructor, or cold consumer exits. Same-TGID task retirement and local result acceptance do not establish an accepted outside owner before that TGID loss; real byte/ACK/EOF/directwait receivers do not adopt its raw records or an unreaped grandchild.",
+      "positive_credit": "Finite hard process end really enforced, earlier work-tail task cutoff confirmed by kernel clear_tid, caller storage and child pairs preowned, finite exact both-family waits, called local native result consumer and warm close-before-clear all genuinely improve local edges.",
+      "required_relation": "Fold complete prescribed original custody/direct-parent duties into an ALREADY EXISTING independently selected outside native parent before bounded birth, or actually call a legally accepted original transfer/adoption before local loss, or confirm finite actual retirement before original native loss. This is expressly authorized inert topology/code work within original roles.",
+      "not_claimed": [
+        "No universal private heap/hostile kernel/arbitrary native domain theorem.",
+        "No claim that absence of CLONE_VM/customheap/subreaper wording proves impossibility or prohibits it.",
+        "No new Root role/process/service/grant, timer renewal, capraise, broad kill, infinite observer chain, or expired parking.",
+        "Missing future image/compiler/ABI/provider/grant alone is not this CODE finding."
+      ],
+      "runtime": "NOT_RUN"
+    },
+    {
+      "id": "A192-C2-SOURCE-NATIVE-RAW-REGISTRY-NOT-RETIRED",
+      "severity": "MANDATORY_ORIGINAL_CODE_EDGE",
+      "normative": [
+        "A180 INPUT directions[3]: complete raw lifetime before caller/interpreter/process destruction",
+        "A189 INPUT directions[2]: same exact raw graph actual finite accepted lifetime across normal/error/default/cleanup",
+        "A192 INPUT requirements[1,2]: actual Source AND Root native endpoints, primary/secondary/recorder before last native loss"
+      ],
+      "actual_producers": [
+        "native/source_owner.c:1370 source_raw_custody",
+        "native/source_owner.c:1385 retain_source_raw_exception",
+        "native/source_owner.c:171 own_current_caller_error",
+        "native/source_owner.c:1843 main trusted Source entry",
+        "tools/native_support.py:47 source_raw_owner",
+        "tools/native_support.py:23 SourceRawOwner.capture",
+        "source/public.py:969 exception_owned_result"
+      ],
+      "actual_cause": "Source main owns generic raw graphs in the new C-global source_raw_root and owns reached loader/factory/return failures in caller_errors[16]. At the actual bounded Source endpoint it clears only received-packet error triplets, then calls Py_FinalizeEx, then closes registered FDs and exits. It never clears source_raw_root or caller_errors/parent-error triplets and has no actual accepted full-raw receiver for those roots. External C strong references can retain traceback/meter/partial-result/held-range aliases across interpreter finalization; a successful finalized value or parent's process wait does not establish explicit raw-root retirement. The Root warm destructor's now-confirmed close-before-clear and Py_CLEAR loops are not called by Source main.",
+      "scope": "Concrete newly installed Source registry and actually reached prescribed Source entry/error paths. Not an assertion that every interpreter-private allocation must be exported; not a reopening of original seven R2 firstcatch credit.",
+      "distinction_from_C1": "Reached warm Source endpoint lacks retirement of its own newly registered root/error lane, including otherwise successful generic refusal. C1 concerns final original Root/error/cold/birth-prefix complete custody/parenthood. An integrator may group their common last-owner invariant, but must close both real called methods; Root-only residual1 is not whole closure.",
+      "positive_credit": "Generic raw-before-projection is materially implemented. Exact SourceRawOwner, constructor precommit, pending primary/recorder, C fixed16 lane, ContextVar identity, meter/terminal/ResultOwner aliases and low-level trusted entry preserve actual objects before projection.",
+      "required_relation": "Provide an actual called finite Source native consumer that accounts for registered raw roots/error lane and FD/resource alias retirement inside original Source ends, with honest uncertainty and accepted existing ownership when retirement is unconfirmed. Do not count Py_FinalizeEx/exit125/local-ref/typed detail as full acceptance.",
+      "runtime": "NOT_RUN"
+    }
+  ],
+  "prior_A185_C2": "LOCAL_RAW_BEFORE_PROJECTION_IMPLEMENTED; whole actual lifetime remains blocked by the above real endpoints",
+  "genuine_repairs_are_not_runtime_or_whole_acceptance": true,
+  "future_qualification": [
+    "Exact selected original provider/issuer/held native image, static link edges and loaded stock graph",
+    "Compiler/linker/allocator/interpreter/codec/kernel/ABI and pthread/clear_tid qualification",
+    "Original actual grants/clock/SourceUID/cgroup/physical fit and full resource observations",
+    "All mandatory independent controls/gates/live on final bytes"
+  ],
+  "future_absence_alone_CODE": false,
+  "SourceReady": false,
+  "Root_admission": false,
+  "runtime": "NOT_RUN",
+  "gates": "REQUIRED_NOT_RUN",
+  "GO": false
+}

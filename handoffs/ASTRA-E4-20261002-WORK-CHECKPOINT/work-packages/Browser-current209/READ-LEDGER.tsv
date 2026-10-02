@@ -1,0 +1,19 @@
+group	operation	charged_full_file_upper_bytes	status
+01	contract/input pin metadata/Root receipt reads and hashes including repeats	262144	BOUNDED_CONSERVATIVE
+02	selected current Source/DATA/ABI/maps reads and rg/jq scans including output truncation rereads	4194304	BOUNDED_CONSERVATIVE
+03	whole2093247B A079 copy and all current Source/metadata archives	3145728	BOUNDED_CONSERVATIVE
+04	apply_patch old-file reads and mechanical current7 path rewrite including all repeats	12582912	BOUNDED_CONSERVATIVE
+05	full86-member A079 SHA verification plus manifest/receipt/terminal and invariant SHA pins	3145728	BOUNDED_CONSERVATIVE
+06	old/new13 Source deltas and new51 full Source/DATA diffs	1048576	BOUNDED_CONSERVATIVE
+07	final old/new full complement/hash inventories, manifest construction, full final-member seal verification and terminal pins	16777216	RESERVED_BEFORE_SEAL
+08	proof JSON metadata/result/ledger/manifest repeated bounded reads	2097152	RESERVED_BEFORE_SEAL
+TOTAL	all explicit physical repeat reads charged irrespective of kernel cache	43253760	LESS_THAN_67108864_CAP
+HEADROOM	additional explicit seal/read contingency reserved before freeze	7077888	NOT_ZERO_ALLOWANCE
+UPPER	conservative charged upper including contingency	50331648	LESS_THAN_67108864_CAP
+PHYSICAL_BLOCK_IO	actual device/cache read bytes	UNKNOWN_NOT_ZERO	NOT_MEASURED
+IMPLICIT_IO	provider/tool infrastructure reads	UNKNOWN_NOT_ZERO	NOT_ASSUMED_ZERO
+RAM	actual preparation peak	UNKNOWN_NOT_ZERO	CONTRACT_CAP_4294967296
+CPU_IO_AFFINITY	actual quota and pressure	UNKNOWN_NOT_ZERO	NO_NATIVE_EXECUTION
+EFFECTS	Source imports/AST/compile/eval/native/control/GET/body/productGit/live/gates/release	0	NOT_RUN
+FREEZE	Source substantive frozen2026-10-01T18:08:14Z /21:08:14MSK elapsed4701sec	4701	BEFORE_ACCEPTED_PLUS4800
+SEAL_RESERVE	available before hard cutoff at Source freeze	699	GREATER_THAN600

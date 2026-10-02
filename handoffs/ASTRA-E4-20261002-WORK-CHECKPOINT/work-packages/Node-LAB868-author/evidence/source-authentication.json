@@ -1,0 +1,13 @@
+{
+  "GO": false,
+  "Root_admission": false,
+  "SourceReady": false,
+  "accepted": false,
+  "input_bytes": 104482,
+  "input_sha256": "a1cd00db96bb5b31e4632cb6a716d553966751c7b99b9d838c74f1f2155dbb07",
+  "pins_verified": 147,
+  "predecessor_manifest_sha256": "5316343b810b9442a67b37a590a082ef88947dece93517e409cf15738f6f4b15",
+  "predecessor_seal_sha256": "7a7eb6837740dfc4a385f1f2e0f8244e0439412ff5ed03c46b58c7126d589648",
+  "schema": "friday.grok.lab868.source-authentication.v1",
+  "source_execution": 0
+}

@@ -1,0 +1,474 @@
+# A171 inert Source text. No fixture constructor, network, exec or owner reset.
+# The external original caller selects operands in its existing sealed fd119.
+# A failure to implement an original domain remains CODE_GAP, never an oracle pass.
+A171_OBSERVATION=None
+
+class A171CodeGap(Exception):
+    pass
+
+def a171_identity(st):
+    return [str(v) for v in (st.st_dev,st.st_ino,st.st_mode,st.st_uid,st.st_gid,
+        st.st_nlink,st.st_size,st.st_mtime_ns,st.st_ctime_ns)]
+
+def a171_new_observation():
+    return {"schema":"friday.a171.actual-operation-observation.v1","state":None,
+        "stages":{},"started_routes":0,"hashes":[],"target_children":[],
+        "consumer_calls":[],"performer_entries":0,"phase_order":[],"facts":{},
+        "first_fault":None,"resource_precondition":None,"unavailable_reason":None,
+        "operation_raw":[],"descriptor_records":[],"runtime":"NOT_RUN_BY_AUTHOR"}
+
+def a171_called(consumer,stage,fn,*args,**kwargs):
+    observation=A171_OBSERVATION
+    if observation is not None:
+        observation["stages"][stage]=observation["stages"].get(stage,0)+1
+        observation["phase_order"].append({"phase":"consumer_enter","consumer":consumer,
+            "stage":stage,"at_ns":str(time.monotonic_ns())})
+        observation["consumer_calls"].append({"consumer":consumer,"stage":stage,
+            "returned":False,"error":None})
+        call=observation["consumer_calls"][-1]
+    try:
+        value=fn(*args,**kwargs)
+    except BaseException as exc:
+        if observation is not None:
+            # Preserve the actual SSL parser reason in the original local CA domain.
+            reason=exc.reason if isinstance(exc,x.ssl.SSLError) and stage=="ca_preflight" else x.cause(exc)
+            call["error"]=reason
+            if observation["first_fault"] is None:
+                observation["first_fault"]={"cause":reason,"stage":stage,
+                    "consumer":consumer,"at_ns":str(time.monotonic_ns())}
+            observation["phase_order"].append({"phase":"consumer_error","consumer":consumer,
+                "stage":stage,"cause":reason,"at_ns":str(time.monotonic_ns())})
+        raise
+    if observation is not None:
+        call["returned"]=True
+        observation["phase_order"].append({"phase":"consumer_return","consumer":consumer,
+            "stage":stage,"at_ns":str(time.monotonic_ns())})
+    return value
+
+def a171_run():
+    # Same original capsule ends. make_run's fresh defaults are replaced before use.
+    run=x.make_run(clock=time.monotonic_ns)
+    run.started=c.ADMISSION["start_ns"]
+    run.work=c.ADMISSION["work_ns"]
+    run.hard=c.ADMISSION["hard_ns"]
+    return run
+
+def a171_keys(args,keys):
+    c.need(type(args) is dict and set(args)==set(keys),"A171_EXACT_OPERATION_OPERANDS")
+
+def a171_parent(value):
+    c.need(type(value) is str and value.startswith("/var/tmp/astra-e4-browser3-a061-offline-") and
+        os.path.dirname(value)=="/var/tmp" and len(value)<=256,"A171_ORIGINAL_OWNED_DOMAIN")
+    fd=x.open_nf(value)
+    try:
+        st=os.fstat(fd)
+        c.need(x.stat.S_ISDIR(st.st_mode) and st.st_uid==st.st_gid==os.getuid()==1000 and
+            x.stat.S_IMODE(st.st_mode)==0o700,"A171_OWNED_PARENT_CUSTODY")
+        A171_OBSERVATION["facts"]["parent_identity9"]=a171_identity(st)
+    finally:os.close(fd)
+    return value
+
+def a171_path(parent,relative):
+    c.need(type(relative) is str and len(relative)<=256 and
+        all(v not in ("",".","..") for v in relative.split("/")),"A171_OWNED_RELATIVE_PATH")
+    return parent+"/"+relative
+
+def a171_fd_record(custody):
+    record={"fd":None,"owner":os.getpid(),"identity9":None,"close_attempted":False,
+        "closed":False,"close_error":None,"original_error":None}
+    custody.append(record)
+    return record
+
+def a171_close(record):
+    if record["fd"] is None:return
+    if record["close_attempted"]:return
+    record["close_attempted"]=True
+    try:os.close(record["fd"])
+    except BaseException as exc:
+        record["close_error"]=x.cause(exc);record["original_error"]=exc
+    else:record["closed"]=True
+
+def a171_borrow_source(role,custody):
+    c.need(type(role) is str and role in s.SOURCE_ROLES,"A171_FIXED_EXISTING_SOURCE_ROLE")
+    record=a171_fd_record(custody)
+    record["fd"]=os.dup(s.SOURCE_ROLES[role][0])
+    record["identity9"]=a171_identity(os.fstat(record["fd"]))
+    return record
+
+def a171_result_bytes(raw,label):
+    c.need(type(raw) is bytes and len(raw)<=262144,"A171_OPERATION_RAW_CAP")
+    A171_OBSERVATION["operation_raw"].append({"label":label,"raw_hex":raw.hex(),
+        "bytes":len(raw),"sha256":hashlib.sha256(raw).hexdigest(),"hash_only":False})
+
+def a171_create_owned(path,raw,custody):
+    record=a171_fd_record(custody)
+    try:
+        c.need(time.monotonic_ns()<c.ADMISSION["work_ns"],"A171_ORIGINAL_MUTATION_END")
+        record["fd"]=os.open(path,os.O_WRONLY|os.O_CREAT|os.O_EXCL|os.O_NOFOLLOW,0o600)
+        record["identity9"]=a171_identity(os.fstat(record["fd"]))
+        view=memoryview(raw)
+        while view:
+            c.need(time.monotonic_ns()<c.ADMISSION["work_ns"],"A171_ORIGINAL_MUTATION_END")
+            count=os.write(record["fd"],view);c.need(count>0,"A171_ACTUAL_OWNED_WRITE")
+            view=view[count:]
+        os.fsync(record["fd"])
+        return a171_identity(os.fstat(record["fd"]))
+    finally:a171_close(record)
+
+def a171_retained_control(case,held,parent,args,custody):
+    if case=="retained_positive":return None
+    key=next(iter(held.fds));path=held.root+"/"+key;original=held.fds[key]
+    c.need(time.monotonic_ns()<c.ADMISSION["work_ns"],"A171_ORIGINAL_MUTATION_END")
+    before=a171_identity(os.fstat(original));mutation={"case":case,"before_identity9":before}
+    raw=whole216_hex(args["mutation_hex"],65536)
+    c.need(bool(raw),"A171_ROOT_SELECTED_ORIGINAL_INERT_MUTATION_BYTES")
+    if case in ("retained_content","late_input"):
+        record=a171_fd_record(custody)
+        try:
+            record["fd"]=os.open(path,os.O_WRONLY|os.O_NOFOLLOW)
+            record["identity9"]=a171_identity(os.fstat(record["fd"]))
+            c.need(record["identity9"]==before,"A171_SAME_ACTUAL_OWNED_RETAINED_FILE")
+            count=os.pwrite(record["fd"],raw,0)
+            c.need(count==len(raw),"A171_ACTUAL_RETAINED_MUTATION_WRITE")
+            os.fsync(record["fd"])
+        finally:a171_close(record)
+        mutation["after_identity9"]=a171_identity(os.fstat(original))
+    elif case=="retained_path":
+        new_path=path+".a171-owned-new"
+        mutation["replacement_identity9"]=a171_create_owned(new_path,raw,custody)
+        os.replace(new_path,path)
+        mutation["named_after_identity9"]=a171_identity(os.stat(path,follow_symlinks=False))
+    elif case=="retained_fd":
+        record=a171_fd_record(custody);record["fd"]=original;record["identity9"]=before
+        a171_close(record);c.need(record["closed"],"A171_RETAINED_NEGATIVE_CLOSE_UNCONFIRMED")
+        held.fds[key]=-1
+        mutation["actual_closed_fd"]=original
+        return key,mutation
+    elif case=="retained_directory":
+        saved=parent+"/a171-owned-saved-directory"
+        c.need(not os.path.lexists(saved),"A171_OWNED_SAVE_COLLISION")
+        directory=held.root+"/d00"
+        os.rename(directory,saved);os.mkdir(directory,0o700)
+        mutation["directory_named_after_identity9"]=a171_identity(os.stat(directory,follow_symlinks=False))
+        mutation["directory_held_identity9"]=a171_identity(os.fstat(held.dirs["d00"]))
+    elif case=="retained_membership":
+        mutation["created_identity9"]=a171_create_owned(held.root+"/a171-owned-extra",raw,custody)
+    else:raise A171CodeGap("ORIGINAL_RETAINED_CONTROL_PHASE_NOT_CONNECTED:"+case)
+    return None,mutation
+
+def a171_output_control(case,out,parent,root,raw,custody):
+    if case=="output_positive":return False
+    path=root+"/bill.json";before=a171_identity(os.stat(path,follow_symlinks=False))
+    mutation={"case":case,"before_identity9":before}
+    c.need(time.monotonic_ns()<c.ADMISSION["work_ns"],"A171_ORIGINAL_MUTATION_END")
+    if case=="output_mode":os.chmod(path,0o644)
+    elif case=="output_hardlink":os.link(path,parent+"/a171-owned-link",follow_symlinks=False)
+    elif case=="output_symlink":
+        os.unlink(path);os.symlink(parent+"/a171-owned-absent",path)
+    elif case=="output_membership":
+        mutation["created_identity9"]=a171_create_owned(root+"/a171-owned-extra",raw,custody)
+    elif case=="output_root":
+        saved=parent+"/a171-owned-saved-output"
+        c.need(not os.path.lexists(saved),"A171_OWNED_SAVE_COLLISION")
+        os.rename(root,saved);os.mkdir(root,0o700)
+    elif case=="output_directory":
+        saved=parent+"/a171-owned-saved-output-directory"
+        c.need(not os.path.lexists(saved),"A171_OWNED_SAVE_COLLISION")
+        os.rename(root+"/archives/playwright",saved);os.mkdir(root+"/archives/playwright",0o700)
+    elif case=="output_disk":
+        target=x.LIMITS["disk_bytes_max"]+1
+        soft,hard=resource.getrlimit(resource.RLIMIT_FSIZE)
+        if soft!=resource.RLIM_INFINITY and soft<target:
+            raise A171CodeGap("ORIGINAL_SPARSE_DISK_CONTROL_EXCEEDS_UNCHANGED_FSIZE_LIMIT")
+        record=a171_fd_record(custody)
+        try:
+            record["fd"]=os.open(path,os.O_WRONLY|os.O_NOFOLLOW)
+            record["identity9"]=a171_identity(os.fstat(record["fd"]))
+            c.need(record["identity9"]==before,"A171_SAME_ACTUAL_OWNED_OUTPUT_FILE")
+            os.ftruncate(record["fd"],target)
+        finally:a171_close(record)
+    elif case=="output_collision":
+        A171_OBSERVATION["facts"]["controlled_mutation"]=mutation
+        return True
+    else:raise A171CodeGap("ORIGINAL_OUTPUT_CONTROL_PHASE_NOT_CONNECTED:"+case)
+    if case!="output_root":
+        mutation["named_after_identity9"]=a171_identity(os.stat(path,follow_symlinks=False))
+    else:
+        mutation["named_after_root_identity9"]=a171_identity(os.stat(root,follow_symlinks=False))
+    A171_OBSERVATION["facts"]["controlled_mutation"]=mutation
+    return False
+
+def a171_merge_run(run):
+    observation=A171_OBSERVATION
+    observation["stages"].update(run.stages)
+    observation["started_routes"]=len(run.started_paths)
+    observation["hashes"]=list(run.hashes)
+    observation["target_children"]=[{"pid":child["pid"],"lifecycle":child["lifecycle"],
+        "connected":child["connected"]} for child in run.children]
+    observation["facts"]["run_reason"]=run.reason
+    observation["facts"]["sticky_uncertainty"]=run.uncertain
+    observation["facts"]["run_errors"]=list(run.errors)
+    if run.reason is not None and observation["first_fault"] is None:
+        calls=observation["consumer_calls"]
+        observation["first_fault"]={"cause":run.reason,
+            "stage":calls[-1]["stage"] if calls else None,
+            "consumer":calls[-1]["consumer"] if calls else None,"at_ns":str(time.monotonic_ns())}
+
+def a171_perform(data,spec,plan,custody):
+    args=data["arguments"];consumer=spec["expected"]["consumer"];case=data["id"]
+    observation=A171_OBSERVATION;observation["performer_entries"]+=1
+    # Target-child domains are not redirected into an inherited producer session.
+    # Their caller is now connected, but the coordinator integration is an exact gap.
+    if spec["expected"]["owned_children"]:
+        raise A171CodeGap("ORIGINAL_COORDINATOR_TARGET_CHILD_ROUTE_REQUIRED:"+case)
+    run=a171_run()
+    try:
+        if consumer=="sealed_bytes":
+            a171_keys(args,("parent","relative","sha256","cap"))
+            parent=a171_parent(args["parent"]);path=a171_path(parent,args["relative"])
+            c.need(type(args["cap"]) is int and 0<=args["cap"]<=1048576,"A171_ORIGINAL_PIN_CAP")
+            value=a171_called("sealed_bytes","sealed_bytes",x.sealed_bytes,path,args["sha256"],args["cap"])
+            a171_result_bytes(value,"sealed_bytes")
+            return {"actual_size":len(value),"actual_sha256":hashlib.sha256(value).hexdigest()}
+        if consumer=="require_absent_target":
+            a171_keys(args,("parent","relative"))
+            path=a171_path(a171_parent(args["parent"]),args["relative"])
+            a171_called(consumer,"require_absent_target",x.require_absent_target,path)
+            return {"target_path":path,"actual_absent":not os.path.lexists(path)}
+        if consumer=="RetainedTree.check":
+            a171_keys(args,("parent","inventory") if case=="retained_positive" else
+                ("parent","inventory","mutation_hex"))
+            parent=a171_parent(args["parent"])
+            c.need(type(args["inventory"]) is dict and args["inventory"].get("root")==parent+"/held",
+                "A171_ORIGINAL316_13_OWNED_RETAINED_DOMAIN")
+            held=None;closed_key=None
+            try:
+                held=a171_called("RetainedTree.__init__","retained_inventory_admission",
+                    x.RetainedTree,parent+"/held",args["inventory"],run)
+                observation["facts"]["admitted_files"]=len(held.fds)
+                observation["facts"]["admitted_directories"]=len(held.dirs)
+                controlled=a171_retained_control(case,held,parent,args,custody)
+                if controlled is not None:
+                    closed_key,mutation=controlled
+                    observation["facts"]["controlled_mutation"]=mutation
+                a171_called(consumer,"retained_partial_custody",held.check)
+                identities={key:a171_identity(os.fstat(fd)) for key,fd in held.fds.items()}
+                return {"files":len(held.fds),"directories":len(held.dirs),
+                    "actual_file_identity_set_sha256":hashlib.sha256(
+                        json.dumps(identities,sort_keys=True,separators=(",",":")).encode("ascii")).hexdigest()}
+            finally:
+                if held is not None:
+                    if closed_key is not None:held.fds.pop(closed_key,None)
+                    held.close()
+        if consumer=="BoundedOutput/G1.Output.check/create":
+            a171_keys(args,("parent","relative","raw_hex"))
+            root=a171_path(a171_parent(args["parent"]),args["relative"])
+            raw=whole216_hex(args["raw_hex"],262144);out=None;record=a171_fd_record(custody)
+            try:
+                out=a171_called("BoundedOutput.__init__","output_custody",x.BoundedOutput,
+                    root,plan["retained_paths"],plan["retained_dirs"],run)
+                record["fd"]=a171_called("BoundedOutput.create","output_custody",out.create,"bill.json")
+                record["identity9"]=a171_identity(os.fstat(record["fd"]))
+                a171_called("R4.guarded_write","output_payload_write",x.r.guarded_write,
+                    record["fd"],raw,run,"output_payload_write")
+                os.fsync(record["fd"]);a171_close(record)
+                collide=a171_output_control(case,out,args["parent"],root,raw,custody)
+                size=a171_called(consumer,"output_custody",out.create,"bill.json") if collide else \
+                    a171_called(consumer,"output_custody",out.check)
+                a171_result_bytes(raw,"actual_written_output_payload")
+                return {"actual_created":sorted(out.inner.created),"actual_disk_bytes":size}
+            finally:
+                a171_close(record)
+                if out is not None:out.close()
+        if consumer in ("R4.guarded_digest","ca_context/R4.guarded_digest",
+                "ca_context/SSLContext.load_verify_locations"):
+            a171_keys(args,("parent","relative","cap","sha256"))
+            path=a171_path(a171_parent(args["parent"]),args["relative"])
+            c.need(type(args["cap"]) is int and 0<=args["cap"]<=2147483648,"A171_ORIGINAL_DIGEST_CAP")
+            if consumer.startswith("ca_context/"):
+                context=a171_called(consumer,"ca_preflight",x.ca_context,run,path,args["sha256"])
+                return {"minimum_version":int(context.minimum_version),"verify_mode":int(context.verify_mode),
+                    "check_hostname":context.check_hostname,"network_used":False}
+            record=a171_fd_record(custody)
+            try:
+                record["fd"]=x.open_nf(path);record["identity9"]=a171_identity(os.fstat(record["fd"]))
+                stage="hash_network" if case=="pinned_body_file_cap" else "guarded_hash"
+                count,digest,_=a171_called(consumer,stage,x.r.guarded_digest,
+                    record["fd"],args["cap"],run,stage,args["sha256"],terminal=True)
+                return {"actual_fd_bytes":count,"actual_fd_sha256":digest}
+            finally:a171_close(record)
+        if consumer=="R4.guarded_write":
+            # Original timeout testing needs a controlled phase at the original end.
+            # Do not open a writer merely to manufacture that deadline.
+            raise A171CodeGap("ORIGINAL_GUARDED_WRITE_DEADLINE_PHASE_NOT_CONNECTED")
+        if consumer=="G1.resources":
+            a171_keys(args,())
+            # Actual immutable helper, actual proc/mount/leaf/ancestors/disk/host order.
+            # Its 256MiB demand is intentionally not replaced by the 192MiB leaf.
+            return a171_called(consumer,"G1.resources",x.m.resources)
+        if consumer=="acquisition_resources":
+            a171_keys(args,())
+            return a171_called(consumer,"acquisition_resources",x.acquisition_resources)
+        if consumer=="Supervisor.runtime_preflight":
+            a171_keys(args,("parent","manifest_sha256"))
+            parent=a171_parent(args["parent"])
+            view=s.RuntimeView(parent+"/runtime",fixture=True)
+            closure=None
+            try:
+                # The original approved owned filesystem domain, full stdlib/ELF/cache.
+                # No zero-filled substitute, false library flags, or partial ELF path.
+                closure=a171_called(consumer,"Supervisor.runtime_preflight",s.runtime_preflight,
+                    s.RUNTIME,args["manifest_sha256"],None,view=view,deadline_ns=c.ADMISSION["work_ns"])
+                observation["facts"]["actual_runtime_member_count"]=len(closure.holds)
+                identities={key:a171_identity(os.fstat(blob.fd)) for key,blob in closure.holds.items()}
+                return {"actual_runtime_member_count":len(closure.holds),
+                    "actual_held_identity_set_sha256":hashlib.sha256(
+                        json.dumps(identities,sort_keys=True,separators=(",",":")).encode("ascii")).hexdigest(),
+                    "runtime_OS_authority_credit":False}
+            finally:
+                if closure is not None:closure.close()
+        if consumer=="Supervisor.cgroup_values":
+            a171_keys(args,("parent",))
+            root=a171_parent(args["parent"])+"/cgroup"
+            record=a171_fd_record(custody)
+            keys={"memory.max","memory.swap.max","memory.oom.group","pids.max","cpu.max","cgroup.procs","cgroup.events"}
+            try:
+                record["fd"]=x.open_nf(root);record["identity9"]=a171_identity(os.fstat(record["fd"]))
+                st=os.fstat(record["fd"])
+                c.need(x.stat.S_ISDIR(st.st_mode) and st.st_uid==st.st_gid==os.getuid() and
+                    x.stat.S_IMODE(st.st_mode)==0o700,"A171_ORIGINAL_OWNED_CGROUP_TEXT_DIRECTORY")
+                actual={}
+                def read(key):
+                    c.need(key in keys,"A171_CGROUP_FIXED_KEYS")
+                    leaf=a171_fd_record(custody)
+                    try:
+                        leaf["fd"]=os.open(key,os.O_RDONLY|os.O_NOFOLLOW|os.O_NONBLOCK,dir_fd=record["fd"])
+                        st=os.fstat(leaf["fd"]);leaf["identity9"]=a171_identity(st)
+                        c.need(x.stat.S_ISREG(st.st_mode) and st.st_uid==st.st_gid==os.getuid() and
+                            st.st_nlink==1 and x.stat.S_IMODE(st.st_mode)==0o600 and st.st_size<=65536,
+                            "A171_OWNED_CONTROL_TEXT_CUSTODY")
+                        raw=os.read(leaf["fd"],65537);c.need(len(raw)<=65536,"CGROUP_READ_CAP")
+                        actual[key]={"raw_hex":raw.hex(),"identity9":a171_identity(os.fstat(leaf["fd"]))}
+                        return raw.decode("ascii","strict").strip()
+                    finally:a171_close(leaf)
+                value=a171_called(consumer,"Supervisor.cgroup_values",s.cgroup_values,read)
+                observation["facts"]["actual_control_text_reads"]=actual
+                return {"consumer_return":value,"kernel_cgroup_authority_credit":False}
+            finally:a171_close(record)
+        if consumer=="Supervisor.HeldSource.bytes":
+            a171_keys(args,("parent","relative","sha256"))
+            path=a171_path(a171_parent(args["parent"]),args["relative"]);blob=None
+            record=a171_fd_record(custody)
+            try:
+                blob=s.HeldSource(path,args["sha256"],262144,deadline_ns=c.ADMISSION["work_ns"])
+                record["fd"]=blob.fd;record["identity9"]=a171_identity(os.fstat(blob.fd))
+                if case=="held_kernel_write_refused":
+                    try:os.pwrite(blob.fd,b"owned-local-write",0)
+                    except OSError as exc:
+                        observation["facts"]["actual_kernel_write_errno"]=exc.errno
+                        c.need(exc.errno in (x.errno.EPERM,x.errno.EACCES),"A171_KERNEL_SEAL_WRITE_REFUSAL")
+                    else:raise c.Refused("A171_KERNEL_SEAL_WRITE_ACCEPTED")
+                if case=="held_path_replaced_exact_bytes":
+                    # No path mutation/replacement fixture is synthesized. The held read
+                    # still occurs, but original post-capture path-control credit is open.
+                    observation["facts"]["post_capture_path_replacement_observed"]=False
+                raw=a171_called(consumer,"Supervisor.HeldSource.bytes",blob.bytes,
+                    262144,deadline_ns=c.ADMISSION["work_ns"])
+                a171_result_bytes(raw,"actual_held_original_bytes")
+                return {"actual_bytes":len(raw),"actual_sha256":hashlib.sha256(raw).hexdigest()}
+            finally:
+                if blob is not None:
+                    a171_close(record);blob.fd=None
+        if consumer=="Run.guard" and spec["expected"]["stage"] in ("work_boundary","terminal_reserve","create_fresh_browser3"):
+            a171_keys(args,())
+            stage={"work1140_boundary":"work_boundary","hard1200_boundary":"terminal_reserve",
+                "deadline_create_fresh_browser3":"create_fresh_browser3"}[case]
+            a171_called(consumer,stage,run.guard,stage,stage=="terminal_reserve")
+            return {"actual_clock_ns":str(time.monotonic_ns()),"original_work_ns":str(c.ADMISSION["work_ns"]),
+                "original_hard_ns":str(c.ADMISSION["hard_ns"])}
+        if consumer=="terminal_bytes":
+            a171_keys(args,("value",))
+            # JSON-only input cannot invent a failing serializer callback. Its absence
+            # is not converted to SERIALIZATION_FAULT or original sticky uncertainty.
+            raw=a171_called(consumer,"terminal_serialization",x.terminal_bytes,args["value"],run)
+            a171_result_bytes(raw,"actual_serialized_terminal")
+            return {"actual_terminal_bytes":len(raw),"actual_terminal_sha256":hashlib.sha256(raw).hexdigest()}
+        if consumer=="emit_terminal" and case in ("terminal_output_path","terminal_sink_blocked"):
+            a171_keys(args,("value",));read_record=None;write_record=a171_fd_record(custody)
+            try:
+                if case=="terminal_output_path":
+                    write_record["fd"]=os.memfd_create("friday-a171-owned-terminal",os.MFD_CLOEXEC)
+                else:
+                    read_record=a171_fd_record(custody)
+                    read_fd,write_fd=os.pipe2(os.O_CLOEXEC|os.O_NONBLOCK)
+                    read_record["fd"]=read_fd;write_record["fd"]=write_fd
+                    read_record["identity9"]=a171_identity(os.fstat(read_fd))
+                    # Actual finite pipe capacity, not an asserted blocked-writer flag.
+                    filled=0
+                    while filled<1048576:
+                        try:filled+=os.write(write_fd,b" "*4096)
+                        except BlockingIOError:break
+                    c.need(filled<1048576,"A171_ACTUAL_PIPE_CAPACITY_BOUND")
+                    observation["facts"]["actual_prefill_bytes"]=filled
+                write_record["identity9"]=a171_identity(os.fstat(write_record["fd"]))
+                emitted=a171_called(consumer,"terminal_sink",x.emit_terminal,
+                    args["value"],run,write_record["fd"])
+                observation["state"]="TERMINAL_EMITTED" if emitted else "TERMINAL_EMISSION_FAILED"
+                if read_record is not None:
+                    a171_close(write_record);parts=[];seen=0
+                    while seen<=1048576:
+                        try:part=os.read(read_record["fd"],min(65536,1048577-seen))
+                        except BlockingIOError:break
+                        if not part:break
+                        parts.append(part);seen+=len(part)
+                    raw=b"".join(parts);c.need(len(raw)<=1048576,"A171_ACTUAL_SINK_RETAINED_CAP")
+                    observation["facts"]["actual_retained_sink_bytes"]=len(raw)
+                    observation["facts"]["actual_retained_sink_sha256"]=hashlib.sha256(raw).hexdigest()
+                return {"emitted":emitted,"actual_reason":run.reason}
+            finally:
+                a171_close(write_record)
+                if read_record is not None:a171_close(read_record)
+        raise A171CodeGap("ORIGINAL_OPERATION_PHASE_OR_APPROVED_DOMAIN_NOT_CONNECTED:"+case)
+    finally:a171_merge_run(run)
+
+def a171_validate_observation(value,meta,need):
+    """Called separately by producer's original controller AND external A087 oracle."""
+    need(type(value) is dict and value.get("schema")=="friday.a171.actual-operation-observation.v1",
+        "A171_FULL_OPERATION_OBSERVATION")
+    need(value["unavailable_reason"] is None,"A171_MANDATORY_CODE_GAP_NOT_A_PASS")
+    need(value["state"]==meta["state"] and value["started_routes"]==meta["started_routes"],
+        "A171_ORIGINAL_STATE_STARTS")
+    need(type(value["stages"]) is dict and value["stages"].get(meta["stage"],0)>0,
+        "A171_ORIGINAL_STAGE_REACHED")
+    calls=value["consumer_calls"]
+    need(type(calls) is list and len(calls)>=meta["minimum_consumer_calls"] and
+        all(type(call) is dict and (call["returned"] or call["error"] is not None) for call in calls),
+        "A171_ACTUAL_ORIGINAL_CONSUMER_INVOCATIONS")
+    aliases={"mapping_check/tokens/container/route_object":"mapping_check","mapping_check/container":"mapping_check"}
+    wanted=aliases.get(meta["consumer"],meta["consumer"])
+    need(sum(call["consumer"]==wanted for call in calls)>=meta["minimum_consumer_calls"],
+        "A171_ACTUAL_REQUESTED_CONSUMER_INVOCATIONS")
+    hashes=value["hashes"];children=value["target_children"]
+    need(type(hashes) is list and type(children) is list and len(children)==meta["owned_children"],
+        "A171_ORIGINAL_ACTUAL_TARGET_CHILDREN")
+    if meta["hashes"]=="none":need(len(hashes)==0,"A171_ORIGINAL_NO_HASH")
+    elif meta["hashes"]=="exact3":need(len(hashes)==3,"A171_ORIGINAL_EXACT3_HASH")
+    elif meta["hashes"]=="at_least1":need(len(hashes)>=1,"A171_ORIGINAL_HASH_REACHED")
+    elif meta["hashes"]=="stage_dependent":
+        need(value["facts"].get("actual_stage_hash_relation") is True,"A171_STAGE_DEPENDENT_HASH_UNPROVEN")
+    else:need(False,"A171_UNKNOWN_ORIGINAL_HASH_DOMAIN")
+    fault=value["first_fault"]
+    need(fault is None if meta["cause"] is None else type(fault) is dict and fault["cause"]==meta["cause"],
+        "A171_ORIGINAL_ACTUAL_FIRST_FAULT")
+    need(type(value["phase_order"]) is list and all(type(phase["at_ns"]) is str and phase["at_ns"].isdecimal()
+        for phase in value["phase_order"]),"A171_ACTUAL_PHASE_ORDER")
+    for raw in value["operation_raw"]:
+        actual=bytes.fromhex(raw["raw_hex"])
+        need(raw["hash_only"] is False and len(actual)==raw["bytes"] and
+            hashlib.sha256(actual).hexdigest()==raw["sha256"],"A171_FULL_OPERATION_RAW_HASH")
+    # Positive source credit also needs per-ID controlled post-admission facts.
+    # Their absence remains a CODE residual even if a simpler physical call returned.
+    if meta["consumer"]=="Supervisor.HeldSource.bytes" and meta["cause"] is None:
+        need(value["facts"].get("actual_kernel_write_errno") in (1,13) or
+            value["facts"].get("post_capture_path_replacement_observed") is True,
+            "A171_HELD_ORIGINAL_CONTROL_FACT_REQUIRED")

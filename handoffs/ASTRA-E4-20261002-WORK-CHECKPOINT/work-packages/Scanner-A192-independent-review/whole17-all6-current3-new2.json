@@ -1,0 +1,449 @@
+{
+  "schema": "friday.a192.independent.whole17-all6-current3-new2.v1",
+  "construction": "Independent current decisions; original17 descriptions preserved from authenticated independent A185, rebound to current exact52 full-byte delta and actual native/default/raw/error/phase methods. No prior whole runtime acceptance carried.",
+  "whole17": [
+    {
+      "id": "A090-CTX",
+      "source_dependencies": [
+        "context",
+        "contracts",
+        "worker_entry",
+        "state_binding"
+      ],
+      "producer_to_consumer": "Seven independent raw selected roles and exact actual code/default/closure/native state before effects",
+      "phase": "INGRESS",
+      "local_mechanism": "PRESENT_SOURCE_TEXT_NOT_RUN",
+      "new_raw_dependency": "Same prospective registered SourceRawOwner/ContextVar/meter/ResultOwner/C lane before projection; current Source end C2 and final Root end C1 unresolved",
+      "current_CODE_dependencies": [
+        "A192-C1-FINAL-ORIGINAL-ROOT-CUSTODY-PARENTHOOD-UNACCEPTED",
+        "A192-C2-SOURCE-NATIVE-RAW-REGISTRY-NOT-RETIRED"
+      ],
+      "whole_source_closed": false,
+      "runtime": "NOT_RUN"
+    },
+    {
+      "id": "A090-CUSTODY",
+      "source_dependencies": [
+        "custody",
+        "root_holder",
+        "native_owner",
+        "source_owner"
+      ],
+      "producer_to_consumer": "Root original202 before clone3; borrowed same generation full9/mount/named/hash and exact COMMIT/ACK",
+      "phase": "CUSTODY",
+      "local_mechanism": "PRESENT_SOURCE_TEXT_NOT_RUN",
+      "new_raw_dependency": "Same prospective registered SourceRawOwner/ContextVar/meter/ResultOwner/C lane before projection; current Source end C2 and final Root end C1 unresolved",
+      "current_CODE_dependencies": [
+        "A192-C1-FINAL-ORIGINAL-ROOT-CUSTODY-PARENTHOOD-UNACCEPTED",
+        "A192-C2-SOURCE-NATIVE-RAW-REGISTRY-NOT-RETIRED"
+      ],
+      "whole_source_closed": false,
+      "runtime": "NOT_RUN"
+    },
+    {
+      "id": "A090-BUDGET",
+      "source_dependencies": [
+        "bounds",
+        "root_holder",
+        "source_owner",
+        "native_owner"
+      ],
+      "producer_to_consumer": "Original reserves versus actual allocator/FD/IO and outside wait4 RSS; no fresh domain",
+      "phase": "ALL",
+      "local_mechanism": "PRESENT_SOURCE_TEXT_NOT_RUN",
+      "new_raw_dependency": "Same prospective registered SourceRawOwner/ContextVar/meter/ResultOwner/C lane before projection; current Source end C2 and final Root end C1 unresolved",
+      "current_CODE_dependencies": [
+        "A192-C1-FINAL-ORIGINAL-ROOT-CUSTODY-PARENTHOOD-UNACCEPTED",
+        "A192-C2-SOURCE-NATIVE-RAW-REGISTRY-NOT-RETIRED"
+      ],
+      "whole_source_closed": false,
+      "runtime": "NOT_RUN"
+    },
+    {
+      "id": "A090-DECODER",
+      "source_dependencies": [
+        "compression",
+        "state_binding",
+        "raw_relations"
+      ],
+      "producer_to_consumer": "Exact selected constructor/state/window/pending/output/eof/tail into streaming body reader",
+      "phase": "DECODE",
+      "local_mechanism": "PRESENT_SOURCE_TEXT_NOT_RUN",
+      "new_raw_dependency": "Same prospective registered SourceRawOwner/ContextVar/meter/ResultOwner/C lane before projection; current Source end C2 and final Root end C1 unresolved",
+      "current_CODE_dependencies": [
+        "A192-C1-FINAL-ORIGINAL-ROOT-CUSTODY-PARENTHOOD-UNACCEPTED",
+        "A192-C2-SOURCE-NATIVE-RAW-REGISTRY-NOT-RETIRED"
+      ],
+      "whole_source_closed": false,
+      "runtime": "NOT_RUN"
+    },
+    {
+      "id": "A090-ZIP",
+      "source_dependencies": [
+        "zip_wheel",
+        "raw_relations",
+        "semantics"
+      ],
+      "producer_to_consumer": "Complete central/local/EOCD/Zip64/descriptors/name/range/CRC into independent raw/member consumers",
+      "phase": "PARSE",
+      "local_mechanism": "PRESENT_SOURCE_TEXT_NOT_RUN",
+      "new_raw_dependency": "Same prospective registered SourceRawOwner/ContextVar/meter/ResultOwner/C lane before projection; current Source end C2 and final Root end C1 unresolved",
+      "current_CODE_dependencies": [
+        "A192-C1-FINAL-ORIGINAL-ROOT-CUSTODY-PARENTHOOD-UNACCEPTED",
+        "A192-C2-SOURCE-NATIVE-RAW-REGISTRY-NOT-RETIRED"
+      ],
+      "whole_source_closed": false,
+      "runtime": "NOT_RUN"
+    },
+    {
+      "id": "A090-METADATA-PIN",
+      "source_dependencies": [
+        "zip_wheel",
+        "context",
+        "normalize",
+        "filename"
+      ],
+      "producer_to_consumer": "Publisher raw bytes/content SHA versus metadata/WHEEL/name/version/tag/purelib/raw Requires-Python",
+      "phase": "METADATA",
+      "local_mechanism": "PRESENT_SOURCE_TEXT_NOT_RUN",
+      "new_raw_dependency": "Same prospective registered SourceRawOwner/ContextVar/meter/ResultOwner/C lane before projection; current Source end C2 and final Root end C1 unresolved",
+      "current_CODE_dependencies": [
+        "A192-C1-FINAL-ORIGINAL-ROOT-CUSTODY-PARENTHOOD-UNACCEPTED",
+        "A192-C2-SOURCE-NATIVE-RAW-REGISTRY-NOT-RETIRED"
+      ],
+      "whole_source_closed": false,
+      "runtime": "NOT_RUN"
+    },
+    {
+      "id": "A090-RECORD",
+      "source_dependencies": [
+        "zip_wheel",
+        "digests",
+        "raw_relations"
+      ],
+      "producer_to_consumer": "Strict complete CSV/member/digest-size/self/signature exception and literal symlink bytes; SHA256/384/512",
+      "phase": "METADATA",
+      "local_mechanism": "PRESENT_SOURCE_TEXT_NOT_RUN",
+      "new_raw_dependency": "Same prospective registered SourceRawOwner/ContextVar/meter/ResultOwner/C lane before projection; current Source end C2 and final Root end C1 unresolved",
+      "current_CODE_dependencies": [
+        "A192-C1-FINAL-ORIGINAL-ROOT-CUSTODY-PARENTHOOD-UNACCEPTED",
+        "A192-C2-SOURCE-NATIVE-RAW-REGISTRY-NOT-RETIRED"
+      ],
+      "whole_source_closed": false,
+      "runtime": "NOT_RUN"
+    },
+    {
+      "id": "A090-PAX",
+      "source_dependencies": [
+        "deb_archive",
+        "raw_relations"
+      ],
+      "producer_to_consumer": "Length/order/raw global/local/GNU/delete/supersession to actual effective framing/replay",
+      "phase": "PARSE",
+      "local_mechanism": "PRESENT_SOURCE_TEXT_NOT_RUN",
+      "new_raw_dependency": "Same prospective registered SourceRawOwner/ContextVar/meter/ResultOwner/C lane before projection; current Source end C2 and final Root end C1 unresolved",
+      "current_CODE_dependencies": [
+        "A192-C1-FINAL-ORIGINAL-ROOT-CUSTODY-PARENTHOOD-UNACCEPTED",
+        "A192-C2-SOURCE-NATIVE-RAW-REGISTRY-NOT-RETIRED"
+      ],
+      "whole_source_closed": false,
+      "runtime": "NOT_RUN"
+    },
+    {
+      "id": "A090-AR",
+      "source_dependencies": [
+        "deb_archive",
+        "raw_relations"
+      ],
+      "producer_to_consumer": "Whole magic/header/numeric/name/dialect/padding/order and exact debian/control/data closure",
+      "phase": "PARSE",
+      "local_mechanism": "PRESENT_SOURCE_TEXT_NOT_RUN",
+      "new_raw_dependency": "Same prospective registered SourceRawOwner/ContextVar/meter/ResultOwner/C lane before projection; current Source end C2 and final Root end C1 unresolved",
+      "current_CODE_dependencies": [
+        "A192-C1-FINAL-ORIGINAL-ROOT-CUSTODY-PARENTHOOD-UNACCEPTED",
+        "A192-C2-SOURCE-NATIVE-RAW-REGISTRY-NOT-RETIRED"
+      ],
+      "whole_source_closed": false,
+      "runtime": "NOT_RUN"
+    },
+    {
+      "id": "A090-TAR",
+      "source_dependencies": [
+        "deb_archive",
+        "raw_relations",
+        "semantics"
+      ],
+      "producer_to_consumer": "Every512-byte physical header/checksum/type/owner/payload/padding/two-zero/aligned tail",
+      "phase": "PARSE",
+      "local_mechanism": "PRESENT_SOURCE_TEXT_NOT_RUN",
+      "new_raw_dependency": "Same prospective registered SourceRawOwner/ContextVar/meter/ResultOwner/C lane before projection; current Source end C2 and final Root end C1 unresolved",
+      "current_CODE_dependencies": [
+        "A192-C1-FINAL-ORIGINAL-ROOT-CUSTODY-PARENTHOOD-UNACCEPTED",
+        "A192-C2-SOURCE-NATIVE-RAW-REGISTRY-NOT-RETIRED"
+      ],
+      "whole_source_closed": false,
+      "runtime": "NOT_RUN"
+    },
+    {
+      "id": "A090-LINK",
+      "source_dependencies": [
+        "guards",
+        "deb_archive",
+        "public",
+        "contracts"
+      ],
+      "producer_to_consumer": "Literal noescape/nodangle/nocycle/terminal regular targets and actual final installed namespace/content",
+      "phase": "AGGREGATE",
+      "local_mechanism": "PRESENT_SOURCE_TEXT_NOT_RUN",
+      "new_raw_dependency": "Same prospective registered SourceRawOwner/ContextVar/meter/ResultOwner/C lane before projection; current Source end C2 and final Root end C1 unresolved",
+      "current_CODE_dependencies": [
+        "A192-C1-FINAL-ORIGINAL-ROOT-CUSTODY-PARENTHOOD-UNACCEPTED",
+        "A192-C2-SOURCE-NATIVE-RAW-REGISTRY-NOT-RETIRED"
+      ],
+      "whole_source_closed": false,
+      "runtime": "NOT_RUN"
+    },
+    {
+      "id": "A090-DEB822",
+      "source_dependencies": [
+        "deb_archive",
+        "raw_relations",
+        "semantics"
+      ],
+      "producer_to_consumer": "Supported known simple/folded/multiline and unknown-simple policy with complete raw fields/order/hash",
+      "phase": "METADATA",
+      "local_mechanism": "PRESENT_SOURCE_TEXT_NOT_RUN",
+      "new_raw_dependency": "Same prospective registered SourceRawOwner/ContextVar/meter/ResultOwner/C lane before projection; current Source end C2 and final Root end C1 unresolved",
+      "current_CODE_dependencies": [
+        "A192-C1-FINAL-ORIGINAL-ROOT-CUSTODY-PARENTHOOD-UNACCEPTED",
+        "A192-C2-SOURCE-NATIVE-RAW-REGISTRY-NOT-RETIRED"
+      ],
+      "whole_source_closed": false,
+      "runtime": "NOT_RUN"
+    },
+    {
+      "id": "A090-RECIPE",
+      "source_dependencies": [
+        "contracts",
+        "public",
+        "broker_map"
+      ],
+      "producer_to_consumer": "Acyclic identity and actual source actions/created directories/installed/supplemental evidence",
+      "phase": "AGGREGATE",
+      "local_mechanism": "PRESENT_SOURCE_TEXT_NOT_RUN",
+      "new_raw_dependency": "Same prospective registered SourceRawOwner/ContextVar/meter/ResultOwner/C lane before projection; current Source end C2 and final Root end C1 unresolved",
+      "current_CODE_dependencies": [
+        "A192-C1-FINAL-ORIGINAL-ROOT-CUSTODY-PARENTHOOD-UNACCEPTED",
+        "A192-C2-SOURCE-NATIVE-RAW-REGISTRY-NOT-RETIRED"
+      ],
+      "whole_source_closed": false,
+      "runtime": "NOT_RUN"
+    },
+    {
+      "id": "A090-A009",
+      "source_dependencies": [
+        "broker_map",
+        "public",
+        "contracts"
+      ],
+      "producer_to_consumer": "Complete canonical350 artifacts/512 members, original202+148 supplemental and golden/authority/approval joins",
+      "phase": "AGGREGATE",
+      "local_mechanism": "PRESENT_SOURCE_TEXT_NOT_RUN",
+      "new_raw_dependency": "Same prospective registered SourceRawOwner/ContextVar/meter/ResultOwner/C lane before projection; current Source end C2 and final Root end C1 unresolved",
+      "current_CODE_dependencies": [
+        "A192-C1-FINAL-ORIGINAL-ROOT-CUSTODY-PARENTHOOD-UNACCEPTED",
+        "A192-C2-SOURCE-NATIVE-RAW-REGISTRY-NOT-RETIRED"
+      ],
+      "whole_source_closed": false,
+      "runtime": "NOT_RUN"
+    },
+    {
+      "id": "A090-SCHEMA",
+      "source_dependencies": [
+        "schema_validate",
+        "custody",
+        "public"
+      ],
+      "producer_to_consumer": "All14 owned schema bytes/aliases and61 refs into strict clauses and actual final/error consumers",
+      "phase": "ALL",
+      "local_mechanism": "PRESENT_SOURCE_TEXT_NOT_RUN",
+      "new_raw_dependency": "Same prospective registered SourceRawOwner/ContextVar/meter/ResultOwner/C lane before projection; current Source end C2 and final Root end C1 unresolved",
+      "current_CODE_dependencies": [
+        "A192-C1-FINAL-ORIGINAL-ROOT-CUSTODY-PARENTHOOD-UNACCEPTED",
+        "A192-C2-SOURCE-NATIVE-RAW-REGISTRY-NOT-RETIRED"
+      ],
+      "whole_source_closed": false,
+      "runtime": "NOT_RUN"
+    },
+    {
+      "id": "A090-CONTROLS",
+      "source_dependencies": [
+        "controls",
+        "public",
+        "native_owner"
+      ],
+      "producer_to_consumer": "All original positive/negative controls, complete independent output/actual trace/cause, native/live/full gates",
+      "phase": "ALL",
+      "local_mechanism": "PRESENT_SOURCE_TEXT_NOT_RUN",
+      "new_raw_dependency": "Same prospective registered SourceRawOwner/ContextVar/meter/ResultOwner/C lane before projection; current Source end C2 and final Root end C1 unresolved",
+      "current_CODE_dependencies": [
+        "A192-C1-FINAL-ORIGINAL-ROOT-CUSTODY-PARENTHOOD-UNACCEPTED",
+        "A192-C2-SOURCE-NATIVE-RAW-REGISTRY-NOT-RETIRED"
+      ],
+      "whole_source_closed": false,
+      "runtime": "NOT_RUN"
+    },
+    {
+      "id": "A090-EVIDENCE",
+      "source_dependencies": [
+        "pins",
+        "contracts",
+        "state_binding",
+        "native_owner"
+      ],
+      "producer_to_consumer": "Current52/code28/source hashes and real selected full byte/native/Root/end generations; no old acceptance carry",
+      "phase": "ALL",
+      "local_mechanism": "PRESENT_SOURCE_TEXT_NOT_RUN",
+      "new_raw_dependency": "Same prospective registered SourceRawOwner/ContextVar/meter/ResultOwner/C lane before projection; current Source end C2 and final Root end C1 unresolved",
+      "current_CODE_dependencies": [
+        "A192-C1-FINAL-ORIGINAL-ROOT-CUSTODY-PARENTHOOD-UNACCEPTED",
+        "A192-C2-SOURCE-NATIVE-RAW-REGISTRY-NOT-RETIRED"
+      ],
+      "whole_source_closed": false,
+      "runtime": "NOT_RUN"
+    }
+  ],
+  "all6": [
+    {
+      "id": "A168-C1-PARENT-FINITE-ERROR-END",
+      "genuine_credit": "Actual hard/minimum process end; earlier native task cutoff with real kernel clear_tid. Original caller storage before init and both directchild finite consumers. Warm confirmed native closes now precede graph clear.",
+      "current_CODE_dependencies": [
+        "A192-C1-FINAL-ORIGINAL-ROOT-CUSTODY-PARENTHOOD-UNACCEPTED",
+        "A192-C2-SOURCE-NATIVE-RAW-REGISTRY-NOT-RETIRED"
+      ],
+      "not_reopened_as_old_unchanged_cause": true
+    },
+    {
+      "id": "A168-C2-OBSERVER-FINAL-CALLER-CUSTODY",
+      "genuine_credit": "Actual preinit observed Root pair plus Python matching receiver, partial Caller/Capsule preownership, called finalkind2 local result consumer.",
+      "current_CODE_dependencies": [
+        "A192-C1-FINAL-ORIGINAL-ROOT-CUSTODY-PARENTHOOD-UNACCEPTED"
+      ],
+      "not_reopened_as_old_unchanged_cause": true
+    },
+    {
+      "id": "A168-C3-NATIVE-RECEIVED-PACKET-OWNERSHIP",
+      "genuine_credit": "Prospective packet raw/control/right histories and native packet error triplets before projection/rejection, no free before actual native acceptance. New generic Source registry is a distinct consumer dependency.",
+      "current_CODE_dependencies": [
+        "A192-C1-FINAL-ORIGINAL-ROOT-CUSTODY-PARENTHOOD-UNACCEPTED",
+        "A192-C2-SOURCE-NATIVE-RAW-REGISTRY-NOT-RETIRED"
+      ],
+      "not_reopened_as_old_unchanged_cause": true
+    },
+    {
+      "id": "A168-C4-SLOT-EFFECT-COMMIT",
+      "genuine_credit": "Fixed canonical slot identity and generation before flock; scalar commit before Python projection; sticky once-unlock uncertainty.",
+      "current_CODE_dependencies": [
+        "A192-C1-FINAL-ORIGINAL-ROOT-CUSTODY-PARENTHOOD-UNACCEPTED",
+        "A192-C2-SOURCE-NATIVE-RAW-REGISTRY-NOT-RETIRED"
+      ],
+      "not_reopened_as_old_unchanged_cause": true
+    },
+    {
+      "id": "A168-C5-MINIMUM-END-COMMIT-CONSUMER",
+      "genuine_credit": "Actual COMMIT recv passes operation_end_ns and real original producer/consumer end checks; no fresh clock or expiry grace.",
+      "current_CODE_dependencies": [
+        "A192-C1-FINAL-ORIGINAL-ROOT-CUSTODY-PARENTHOOD-UNACCEPTED",
+        "A192-C2-SOURCE-NATIVE-RAW-REGISTRY-NOT-RETIRED"
+      ],
+      "not_reopened_as_old_unchanged_cause": true
+    },
+    {
+      "id": "A168-C6-CALLED-OBSERVER-NATIVE-END-JOIN",
+      "genuine_credit": "Both called credential/generation/start/end/hash/ACK families; Source native120 and Root native216, exact stdout/stderr EOF and directwait. Final kind2 does not self-observe a future trailer.",
+      "current_CODE_dependencies": [
+        "A192-C1-FINAL-ORIGINAL-ROOT-CUSTODY-PARENTHOOD-UNACCEPTED",
+        "A192-C2-SOURCE-NATIVE-RAW-REGISTRY-NOT-RETIRED"
+      ],
+      "not_reopened_as_old_unchanged_cause": true
+    }
+  ],
+  "current3": [
+    {
+      "id": "A176-C1-ORIGINAL-HARD-END-NOT-ENFORCED",
+      "local_fix": "Former flag-only/expired two-write path removed; hard physical original stop and kernel task confirmation present.",
+      "current_CODE_dependencies": [
+        "A192-C1-FINAL-ORIGINAL-ROOT-CUSTODY-PARENTHOOD-UNACCEPTED",
+        "A192-C2-SOURCE-NATIVE-RAW-REGISTRY-NOT-RETIRED"
+      ]
+    },
+    {
+      "id": "A176-C2-UNREAPED-DIRECT-CHILD-CUSTODY-LOSS",
+      "local_fix": "Preowned genuine direct Source/Root finite wait4 commit paths and clone3 held-pidfd prefix recovery present. Final-process legal accepted complete custody still absent.",
+      "current_CODE_dependencies": [
+        "A192-C1-FINAL-ORIGINAL-ROOT-CUSTODY-PARENTHOOD-UNACCEPTED"
+      ]
+    },
+    {
+      "id": "A176-C3-SECONDARY-PYTHON-ORIGIN-DROPPED",
+      "local_fix": "Targeted Root primary/secondary/recorder nodes fixed prospectively. New generic Source before-projection owner now installed; complete lifetime not proved at Source main or final Root.",
+      "current_CODE_dependencies": [
+        "A192-C1-FINAL-ORIGINAL-ROOT-CUSTODY-PARENTHOOD-UNACCEPTED",
+        "A192-C2-SOURCE-NATIVE-RAW-REGISTRY-NOT-RETIRED"
+      ]
+    }
+  ],
+  "new2": [
+    {
+      "id": "A185-C1-FINAL-ORIGINAL-PROCESS-CUSTODY-PARENTHOOD-UNACCEPTED",
+      "status": "NOT_CLOSED_AT_FINAL_ROOT_END",
+      "current_CODE_dependencies": [
+        "A192-C1-FINAL-ORIGINAL-ROOT-CUSTODY-PARENTHOOD-UNACCEPTED"
+      ]
+    },
+    {
+      "id": "A185-C2-GENERIC-SOURCE-RAW-EXCEPTION-NOT-PREOWNED",
+      "status": "PREPROJECTION_LOCAL_MECHANISM_IMPLEMENTED; SOURCE_MAIN_LIFETIME_NOT_CLOSED",
+      "current_CODE_dependencies": [
+        "A192-C2-SOURCE-NATIVE-RAW-REGISTRY-NOT-RETIRED",
+        "A192-C1-FINAL-ORIGINAL-ROOT-CUSTODY-PARENTHOOD-UNACCEPTED"
+      ],
+      "genuine_credit": "No missing firstcatch claimed merely because warm/cold lifetime remains."
+    }
+  ],
+  "original_scope": {
+    "formats": 7,
+    "positive202": 202,
+    "wheels": 94,
+    "ubuntu": 106,
+    "kernel": 2,
+    "artifacts": 350,
+    "members": 512,
+    "negative_sets": [
+      31,
+      20,
+      55
+    ],
+    "catalogue_preserved_added": [
+      44,
+      11
+    ],
+    "scenarios": 6,
+    "all30": true,
+    "F0_F11": true,
+    "C01_C14": true,
+    "full_final_gates_live_negativecontrols": "REQUIRED_NOT_RUN",
+    "unsafe_historical": "ABSTRACT_REQUIRED_NOT_RUN; no operational bodies/fixtures/reproduction/waiver"
+  },
+  "qualification_partition": {
+    "ordinary_performing": "Normal owned child, EOF, finite write, deadline, cleanup, resources and significant negative controls remain REQUIRED_NOT_RUN without reducing scope.",
+    "unsafe_historical": "ABSTRACT_REQUIRED_NOT_RUN only: no operational payload/fixture/generator/reproduction/exploit/waiver.",
+    "future_authority": "Absent selected Root image/clock/grant/compiler/ABI/provider alone NOTCODE.",
+    "full_final_gates_live": "REQUIRED_NOT_RUN on final artifact, independent different-author acceptance mandatory"
+  },
+  "SourceReady": false,
+  "Root_admission": false,
+  "runtime": "NOT_RUN",
+  "gates": "REQUIRED_NOT_RUN",
+  "GO": false
+}

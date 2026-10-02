@@ -1,0 +1,86 @@
+{
+  "GO": false,
+  "Root_Image": false,
+  "Root_admission": false,
+  "SourceReady": false,
+  "accepted": false,
+  "assignment": "ASTRA-E4-SOL062-A191-NODE-WHOLE6-ALL35-ALL6-ALL3-CONNECTED-SOURCE-CLOSURE-LAB-868",
+  "changed_count": 5,
+  "changed_source": [
+    "caller.py",
+    "expectations.json",
+    "launch-contract.json",
+    "supervisor.py",
+    "verifier.py"
+  ],
+  "code_open": [
+    "KERNEL_EXIT_STILL_CLOSES_UNHANDED_UNREAD_PREFIX",
+    "PUBLICATION_OVER_CAP_EXITS_WITHOUT_SUBSTITUTE",
+    "STOCK_GRAPH_OVER_8192_REFUSES_RATHER_THAN_UNIVERSAL_FIT",
+    "NATIVE_OBJECT_RECONSTRUCTION_NOT_QUALIFIED",
+    "WHOLE_RAM_IO_UNKNOWN_NOT_ZERO",
+    "FUTURE_ROOT_IMAGE_CLOCK_GPG_ABI_REQUIRED_NOT_RUN",
+    "NOT_RUN"
+  ],
+  "compiler_ELF_ABI": "NOT_RUN",
+  "completed_msk": "2026-10-02T16:09:36.918958+03:00",
+  "costs": {
+    "cgroup_memory_current": "3088044032",
+    "cumulative_bytes": 8511854,
+    "implicit_IO": "UNKNOWN_NOT_ZERO_NOT_PROVEN",
+    "meminfo_present": true,
+    "memory_hash_bytes": 424978,
+    "physical_read_bytes": 7658860,
+    "proc_read_bytes": 3316,
+    "proc_write_bytes": 0,
+    "sealed_tree_bytes": 428016,
+    "transport_write_bytes": 428016,
+    "vm_rss_kib": "23632",
+    "whole_RAM": "UNKNOWN_NOT_ZERO_NOT_PROVEN"
+  },
+  "delivery_id": "del_91d06b4a0f3e4aa59453f15c8364a835",
+  "elapsed_seconds": 1154.642407,
+  "equal_count": 1,
+  "equal_source": [
+    "ordinary-surplus.txt"
+  ],
+  "gates": "NOT_RUN",
+  "input_bytes": 104482,
+  "input_sha256": "a1cd00db96bb5b31e4632cb6a716d553966751c7b99b9d838c74f1f2155dbb07",
+  "job_id": "job_0501fd90f6414603a2dd6b4cfeb064b2",
+  "output": "/var/tmp/friday-lab868-sol062-a191-node-whole6-all35-all6-all3-connected-source-closure",
+  "pins_verified": 147,
+  "predecessor_manifest_sha256": "5316343b810b9442a67b37a590a082ef88947dece93517e409cf15738f6f4b15",
+  "predecessor_seal_sha256": "7a7eb6837740dfc4a385f1f2e0f8244e0439412ff5ed03c46b58c7126d589648",
+  "run_message_id": "msg_72e96ccac50e4e7a80e7ab20bf51c184",
+  "runtime": "NOT_RUN",
+  "schema": "friday.grok.lab868.node-whole6-all35-all6-all3-connected-source-closure.v1",
+  "sizes": {
+    "caller.py": {
+      "bytes": 147863,
+      "sha256": "7a065f3aead7f0a7c075b5b42e2d108b5e75f79e5a1823b9c216439afa560282"
+    },
+    "expectations.json": {
+      "bytes": 11517,
+      "sha256": "4b3e79de733e10de1cfe9d07fb9bf850eaed9ecc75430b58ff817a25dee88816"
+    },
+    "launch-contract.json": {
+      "bytes": 49780,
+      "sha256": "54cdce4dbc50854fc6b6604f50409c3d178c6aa856aaf668e1df39b530eb91ad"
+    },
+    "ordinary-surplus.txt": {
+      "bytes": 158,
+      "sha256": "a21adfb2651cc9265aa37585b38adccec8b11fc627a7030493f76bfe0d5fec7e"
+    },
+    "supervisor.py": {
+      "bytes": 115874,
+      "sha256": "516ce2cabcf140fd4a097a5b47a13f866aaa15d14c50060ddb4fbbb00c581d1f"
+    },
+    "verifier.py": {
+      "bytes": 87992,
+      "sha256": "75b58eb3269062e365faef39e8df5ae76968c9b8ffd7a3c5f98aceb0001da89a"
+    }
+  },
+  "source_execution": 0,
+  "verdict": "A191_FIVE_ROUTES_CONNECTED_SOURCE_CLOSURE_AUTHORED_NOT_RUN"
+}

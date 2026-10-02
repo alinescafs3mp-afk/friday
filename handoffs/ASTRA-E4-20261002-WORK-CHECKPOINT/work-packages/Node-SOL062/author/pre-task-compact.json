@@ -1,0 +1,70 @@
+{
+  "GO": false,
+  "after": {
+    "latest_turn": {
+      "completedAt": 1790939788,
+      "durationMs": 86294,
+      "error": null,
+      "id": "01a0fc53-23cc-7cb0-85fe-c72895f69f4f",
+      "items": [],
+      "itemsView": "notLoaded",
+      "startedAt": 1790939702,
+      "status": "completed"
+    },
+    "queue_count": 0,
+    "queue_has_more": false,
+    "quiescence": {
+      "active_completed_grace_seconds": 0.0,
+      "basis": "strict_idle",
+      "observations": 1,
+      "stability_seconds": 0.0
+    },
+    "thread_status": {
+      "type": "idle"
+    }
+  },
+  "assignment": "ASTRA-E4-LAB865-A182-NODE-WHOLE6-ALL35-ALL6-STOCK-RAW-BOUND-CONNECTED-SOURCE-CLOSURE-SOL062",
+  "at": "2026-10-02T11:16:28.626245+00:00",
+  "before": {
+    "latest_turn": {
+      "completedAt": 1790938608,
+      "durationMs": 1888075,
+      "error": null,
+      "id": "01a0fc25-a459-7aa3-8c45-db894553d6a5",
+      "items": [],
+      "itemsView": "notLoaded",
+      "startedAt": 1790936720,
+      "status": "completed"
+    },
+    "queue_count": 0,
+    "queue_has_more": false,
+    "quiescence": {
+      "active_completed_grace_seconds": 5.0,
+      "basis": "strict_idle",
+      "observations": 1,
+      "stability_seconds": 0.0
+    },
+    "thread_status": {
+      "type": "idle"
+    }
+  },
+  "compact_response": {},
+  "compact_turn": "01a0fc53-23cc-7cb0-85fe-c72895f69f4f",
+  "completion": {
+    "completed_at": 1790939788,
+    "duration_ms": 86294,
+    "error": null,
+    "id": "01a0fc53-23cc-7cb0-85fe-c72895f69f4f",
+    "item_id": "01a0fc53-23f3-7d10-a8c4-6175dc5c3096",
+    "item_type": "contextCompaction",
+    "started_at": 1790939702,
+    "status": "completed"
+  },
+  "completion_verified_by": "thread/turns/list itemsView=full contextCompaction",
+  "generation": 1,
+  "next_task_enqueued": false,
+  "profile": "sol",
+  "same_tui": true,
+  "schema": "friday.team.pre-task-compact.v1",
+  "thread_id": "01a0d516-a446-7131-a123-faeea4bb8e8c"
+}

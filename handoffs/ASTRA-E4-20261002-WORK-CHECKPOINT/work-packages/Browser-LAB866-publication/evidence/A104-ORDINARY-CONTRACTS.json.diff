@@ -1,0 +1,13 @@
+--- a/source/A104-ORDINARY-CONTRACTS.json
++++ b/source/A104-ORDINARY-CONTRACTS.json
+@@ -2378,7 +2378,9 @@
+   },
+   "actual_consumer": "run_public freezes all four raw streams before frame/native-original binding and semantic/oracle/exit/complement validation; calls bind_inner_streams for an available complete outer frame even on prior refusal. Accepted path calls oracle_receiving and positive calls consume_connected_positive with the same stream/raw objects. Historical LAB840 plan is superseded, supplies no observations.",
+   "actual_resource_lifecycle": "PublicAuxiliaries ledger precedes first pipe; every partial acquisition/metadata/selfbirth/buffer initialization/fork error has typed preclone actual auxiliary cleanup; actual fork PID is recorded before parent close/acquisition. Real postclone errors enter finite owned reap/drain/close and retained raw receipt; child setup failure exits125. No fabricated preclone output/PID, no second waiting inner parent, no close retry after uncertain close.",
+-  "source_manifest_binding": "External sealed friday.a153.connected-normal-source-manifest.v1, exact A153 assignment generation1 and SHA equals external final-byte review/compiled_from_manifest; new Source grants no authority",
++  "source_manifest_binding": "HISTORICAL_A153_NOT_CURRENT: external sealed friday.a153.connected-normal-source-manifest.v1 is not the current binder. Current binder is a171_source_dependency with friday.a171.connected-whole-source-manifest.v1. No authority or release follows from this metadata update.",
++  "a158_counter_status": "historical_claim",
++  "historical_claim": "mandatory_unimplemented_ID_count is a historical counter; current binder is a171_source_dependency",
+   "a158_additional_entry": {
+     "assignment": "ASTRA-E4-BROWSER-A153-A156-WHOLE216-ALL6-ALL2-CONNECTED-SOURCE-IMPLEMENTATION-A158",
+     "generation": 1,

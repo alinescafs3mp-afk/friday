@@ -1,0 +1,90 @@
+{
+  "schema": "friday.a192.actual-cost-ledger.v1",
+  "accepted_MSK": "2026-10-02 15:34:59 MSK",
+  "accepted_unix_seconds": "1790944499",
+  "completion": "single protected terminal records actual end/elapsed after sealing",
+  "review_budget_only": {
+    "wall_seconds": 6600,
+    "seal_reserve_seconds": 600,
+    "read_bytes": "268435456",
+    "RAM_bytes": "8589934592",
+    "output_bytes": "16777216",
+    "local_workers": 4,
+    "children": 0,
+    "network": 0,
+    "retries": 0,
+    "source_or_runtime_grant": false
+  },
+  "review_observations": {
+    "initial_authenticated_unique_pin_full_read_bytes": "12482643",
+    "successful_lexical_inventory_full_source52_read_bytes": "14370300",
+    "successful_schema_current202_stock_read_bytes": "4014168",
+    "accounted_initial_successful_metadata_read_bytes": "30867111",
+    "final_authentication_bytes": "recorded separately in final-authentication.json; additional nonzero actual read",
+    "aggregate_exact_read_bytes": "UNKNOWN_NOT_ZERO: textual reads, full inputs, reviewer report processing and transport/truncated metadata outputs additional; no unknown category counted as zero",
+    "bounded_conservative_read_audit_allowance_bytes": "134217728",
+    "read_allowance_basis": "Bounded finite input183 sets + ten current52 inventory passes + six bounded schema/index metadata passes and bounded Source/read-only report fragments. Conservative review-only allowance, not actual Source cost or an independently measured exact total.",
+    "initial_stock_rusage_maxrss_KiB": "615856",
+    "initial_stock_rusage_cpu_seconds": "0.08435",
+    "rusage_scope": "Observed isolated stock metadata process; not Scanner/Source/Root RSS. Aggregate shell/parent/model/tool memory/CPU/implicit IO unknown-not-zero; no Source fit claim.",
+    "model_tokens_and_cost": "UNKNOWN_NOT_ZERO; parent/platform accounting required; cached input is input, reasoning output, no child models",
+    "metadata_transport_observations": "Some author-created stock checker output was truncated or schema-field checker assumption corrected before final artifacts; metadata-only, not supplied Source execution. No rerun of candidate/runtime/gate and no candidate acceptance fabricated.",
+    "no_supplied_execution": true
+  },
+  "original_resource_semantics": {
+    "Source_FDs": 16,
+    "Root_FDs": "B+220 distinct original Root allowance, never global16",
+    "canonical_global": 4,
+    "holder_logical_bytes": "13500416",
+    "holder_descriptions_without_directory": 206,
+    "holder_descriptions_with_directory": 207,
+    "duplicate_holder_27000832": false,
+    "transient_FD_overlaps": "REQUIRED actual original overlaps, no new grant inferred",
+    "one_body_lower_bytes": "372570142",
+    "mandatory_Source4_body_lower_bytes": "1490280568",
+    "mandatory_Root4_body_lower_bytes": "1490280568",
+    "combined_body_lower_bytes": "2980561136",
+    "automatic_extra_body_pass_372570142": false,
+    "historical_resource_observation": {
+      "observed_bytes": "630636544",
+      "cap_bytes": "268435456",
+      "excess_bytes": "362201088",
+      "status": "NOT_FIT",
+      "current_runtime_RSS_measurement": false
+    }
+  },
+  "actual_Source_runtime_permission": {
+    "status": "NOT_PROVEN_NOT_ADMITTED; actual future original independently issued selected native caps/clock/held image required",
+    "Source_grant": "Source actual_permission readonly-archive-scan/filesystem_read, exact Source16/canonical4/max_live/read/work/output/wall/rss and SourceUID/cgroup must match native owner snapshot",
+    "Root_grant": "Distinct original Root actual caps/interval/issuer/topology/current held selections; maxread Source4 and Root4 each >=1490280568 before further overhead",
+    "proposed_plan_limits": {
+      "max_archive_bytes": "536870912",
+      "max_expanded_bytes": "2147483648",
+      "max_members": 250000,
+      "max_member_name_bytes": 4096,
+      "max_depth": 64,
+      "max_fds": 16,
+      "max_output_bytes": "67108864",
+      "max_wall_ms": 120000,
+      "status": "PROPOSED_NOT_GRANTED; expanded and whole physical fit NOT_PROVEN"
+    },
+    "reviewer_author_limit_transfer": false
+  },
+  "actual_new_cost_domains": [
+    "SourceRawOwner/C-global root, SourceRawOrigin linked nodes, exact exception/traceback/frame/cause/context/notes aliases; any retained producer scratch stays charged.",
+    "ContextVar/set/token/reset/copy_context/type/state/closure validation and metered full graph/schema/raw replay/hashing. No caches or old observation credit without same original fence/held9/fullbyte generation.",
+    "NativeHandle21 bound builtins, partial constructor/factory snapshots, fixed16 error lane and actual low-level trusted entry loader/factory/result/error accounting.",
+    "Actual native inherited FD table, slots/flock, packet body/control/rights/projection/errors, clone3/prebirth/futex/signal/clear_tid/directwait/EOF/native120/216, genuine caller/capsule/original202 aliases.",
+    "Existing inprocess interpreter task adds1MiB+page stack, kernel task/TLS/NPTL/bookkeeping/CPU. SameoriginalRoot arena/caps; cannot count task cutoff as physicalfree/refund.",
+    "All actual positive/negative/normal/default/error/cleanup/recorder/encoder/hash/copy/bootstrap/native/finalization/write/receiver tails and implicitIO; exact whole CPU/RAM/IO UNKNOWN_NOT_ZERO_NOT_PROVEN."
+  ],
+  "whole_Source_CPU_RAM_IO": "UNKNOWN_NOT_ZERO_NOT_PROVEN",
+  "whole_fit": "NOT_PROVEN; no partialcost PASS",
+  "ends": "Original interval/work-tail/terminal/minimum consumer ends unchanged; no new clock/wall cap",
+  "unsafe_historical": "ABSTRACT_REQUIRED_NOT_RUN; no operational body/fixture/payload/reproduction/exploit/waiver",
+  "SourceReady": false,
+  "Root_admission": false,
+  "runtime": "NOT_RUN",
+  "gates": "REQUIRED_NOT_RUN",
+  "GO": false
+}

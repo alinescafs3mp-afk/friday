@@ -1,0 +1,37 @@
+{
+  "schema": "friday.e4.lab868.node-whole6-all35-all6-all3-connected-source-closure.run.v1",
+  "kind": "node-whole6-all35-all6-all3-connected-source-closure",
+  "from": "astra",
+  "identity": "owner",
+  "surface": "API_OWNER",
+  "goal": "ASTRA-E4-SOL062-A191-NODE-WHOLE6-ALL35-ALL6-ALL3-CONNECTED-SOURCE-CLOSURE-LAB-868",
+  "task_generation": 1,
+  "execution_mode": "ATTACHED_TUI_MONITOR",
+  "astra_policy": "SUBMIT_AND_CONTINUE",
+  "delivery": "CHECKPOINT_NONBLOCKING",
+  "deadline_sec": 4200,
+  "source_root": "/home/jericho/.jericho/grok-takeover/ASTRA-E4-LAB868-INPUT-R2-20261002.json",
+  "source_sha": "a1cd00db96bb5b31e4632cb6a716d553966751c7b99b9d838c74f1f2155dbb07",
+  "actual_test_surface": "Inert original NodeSource6/35/6/3/GPG6/F1F2D1D2 exactstock/raw/errors/FD/phase/resources, no Sourceexecution",
+  "data": "SOL062actual5changed1equal/new19 coherence; independent A191 exact5 findings+genuine credits; benign FD lifetime versus simultaneous capacity proven",
+  "oracle": "LIFECYCLE assignment=ASTRA-E4-SOL062-A191-NODE-WHOLE6-ALL35-ALL6-ALL3-CONNECTED-SOURCE-CLOSURE-LAB-868 generation=1 context=fresh owner_scope=goal\nPRE_TASK_COMPACT=FORBIDDEN_OWNER_POLICY\nSCOPE: ACTUAL whole Node6/all35/all6/all3/GPG6/F1F2D1D2 performingconnected closure across allknown B01-B05 including realnormal FDhistory256/262 contradiction, not onecapmicrofix/residualonly.\nRESULT: Original-role performing Source with exactstock/fullraw/error/prefix/onceFD/custody/other-side acceptedreceiver/bothschemaconsumers/current19/hashDAG/fullnumericwidth-cost/phase/end joins and honest exactresidual.\nDONE WHEN: Read FULL INPUT and exactnormative+A191wholeReview; implement B01-B05 together retaining genuine stockcause/verifier.call/deferred/fullgraph/preimage credits. Whole Source requires differentauthor review/newRootqualification before anyexecution.\nSNAPSHOT: cecd28a9/schema50 installed0.208.58 unchanged; no oldruntime/clock/gate carry.\nMATERIALS: /home/jericho/.jericho/grok-takeover/ASTRA-E4-LAB868-INPUT-R2-20261002.json SHA256 a1cd00db96bb5b31e4632cb6a716d553966751c7b99b9d838c74f1f2155dbb07.\nOUTPUT: /var/tmp/friday-lab868-sol062-a191-node-whole6-all35-all6-all3-connected-source-closure ONLY+officialprotected RESULT/bookkeeping; oldSource/Git/config/index/guards/models/locks unchanged.\nEFFECTS: New inert SourceTEXT/JSON manualmaterialization+boundedtrustedmetadata only. NO supplied import/AST/compiler/exec/tests/native/Root/GPG/Node/archive/net/install/UI/model/live/gates.\nRESOURCES: 4200s INCLUDING600seal/read256MiB/RAM8GiB/out16MiB/local4/children0/net0/retries0/friday0/freezeend-600. Originalcaps/oracles/scenarios/roles/ends/negativegates notcut; authorbudgetnotSourcegrant. Lifetimeinternaltable != simultaneousNOFILE256, mayrepairactualcapacity/retirement withfullcost notoriginalquota raise.\nCONTROL: Same existing visible GrokTUI/model/epoch/provider/reasoning/tier; NEVERcompact/headless/newTUI/service. FutureRoot/image/clock/provider/ABI absence alone NOTCODE. No universalheap/hostilekernel/arbitraryfactoryscope. Unsafehistoricaloperationalbodies ABSTRACT_REQUIRED_NOT_RUN/no payload/fixture/repro/exploit/waiver; originalordinaryownchild/EOF/write/deadline/cleanup/positive controls preserved. Exactinteger/absence stockJSON only. Private700600/nlink1/full9/pathset/DAG sameofficialmanifest RESULT+accepted/end/elapsedMSK/costs thenstop. SourceReady/Root/runtime/gates/GO=false.\n",
+  "effects": "NEW own inert performing SourceTEXT/JSON+bounded trustedstockmetadata only, no supplied code/runtime/native/external effects",
+  "limits": {
+    "deadline_sec": 4200,
+    "friday_calls": 0,
+    "grok_continuations": 4,
+    "scenarios": 1
+  },
+  "resource_slot": "INERT_CONNECTED_SOURCE_AUTHORSHIP_NO_HEAVY_GATE_SLOT",
+  "blocking_scope": [
+    "Actual coherent original Node Source before independent fullreview/newRoot/gates/live acceptance"
+  ],
+  "expected": {
+    "GO": false,
+    "SourceReady": false,
+    "Root_admission": false,
+    "compiler_ELF_ABI": "NOT_RUN",
+    "runtime": "NOT_RUN",
+    "gates": "NOT_RUN"
+  }
+}

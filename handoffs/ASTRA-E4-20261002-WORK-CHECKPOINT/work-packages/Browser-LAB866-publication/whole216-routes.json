@@ -1,0 +1,2166 @@
+{
+  "count": 216,
+  "rows": [
+    {
+      "cause": null,
+      "consumer": "mapping_check",
+      "hashes": "none",
+      "id": "actual_pinned_registry_browsers_cft_positive",
+      "owned_children": 0,
+      "position": 0,
+      "route": "existing_unmodified_producer",
+      "status": "UNCHANGED_THIS_CLOSURE"
+    },
+    {
+      "cause": "EXACT_CFT_HELPER_AND_TAIL",
+      "consumer": "mapping_check/tokens/container/route_object",
+      "hashes": "none",
+      "id": "helper_path",
+      "owned_children": 0,
+      "position": 1,
+      "route": "existing_unmodified_producer",
+      "status": "UNCHANGED_THIS_CLOSURE"
+    },
+    {
+      "cause": "EXACT_CFT_HELPER_AND_TAIL",
+      "consumer": "mapping_check/tokens/container/route_object",
+      "hashes": "none",
+      "id": "helper_mirror",
+      "owned_children": 0,
+      "position": 2,
+      "route": "existing_unmodified_producer",
+      "status": "UNCHANGED_THIS_CLOSURE"
+    },
+    {
+      "cause": "EXACT_CFT_HELPER_AND_TAIL",
+      "consumer": "mapping_check/tokens/container/route_object",
+      "hashes": "none",
+      "id": "helper_tail",
+      "owned_children": 0,
+      "position": 3,
+      "route": "existing_unmodified_producer",
+      "status": "UNCHANGED_THIS_CLOSURE"
+    },
+    {
+      "cause": "EXACT_CFT_HELPER_AND_TAIL",
+      "consumer": "mapping_check/tokens/container/route_object",
+      "hashes": "none",
+      "id": "helper_unknown",
+      "owned_children": 0,
+      "position": 4,
+      "route": "existing_unmodified_producer",
+      "status": "UNCHANGED_THIS_CLOSURE"
+    },
+    {
+      "cause": "EXACT_PLATFORM_ROUTE",
+      "consumer": "mapping_check/tokens/container/route_object",
+      "hashes": "none",
+      "id": "platform_value",
+      "owned_children": 0,
+      "position": 5,
+      "route": "existing_unmodified_producer",
+      "status": "UNCHANGED_THIS_CLOSURE"
+    },
+    {
+      "cause": "EXACT_ALL_PLATFORM_KEYS",
+      "consumer": "mapping_check/tokens/container/route_object",
+      "hashes": "none",
+      "id": "platform_unknown",
+      "owned_children": 0,
+      "position": 6,
+      "route": "existing_unmodified_producer",
+      "status": "UNCHANGED_THIS_CLOSURE"
+    },
+    {
+      "cause": "PLATFORM_DUPLICATE",
+      "consumer": "mapping_check/tokens/container/route_object",
+      "hashes": "none",
+      "id": "platform_duplicate",
+      "owned_children": 0,
+      "position": 7,
+      "route": "existing_unmodified_producer",
+      "status": "UNCHANGED_THIS_CLOSURE"
+    },
+    {
+      "cause": "PLATFORM_SET_UNKNOWN",
+      "consumer": "mapping_check/tokens/container/route_object",
+      "hashes": "none",
+      "id": "unknown_fallback",
+      "owned_children": 0,
+      "position": 8,
+      "route": "existing_unmodified_producer",
+      "status": "UNCHANGED_THIS_CLOSURE"
+    },
+    {
+      "cause": "PLATFORM_VALUE_TAIL",
+      "consumer": "mapping_check/tokens/container/route_object",
+      "hashes": "none",
+      "id": "route_tail",
+      "owned_children": 0,
+      "position": 9,
+      "route": "existing_unmodified_producer",
+      "status": "UNCHANGED_THIS_CLOSURE"
+    },
+    {
+      "cause": "EXACT_PLATFORM_ROUTE",
+      "consumer": "mapping_check/tokens/container/route_object",
+      "hashes": "none",
+      "id": "ffmpeg_route",
+      "owned_children": 0,
+      "position": 10,
+      "route": "existing_unmodified_producer",
+      "status": "UNCHANGED_THIS_CLOSURE"
+    },
+    {
+      "cause": "BROWSER_REVISION",
+      "consumer": "mapping_check/tokens/container/route_object",
+      "hashes": "none",
+      "id": "revision",
+      "owned_children": 0,
+      "position": 11,
+      "route": "existing_unmodified_producer",
+      "status": "UNCHANGED_THIS_CLOSURE"
+    },
+    {
+      "cause": "BROWSER_VERSION",
+      "consumer": "mapping_check/tokens/container/route_object",
+      "hashes": "none",
+      "id": "version",
+      "owned_children": 0,
+      "position": 12,
+      "route": "existing_unmodified_producer",
+      "status": "UNCHANGED_THIS_CLOSURE"
+    },
+    {
+      "cause": "BROWSER_REVISION",
+      "consumer": "mapping_check/tokens/container/route_object",
+      "hashes": "none",
+      "id": "revision_type",
+      "owned_children": 0,
+      "position": 13,
+      "route": "existing_unmodified_producer",
+      "status": "UNCHANGED_THIS_CLOSURE"
+    },
+    {
+      "cause": "BROWSER_REVISION",
+      "consumer": "mapping_check/tokens/container/route_object",
+      "hashes": "none",
+      "id": "duplicate_browser",
+      "owned_children": 0,
+      "position": 14,
+      "route": "existing_unmodified_producer",
+      "status": "UNCHANGED_THIS_CLOSURE"
+    },
+    {
+      "cause": "BROWSER_MAP_TYPE",
+      "consumer": "mapping_check/tokens/container/route_object",
+      "hashes": "none",
+      "id": "browsers_type",
+      "owned_children": 0,
+      "position": 15,
+      "route": "existing_unmodified_producer",
+      "status": "UNCHANGED_THIS_CLOSURE"
+    },
+    {
+      "cause": "CFT_VERSION_TYPE",
+      "consumer": "mapping_check/tokens/container/route_object",
+      "hashes": "none",
+      "id": "cft_version",
+      "owned_children": 0,
+      "position": 16,
+      "route": "existing_unmodified_producer",
+      "status": "UNCHANGED_THIS_CLOSURE"
+    },
+    {
+      "cause": "EXACT_CFT_URL",
+      "consumer": "mapping_check/tokens/container/route_object",
+      "hashes": "none",
+      "id": "cft_url",
+      "owned_children": 0,
+      "position": 17,
+      "route": "existing_unmodified_producer",
+      "status": "UNCHANGED_THIS_CLOSURE"
+    },
+    {
+      "cause": "EXACT_CFT_URL",
+      "consumer": "mapping_check/tokens/container/route_object",
+      "hashes": "none",
+      "id": "cft_platform",
+      "owned_children": 0,
+      "position": 18,
+      "route": "existing_unmodified_producer",
+      "status": "UNCHANGED_THIS_CLOSURE"
+    },
+    {
+      "cause": "EXACT_CFT_URL",
+      "consumer": "mapping_check/tokens/container/route_object",
+      "hashes": "none",
+      "id": "cft_duplicate_linux",
+      "owned_children": 0,
+      "position": 19,
+      "route": "existing_unmodified_producer",
+      "status": "UNCHANGED_THIS_CLOSURE"
+    },
+    {
+      "cause": "CFT_DOWNLOAD_TYPE",
+      "consumer": "mapping_check/tokens/container/route_object",
+      "hashes": "none",
+      "id": "cft_download_type",
+      "owned_children": 0,
+      "position": 20,
+      "route": "existing_unmodified_producer",
+      "status": "UNCHANGED_THIS_CLOSURE"
+    },
+    {
+      "cause": "OWNER_PIN",
+      "consumer": "compile_bill",
+      "hashes": "none",
+      "id": "owner_pin",
+      "owned_children": 0,
+      "position": 21,
+      "route": "existing_unmodified_producer",
+      "status": "UNCHANGED_THIS_CLOSURE"
+    },
+    {
+      "cause": "HELPER_PINS",
+      "consumer": "compile_bill",
+      "hashes": "none",
+      "id": "helper_digest",
+      "owned_children": 0,
+      "position": 22,
+      "route": "existing_unmodified_producer",
+      "status": "UNCHANGED_THIS_CLOSURE"
+    },
+    {
+      "cause": "EXACT_BROWSER_ROW",
+      "consumer": "compile_bill",
+      "hashes": "none",
+      "id": "browser_route",
+      "owned_children": 0,
+      "position": 23,
+      "route": "existing_unmodified_producer",
+      "status": "UNCHANGED_THIS_CLOSURE"
+    },
+    {
+      "cause": "EXACT_BROWSER_ROW",
+      "consumer": "compile_bill",
+      "hashes": "none",
+      "id": "browser_cap_type",
+      "owned_children": 0,
+      "position": 24,
+      "route": "existing_unmodified_producer",
+      "status": "UNCHANGED_THIS_CLOSURE"
+    },
+    {
+      "cause": "BILL_LIMITS",
+      "consumer": "compile_bill",
+      "hashes": "none",
+      "id": "resource_type",
+      "owned_children": 0,
+      "position": 25,
+      "route": "existing_unmodified_producer",
+      "status": "UNCHANGED_THIS_CLOSURE"
+    },
+    {
+      "cause": "BROWSER_COUNT",
+      "consumer": "compile_bill",
+      "hashes": "none",
+      "id": "fourth_browser",
+      "owned_children": 0,
+      "position": 26,
+      "route": "existing_unmodified_producer",
+      "status": "UNCHANGED_THIS_CLOSURE"
+    },
+    {
+      "cause": "BILL_LIMITS",
+      "consumer": "compile_bill",
+      "hashes": "none",
+      "id": "target_change",
+      "owned_children": 0,
+      "position": 27,
+      "route": "existing_unmodified_producer",
+      "status": "UNCHANGED_THIS_CLOSURE"
+    },
+    {
+      "cause": "PIN_SHA",
+      "consumer": "sealed_bytes",
+      "hashes": "none",
+      "id": "real_owner_wrong_digest",
+      "owned_children": 0,
+      "position": 28,
+      "route": "existing_unmodified_producer",
+      "status": "UNCHANGED_THIS_CLOSURE"
+    },
+    {
+      "cause": "PIN_SHA",
+      "consumer": "sealed_bytes",
+      "hashes": "none",
+      "id": "real_metadata_wrong_digest",
+      "owned_children": 0,
+      "position": 29,
+      "route": "existing_unmodified_producer",
+      "status": "UNCHANGED_THIS_CLOSURE"
+    },
+    {
+      "cause": "HEADERS_OR_CHUNK_FRAMING_CAP",
+      "consumer": "G1.HeaderReader.readline",
+      "hashes": "none",
+      "id": "header64KiB_cap",
+      "owned_children": 0,
+      "position": 30,
+      "route": "existing_unmodified_producer",
+      "status": "UNCHANGED_THIS_CLOSURE"
+    },
+    {
+      "cause": "MAPPING_SOURCE_CAP",
+      "consumer": "tokens",
+      "hashes": "none",
+      "id": "mapping_source262KiB_cap",
+      "owned_children": 0,
+      "position": 31,
+      "route": "existing_unmodified_producer",
+      "status": "UNCHANGED_THIS_CLOSURE"
+    },
+    {
+      "cause": "JSON_DUPLICATE_KEY",
+      "consumer": "G1.inert_json",
+      "hashes": "none",
+      "id": "duplicate_json_key",
+      "owned_children": 0,
+      "position": 32,
+      "route": "existing_unmodified_producer",
+      "status": "UNCHANGED_THIS_CLOSURE"
+    },
+    {
+      "cause": "JSON_CONSTANT",
+      "consumer": "G1.inert_json",
+      "hashes": "none",
+      "id": "nonfinite_json",
+      "owned_children": 0,
+      "position": 33,
+      "route": "existing_unmodified_producer",
+      "status": "UNCHANGED_THIS_CLOSURE"
+    },
+    {
+      "cause": "JSON_DEPTH",
+      "consumer": "G1.inert_json",
+      "hashes": "none",
+      "id": "json_depth",
+      "owned_children": 0,
+      "position": 34,
+      "route": "existing_unmodified_producer",
+      "status": "UNCHANGED_THIS_CLOSURE"
+    },
+    {
+      "cause": null,
+      "consumer": "execute_core/R4.run_wave/G1.worker",
+      "hashes": "exact3",
+      "id": "whole3_actual_G1_worker_positive",
+      "owned_children": 3,
+      "position": 35,
+      "route": "historical_body_not_copied",
+      "status": "HISTORICAL_OPERATIONAL_BODY_ABSTRACT_REQUIRED_NOT_RUN"
+    },
+    {
+      "cause": "THREE_BODY_RECEIPTS",
+      "consumer": "R4.drain/collect/G1.worker",
+      "hashes": "at_least1",
+      "id": "whole3_redirect",
+      "owned_children": 3,
+      "position": 36,
+      "route": "historical_body_not_copied",
+      "status": "HISTORICAL_OPERATIONAL_BODY_ABSTRACT_REQUIRED_NOT_RUN"
+    },
+    {
+      "cause": "THREE_BODY_RECEIPTS",
+      "consumer": "R4.drain/collect/G1.worker",
+      "hashes": "at_least1",
+      "id": "whole3_http404",
+      "owned_children": 3,
+      "position": 37,
+      "route": "historical_body_not_copied",
+      "status": "HISTORICAL_OPERATIONAL_BODY_ABSTRACT_REQUIRED_NOT_RUN"
+    },
+    {
+      "cause": "SECURITY_INTEGRITY_PROTOCOL:SSLCertVerificationError",
+      "consumer": "R4.drain/collect/G1.worker",
+      "hashes": "at_least1",
+      "id": "whole3_tls_certificate",
+      "owned_children": 3,
+      "position": 38,
+      "route": "historical_body_not_copied",
+      "status": "HISTORICAL_OPERATIONAL_BODY_ABSTRACT_REQUIRED_NOT_RUN"
+    },
+    {
+      "cause": "SECURITY_INTEGRITY_PROTOCOL:TLS_EVIDENCE",
+      "consumer": "R4.drain/collect/G1.worker",
+      "hashes": "at_least1",
+      "id": "whole3_tls_protocol",
+      "owned_children": 3,
+      "position": 39,
+      "route": "historical_body_not_copied",
+      "status": "HISTORICAL_OPERATIONAL_BODY_ABSTRACT_REQUIRED_NOT_RUN"
+    },
+    {
+      "cause": "SECURITY_INTEGRITY_PROTOCOL:CONTENT_ENCODING",
+      "consumer": "R4.drain/collect/G1.worker",
+      "hashes": "at_least1",
+      "id": "whole3_encoding",
+      "owned_children": 3,
+      "position": 40,
+      "route": "historical_body_not_copied",
+      "status": "HISTORICAL_OPERATIONAL_BODY_ABSTRACT_REQUIRED_NOT_RUN"
+    },
+    {
+      "cause": "SECURITY_INTEGRITY_PROTOCOL:HTTP_FRAMING",
+      "consumer": "R4.drain/collect/G1.worker",
+      "hashes": "at_least1",
+      "id": "whole3_framing",
+      "owned_children": 3,
+      "position": 41,
+      "route": "historical_body_not_copied",
+      "status": "HISTORICAL_OPERATIONAL_BODY_ABSTRACT_REQUIRED_NOT_RUN"
+    },
+    {
+      "cause": "SECURITY_INTEGRITY_PROTOCOL:HTTP_FRAMING",
+      "consumer": "R4.drain/collect/G1.worker",
+      "hashes": "at_least1",
+      "id": "whole3_duplicate_length",
+      "owned_children": 3,
+      "position": 42,
+      "route": "historical_body_not_copied",
+      "status": "HISTORICAL_OPERATIONAL_BODY_ABSTRACT_REQUIRED_NOT_RUN"
+    },
+    {
+      "cause": "SECURITY_INTEGRITY_PROTOCOL:DECLARED_BODY_SIZE",
+      "consumer": "R4.drain/collect/G1.worker",
+      "hashes": "at_least1",
+      "id": "whole3_length_cap",
+      "owned_children": 3,
+      "position": 43,
+      "route": "historical_body_not_copied",
+      "status": "HISTORICAL_OPERATIONAL_BODY_ABSTRACT_REQUIRED_NOT_RUN"
+    },
+    {
+      "cause": "SECURITY_INTEGRITY_PROTOCOL:BODY_TRUNCATED",
+      "consumer": "R4.drain/collect/G1.worker",
+      "hashes": "at_least1",
+      "id": "whole3_truncated",
+      "owned_children": 3,
+      "position": 44,
+      "route": "historical_body_not_copied",
+      "status": "HISTORICAL_OPERATIONAL_BODY_ABSTRACT_REQUIRED_NOT_RUN"
+    },
+    {
+      "cause": "TLS_EVIDENCE",
+      "consumer": "R4.drain/collect/G1.worker",
+      "hashes": "at_least1",
+      "id": "whole3_hostname",
+      "owned_children": 3,
+      "position": 45,
+      "route": "historical_body_not_copied",
+      "status": "HISTORICAL_OPERATIONAL_BODY_ABSTRACT_REQUIRED_NOT_RUN"
+    },
+    {
+      "cause": "TLS_EVIDENCE",
+      "consumer": "R4.drain/collect/G1.worker",
+      "hashes": "at_least1",
+      "id": "whole3_verify_mode",
+      "owned_children": 3,
+      "position": 46,
+      "route": "historical_body_not_copied",
+      "status": "HISTORICAL_OPERATIONAL_BODY_ABSTRACT_REQUIRED_NOT_RUN"
+    },
+    {
+      "cause": "TLS_EVIDENCE",
+      "consumer": "R4.drain/collect/G1.worker",
+      "hashes": "at_least1",
+      "id": "whole3_verified_type",
+      "owned_children": 3,
+      "position": 47,
+      "route": "historical_body_not_copied",
+      "status": "HISTORICAL_OPERATIONAL_BODY_ABSTRACT_REQUIRED_NOT_RUN"
+    },
+    {
+      "cause": "TLS_EVIDENCE",
+      "consumer": "R4.drain/collect/G1.worker",
+      "hashes": "at_least1",
+      "id": "whole3_cert_digest",
+      "owned_children": 3,
+      "position": 48,
+      "route": "historical_body_not_copied",
+      "status": "HISTORICAL_OPERATIONAL_BODY_ABSTRACT_REQUIRED_NOT_RUN"
+    },
+    {
+      "cause": "WORKER_ACCOUNTING_DRIFT",
+      "consumer": "R4.drain/collect/G1.worker",
+      "hashes": "at_least1",
+      "id": "whole3_accounting",
+      "owned_children": 3,
+      "position": 49,
+      "route": "historical_body_not_copied",
+      "status": "HISTORICAL_OPERATIONAL_BODY_ABSTRACT_REQUIRED_NOT_RUN"
+    },
+    {
+      "cause": "WORKER_ACCOUNTING_DRIFT",
+      "consumer": "R4.drain/collect/G1.worker",
+      "hashes": "at_least1",
+      "id": "whole3_digest",
+      "owned_children": 3,
+      "position": 50,
+      "route": "historical_body_not_copied",
+      "status": "HISTORICAL_OPERATIONAL_BODY_ABSTRACT_REQUIRED_NOT_RUN"
+    },
+    {
+      "cause": "UNPINNED_ACCEPTANCE",
+      "consumer": "R4.drain/collect/G1.worker",
+      "hashes": "at_least1",
+      "id": "whole3_acceptance",
+      "owned_children": 3,
+      "position": 51,
+      "route": "historical_body_not_copied",
+      "status": "HISTORICAL_OPERATIONAL_BODY_ABSTRACT_REQUIRED_NOT_RUN"
+    },
+    {
+      "cause": "WORKER_RECEIPT_INCOMPLETE",
+      "consumer": "R4.drain/collect/G1.worker",
+      "hashes": "none",
+      "id": "whole3_unknown_final",
+      "owned_children": 3,
+      "position": 52,
+      "route": "historical_body_not_copied",
+      "status": "HISTORICAL_OPERATIONAL_BODY_ABSTRACT_REQUIRED_NOT_RUN"
+    },
+    {
+      "cause": "EVENT_COUNT",
+      "consumer": "R4.drain/collect/G1.worker",
+      "hashes": "none",
+      "id": "whole3_duplicate_final",
+      "owned_children": 3,
+      "position": 53,
+      "route": "historical_body_not_copied",
+      "status": "HISTORICAL_OPERATIONAL_BODY_ABSTRACT_REQUIRED_NOT_RUN"
+    },
+    {
+      "cause": "PARTIAL_LATE_INPUT_DRIFT",
+      "consumer": "RetainedTree.check",
+      "hashes": "none",
+      "id": "late_input",
+      "owned_children": 0,
+      "position": 54,
+      "route": "existing_unmodified_producer",
+      "status": "UNCHANGED_THIS_CLOSURE"
+    },
+    {
+      "cause": "RSS_CAP",
+      "consumer": "R4.run_wave/G1.process_status",
+      "hashes": "none",
+      "id": "aggregate_RSS",
+      "owned_children": 3,
+      "position": 55,
+      "route": "historical_body_not_copied",
+      "status": "HISTORICAL_OPERATIONAL_BODY_ABSTRACT_REQUIRED_NOT_RUN"
+    },
+    {
+      "cause": "WALL_TIMEOUT:create_fresh_browser3",
+      "consumer": "Run.guard",
+      "hashes": "none",
+      "id": "deadline_create_fresh_browser3",
+      "owned_children": 0,
+      "position": 56,
+      "route": "Run.guard",
+      "status": "HASH_RELATION_NOT_MANUFACTURED"
+    },
+    {
+      "cause": "WALL_TIMEOUT:receipt_write",
+      "consumer": "Run.guard",
+      "hashes": "stage_dependent",
+      "id": "deadline_receipt_write",
+      "owned_children": 3,
+      "position": 57,
+      "route": "Run.guard",
+      "status": "HASH_RELATION_NOT_MANUFACTURED"
+    },
+    {
+      "cause": "WALL_TIMEOUT:receipts_fsynced",
+      "consumer": "Run.guard",
+      "hashes": "stage_dependent",
+      "id": "deadline_receipts_fsynced",
+      "owned_children": 3,
+      "position": 58,
+      "route": "Run.guard",
+      "status": "HASH_RELATION_NOT_MANUFACTURED"
+    },
+    {
+      "cause": "WALL_TIMEOUT:inventory_write",
+      "consumer": "Run.guard",
+      "hashes": "stage_dependent",
+      "id": "deadline_inventory_write",
+      "owned_children": 3,
+      "position": 59,
+      "route": "Run.guard",
+      "status": "HASH_RELATION_NOT_MANUFACTURED"
+    },
+    {
+      "cause": "WALL_TIMEOUT:inventory_fsynced",
+      "consumer": "Run.guard",
+      "hashes": "stage_dependent",
+      "id": "deadline_inventory_fsynced",
+      "owned_children": 3,
+      "position": 60,
+      "route": "Run.guard",
+      "status": "HASH_RELATION_NOT_MANUFACTURED"
+    },
+    {
+      "cause": "WALL_TIMEOUT:terminal_seal",
+      "consumer": "Run.guard",
+      "hashes": "stage_dependent",
+      "id": "deadline_terminal_seal",
+      "owned_children": 3,
+      "position": 61,
+      "route": "Run.guard",
+      "status": "HASH_RELATION_NOT_MANUFACTURED"
+    },
+    {
+      "cause": "WALL_TIMEOUT:closed_terminal",
+      "consumer": "Run.guard",
+      "hashes": "stage_dependent",
+      "id": "deadline_closed_terminal",
+      "owned_children": 3,
+      "position": 62,
+      "route": "Run.guard",
+      "status": "HASH_RELATION_NOT_MANUFACTURED"
+    },
+    {
+      "cause": "OWNER_STOP",
+      "consumer": "Run.guard",
+      "hashes": "none",
+      "id": "owner_stop",
+      "owned_children": 0,
+      "position": 63,
+      "route": "existing_unmodified_producer",
+      "status": "UNCHANGED_THIS_CLOSURE"
+    },
+    {
+      "cause": "CLEANUP:PRIVATE_CLEANUP_FAULT",
+      "consumer": "R4.close_fd",
+      "hashes": "none",
+      "id": "sticky_cleanup",
+      "owned_children": 0,
+      "position": 64,
+      "route": "existing_unmodified_producer",
+      "status": "UNCHANGED_THIS_CLOSURE"
+    },
+    {
+      "cause": "FORCE_OWNED_CHILD_STOP",
+      "consumer": "R4.stop_child/collect",
+      "hashes": "none",
+      "id": "unknown_owned_child_sticky",
+      "owned_children": 3,
+      "position": 65,
+      "route": "historical_body_not_copied",
+      "status": "HISTORICAL_OPERATIONAL_BODY_ABSTRACT_REQUIRED_NOT_RUN"
+    },
+    {
+      "cause": "EXISTING_TARGET",
+      "consumer": "require_absent_target",
+      "hashes": "none",
+      "id": "existing_target",
+      "owned_children": 0,
+      "position": 66,
+      "route": "existing_unmodified_producer",
+      "status": "UNCHANGED_THIS_CLOSURE"
+    },
+    {
+      "cause": "PIN_CUSTODY",
+      "consumer": "sealed_bytes",
+      "hashes": "none",
+      "id": "wrong_mode",
+      "owned_children": 0,
+      "position": 67,
+      "route": "existing_unmodified_producer",
+      "status": "UNCHANGED_THIS_CLOSURE"
+    },
+    {
+      "cause": "PIN_CUSTODY",
+      "consumer": "sealed_bytes",
+      "hashes": "none",
+      "id": "hardlink",
+      "owned_children": 0,
+      "position": 68,
+      "route": "existing_unmodified_producer",
+      "status": "UNCHANGED_THIS_CLOSURE"
+    },
+    {
+      "cause": "OSError:40",
+      "consumer": "sealed_bytes",
+      "hashes": "none",
+      "id": "symlink",
+      "owned_children": 0,
+      "position": 69,
+      "route": "existing_unmodified_producer",
+      "status": "UNCHANGED_THIS_CLOSURE"
+    },
+    {
+      "cause": "EXACT_MIRRORS",
+      "consumer": "mapping_check/container",
+      "hashes": "none",
+      "id": "outer_mirror",
+      "owned_children": 0,
+      "position": 70,
+      "route": "supervise_owned+complete_streams+one_retirement",
+      "status": "CONNECTED_NOT_RUN"
+    },
+    {
+      "cause": null,
+      "consumer": "RetainedTree.check",
+      "hashes": "none",
+      "id": "retained_positive",
+      "owned_children": 0,
+      "position": 71,
+      "route": "existing_unmodified_producer",
+      "status": "UNCHANGED_THIS_CLOSURE"
+    },
+    {
+      "cause": "PARTIAL_LATE_INPUT_DRIFT",
+      "consumer": "RetainedTree.check",
+      "hashes": "none",
+      "id": "retained_content",
+      "owned_children": 0,
+      "position": 72,
+      "route": "existing_unmodified_producer",
+      "status": "UNCHANGED_THIS_CLOSURE"
+    },
+    {
+      "cause": "PARTIAL_LATE_INPUT_DRIFT",
+      "consumer": "RetainedTree.check",
+      "hashes": "none",
+      "id": "retained_path",
+      "owned_children": 0,
+      "position": 73,
+      "route": "existing_unmodified_producer",
+      "status": "UNCHANGED_THIS_CLOSURE"
+    },
+    {
+      "cause": "OSError:9",
+      "consumer": "RetainedTree.check",
+      "hashes": "none",
+      "id": "retained_fd",
+      "owned_children": 0,
+      "position": 74,
+      "route": "existing_unmodified_producer",
+      "status": "UNCHANGED_THIS_CLOSURE"
+    },
+    {
+      "cause": "PARTIAL_DIRECTORY_PATH",
+      "consumer": "RetainedTree.check",
+      "hashes": "none",
+      "id": "retained_directory",
+      "owned_children": 0,
+      "position": 75,
+      "route": "existing_unmodified_producer",
+      "status": "UNCHANGED_THIS_CLOSURE"
+    },
+    {
+      "cause": "PARTIAL_MEMBERSHIP",
+      "consumer": "RetainedTree.check",
+      "hashes": "none",
+      "id": "retained_membership",
+      "owned_children": 0,
+      "position": 76,
+      "route": "existing_unmodified_producer",
+      "status": "UNCHANGED_THIS_CLOSURE"
+    },
+    {
+      "cause": null,
+      "consumer": "BoundedOutput/G1.Output.check/create",
+      "hashes": "none",
+      "id": "output_positive",
+      "owned_children": 0,
+      "position": 77,
+      "route": "existing_unmodified_producer",
+      "status": "UNCHANGED_THIS_CLOSURE"
+    },
+    {
+      "cause": "FILE_CUSTODY",
+      "consumer": "BoundedOutput/G1.Output.check/create",
+      "hashes": "none",
+      "id": "output_mode",
+      "owned_children": 0,
+      "position": 78,
+      "route": "existing_unmodified_producer",
+      "status": "UNCHANGED_THIS_CLOSURE"
+    },
+    {
+      "cause": "FILE_CUSTODY",
+      "consumer": "BoundedOutput/G1.Output.check/create",
+      "hashes": "none",
+      "id": "output_hardlink",
+      "owned_children": 0,
+      "position": 79,
+      "route": "existing_unmodified_producer",
+      "status": "UNCHANGED_THIS_CLOSURE"
+    },
+    {
+      "cause": "FILE_CUSTODY",
+      "consumer": "BoundedOutput/G1.Output.check/create",
+      "hashes": "none",
+      "id": "output_symlink",
+      "owned_children": 0,
+      "position": 80,
+      "route": "existing_unmodified_producer",
+      "status": "UNCHANGED_THIS_CLOSURE"
+    },
+    {
+      "cause": "UNEXPECTED_TREE_ENTRY",
+      "consumer": "BoundedOutput/G1.Output.check/create",
+      "hashes": "none",
+      "id": "output_membership",
+      "owned_children": 0,
+      "position": 81,
+      "route": "existing_unmodified_producer",
+      "status": "UNCHANGED_THIS_CLOSURE"
+    },
+    {
+      "cause": "ROOT_CUSTODY",
+      "consumer": "BoundedOutput/G1.Output.check/create",
+      "hashes": "none",
+      "id": "output_root",
+      "owned_children": 0,
+      "position": 82,
+      "route": "existing_unmodified_producer",
+      "status": "UNCHANGED_THIS_CLOSURE"
+    },
+    {
+      "cause": "DIRECTORY_REPLACED",
+      "consumer": "BoundedOutput/G1.Output.check/create",
+      "hashes": "none",
+      "id": "output_directory",
+      "owned_children": 0,
+      "position": 83,
+      "route": "existing_unmodified_producer",
+      "status": "UNCHANGED_THIS_CLOSURE"
+    },
+    {
+      "cause": "FINAL_DISK_CAP",
+      "consumer": "BoundedOutput/G1.Output.check/create",
+      "hashes": "none",
+      "id": "output_disk",
+      "owned_children": 0,
+      "position": 84,
+      "route": "existing_unmodified_producer",
+      "status": "UNCHANGED_THIS_CLOSURE"
+    },
+    {
+      "cause": "OUTPUT_COLLISION",
+      "consumer": "BoundedOutput/G1.Output.check/create",
+      "hashes": "none",
+      "id": "output_collision",
+      "owned_children": 0,
+      "position": 85,
+      "route": "existing_unmodified_producer",
+      "status": "UNCHANGED_THIS_CLOSURE"
+    },
+    {
+      "cause": "BODY_RESERVATION",
+      "consumer": "reservations",
+      "hashes": "none",
+      "id": "reservation",
+      "owned_children": 0,
+      "position": 86,
+      "route": "existing_unmodified_producer",
+      "status": "UNCHANGED_THIS_CLOSURE"
+    },
+    {
+      "cause": "OUTPUT_FILE_LIMIT",
+      "consumer": "BoundedOutput.__init__",
+      "hashes": "none",
+      "id": "file_count",
+      "owned_children": 0,
+      "position": 87,
+      "route": "existing_unmodified_producer",
+      "status": "UNCHANGED_THIS_CLOSURE"
+    },
+    {
+      "cause": "OUTPUT_DIRECTORY_LIMIT",
+      "consumer": "BoundedOutput.__init__",
+      "hashes": "none",
+      "id": "dir_count",
+      "owned_children": 0,
+      "position": 88,
+      "route": "existing_unmodified_producer",
+      "status": "UNCHANGED_THIS_CLOSURE"
+    },
+    {
+      "cause": "INPUT_SIZE",
+      "consumer": "R4.guarded_digest",
+      "hashes": "none",
+      "id": "pinned_body_file_cap",
+      "owned_children": 0,
+      "position": 89,
+      "route": "existing_unmodified_producer",
+      "status": "UNCHANGED_THIS_CLOSURE"
+    },
+    {
+      "cause": "WALL_TIMEOUT:guarded_hash",
+      "consumer": "R4.guarded_digest",
+      "hashes": "none",
+      "id": "guarded_hash",
+      "owned_children": 0,
+      "position": 90,
+      "route": "existing_unmodified_producer",
+      "status": "UNCHANGED_THIS_CLOSURE"
+    },
+    {
+      "cause": "WALL_TIMEOUT:guarded_write",
+      "consumer": "R4.guarded_write",
+      "hashes": "none",
+      "id": "guarded_write",
+      "owned_children": 0,
+      "position": 91,
+      "route": "existing_unmodified_producer",
+      "status": "UNCHANGED_THIS_CLOSURE"
+    },
+    {
+      "cause": "INPUT_SHA",
+      "consumer": "ca_context/R4.guarded_digest",
+      "hashes": "none",
+      "id": "actual_CA_wrong_digest",
+      "owned_children": 0,
+      "position": 92,
+      "route": "existing_unmodified_producer",
+      "status": "UNCHANGED_THIS_CLOSURE"
+    },
+    {
+      "cause": "NO_CERTIFICATE_OR_CRL_FOUND",
+      "consumer": "ca_context/SSLContext.load_verify_locations",
+      "hashes": "none",
+      "id": "actual_CA_parse",
+      "owned_children": 0,
+      "position": 93,
+      "route": "existing_unmodified_producer",
+      "status": "UNCHANGED_THIS_CLOSURE"
+    },
+    {
+      "cause": null,
+      "consumer": "G1.resources",
+      "hashes": "none",
+      "id": "actual_resources_positive",
+      "owned_children": 0,
+      "position": 94,
+      "route": "a171_resource_observer_receipt",
+      "status": "OBSERVER_BEFORE_DELEGATED_JOIN"
+    },
+    {
+      "cause": "CGROUP_LEAF_UNKNOWN",
+      "consumer": "G1.resources",
+      "hashes": "none",
+      "id": "actual_resources_leaf",
+      "owned_children": 0,
+      "position": 95,
+      "route": "a171_resource_observer_receipt",
+      "status": "OBSERVER_BEFORE_DELEGATED_JOIN"
+    },
+    {
+      "cause": "CGROUP_MEMORY_LIMIT_UNKNOWN",
+      "consumer": "G1.resources",
+      "hashes": "none",
+      "id": "actual_resources_limit",
+      "owned_children": 0,
+      "position": 96,
+      "route": "a171_resource_observer_receipt",
+      "status": "OBSERVER_BEFORE_DELEGATED_JOIN"
+    },
+    {
+      "cause": "CGROUP_MEMORY_SHORTFALL",
+      "consumer": "G1.resources",
+      "hashes": "none",
+      "id": "actual_resources_memory",
+      "owned_children": 0,
+      "position": 97,
+      "route": "a171_resource_observer_receipt",
+      "status": "OBSERVER_BEFORE_DELEGATED_JOIN"
+    },
+    {
+      "cause": "CGROUP_ANCESTOR_MEMORY_SHORTFALL",
+      "consumer": "G1.resources",
+      "hashes": "none",
+      "id": "actual_resources_ancestor",
+      "owned_children": 0,
+      "position": 98,
+      "route": "a171_resource_observer_receipt",
+      "status": "OBSERVER_BEFORE_DELEGATED_JOIN"
+    },
+    {
+      "cause": "DISK_SHORTFALL",
+      "consumer": "G1.resources",
+      "hashes": "none",
+      "id": "actual_resources_disk",
+      "owned_children": 0,
+      "position": 99,
+      "route": "a171_resource_observer_receipt",
+      "status": "OBSERVER_BEFORE_DELEGATED_JOIN"
+    },
+    {
+      "cause": "MEMORY_SHORTFALL",
+      "consumer": "G1.resources",
+      "hashes": "none",
+      "id": "actual_resources_host_memory",
+      "owned_children": 0,
+      "position": 100,
+      "route": "a171_resource_observer_receipt",
+      "status": "OBSERVER_BEFORE_DELEGATED_JOIN"
+    },
+    {
+      "cause": "SECURITY_INTEGRITY_PROTOCOL:HEADERS_OR_CHUNK_FRAMING_CAP",
+      "consumer": "G1.worker/BoundedResponse/HeaderReader",
+      "hashes": "at_least1",
+      "id": "whole3_bounded_header",
+      "owned_children": 3,
+      "position": 101,
+      "route": "historical_body_not_copied",
+      "status": "HISTORICAL_OPERATIONAL_BODY_ABSTRACT_REQUIRED_NOT_RUN"
+    },
+    {
+      "cause": "PARTIAL_LATE_INPUT_DRIFT",
+      "consumer": "RetainedTree.check",
+      "hashes": "exact3",
+      "id": "late_during_work",
+      "owned_children": 3,
+      "position": 102,
+      "route": "historical_body_not_copied",
+      "status": "HISTORICAL_OPERATIONAL_BODY_ABSTRACT_REQUIRED_NOT_RUN"
+    },
+    {
+      "cause": "OUTPUT_CLOSE:OSError:5",
+      "consumer": "BoundedOutput/G1.Output.close",
+      "hashes": "exact3",
+      "id": "actual_output_close",
+      "owned_children": 3,
+      "position": 103,
+      "route": "historical_body_not_copied",
+      "status": "HISTORICAL_OPERATIONAL_BODY_ABSTRACT_REQUIRED_NOT_RUN"
+    },
+    {
+      "cause": "SIGNAL_RESTORE:OSError:5",
+      "consumer": "execute_core/signal.signal",
+      "hashes": "exact3",
+      "id": "actual_signal_restore",
+      "owned_children": 3,
+      "position": 104,
+      "route": "historical_body_not_copied",
+      "status": "HISTORICAL_OPERATIONAL_BODY_ABSTRACT_REQUIRED_NOT_RUN"
+    },
+    {
+      "cause": "OWNER_STOP",
+      "consumer": "Run.guard/R4.stop_child",
+      "hashes": "none",
+      "id": "active_owned_stop",
+      "owned_children": 3,
+      "position": 105,
+      "route": "historical_body_not_copied",
+      "status": "HISTORICAL_OPERATIONAL_BODY_ABSTRACT_REQUIRED_NOT_RUN"
+    },
+    {
+      "cause": null,
+      "consumer": "public_admission",
+      "hashes": "none",
+      "id": "public_admission_positive",
+      "owned_children": 0,
+      "position": 106,
+      "route": "existing_unmodified_producer",
+      "status": "UNCHANGED_THIS_CLOSURE"
+    },
+    {
+      "cause": "EXTERNAL_ROOT_PINS_REQUIRED",
+      "consumer": "public_admission",
+      "hashes": "none",
+      "id": "public_unknown",
+      "owned_children": 0,
+      "position": 107,
+      "route": "existing_unmodified_producer",
+      "status": "UNCHANGED_THIS_CLOSURE"
+    },
+    {
+      "cause": "ISOLATED_ENV",
+      "consumer": "public_admission",
+      "hashes": "none",
+      "id": "public_environment",
+      "owned_children": 0,
+      "position": 108,
+      "route": "existing_unmodified_producer",
+      "status": "UNCHANGED_THIS_CLOSURE"
+    },
+    {
+      "cause": "PIN_SHA:SELF",
+      "consumer": "public_admission",
+      "hashes": "none",
+      "id": "public_self_pin",
+      "owned_children": 0,
+      "position": 109,
+      "route": "existing_unmodified_producer",
+      "status": "UNCHANGED_THIS_CLOSURE"
+    },
+    {
+      "cause": "EXTERNAL_BILL_PIN",
+      "consumer": "public_admission",
+      "hashes": "none",
+      "id": "public_bill_pin",
+      "owned_children": 0,
+      "position": 110,
+      "route": "existing_unmodified_producer",
+      "status": "UNCHANGED_THIS_CLOSURE"
+    },
+    {
+      "cause": "PIN_SHA:CONTROLS",
+      "consumer": "public_admission",
+      "hashes": "none",
+      "id": "public_controls_pin",
+      "owned_children": 0,
+      "position": 111,
+      "route": "existing_unmodified_producer",
+      "status": "UNCHANGED_THIS_CLOSURE"
+    },
+    {
+      "cause": "WALL_TIMEOUT:final_retained_hash",
+      "consumer": "Run.guard/R4.guarded_digest",
+      "hashes": "exact3",
+      "id": "deadline_final_retained_hash",
+      "owned_children": 3,
+      "position": 112,
+      "route": "Run.guard",
+      "status": "HASH_RELATION_NOT_MANUFACTURED"
+    },
+    {
+      "cause": "WALL_TIMEOUT:inventory_serialization",
+      "consumer": "Run.guard/R4.guarded_digest",
+      "hashes": "exact3",
+      "id": "deadline_inventory_serialization",
+      "owned_children": 3,
+      "position": 113,
+      "route": "Run.guard",
+      "status": "HASH_RELATION_NOT_MANUFACTURED"
+    },
+    {
+      "cause": "WALL_TIMEOUT:inventory_serialized",
+      "consumer": "Run.guard/R4.guarded_digest",
+      "hashes": "exact3",
+      "id": "deadline_inventory_serialized",
+      "owned_children": 3,
+      "position": 114,
+      "route": "Run.guard",
+      "status": "HASH_RELATION_NOT_MANUFACTURED"
+    },
+    {
+      "cause": "WALL_TIMEOUT:terminal_serialization",
+      "consumer": "terminal_bytes/Run.guard",
+      "hashes": "none",
+      "id": "terminal_serialization",
+      "owned_children": 0,
+      "position": 115,
+      "route": "existing_unmodified_producer",
+      "status": "UNCHANGED_THIS_CLOSURE"
+    },
+    {
+      "cause": "WALL_TIMEOUT:terminal_serialized",
+      "consumer": "terminal_bytes/Run.guard",
+      "hashes": "none",
+      "id": "terminal_serialized",
+      "owned_children": 0,
+      "position": 116,
+      "route": "existing_unmodified_producer",
+      "status": "UNCHANGED_THIS_CLOSURE"
+    },
+    {
+      "cause": "SERIALIZATION_FAULT",
+      "consumer": "terminal_bytes",
+      "hashes": "none",
+      "id": "serialization_failure",
+      "owned_children": 0,
+      "position": 117,
+      "route": "existing_unmodified_producer",
+      "status": "UNCHANGED_THIS_CLOSURE"
+    },
+    {
+      "cause": "SERIALIZATION_FAULT",
+      "consumer": "terminal_bytes",
+      "hashes": "none",
+      "id": "sticky_serialization",
+      "owned_children": 0,
+      "position": 118,
+      "route": "existing_unmodified_producer",
+      "status": "UNCHANGED_THIS_CLOSURE"
+    },
+    {
+      "cause": "TERMINAL_SINK:TERMINAL_OUTPUT_NOT_PIPE",
+      "consumer": "emit_terminal",
+      "hashes": "none",
+      "id": "terminal_output_path",
+      "owned_children": 0,
+      "position": 119,
+      "route": "existing_unmodified_producer",
+      "status": "UNCHANGED_THIS_CLOSURE"
+    },
+    {
+      "cause": "REQUEST_TIMEOUT",
+      "consumer": "R4.run_wave/stop_child",
+      "hashes": "none",
+      "id": "connect15_unconnected",
+      "owned_children": 3,
+      "position": 120,
+      "route": "historical_body_not_copied",
+      "status": "HISTORICAL_OPERATIONAL_BODY_ABSTRACT_REQUIRED_NOT_RUN"
+    },
+    {
+      "cause": "REQUEST_TIMEOUT",
+      "consumer": "R4.run_wave/stop_child",
+      "hashes": "none",
+      "id": "request300_connected",
+      "owned_children": 3,
+      "position": 121,
+      "route": "historical_body_not_copied",
+      "status": "HISTORICAL_OPERATIONAL_BODY_ABSTRACT_REQUIRED_NOT_RUN"
+    },
+    {
+      "cause": "WALL_TIMEOUT:work_boundary",
+      "consumer": "Run.guard",
+      "hashes": "none",
+      "id": "work1140_boundary",
+      "owned_children": 0,
+      "position": 122,
+      "route": "existing_unmodified_producer",
+      "status": "UNCHANGED_THIS_CLOSURE"
+    },
+    {
+      "cause": "WALL_TIMEOUT:terminal_reserve",
+      "consumer": "Run.guard",
+      "hashes": "none",
+      "id": "hard1200_boundary",
+      "owned_children": 0,
+      "position": 123,
+      "route": "existing_unmodified_producer",
+      "status": "UNCHANGED_THIS_CLOSURE"
+    },
+    {
+      "cause": "WALL_TIMEOUT:network_schedule",
+      "consumer": "R4.run_wave/Run.guard",
+      "hashes": "none",
+      "id": "work1140_active",
+      "owned_children": 3,
+      "position": 124,
+      "route": "historical_body_not_copied",
+      "status": "HISTORICAL_OPERATIONAL_BODY_ABSTRACT_REQUIRED_NOT_RUN"
+    },
+    {
+      "cause": null,
+      "consumer": "G1.worker/BoundedResponse/write_all",
+      "hashes": "exact3",
+      "id": "body_eof_at_cap",
+      "owned_children": 3,
+      "position": 125,
+      "route": "module_write_all",
+      "status": "REAL_SYMBOL_THREE_WORKER_HISTORICAL_ABSTRACT"
+    },
+    {
+      "cause": "SECURITY_INTEGRITY_PROTOCOL:CAP_REACHED_WITHOUT_EOF",
+      "consumer": "G1.worker/BoundedResponse/write_all",
+      "hashes": "at_least1",
+      "id": "body_cap_without_eof",
+      "owned_children": 3,
+      "position": 126,
+      "route": "module_write_all",
+      "status": "REAL_SYMBOL_THREE_WORKER_HISTORICAL_ABSTRACT"
+    },
+    {
+      "cause": "SECURITY_INTEGRITY_PROTOCOL:SHORT_WRITE",
+      "consumer": "G1.worker/BoundedResponse/write_all",
+      "hashes": "at_least1",
+      "id": "body_short_write",
+      "owned_children": 3,
+      "position": 127,
+      "route": "module_write_all",
+      "status": "REAL_SYMBOL_THREE_WORKER_HISTORICAL_ABSTRACT"
+    },
+    {
+      "cause": null,
+      "consumer": "G1.worker/BoundedResponse/write_all",
+      "hashes": "exact3",
+      "id": "body_partial_write",
+      "owned_children": 3,
+      "position": 128,
+      "route": "module_write_all",
+      "status": "REAL_SYMBOL_THREE_WORKER_HISTORICAL_ABSTRACT"
+    },
+    {
+      "cause": null,
+      "consumer": "disk_reservation",
+      "hashes": "none",
+      "id": "disk_reservation_positive",
+      "owned_children": 0,
+      "position": 129,
+      "route": "existing_unmodified_producer",
+      "status": "UNCHANGED_THIS_CLOSURE"
+    },
+    {
+      "cause": "RESERVATION",
+      "consumer": "disk_reservation",
+      "hashes": "none",
+      "id": "disk_reservation_boundary",
+      "owned_children": 0,
+      "position": 130,
+      "route": "existing_unmodified_producer",
+      "status": "UNCHANGED_THIS_CLOSURE"
+    },
+    {
+      "cause": "STOP_UNCONFIRMED",
+      "consumer": "R4.collect",
+      "hashes": "none",
+      "id": "moving_owned_collect_no_hash",
+      "owned_children": 1,
+      "position": 131,
+      "route": "historical_body_not_copied",
+      "status": "HISTORICAL_OPERATIONAL_BODY_ABSTRACT_REQUIRED_NOT_RUN"
+    },
+    {
+      "cause": "COMBINED_ACTIVE_UNKNOWN",
+      "consumer": "R4.stop_child/G1.Output.close/terminal_bytes",
+      "hashes": "none",
+      "id": "combined_active_unknown_close_serialization",
+      "owned_children": 3,
+      "position": 132,
+      "route": "historical_body_not_copied",
+      "status": "HISTORICAL_OPERATIONAL_BODY_ABSTRACT_REQUIRED_NOT_RUN"
+    },
+    {
+      "cause": null,
+      "consumer": "emit_terminal",
+      "hashes": "none",
+      "id": "terminal_sink_partial_positive",
+      "owned_children": 0,
+      "position": 133,
+      "route": "existing_unmodified_producer",
+      "status": "UNCHANGED_THIS_CLOSURE"
+    },
+    {
+      "cause": "TERMINAL_SINK:TERMINAL_SHORT_WRITE",
+      "consumer": "emit_terminal",
+      "hashes": "none",
+      "id": "terminal_sink_zero",
+      "owned_children": 0,
+      "position": 134,
+      "route": "existing_unmodified_producer",
+      "status": "UNCHANGED_THIS_CLOSURE"
+    },
+    {
+      "cause": "TERMINAL_SINK:OSError:5",
+      "consumer": "emit_terminal",
+      "hashes": "none",
+      "id": "terminal_sink_failed",
+      "owned_children": 0,
+      "position": 135,
+      "route": "existing_unmodified_producer",
+      "status": "UNCHANGED_THIS_CLOSURE"
+    },
+    {
+      "cause": "TERMINAL_SINK:TERMINAL_DRAIN_TIMEOUT",
+      "consumer": "emit_terminal",
+      "hashes": "none",
+      "id": "terminal_sink_blocked",
+      "owned_children": 0,
+      "position": 136,
+      "route": "existing_unmodified_producer",
+      "status": "UNCHANGED_THIS_CLOSURE"
+    },
+    {
+      "cause": "TERMINAL_SINK:OSError:5",
+      "consumer": "emit_terminal",
+      "hashes": "none",
+      "id": "terminal_sink_partial_failed",
+      "owned_children": 0,
+      "position": 137,
+      "route": "existing_unmodified_producer",
+      "status": "UNCHANGED_THIS_CLOSURE"
+    },
+    {
+      "cause": null,
+      "consumer": "supervise_owned/terminal_check",
+      "hashes": "none",
+      "id": "outer_positive",
+      "owned_children": 1,
+      "position": 138,
+      "route": "supervise_owned+complete_streams+one_retirement",
+      "status": "CONNECTED_NOT_RUN"
+    },
+    {
+      "cause": "PARTIAL_OR_MULTIPLE_TERMINAL",
+      "consumer": "supervise_owned/terminal_check",
+      "hashes": "none",
+      "id": "outer_partial",
+      "owned_children": 1,
+      "position": 139,
+      "route": "supervise_owned+complete_streams+one_retirement",
+      "status": "CONNECTED_NOT_RUN"
+    },
+    {
+      "cause": "JSON_PARSE",
+      "consumer": "supervise_owned/terminal_check",
+      "hashes": "none",
+      "id": "outer_json",
+      "owned_children": 1,
+      "position": 140,
+      "route": "supervise_owned+complete_streams+one_retirement",
+      "status": "CONNECTED_NOT_RUN"
+    },
+    {
+      "cause": "PARTIAL_OR_MULTIPLE_TERMINAL",
+      "consumer": "supervise_owned/terminal_check",
+      "hashes": "none",
+      "id": "outer_multiple",
+      "owned_children": 1,
+      "position": 141,
+      "route": "supervise_owned+complete_streams+one_retirement",
+      "status": "CONNECTED_NOT_RUN"
+    },
+    {
+      "cause": "INNER_FAILURE",
+      "consumer": "supervise_owned/terminal_check",
+      "hashes": "none",
+      "id": "outer_false_success",
+      "owned_children": 1,
+      "position": 142,
+      "route": "supervise_owned+complete_streams+one_retirement",
+      "status": "CONNECTED_NOT_RUN"
+    },
+    {
+      "cause": "INNER_EXIT",
+      "consumer": "supervise_owned/terminal_check",
+      "hashes": "none",
+      "id": "outer_exit",
+      "owned_children": 1,
+      "position": 143,
+      "route": "supervise_owned+complete_streams+one_retirement",
+      "status": "CONNECTED_NOT_RUN"
+    },
+    {
+      "cause": "INNER_STDERR",
+      "consumer": "supervise_owned/terminal_check",
+      "hashes": "none",
+      "id": "outer_stderr",
+      "owned_children": 1,
+      "position": 144,
+      "route": "supervise_owned+complete_streams+one_retirement",
+      "status": "CONNECTED_NOT_RUN"
+    },
+    {
+      "cause": "OUTER_PIPE_CAP",
+      "consumer": "supervise_owned/terminal_check",
+      "hashes": "none",
+      "id": "outer_stdout_cap",
+      "owned_children": 1,
+      "position": 145,
+      "route": "supervise_owned+complete_streams+one_retirement",
+      "status": "CONNECTED_NOT_RUN"
+    },
+    {
+      "cause": "OUTER_PIPE_CAP",
+      "consumer": "supervise_owned/terminal_check",
+      "hashes": "none",
+      "id": "outer_stderr_cap",
+      "owned_children": 1,
+      "position": 146,
+      "route": "supervise_owned+complete_streams+one_retirement",
+      "status": "CONNECTED_NOT_RUN"
+    },
+    {
+      "cause": "OUTER_WORK_TIMEOUT",
+      "consumer": "supervise_owned/terminal_check",
+      "hashes": "none",
+      "id": "outer_blocked",
+      "owned_children": 1,
+      "position": 147,
+      "route": "supervise_owned+complete_streams+one_retirement",
+      "status": "CONNECTED_NOT_RUN"
+    },
+    {
+      "cause": "OUTER_RSS_CAP",
+      "consumer": "supervise_owned/terminal_check",
+      "hashes": "none",
+      "id": "outer_rss",
+      "owned_children": 1,
+      "position": 148,
+      "route": "supervise_owned+complete_streams+one_retirement",
+      "status": "CONNECTED_NOT_RUN"
+    },
+    {
+      "cause": "UNKNOWN_CGROUP_MEMBER",
+      "consumer": "supervise_owned/terminal_check",
+      "hashes": "none",
+      "id": "outer_unknown_member",
+      "owned_children": 1,
+      "position": 149,
+      "route": "supervise_owned+complete_streams+one_retirement",
+      "status": "CONNECTED_NOT_RUN"
+    },
+    {
+      "cause": "OUTER_WORK_TIMEOUT",
+      "consumer": "supervise_owned/terminal_check",
+      "hashes": "none",
+      "id": "outer_stop_unknown",
+      "owned_children": 1,
+      "position": 150,
+      "route": "supervise_owned+complete_streams+one_retirement",
+      "status": "CONNECTED_NOT_RUN"
+    },
+    {
+      "cause": "OUTER_OWNER_STOP",
+      "consumer": "supervise_owned/terminal_check",
+      "hashes": "none",
+      "id": "outer_owner_stop",
+      "owned_children": 1,
+      "position": 151,
+      "route": "supervise_owned+complete_streams+one_retirement",
+      "status": "CONNECTED_NOT_RUN"
+    },
+    {
+      "cause": "UNKNOWN_PIN",
+      "consumer": "Supervisor.seal",
+      "hashes": "none",
+      "id": "outer_unknown_pin",
+      "owned_children": 0,
+      "position": 152,
+      "route": "supervise_owned+complete_streams+one_retirement",
+      "status": "CONNECTED_NOT_RUN"
+    },
+    {
+      "cause": "RUNTIME_PATH",
+      "consumer": "Supervisor.runtime_preflight",
+      "hashes": "none",
+      "id": "outer_runtime_path",
+      "owned_children": 0,
+      "position": 153,
+      "route": "supervise_owned+complete_streams+one_retirement",
+      "status": "CONNECTED_NOT_RUN"
+    },
+    {
+      "cause": "OUTER_TERMINAL_SHORT_WRITE",
+      "consumer": "Supervisor.write_terminal",
+      "hashes": "none",
+      "id": "outer_sink_short",
+      "owned_children": 0,
+      "position": 154,
+      "route": "supervise_owned+complete_streams+one_retirement",
+      "status": "CONNECTED_NOT_RUN"
+    },
+    {
+      "cause": "OSError:5",
+      "consumer": "Supervisor.write_terminal",
+      "hashes": "none",
+      "id": "outer_sink_failed",
+      "owned_children": 0,
+      "position": 155,
+      "route": "supervise_owned+complete_streams+one_retirement",
+      "status": "CONNECTED_NOT_RUN"
+    },
+    {
+      "cause": "OUTER_TERMINAL_TIMEOUT",
+      "consumer": "Supervisor.write_terminal",
+      "hashes": "none",
+      "id": "outer_sink_blocked",
+      "owned_children": 0,
+      "position": 156,
+      "route": "supervise_owned+complete_streams+one_retirement",
+      "status": "CONNECTED_NOT_RUN"
+    },
+    {
+      "cause": null,
+      "consumer": "Supervisor.bounded_fd_bytes",
+      "hashes": "none",
+      "id": "held_positive",
+      "owned_children": 0,
+      "position": 157,
+      "route": "existing_unmodified_producer",
+      "status": "UNCHANGED_THIS_CLOSURE"
+    },
+    {
+      "cause": null,
+      "consumer": "Supervisor.HeldSource.bytes",
+      "hashes": "none",
+      "id": "held_path_replaced_exact_bytes",
+      "owned_children": 0,
+      "position": 158,
+      "route": "existing_unmodified_producer",
+      "status": "UNCHANGED_THIS_CLOSURE"
+    },
+    {
+      "cause": "HELD_FD_SHA",
+      "consumer": "Supervisor.bounded_fd_bytes",
+      "hashes": "none",
+      "id": "held_wrong_sha",
+      "owned_children": 0,
+      "position": 159,
+      "route": "existing_unmodified_producer",
+      "status": "UNCHANGED_THIS_CLOSURE"
+    },
+    {
+      "cause": "HELD_FD_CUSTODY",
+      "consumer": "Supervisor.bounded_fd_bytes",
+      "hashes": "none",
+      "id": "held_cap",
+      "owned_children": 0,
+      "position": 160,
+      "route": "existing_unmodified_producer",
+      "status": "UNCHANGED_THIS_CLOSURE"
+    },
+    {
+      "cause": "HELD_ROOT_AUTHORITY",
+      "consumer": "Supervisor.bounded_fd_bytes",
+      "hashes": "none",
+      "id": "held_root_authority_missing",
+      "owned_children": 0,
+      "position": 161,
+      "route": "existing_unmodified_producer",
+      "status": "UNCHANGED_THIS_CLOSURE"
+    },
+    {
+      "cause": "HELD_READ_TIMEOUT",
+      "consumer": "Supervisor.bounded_fd_bytes",
+      "hashes": "none",
+      "id": "held_read_timeout",
+      "owned_children": 0,
+      "position": 162,
+      "route": "existing_unmodified_producer",
+      "status": "UNCHANGED_THIS_CLOSURE"
+    },
+    {
+      "cause": null,
+      "consumer": "Supervisor.HeldSource.bytes",
+      "hashes": "none",
+      "id": "held_kernel_write_refused",
+      "owned_children": 0,
+      "position": 163,
+      "route": "existing_unmodified_producer",
+      "status": "UNCHANGED_THIS_CLOSURE"
+    },
+    {
+      "cause": "HELD_ROOT_AUTHORITY",
+      "consumer": "Supervisor.NativeLaunchAdapter",
+      "hashes": "none",
+      "id": "native_launcher_authority_missing",
+      "owned_children": 0,
+      "position": 164,
+      "route": "existing_unmodified_producer",
+      "status": "UNCHANGED_THIS_CLOSURE"
+    },
+    {
+      "cause": "HELD_KERNEL_SEALS",
+      "consumer": "Supervisor.bounded_fd_bytes",
+      "hashes": "none",
+      "id": "held_unsealed",
+      "owned_children": 0,
+      "position": 165,
+      "route": "existing_unmodified_producer",
+      "status": "UNCHANGED_THIS_CLOSURE"
+    },
+    {
+      "cause": "OUTER_PIDFD:38",
+      "consumer": "Supervisor.supervise_owned",
+      "hashes": "none",
+      "id": "owned_registration_pidfd",
+      "owned_children": 1,
+      "position": 166,
+      "route": "supervise_owned+complete_streams+one_retirement",
+      "status": "CONNECTED_NOT_RUN"
+    },
+    {
+      "cause": "OWNED_PROC_FIXTURE",
+      "consumer": "Supervisor.supervise_owned",
+      "hashes": "none",
+      "id": "owned_registration_proc",
+      "owned_children": 1,
+      "position": 167,
+      "route": "supervise_owned+complete_streams+one_retirement",
+      "status": "CONNECTED_NOT_RUN"
+    },
+    {
+      "cause": "OWNED_POST_FORK_FIXTURE",
+      "consumer": "Supervisor.supervise_owned",
+      "hashes": "none",
+      "id": "owned_registration_after_spawn",
+      "owned_children": 1,
+      "position": 168,
+      "route": "supervise_owned+complete_streams+one_retirement",
+      "status": "CONNECTED_NOT_RUN"
+    },
+    {
+      "cause": "OWNERSHIP_RACE",
+      "consumer": "Supervisor.supervise_owned",
+      "hashes": "none",
+      "id": "owned_registration_race",
+      "owned_children": 1,
+      "position": 169,
+      "route": "supervise_owned+complete_streams+one_retirement",
+      "status": "CONNECTED_NOT_RUN"
+    },
+    {
+      "cause": "OWNED_POST_CUSTODY_FIXTURE",
+      "consumer": "Supervisor.supervise_owned",
+      "hashes": "none",
+      "id": "owned_registration_post_custody",
+      "owned_children": 1,
+      "position": 170,
+      "route": "supervise_owned+complete_streams+one_retirement",
+      "status": "CONNECTED_NOT_RUN"
+    },
+    {
+      "cause": null,
+      "consumer": "Supervisor.runtime_preflight",
+      "hashes": "none",
+      "id": "runtime_positive",
+      "owned_children": 0,
+      "position": 171,
+      "route": "existing_unmodified_producer",
+      "status": "UNCHANGED_THIS_CLOSURE"
+    },
+    {
+      "cause": "RUNTIME_SCHEMA",
+      "consumer": "Supervisor.runtime_preflight",
+      "hashes": "none",
+      "id": "runtime_schema",
+      "owned_children": 0,
+      "position": 172,
+      "route": "existing_unmodified_producer",
+      "status": "UNCHANGED_THIS_CLOSURE"
+    },
+    {
+      "cause": "RUNTIME_FILE_SET",
+      "consumer": "Supervisor.runtime_preflight",
+      "hashes": "none",
+      "id": "runtime_file_set",
+      "owned_children": 0,
+      "position": 173,
+      "route": "existing_unmodified_producer",
+      "status": "UNCHANGED_THIS_CLOSURE"
+    },
+    {
+      "cause": "RUNTIME_STDLIB_ABSENT",
+      "consumer": "Supervisor.runtime_preflight",
+      "hashes": "none",
+      "id": "runtime_stdlib_absent",
+      "owned_children": 0,
+      "position": 174,
+      "route": "existing_unmodified_producer",
+      "status": "UNCHANGED_THIS_CLOSURE"
+    },
+    {
+      "cause": "RUNTIME_DIRECTORY_CUSTODY",
+      "consumer": "Supervisor.runtime_preflight",
+      "hashes": "none",
+      "id": "runtime_directory",
+      "owned_children": 0,
+      "position": 175,
+      "route": "existing_unmodified_producer",
+      "status": "UNCHANGED_THIS_CLOSURE"
+    },
+    {
+      "cause": "RUNTIME_SYMLINK",
+      "consumer": "Supervisor.runtime_preflight",
+      "hashes": "none",
+      "id": "runtime_symlink",
+      "owned_children": 0,
+      "position": 176,
+      "route": "existing_unmodified_producer",
+      "status": "UNCHANGED_THIS_CLOSURE"
+    },
+    {
+      "cause": "UNKNOWN_RUNTIME_ZIP",
+      "consumer": "Supervisor.runtime_preflight",
+      "hashes": "none",
+      "id": "runtime_zip",
+      "owned_children": 0,
+      "position": 177,
+      "route": "existing_unmodified_producer",
+      "status": "UNCHANGED_THIS_CLOSURE"
+    },
+    {
+      "cause": "RUNTIME_LIBRARY_PATHS",
+      "consumer": "Supervisor.runtime_preflight",
+      "hashes": "none",
+      "id": "runtime_preload",
+      "owned_children": 0,
+      "position": 178,
+      "route": "existing_unmodified_producer",
+      "status": "UNCHANGED_THIS_CLOSURE"
+    },
+    {
+      "cause": "RUNTIME_LIBRARY_PATHS",
+      "consumer": "Supervisor.runtime_preflight",
+      "hashes": "none",
+      "id": "runtime_library_path",
+      "owned_children": 0,
+      "position": 179,
+      "route": "existing_unmodified_producer",
+      "status": "UNCHANGED_THIS_CLOSURE"
+    },
+    {
+      "cause": "RUNTIME_MEMBERSHIP",
+      "consumer": "Supervisor.runtime_preflight",
+      "hashes": "none",
+      "id": "runtime_membership",
+      "owned_children": 0,
+      "position": 180,
+      "route": "existing_unmodified_producer",
+      "status": "UNCHANGED_THIS_CLOSURE"
+    },
+    {
+      "cause": "RUNTIME_PIN_ROW",
+      "consumer": "Supervisor.runtime_preflight",
+      "hashes": "none",
+      "id": "runtime_pin_row",
+      "owned_children": 0,
+      "position": 181,
+      "route": "existing_unmodified_producer",
+      "status": "UNCHANGED_THIS_CLOSURE"
+    },
+    {
+      "cause": "RUNTIME_READ_CAP",
+      "consumer": "Supervisor.runtime_preflight",
+      "hashes": "none",
+      "id": "runtime_read_cap",
+      "owned_children": 0,
+      "position": 182,
+      "route": "existing_unmodified_producer",
+      "status": "UNCHANGED_THIS_CLOSURE"
+    },
+    {
+      "cause": "UNKNOWN_PIN",
+      "consumer": "Supervisor.runtime_preflight",
+      "hashes": "none",
+      "id": "runtime_unknown_pin",
+      "owned_children": 0,
+      "position": 183,
+      "route": "existing_unmodified_producer",
+      "status": "UNCHANGED_THIS_CLOSURE"
+    },
+    {
+      "cause": "HELD_FD_SHA",
+      "consumer": "Supervisor.runtime_preflight",
+      "hashes": "none",
+      "id": "runtime_pin_sha",
+      "owned_children": 0,
+      "position": 184,
+      "route": "existing_unmodified_producer",
+      "status": "UNCHANGED_THIS_CLOSURE"
+    },
+    {
+      "cause": "PIN_CUSTODY",
+      "consumer": "Supervisor.runtime_preflight",
+      "hashes": "none",
+      "id": "runtime_pin_custody",
+      "owned_children": 0,
+      "position": 185,
+      "route": "existing_unmodified_producer",
+      "status": "UNCHANGED_THIS_CLOSURE"
+    },
+    {
+      "cause": "RUNTIME_SONAME_MAP",
+      "consumer": "Supervisor.runtime_preflight",
+      "hashes": "none",
+      "id": "runtime_soname_map",
+      "owned_children": 0,
+      "position": 186,
+      "route": "existing_unmodified_producer",
+      "status": "UNCHANGED_THIS_CLOSURE"
+    },
+    {
+      "cause": "RUNTIME_CACHE_FORMAT",
+      "consumer": "Supervisor.runtime_preflight",
+      "hashes": "none",
+      "id": "runtime_cache_format",
+      "owned_children": 0,
+      "position": 187,
+      "route": "existing_unmodified_producer",
+      "status": "UNCHANGED_THIS_CLOSURE"
+    },
+    {
+      "cause": "RUNTIME_CACHE_CAP",
+      "consumer": "Supervisor.runtime_preflight",
+      "hashes": "none",
+      "id": "runtime_cache_cap",
+      "owned_children": 0,
+      "position": 188,
+      "route": "existing_unmodified_producer",
+      "status": "UNCHANGED_THIS_CLOSURE"
+    },
+    {
+      "cause": "RUNTIME_CACHE_STRING",
+      "consumer": "Supervisor.runtime_preflight",
+      "hashes": "none",
+      "id": "runtime_cache_string",
+      "owned_children": 0,
+      "position": 189,
+      "route": "existing_unmodified_producer",
+      "status": "UNCHANGED_THIS_CLOSURE"
+    },
+    {
+      "cause": "RUNTIME_CACHE_RESOLUTION",
+      "consumer": "Supervisor.runtime_preflight",
+      "hashes": "none",
+      "id": "runtime_cache_resolution",
+      "owned_children": 0,
+      "position": 190,
+      "route": "existing_unmodified_producer",
+      "status": "UNCHANGED_THIS_CLOSURE"
+    },
+    {
+      "cause": "RUNTIME_INTERPRETER_ELF",
+      "consumer": "Supervisor.runtime_preflight",
+      "hashes": "none",
+      "id": "runtime_interpreter",
+      "owned_children": 0,
+      "position": 191,
+      "route": "existing_unmodified_producer",
+      "status": "UNCHANGED_THIS_CLOSURE"
+    },
+    {
+      "cause": "RUNTIME_ELF_FORMAT",
+      "consumer": "Supervisor.runtime_preflight",
+      "hashes": "none",
+      "id": "runtime_elf_format",
+      "owned_children": 0,
+      "position": 192,
+      "route": "existing_unmodified_producer",
+      "status": "UNCHANGED_THIS_CLOSURE"
+    },
+    {
+      "cause": "RUNTIME_ELF_HEADERS",
+      "consumer": "Supervisor.runtime_preflight",
+      "hashes": "none",
+      "id": "runtime_elf_headers",
+      "owned_children": 0,
+      "position": 193,
+      "route": "existing_unmodified_producer",
+      "status": "UNCHANGED_THIS_CLOSURE"
+    },
+    {
+      "cause": "RUNTIME_DYNAMIC_CAP",
+      "consumer": "Supervisor.runtime_preflight",
+      "hashes": "none",
+      "id": "runtime_dynamic_cap",
+      "owned_children": 0,
+      "position": 194,
+      "route": "existing_unmodified_producer",
+      "status": "UNCHANGED_THIS_CLOSURE"
+    },
+    {
+      "cause": "RUNTIME_DYNAMIC_SEARCH",
+      "consumer": "Supervisor.runtime_preflight",
+      "hashes": "none",
+      "id": "runtime_dynamic_search",
+      "owned_children": 0,
+      "position": 195,
+      "route": "existing_unmodified_producer",
+      "status": "UNCHANGED_THIS_CLOSURE"
+    },
+    {
+      "cause": "RUNTIME_STRTAB",
+      "consumer": "Supervisor.runtime_preflight",
+      "hashes": "none",
+      "id": "runtime_strtab",
+      "owned_children": 0,
+      "position": 196,
+      "route": "existing_unmodified_producer",
+      "status": "UNCHANGED_THIS_CLOSURE"
+    },
+    {
+      "cause": "RUNTIME_SONAME",
+      "consumer": "Supervisor.runtime_preflight",
+      "hashes": "none",
+      "id": "runtime_soname",
+      "owned_children": 0,
+      "position": 197,
+      "route": "existing_unmodified_producer",
+      "status": "UNCHANGED_THIS_CLOSURE"
+    },
+    {
+      "cause": "UNKNOWN_RUNTIME_DEPENDENCY",
+      "consumer": "Supervisor.runtime_preflight",
+      "hashes": "none",
+      "id": "runtime_dependency",
+      "owned_children": 0,
+      "position": 198,
+      "route": "existing_unmodified_producer",
+      "status": "UNCHANGED_THIS_CLOSURE"
+    },
+    {
+      "cause": "RUNTIME_LOADER_PIN",
+      "consumer": "Supervisor.runtime_preflight",
+      "hashes": "none",
+      "id": "runtime_loader_pin",
+      "owned_children": 0,
+      "position": 199,
+      "route": "existing_unmodified_producer",
+      "status": "UNCHANGED_THIS_CLOSURE"
+    },
+    {
+      "cause": "RUNTIME_LOADER_CUSTODY",
+      "consumer": "Supervisor.runtime_preflight",
+      "hashes": "none",
+      "id": "runtime_loader_custody",
+      "owned_children": 0,
+      "position": 200,
+      "route": "existing_unmodified_producer",
+      "status": "UNCHANGED_THIS_CLOSURE"
+    },
+    {
+      "cause": "PREFLIGHT_TIMEOUT",
+      "consumer": "Supervisor.runtime_preflight",
+      "hashes": "none",
+      "id": "runtime_timeout",
+      "owned_children": 0,
+      "position": 201,
+      "route": "existing_unmodified_producer",
+      "status": "UNCHANGED_THIS_CLOSURE"
+    },
+    {
+      "cause": null,
+      "consumer": "acquisition_resources",
+      "hashes": "none",
+      "id": "resource_envelope_positive",
+      "owned_children": 0,
+      "position": 202,
+      "route": "a171_resource_observer_receipt",
+      "status": "OBSERVER_BEFORE_DELEGATED_JOIN"
+    },
+    {
+      "cause": "RESOURCE_CGROUP_MEMBERSHIP",
+      "consumer": "acquisition_resources",
+      "hashes": "none",
+      "id": "resource_envelope_membership",
+      "owned_children": 0,
+      "position": 203,
+      "route": "a171_resource_observer_receipt",
+      "status": "OBSERVER_BEFORE_DELEGATED_JOIN"
+    },
+    {
+      "cause": "RESOURCE_CGROUP_MOUNT",
+      "consumer": "acquisition_resources",
+      "hashes": "none",
+      "id": "resource_envelope_mount",
+      "owned_children": 0,
+      "position": 204,
+      "route": "a171_resource_observer_receipt",
+      "status": "OBSERVER_BEFORE_DELEGATED_JOIN"
+    },
+    {
+      "cause": "RESOURCE_KERNEL_ENVELOPE",
+      "consumer": "acquisition_resources",
+      "hashes": "none",
+      "id": "resource_envelope_envelope",
+      "owned_children": 0,
+      "position": 205,
+      "route": "a171_resource_observer_receipt",
+      "status": "OBSERVER_BEFORE_DELEGATED_JOIN"
+    },
+    {
+      "cause": "RESOURCE_INNER_MEMORY",
+      "consumer": "acquisition_resources",
+      "hashes": "none",
+      "id": "resource_envelope_memory",
+      "owned_children": 0,
+      "position": 206,
+      "route": "a171_resource_observer_receipt",
+      "status": "OBSERVER_BEFORE_DELEGATED_JOIN"
+    },
+    {
+      "cause": "CGROUP_ANCESTOR_MEMORY_SHORTFALL",
+      "consumer": "acquisition_resources",
+      "hashes": "none",
+      "id": "resource_envelope_ancestor",
+      "owned_children": 0,
+      "position": 207,
+      "route": "a171_resource_observer_receipt",
+      "status": "OBSERVER_BEFORE_DELEGATED_JOIN"
+    },
+    {
+      "cause": "MEMORY_SHORTFALL",
+      "consumer": "acquisition_resources",
+      "hashes": "none",
+      "id": "resource_envelope_host",
+      "owned_children": 0,
+      "position": 208,
+      "route": "a171_resource_observer_receipt",
+      "status": "OBSERVER_BEFORE_DELEGATED_JOIN"
+    },
+    {
+      "cause": "DISK_SHORTFALL",
+      "consumer": "acquisition_resources",
+      "hashes": "none",
+      "id": "resource_envelope_disk",
+      "owned_children": 0,
+      "position": 209,
+      "route": "a171_resource_observer_receipt",
+      "status": "OBSERVER_BEFORE_DELEGATED_JOIN"
+    },
+    {
+      "cause": "RESOURCE_CPU_AFFINITY",
+      "consumer": "acquisition_resources",
+      "hashes": "none",
+      "id": "resource_envelope_cpu",
+      "owned_children": 0,
+      "position": 210,
+      "route": "a171_resource_observer_receipt",
+      "status": "OBSERVER_BEFORE_DELEGATED_JOIN"
+    },
+    {
+      "cause": "RESOURCE_READ_CAP",
+      "consumer": "acquisition_resources",
+      "hashes": "none",
+      "id": "resource_envelope_cap",
+      "owned_children": 0,
+      "position": 211,
+      "route": "a171_resource_observer_receipt",
+      "status": "OBSERVER_BEFORE_DELEGATED_JOIN"
+    },
+    {
+      "cause": null,
+      "consumer": "Supervisor.cgroup_values",
+      "hashes": "none",
+      "id": "cgroup_values_positive",
+      "owned_children": 0,
+      "position": 212,
+      "route": "existing_unmodified_producer",
+      "status": "UNCHANGED_THIS_CLOSURE"
+    },
+    {
+      "cause": "CGROUP_BOUND_UNKNOWN",
+      "consumer": "Supervisor.cgroup_values",
+      "hashes": "none",
+      "id": "cgroup_values_bound",
+      "owned_children": 0,
+      "position": 213,
+      "route": "existing_unmodified_producer",
+      "status": "UNCHANGED_THIS_CLOSURE"
+    },
+    {
+      "cause": "CGROUP_NOT_EXCLUSIVE_EMPTY",
+      "consumer": "Supervisor.cgroup_values",
+      "hashes": "none",
+      "id": "cgroup_values_populated",
+      "owned_children": 0,
+      "position": 214,
+      "route": "existing_unmodified_producer",
+      "status": "UNCHANGED_THIS_CLOSURE"
+    },
+    {
+      "cause": "CGROUP_NOT_EXCLUSIVE_EMPTY",
+      "consumer": "Supervisor.cgroup_values",
+      "hashes": "none",
+      "id": "cgroup_values_events",
+      "owned_children": 0,
+      "position": 215,
+      "route": "existing_unmodified_producer",
+      "status": "UNCHANGED_THIS_CLOSURE"
+    }
+  ],
+  "schema": "friday.grok.lab866.whole216-routes.v1"
+}
