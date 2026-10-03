@@ -16,139 +16,91 @@ The 2026-09-03 post-backlog audit snapshot (`main` `43a16c8b`, source
 live host, the laptop or Telegram. Do not copy historical release claims
 forward or treat a source correction as a deployed release.
 
-## Current release frontier — 2026-10-03, 13:18 MSK
+## Current release frontier — 2026-10-03, 17:00 MSK
 
-Astra active Lead Architect epoch4; Kimi continuity deputy. This is the only
-mutable backlog/status register. Three existing native TUIs/models/ultra/tier/
-provider/guards/writer locks unchanged. No takeover, new service or dispatcher.
+Astra active Lead Architect epoch4; Kimi continuity deputy. This remains the only
+mutable backlog/status register. Three existing native TUIs, models/ultra/tier/
+provider/guards/writer locks unchanged. No takeover or new service/dispatcher.
 
-Frozen product `cecd28a92ac4fd4e34c4d3813d0c598debe09436`,
-`0.208.64/schema50`, index SHA256
-`29ddfd4a8810d4396673e153fd5da301f7cf86ea00c1bf478ea2ec76fe844e4f`.
-Published archival main is not the frozen product candidate or a pull/reset
-target. Candidate, harness package, compiler/image/ABI, wheel and installed
-runtime identities remain separate. Final wheel absent; recorded installed
-production0.208.58 unchanged, not newly probed.
+Product candidate remains `cecd28a92ac4fd4e34c4d3813d0c598debe09436`,
+`0.208.64/schema50`, tree `e7e86c7796a3db6571ffea715e666247f8876d63`,
+index SHA256 `29ddfd4a8810d4396673e153fd5da301f7cf86ea00c1bf478ea2ec76fe844e4f`.
+Archival main is separate and is NOT a pull/reset target. Candidate, harness,
+compiler/image/ABI, wheel and installed runtime identities stay distinct.
+Final wheel absent; recorded installed production0.208.58 unchanged/not reprobed.
 
-Five grouped roots remain class=harness:
+Five grouped roots remain class=harness. “Checked” below means bounded inert
+text/hash/pathset checking, never execution or target acceptance.
 
-| Root / exact current manifest SHA256 | Implemented / locally checked / integrated / independently accepted / target | Existing invariant → actual remaining path → closure owner/dependency |
+| Root / exact current manifest SHA256 | Implemented / checked / integrated / independent / target | Invariant → actual failing path → next closure, owner/dependency |
 | --- | --- | --- |
-| Browser A214 baseline `b48767637bddf842ae1d2cd1e1afe01af0970c17ba590cfc6f4773ca6d18fc66`; A226 author `b5e7874b3d911f0292ed0f68d95b5d205cf1628ccfca79d97cb087c08dee73f1` | Physical15 / new Source10: common DS69 codec changed identically in four actual producers; BOTH decoder bodies equal; 3 loader and 3 JSON active pin bindings only. Full Source15/current209/aux3 and212 unique current pins checked; inert author proposal, LAB915 FIRST nonauthor review. Old E01–E04 scoped context must rejoin, no whole/target | Existing C2 late graph/JSON allocation: necessary complete-wire floor now debited before graph growth, original16MiB body guard before UTF8 conversion, unchanged full frame/values/aliases/caps; native/stock/raw/preencode/error/BOTH ends C1 CODE and full factory/CPU/RSS C2 UNKNOWN remain. Astra integration; Grok LAB915 changed whole permitted path review; original216/all29/all6/all9/Source19/caps retained. |
-| Scanner LAB887 `3527f471a3070180968873c76150db504cba16cc23777e2562d226eb3b4656ee` | Current52 narrow R02/R03. SOL075 G2 WIP `da7f001b531935f5374cde8092f31d2b428ac8bfef98dc0548746e8c8f3983fd` hash-only quarantined, not implementation/acceptance/target | A192-C1/C2 actual Source main AND Root native parent/caller/finite endpoints CODE. Original authority already permits an existing outside-parent fold, not a universal private-heap theorem. SOL075 G1 cyberPolicy-denied operation remains blocked: no retry/rephrase/delegation/route. Astra exact compliant ownership decision; missing code is not automatically an owner-only grant gap. |
-| Publisher baseline A209 `5891c11470be4e25e540f50820614587bb1798bb48f3478394b6ad8482a60181`; actual SOL090 `62533ad749b8a3574b5f8df571e983ca3e6aa7f3fcfb5dcc56f1fb3bbc132db3` | SOL090 physical60/current134/Source44: 7 changed original +4 necessary safe inert dependencies, full pins authenticated. Real entry/body/receiver/retirement attempt, not LAB909 wrapper. Author proposal only; prior H2/order scoped credits not automatic current whole acceptance; target NOT_RUN | N1 prefix/preconstructor full receiver incomplete; N2 argc/argv before child endpoint supplier; N3 selected owned mmap/public stock body and uncertain ACK path; N4 postdocument last-error/retirement BOTH ends. All four CODE remain. Sol091 owns connected N1/N3/N4; Astra N2 existing seed/token carrier decision received LAB914, next actual N2 producer/receiver implementation and precise pre-script residual reconciliation, then nonauthor whole review/C2/admission. Original69/exact6/all15/schema20/caps/80Mbody+2Mmetadata retained. |
-| Sender LAB896 `3640d1973ef956cadbad7efa11ae91343f132631931beb9e21494eb188b1aac9`; SOL089 `2b47fdda0e73435f3c9d370f1c52e83fb849138b44575932867a6bc0d5029133` | Source9/physical25/110external authenticated; LAB910 stock-Python birth/body/alias/readonly replay before unchanged strict matcher scoped source credit. Not product integrated/whole native accepted/target | Native/raw/error C1 and BOTH outside native endpoints CODE, inclusive C2 UNKNOWN; Astra integration/admission. Original54/current96/all32/all7/132predicates/16pure/12class/72effects/R01R07/caps unchanged. |
-| Node SOL079 `3981cc05a99abf578767413249db6812c7319346b844a5ac846348c2082558ec`; A224 `70b8ad85e62a5089668f128aadc1fc1ddfe0fb9e886c497128119df748e57fc7` | Current6/physical11/Source3 locally checked INERT, now LAB913 independently credits prospective lower-bound joins, BOTH v2 receivers, private None unpublished, E01/E02 unchanged context and acyclic pin chain. No whole/target | Prospective lower bound is not full factory cost/fit; str(original) occurs before width admission. Native/stock/raw/prebirth/BOTH ends C1 CODE, full factory/formatter/native C2 UNKNOWN. Astra connected integration/admission, original35/all6/3/GPG6/F1F2D1D2/current19/B04simultaneous256/reclamation/caps retained. |
+| Browser A226 `b5e7874b3d911f0292ed0f68d95b5d205cf1628ccfca79d97cb087c08dee73f1` | Common DS69 prospective floor in four producers; Source15/current209/aux3 joined. Checked full SHA9; integrated inert only. Actual LAB915 nonauthor result received+ACK: seven scoped properties accepted, NOT whole/native/C2. Target NOT_RUN. | Complete value/alias/cap compatibility confirmed with BOTH unchanged decoders, actual callers and pin DAG; necessary floor does not reject fitting full frames. Undercharge is not a complete allocator/factory/RSS/CPU proof. Native/stock/raw/pre-encode/error/BOTH ends C1 CODE, whole C2 UNKNOWN_NOT_ZERO. Astra owns remaining connected custody/fit and independent whole Source/admission. Original216/all29/all6/all9/Source19/caps/negative controls retained. |
+| Scanner LAB887 `3527f471a3070180968873c76150db504cba16cc23777e2562d226eb3b4656ee` | Source52 narrow R02/R03 only. SOL075 G2 WIP `da7f001b531935f5374cde8092f31d2b428ac8bfef98dc0548746e8c8f3983fd` hash-only quarantine, not new implementation/whole acceptance. Target NOT_RUN. | A192-C1/C2 actual Source main AND Root original native caller/finite endpoints remain CODE. Existing authority permits appropriate fold into existing outside parent, not a new service/infinite observer/private-heap theorem. SOL075 G1 cyberPolicy-denied action must NOT be retried/rephrased/delegated/routed. Astra owns exact compliant connected ownership decision; no invented missing grant or new resource allowance. |
+| Publisher SOL091 `689764de3aef2930e9b777464cd0ea8dc9107f2ed2ce599f891da1cf04967f2b` | Authentic finite source attempt: original44+5 dependencies/current134, physical63 and external243 incl TASK/input/compact checked; old/current dirs+pathsets exact. Inert proposal only; author says NOT N1/N3/N4 closure. Consumer23/H2 unchanged credit not automatically whole-current credit. Target NOT_RUN. | N1 pre-module allocation error lacks full accepted body/finite end; N3 self-writing mapping/PUBLIC native state/combined primary+late/meta layout and late-error end; N4 actual original prepared-row supplier/after-document last-error end remain CODE. N2 permitted SAME existing launch_fact slots/export-token before argv is now assigned as connected implementation SOL092 (Sol). LAB916 (Grok) owns nonoverlap N3 before-effect owned-cohort/total original-pool layout. Astra owns original native supplier/end decisions, merge and subsequent nonauthor whole acceptance. Body80M/meta2M are ceilings, wholeoutput33554432 stays unchanged. |
+| Sender SOL089 `2b47fdda0e73435f3c9d370f1c52e83fb849138b44575932867a6bc0d5029133` | Source9/physical25/110external checked, inert proposal. LAB910 nonauthor actual stock-Python birth/body/alias/read-only replay scoped credit retained; not product/whole acceptance. Target NOT_RUN. | Native/raw/error actual supplier+BOTH outside finite endpoints C1 CODE and whole C2 UNKNOWN. Astra owns connected closure and image/ABI/resources admission; preserve strict matcher and original positive/negative controls. |
+| Node A224 `70b8ad85e62a5089668f128aadc1fc1ddfe0fb9e886c497128119df748e57fc7` | Current6/physical11 checked, inert integration only. LAB913 four nonauthor scoped credits: prospective lower bound, BOTH v2 decoders, unpublished private None, E01/E02 changed context+acyclic pins. Target NOT_RUN. | Native/stock/raw/prebirth custody+BOTH ends C1 CODE; str(original) before width debit/arbitrary formatter/full factory/C2 UNKNOWN remain. Astra owns connected supplier/fit and whole admission. Original35/all6/3/GPG6/F1/F2/D1/D2/current19, B04 simultaneous256/reclamation and caps retained; old lifetime-history finding not automatically reapplied. |
 
-A226 movement and actual lifecycle (previous A225 intakes retained):
+Current bounded movement A227: actual SOL091 authenticated/received, exact sole
+native RESULT consumed; actual LAB915 completed review authenticated/received,
+ACK and durable cursor advanced. Seven Browser scoped properties independently
+confirmed, zero additional whole release-blocking roots closed, zero required
+release execution layers completed. N3 total-bank/self-writing constraints refine
+an existing root; no genuinely new product/grouped root or current physical drift.
+Historical pin-declaration timestamp inequalities are not automatically live drift.
 
-- Author added a necessary complete-wire lower bound BEFORE Browser graph cells,
-  keeping complete body bytes, alias bijection, original DS69/UTF8/RLE choice,
-  final exact cap and BOTH decoders. No prefix/hash substitution, cap/grant/
-  oracle/case reduction, native accepted marker or Source execution. Three actual
-  loaders and three ABI/build/contract current pin sets rejoined; historical-only
-  metadata preserved. Source/literal/hash/JSON checks only, not allocator/RSS fit.
-- A226 exact Source15/current209/aux3: ten changed/five equal selected Source,
-  7 changed current209/3 changed aux (same existing slots);212 unique
-  full SHA9 checked. Four encoder copies identical, BOTH decode functions
-  byte-equal;375 JSON leaf changes are only current exact pins. Native/C/H and
-  unsafe controls hash-only; no compiler/parser/AST/import/execution/tests.
-- LAB914 completed13:03:02MSK, measured743.134s; actual manifest
-  `813db1b7beeaa090cfcd57ca5f2068cb5ee621a91183aa187a99e86d32eab7e4`,
-  physical9/2837declared/856unique source/evidence observations authenticated:
-  650 already protected fullSHA9 reused only after held/named current9,206 other
-  fullSHA9 checked with no current acceptance credit. Received then ACK13:14:32.
-  Five mismatched nested A190 declarations are stale historical metadata, their
-  actual bytes/current9 match UNCHANGED protected pins; NOT new physical drift,
-  not used as N2 text, not repaired/re-pinned/current source credit.
-- LAB914 corroborates preexec failure bank is CLOEXEC and cannot survive exec;
-  postexec prefix only starts after seed. Existing fixed-slot channel seed BEFORE
-  Source argc/argv validation is permitted in the SAME enrolled launcher/
-  bootstrap; no stock-image edit/new role/service/argv/token/cap. Astra Source-only
-  decision allows SAME already Root-owned export token via SAME existing
-  launch_fact channel before checks, with actual producer/receiver/cap/error/
-  retirement proof required. This is NOT implementation/admission/Root grant.
-  Stock interpreter pre-script requirement/fence remains exact unresolved
-  residual; no waived case or private-heap/theorem/source-authority enlargement.
-- Existing Sol091 generation1 remains actual inProgress/no queue/no Sol goal;
-  one completed original compact95.554s before enqueue12:44:29 retained. Actual
-  TASK/INPUT pin/turn identities unchanged. It owns N1/N3/N4; preserve safe work.
-  Next N2 connected implementation after actual result and existing protocol,
-  not overwrite changing source or duplicate task.
-- Grok LAB915 generation1/job`job_a02c540f6d0048dd93c6ab710e9b570f`:
-  FIRST nonauthor A226 actual common codec→worker/supervisor/public callers→
-  BOTH receivers/error/retirement and source/cap pin context. Actual same-instance
-  executor ACK10:15:21UTC;
-  INPUT `47583e6812f00f4e86084a4119c550e0ef9ae5ca5a4911f51b3a59eb5fb43f07`.
-  PRE_TASK_COMPACT=FORBIDDEN_OWNER_POLICY, effects0/friday0, no heavy slot.
-- Independently closed additional whole roots=0; genuinely new grouped/product/
-  environment roots=0; required release layers completed=0; next newly executable
-  full release stage=NONE. Browser real source correction and bounded N2
-  authority decision change the next action, not release GO or whole fit.
-  Caps are not measured release durations; no grounded rolling ETA.
+SOL092 generation1: one same idle/empty existing Sol TUI compact completed
+127.166s before TASK enqueue. Exact current first native input matches TASK/ref/hash;
+ENQUEUED alone was not used as receipt. Existing native turn active; no Sol goal, repeated
+compact, interrupt or overlapping source writes. LAB916 generation1 actual executor
+ACK at16:55:15 MSK in SAME visible Grok instance; deadline17:55:15 MSK, effects0
+at checkpoint, Source authoring only. Grok works while available; date/PID alone
+is not loss. If genuinely unavailable, first intake ready results then retire the
+exact generation/effects boundary and transfer unfinished safe scope to Sol
+after its current task, without duplicating execution or changing guards/models.
 
-Retain genuine earlier scoped credits, immutable failed/superseded results and
-exact changed-context dependency checks. No byte-equal single-file acceptance
-by changed-caller analogy. No LAB909 wrapper/author marker/process exit/hash/type
-as full native value-body/custody/retirement proof.
+Critical path: connected actual supplier/error/custody/BOTH finite-end and total
+resource-fit Source closure across existing roots → independent whole Source
+acceptance → actual stable current image/compiler/native ABI/stock/provider/
+components/grants/resources/finite-clock Source+Root admission → collect-all
+available diagnostics on one stable candidate. SourceReady/helper/collection
+success are not GO. No admitted runtime stage newly executable yet; r5 immutable
+RED/no reuse, r6 absent, full pair/all30/F.0–F.11 incomplete. Do not execute inert
+Source or bind expiring prerequisites while source inputs still change.
 
-Conditional B09 Source3
-`fe92c18f0b7eb8a558e2be25adbefa0e1fbf00009b9c3d500fbb37be4d2e5300`
-retains LAB911 primary12656/six cases/nine fields/rubric/MAC and LAB912
-neverACK receipt-before-sticky-cancel/typed-zero/lock/claim/writer/receiver source
-credits. Proposed helper242ff differs from unchanged installed83be; actual helper/
-watcher/CLI-image admission, newest/current native caller ordering and afterACK
-provider-loss retirement supplier pending. Native fallback NOT_READY, not current
-critical path while Grok works; no retired generation/effects closure from date,
-expired/noACK/zero/PID/status/process exit alone.
+Ordinary diagnostic FAIL continues independent available branches; missing
+prerequisites give exact dependent NOT_RUN. Cleanup/containment/privacy/evidence
+uncertainty stops the affected contour. Gather available failures before the
+next connected correction batch; no small-edit/full-heavy-run loop.
 
-Availability on3October: actual LAB914 result and current LAB915 executor ACK
-prove Grok still working. At an overdue/unclaimed substantive checkpoint first
-check ready result, actual TUI turn/delivery/deathwatch/guard. Only confirmed
-unavailability retires the exact unfinished generation/effects and transfers safe
-work to the existing Sol after his current task/one compact. No hidden replacement,
-heartbeat/model polling, mailbox sleep, forced compact or current task interrupt.
-Latest authenticated Lab RESULT `msg_72bea5db09c446bbb620e533f54d3dc4`.
-Historical SOL071 already received; do not replay it.
+Final existing contract: ONE canonical exact-release required change+exact union,
+complete inventory/topology/no skipped nodes/no old execution import. Acceptance
+reader can consume a valid exact receipt without a second pytest controller.
+Mandatory live160, official A+B (B forbidden after red A), preregistered B09
+six cases/actual independent content/final binder, R10/all30/F.0–F.11/enabled
+features, build/install/restore/rollback/target observation/independent acceptance.
+Initial pair exit4 while B09 content pending is neither GO nor rerun reason.
+Exclusive heavy slot and canonical resource/concurrency retained; no production
+Telegram singleton/home outside specifically authorized procedures.
 
-Current critical path remains the five connected producer/receiver/error/
-ownership/BOTH finite-end harness implementations and whole resource fit, then
-independent whole Source acceptance and actual stable current image/compiler/
-native ABI/stock/provider/components/grants/resources/finite-clock Source+Root
-admission. r5 immutable RED/no reuse; r6 absent. Bind exact execution prerequisites
-once source is stable; do not repeatedly bind expiring changing-source inputs or
-execute inert Source.
+Conditional B09 source3 scoped neverACK credits preserved; installed helper,
+watcher/CLI/current-native-turn/order and afterACK-loss supplier qualification
+still required. Proposed helper is not installed. Grok works, so fallback is not
+the current critical path and no fallback activation occurred.
 
-Then collect all available diagnostics on one stable candidate: ordinary FAIL
-continues independent available branches, missing prerequisites give exact
-dependent NOT_RUN; cleanup/containment/privacy/evidence uncertainty stops the
-affected contour. No small-edit→full-heavy-gate loop.
+Environment: exactly two invalidated historical libcrypto/ld-cache bindings;
+no automatic new image/ABI credit or system restore. Other protected evidence
+and frozen index unchanged. Scanner helper630636544>268435456 NOT_FIT;
+Source1490280568+Root1490280568 lower2980561136+overhead, SourceFD16/
+Root B+220/global4/holder13500416 retained, no cap raise or zero unknown costs.
 
-Final canonical requirements unchanged: one exact-release change+exact union,
-required inventory/topology/no skipped nodes/no old execution import; existing
-acceptance reader may consume a valid exact receipt without second pytest.
-Mandatory live160, official A+B (B forbidden after red A), preregistered B09 six
-cases/real independent content/final binder, R10/all30/F.0–F.11/enabled features,
-build/install/restore/rollback/target observation and independent acceptance.
-Initial pair exit4 while B09 content pending is neither GO nor a rerun reason.
-Exclusive heavy slot and canonical resource/concurrency rules preserved; no
-production Telegram singleton/home outside specific authorized procedures.
-
-Class=environment remains exactly two invalidated historical libcrypto/ld-cache
-bindings after external host update, no automatic new image/ABI credit. Other
-protected source/evidence and frozen index unchanged. Scanner original helper
-630636544>268435456 NOT_FIT; Source1490280568+Root1490280568 lower2980561136
-plus overhead, SourceFD16/Root B+220/global4/holder13500416, whole C2 UNKNOWN,
-not measured RSS/audit4096 grant. Full protected registry stays A223 FULL6397
-plus exact immutable deltas, not a new status register or reconstructed history.
-
-GO requires the complete agreed conjunction, not source/helper/collection/
-closed-only pair. Only external web search OWNER_DEFERRED_POST_1_0, never PASS;
-file/archive/document search, privacy/auth/isolation/honest unavailable not
-deferred. Order1.0→N6 TinyFish→first N8 AgentZeroV6. Unsafe historical controls
-remain HASHONLY_ABSTRACT_REQUIRED_NOT_RUN required=true waiver=false; no bodies,
-fixtures/repros. Archive-only changes are distinct from product/harness changes
-but never waive documented exact Git/inventory consumer identities.
+No unsupported rolling ETA: current evidence supports remaining dependencies,
+not measured completion duration. Deadline/resource caps are caps, not runtimes;
+24/7 does not imply threefold speedup. Only external web search remains
+OWNER_DEFERRED_POST_1_0, never PASS. File/archive/document search, privacy,
+authorization/isolation/honest unavailability are not deferred. Order1.0→N6
+TinyFish→first N8 AgentZeroV6. Unsafe historical controls stay
+HASHONLY_ABSTRACT_REQUIRED_NOT_RUN required=true waiver=false; no bodies/repros.
+Archive-only changes remain distinct but do not waive exact consumer identities.
 
 ## Ближайшая очередь: релиз 1.0 → N6 TinyFish → Agent Zero V6 (владелец, 2026-09-21)
 1. Завершить выпуск 1.0 с согласованным ниже исключением для внешнего веб-поиска.
