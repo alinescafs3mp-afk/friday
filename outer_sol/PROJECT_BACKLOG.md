@@ -16,14 +16,14 @@ The 2026-09-03 post-backlog audit snapshot (`main` `43a16c8b`, source
 live host, the laptop or Telegram. Do not copy historical release claims
 forward or treat a source correction as a deployed release.
 
-## Current release frontier — 2026-10-03, 02:25 MSK
+## Current release frontier — 2026-10-03, 03:07 MSK
 
 This short frontier supersedes historical live-state paragraphs, not immutable
 evidence or the release contract. Current local authority: Astra active Lead
 Architect epoch4, Kimi continuity deputy. Existing native participants and
 models/ultra/tier/provider/guards/writer locks unchanged.
 
-Identity: publication parent `main` `ce2b566a23fb5b2cc13e2507db16f0934a2a423d`
+Identity: publication parent `main` `e7c1d221279a370cab695775689df1dfc7b34f8d`
 and earlier `4aebe36ee864c652fa7052b819a60a9aa4ffcfda` are archival, not
 product candidates. Frozen product remains
 `cecd28a92ac4fd4e34c4d3813d0c598debe09436`, `0.208.64/schema50`;
@@ -41,9 +41,9 @@ Evidence, environment and deployment qualification remain separate.
 
 | Existing root / exact current package | Implemented / locally checked | Integrated / independently accepted / target verified | Invariant → actual failing path → next closure; owner/dependency |
 | --- | --- | --- | --- |
-| Browser: immutable Astra A201 manifest `f8bc47287333eb9a64ce7605eec1e0b0025173b11e591387e4a060bd8bd9e467`; actual209 ten changed199equal +3 auxiliaries | Outside caller preowned encoded physical-frame path authored; full17/13 Source and byte joins retained. LAB885 actual independent result completed01:59:38 MSK/13m51s | Connected mechanism independently **REJECTED**, not accepted / target NOT_RUN | Existing216/29/all6/all9/C01–C08/M01: actual executor/admitted G1/R4 fd105/106 digests disagree with new worker/decoder digests; writer publishes before advancing its cursor, permitting overwrite after ordinary failure. These are actual connected implementation failures, not new project-wide roots. Sol SOL073 closes both with all actual caller/fork/receiver/hash/retirement joins; original native/error body before encoding, complete packet/capprobe, final native ends and whole resource fit remain required. |
-| Scanner: Astra A202 manifest `9148d4365af54558dc26fdc39c2b745cc473b225fd2673881fd81a12569612ff`, atop authenticated SOL071 `1a174283685c764c4e684bc48608ce75b2e0c00d4aab559d651a974ee366e067`; actual52 one changed51equal +existing native header changed | New original absolute/minimum guard before actual prepare/caps/mmap/task/Python; actual public caller rejoins preinstalled exact minimum instead of rejecting every positive; kernel exit-word registration precedes fallible startup; late status/errors retained; local return no longer disarms guard. Full7 owned pathset,67 full gapless C/header partitions and actual52 pins checked. Public native ABI now `0x4652413230320001`, no old ABI credit | Actual caller/text integrated, **not runtime** / Grok LAB886 independent connected C2 review active / target NOT_RUN | Existing A192-C1/C2: exact actual outside original opaque-permit factory/enrollment/calling Source and its own finite BOTH-body/child endpoint remain missing; declaration/125/map/local return is not transfer. Astra owns concrete original-role caller/issuer/final-end closure; no private-artifact reconstruction, new grant/service/observer or universalheap theorem. Historical helper NOT_FIT is not this Source RAM cap; current whole cost fit remains UNKNOWN. |
-| Publisher: LAB884 manifest `53883a67ce20768e4e6a884e015a12089227fe1789bd4d5b68c1b83df0c24fc1`; actual134 two changed132equal atop Sol070 | Actual early stock prefix v3 before Source admission + Root original error/body/alias receiver authored; full55 and actual134 bytes authenticated | Author source only; LAB882 credit applies only to exact A199 six-file mechanism/dependencies, not automatically to new context / target NOT_RUN | Existing C01/C02/C04/C05/C06/C09: foreign stdlib/builtin/global/context/native body incomplete; v3 over2M still falls back to incompletev1. Full representation, standalone actual caller completion, native outside parent/finite end and prospective whole fit required. Astra connected ownership/stock/error/end integration; no whole review with a known incompatible path. |
+| Browser: SOL073 manifest `3a033e0ffad22c17332c9d1221d6f6799b38d917f039b769567f87bfb81455a1`; actual209 seven changed202equal +3 auxiliaries atop A201 | Completed02:35:00 MSK/13m44s; full28/14 actual Source, all209+aux and394 full gapless byte partitions authenticated with final identities. Admitted Executor/G1/R4/Worker/ABI/recipe pins, shared append cursor/fault latch, all three Python fork-close routes, Source UID/GID and native dependency joined in author Source | Integrated text/binding joins only; non-author LAB888 actual executor ACK03:03:51 MSK, decision pending / target NOT_RUN | Existing216/29/all6/all9/C01–C08/M01: independently verify actual caller/decoder/writer/receiver/ordinary-failure/finite-retirement path against immutable LAB885 rejection. Original pre-encoding native/stock/raw/error bodies/aliases, complete packet/capprobe domain, final outside native ownership and whole resource fit remain CODE/UNKNOWN, not waived by physical frames. Grok non-author review now; Astra owns whole integration and next connected original-body closure. |
+| Scanner: LAB887 manifest `3527f471a3070180968873c76150db504cba16cc23777e2562d226eb3b4656ee`; actual52 one changed51equal/header unchanged atop A202 | Completed02:45:33 MSK/11m07s; full10 pathset/current52/native before-after authenticated. Preinit rejoins installed guard without rearm; NEVER_CREATED does not read body or claim kernel-confirmed task exit. ABI `0x4652413230320001` unchanged, not admitted | Astra A205 non-author scoped static CREDIT for LAB886-R02/R03 after actual guard/init/receiver/return joins; NOT whole acceptance of A202/SOL071; immutable rejection preserved / target NOT_RUN | Existing A192-C1/C2: actual outside Root materials factory, enrolled external callsite and BOTH-family finite original-body custody still absent. Astra A204 reconciles original A159/A180/A197: new inert Root implementation in the already permitted role is CODE work, not a demand to reconstruct an unproved private factory. Implement actual producer/caller/end package; preserve genuine original authority separately for future qualification, never mint a grant from Source JSON/hash/boolean. No empty callback/new role/process/service/observer. Historical helper NOT_FIT is not Source RAM cap; whole fit UNKNOWN. |
+| Publisher: LAB884 manifest `53883a67ce20768e4e6a884e015a12089227fe1789bd4d5b68c1b83df0c24fc1`; actual134 two changed132equal atop Sol070 | Actual early stock prefix v3 before Source admission + Root original error/body/alias receiver authored; full55 and actual134 bytes authenticated | Author source only; LAB882 credit applies only to exact A199 six-file mechanism/dependencies, not automatically to new context / target NOT_RUN | Existing C01/C02/C04/C05/C06/C09: foreign stdlib/builtin/global/context/native body incomplete; v3 over2M still falls back to incompletev1. Sol SOL074 active connected implementation covers full original representation/stock/error aliases, actual standalone/outside caller/native finite end and prospective whole fit. Astra owns ownership integration; no whole review with a known incompatible path. |
 | Sender: LAB873 manifest `fd00045ff696d9c2e19782ec14bdbf7d24dcb78ec245ec2189c67869fbb30404`; actual96 five changed91equal +auxiliary | Actual recorder-live settle→seal→finalclose correction retained | Scoped R02 terminal ordering/M01 binding only, no whole acceptance / target NOT_RUN | Existing R01–R07: full original raw/value/error/helper/native finite-end/cost joins still required. Astra next connected slice after current dependencies; no cleanup-to-native-end self-certification. |
 | Node: SOL072 manifest `9f63f991a0d503a47d80dda68a58d9e081d3bbd81bb0726441101cfd64790436`; actual6 five changed1equal atop LAB883 | Completed01:59:01 MSK/22m41s; full23 owned pathset,194 full gapless partitions and actual six final pins authenticated. Ordered prefix+frame/both decoders/one ledger, call-owner shadow and original secondary TB/six tuples/late qualification errors joined. Immutable partition pins used pre-seal ctime; Root verified unchanged full bytes and joined actual final manifest9 for all six, without restoring metadata | Partial source, no non-author whole acceptance; original B04 simultaneous256/confirmed reclamation and scoped B05/R03 retained only with dependencies / target NOT_RUN | Existing R01–R04: actual outside Root→caller original-body allocator/enrollment/readonly decoder Source absent; rendered transport is not independently preheld original body. Full factory/catch/native costs, both finite native ends and whole fit open. Astra owns exact original-role outside caller/body relation; no old A191 lifetime-FD or universal SIGKILL finding blindly reused. |
 
@@ -56,28 +56,34 @@ Four required full body passes each: Source1490280568 and Root1490280568,
 combined lower2980561136 **plus every actual overhead**. Source16, Root actual
 B+220 (never B=0 or audit-table4096 as grant), global4/holder13500416 unchanged.
 
-Private immutable evidence remains local: A202/source-package and actual
-SOL072/LAB885 received records. Actual A193/LAB869 full results and scoped A199
+Private immutable evidence remains local: A201/A202/A204 and actual
+SOL072/SOL073/LAB885/LAB886/LAB887 received records and scoped A205 review. Actual A193/LAB869 full results and scoped A199
 LAB882 credit remain preserved; no archived RUNNING/interim inference.
 
-Protocol: SOL072 RESULT full ref/task/input/manifest/current6 checked, durable
-received written; **only** exact native item
-`01a0fed8-3336-7612-a8d4-300ac0c19c50` consumed. LAB885 actual result independently
-REJECTED and ACKed, durable cursor`msg_f6fb06dda6c944fcab67cea52406be94`.
-Existing Sol TUI one pre-task contextCompaction completed/error-null89.613s
-at02:20:31 MSK; new SOL073 input SHA
-`f817719bc33dc511065ca097cab5ac2c57c7e9d46302791bb8b4664436aef9cb`,
-actual turn`01a0feeb-f119-7c40-9b4b-d2a4a2ca750f` inProgress, queue empty,
-goal null. Not merely ENQUEUED.
+Protocol: SOL072/SOL073 RESULT full ref/task/input/manifest/current-source checked,
+durable received written; only their exact confirmed native items consumed.
+SOL073 exact item `01a0fef9-3ee9-7900-a7e8-d7548bda61b4`, no duplicate execution.
+Existing Sol TUI next one pre-task contextCompaction completed/error-null109.106s
+at02:54:14 MSK before SOL074 enqueue. Actual Publisher
+turn`01a0ff0a-3db2-72a2-a650-8218002686a1` inProgress, queue empty, goal null;
+not merely ENQUEUED. Current safe task preserved without interruption.
 
-Existing Grok TUI/instance15: LAB886
-`job_a9d1a3fd342a4d04bb518d892ac2101a`, actual executor ACK02:21:06 MSK,
-deadline03:31:06 MSK (4200s cap, not measured duration), effects/friday_calls0.
-Review Source input/oracle explicitly forbid Friday/Source execution and specify
-original read/RAM/write/child bounds; observed host default counter ceilings
-48calls/8scenarios are **not a grant**, no effect is authorized by those defaults.
-No compact, new participant, hidden model, dispatcher, service or duplicate
-execution. Grok is actually available, not declared unavailable by calendar/PID.
+LAB886 actual full8/manifest/message/input result checked, received and ACKed.
+Its default host ceilings48/8
+were not task grants: exact input/oracle prohibited execution, actual effects/
+friday_calls0; not reused as resource or execution credit. LAB887 actual Source,
+full result and exact input/message authenticated, received and ACKed; durable
+cursor`msg_e971696401c644d99caad7a7d6b5b6bd`. Same visible Grok TUI/instance15
+now assigned independent Browser LAB888 `job_15ba93313adb4f7981b0a649814f2c9a`,
+INPUT SHA`d422e542846a00312626a2dab1ecc7f024f0a1053fb14823e4a5fa5f18bdf71a`.
+New exact envelope explicitly4200s/friday0/scenarios1/generation1/attachedTUI;
+actual executor ACK03:03:51 MSK, deadline04:13:51 MSK, effects/friday_calls0.
+Deadline is a cap, not measured work. Concrete new original-role Root source
+authoring is allowed, never recovery of a missing private original: actual
+independent original Root authority must remain before effects; Source JSON/
+hash/boolean cannot mint it. Grok NEVERcompact under newer owner policy; no new
+participant/hidden model/dispatcher/service/duplicate execution. Grok is available
+by actual completed result and assigned visible session, not calendar/PID alone.
 
 Owner Grok fallback: at an overdue/unclaimed substantive checkpoint inspect
 actual RESULT first, then assigned visible turn/delivery/death-watch/guard.
@@ -86,12 +92,14 @@ the exact unfinished generation/effects, move remaining work to existing Sol
 after its safe current task and once pre-task compact. No interrupt of safe
 active work and no hidden replacement/monitor/polling loop.
 
-Movement: concrete connected Scanner guard/caller/startup/late-return Source
-correction; authenticated Sol072 and actual non-author Browser reject; ready
-corrective Browser package assigned without idle Sol. Additional independently
-closed **whole** roots0; genuinely new product roots0; required execution layers
-newly completed0. Browser findings and Scanner preinstalled-bound refusal are
-new evidence on existing connected roots, not another audit or scope expansion.
+Movement: authenticated connected Sol073 Browser corrections and LAB887 Scanner
+guard/no-birth correction with two non-author scoped static findings closed;
+Browser immediately assigned to a non-author while
+Sol implements connected Publisher. Astra A204 removed the unsupported demand
+to find an unproved old private factory, not the actual implementation obligation.
+Additional independently closed **whole** roots0; genuinely new product roots0;
+required execution layers newly completed0. These are actual Source and contract
+changes on existing roots, not release acceptance or another audit.
 
 Critical path: actual whole original-body/caller/factory/ordinary-error/finite
 endpoint and resource contracts → non-author whole Source acceptance → exact
