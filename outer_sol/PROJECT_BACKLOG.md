@@ -16,7 +16,7 @@ The 2026-09-03 post-backlog audit snapshot (`main` `43a16c8b`, source
 live host, the laptop or Telegram. Do not copy historical release claims
 forward or treat a source correction as a deployed release.
 
-## Current release frontier — 2026-10-03, 09:54 MSK
+## Current release frontier — 2026-10-03, 10:02 MSK
 
 Astra active Lead Architect epoch4; Kimi continuity deputy. This is the only
 mutable status register. Three existing participants/TUIs/models/ultra/tier/
@@ -38,7 +38,7 @@ non-author credits remain scoped, not whole acceptance.
 | --- | --- | --- |
 | Browser A214 `b48767637bddf842ae1d2cd1e1afe01af0970c17ba590cfc6f4773ca6d18fc66` | Connected E01–E04 ordinary correction integrated INERT only; Root/LAB898 narrow E01/E02/E04 plus Sol083 first non-author E03 FD-generation credit. No whole acceptance; target NOT_RUN | Original producer→BOTH transport/parser/oracle→retirement preserved. Native/stock/raw/preencode/error body+aliases/BOTH outside ends C1 CODE; inclusive fit C2 UNKNOWN. Astra owns integration/admission. Source15/current209/aux3 plus original216/all29/all6/all9 and caps retained. |
 | Scanner LAB887 `3527f471a3070180968873c76150db504cba16cc23777e2562d226eb3b4656ee` | A205 R02/R03 narrow credits; Sol075 G2 checkpoint-only WIP `da7f001b531935f5374cde8092f31d2b428ac8bfef98dc0548746e8c8f3983fd` quarantined, not replacement. No full implementation/acceptance/target | A192-C1/C2 BOTH actual Source/Root performing parent/caller/finite-end closure CODE. Sol075 G1 cyberPolicy-denied action must not be retried/rephrased/delegated/routed around. No new service or grant/ABI fiction. Astra owns precise permitted ownership decision. |
-| Publisher A209 `5891c11470be4e25e540f50820614587bb1798bb48f3478394b6ad8482a60181` | Sol077 narrow D2/prior credits retained. SOL085 author manifest `670ceabf3f5d471269f7b8b41b6ff73ecdf7c3343b6aabaf760fadb1dd0ff17f` authenticated, not independently accepted/integrated. A218 actual Sol086+H2 linked manifest `1704eecb67d5b3262b1f6c1ec9b5d141ca1a7a3551af22c0a64d20d256d0ca59`: Root one-function change literally rejoined to current physical-v5/prepared-v2 observer; NOT executed/integrated/non-author accepted/target verified | Original complete primary chronology/body/key/order/aliases preserved. H2 delta binds actual row→journal→rows owner plus complete ordered owned projection, retaining legal old-journal transferred-row references and arbitrary subsets. SOL086 actual author manifest `80f3ebf60b3403f0a1fcf1b273a47c51716cf697a6b855e105f2622346dda0f5` Received/consumed; changed9/current134, full104/external244/84 Source partitions/28 actual literal windows authenticated. LAB904 completed/Received/ACKed: scoped OwnedFDs H2 and selected full readers credit only; bootstrap/ordinary-error/normal-fork reader joins not established; SOL087 safe-Python early-prefix package delivered only after its actual one compact completion; next native turn inProgress/queue0. LAB903 design has scoped interface credit, not actual finite native outside-end closure. C01/C02/C04/C05/C06/C09/C1 still open; C2 whole fit UNKNOWN. |
+| Publisher A209 `5891c11470be4e25e540f50820614587bb1798bb48f3478394b6ad8482a60181` | Sol077 narrow D2/prior credits retained. SOL085 author manifest `670ceabf3f5d471269f7b8b41b6ff73ecdf7c3343b6aabaf760fadb1dd0ff17f` authenticated, not independently accepted/integrated. A218 actual Sol086+H2 linked manifest `1704eecb67d5b3262b1f6c1ec9b5d141ca1a7a3551af22c0a64d20d256d0ca59`: Root one-function change literally rejoined to current physical-v5/prepared-v2 observer; NOT executed/integrated/non-author accepted/target verified | Original complete primary chronology/body/key/order/aliases preserved. H2 delta binds actual row→journal→rows owner plus complete ordered owned projection, retaining legal old-journal transferred-row references and arbitrary subsets. SOL086 actual author manifest `80f3ebf60b3403f0a1fcf1b273a47c51716cf697a6b855e105f2622346dda0f5` Received/consumed; changed9/current134, full104/external244/84 Source partitions/28 actual literal windows authenticated. LAB904 completed/Received/ACKed: scoped OwnedFDs H2 and selected full readers credit only; bootstrap/ordinary-error/normal-fork reader joins not established; SOL087 completed09:53:38MSK/32m59s, author manifest `acfe7c0d4e978e331240f8a1e5f89bd75bc2eff349d464bedbf5638f06fc6a0e` fully authenticated (current44/134, six changed vs SOL086, exact literal/linked provenance); LAB904 actual findings rejoined by author. New body/early-prefix source remains author-only, no whole acceptance. LAB903 design has scoped interface credit, not actual finite native outside-end closure. C01/C02/C04/C05/C06/C09/C1 still open; C2 whole fit UNKNOWN. |
 | Sender LAB896 `3640d1973ef956cadbad7efa11ae91343f132631931beb9e21494eb188b1aac9` | Sol082 first non-author filename-before-str BOTH error contexts credit; selector membership/context/one-close CONDITIONAL. No whole/target credit | Actual preinit Python operand self→raw journal/client→typed decoder→exact matcher disagrees with consumer's zero operand; later kernel wrapper birth is distinct, actual selected image/MRO/metaclass not qualified. Missing C1 native/body/BOTH ends cannot be cured by facade/dummy expected body. C2 UNKNOWN. Original54/current96/all32/all7/R01–R07 retained. Astra owns connected closure. |
 | Node SOL079 `3981cc05a99abf578767413249db6812c7319346b844a5ac846348c2082558ec` | LAB895 first non-author narrow E01 masked dup2 UNKNOWN/RETURNED and E02 original primary/unlock/end/TB through BOTH decoders/single publication. B04 simultaneous256/reclaim-confirmed-closed credit retained, not old lifetime history finding. No whole/target credit | Actual selected native/stock/raw/prebirth Root→Caller/body/allocator/enrollment/readonly receiver/BOTH ends C1 CODE; C2 actual factory/body fit UNKNOWN. Original35/all6/all3/GPG6/F1F2D1D2/current19/caps/clocks retained. Astra owns integration/admission. |
 
@@ -74,11 +74,22 @@ Current A219 delta / concrete next owners:
   decoder/matcher/error/selector-end implementation submitted09:54:07MSK to same
   visible instance15; no replay constructor, facade/opaque/class/FD body substitute,
   expected-arg copy, matcher waiver, execution or author self-acceptance.
-- SOL087 remains the current native assignment. Its exact ordinary prefix and
-  both-end corrections must receive LAB904 actual reader findings before whole
-  source decision. No new TASK/compact/interrupt/undelivered CONTROL retry.
-  Native queue checked empty at substantive Root code checkpoints; no waiting
-  or polling. SOL071 prior result remains consumed once, not repeated.
+- SOL087 actual current six-module proposal completed03.10 09:53:38MSK/
+  32m59s. Full104 physical/external377/current44/134/86 gapless parts/36 actual
+  windows authenticated, durable Received then only exact native RESULT consumed.
+  Author already rejoined LAB904; no old observation transfer. Scoped non-author
+  Root H2 function text credit retained only, not own new Source acceptance.
+  N1 Root pre-entry, N2 Stock pre-channel, N3 dying-child body/ACK, N4 current-v2
+  native final receipt/error/outside end remain CODE; full C2 UNKNOWN. Actual
+  protected existing native supplier/receiver interfaces and their original
+  bounds are the next dependency, not a flag or repeated local Python patch.
+- Existing Sol now runs SOL088 finite B09 two-way intake producer/receipt
+  consumer repair. One original compact completed/error-null95.265s, authenticated
+  before TASK enqueue; no second compact despite observer frame error. Actual
+  next native turn inProgress/queue0; ENQUEUED alone is not ACK/completion.
+  No native dispatch, signing/content execution or protected helper mutation
+  authorized. Current Grok LAB906 implementation ACK09:54:16MSK/deadline11:04:16,
+  same visible instance15; source proposal needs non-author acceptance.
 
 Evidence class: whole Source acceptance and required release layers remain
 NOT_ESTABLISHED/NOT_RUN. Environment class: old libcrypto/loader exact bindings
