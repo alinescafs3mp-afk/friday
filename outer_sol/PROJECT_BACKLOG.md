@@ -16,20 +16,18 @@ The 2026-09-03 post-backlog audit snapshot (`main` `43a16c8b`, source
 live host, the laptop or Telegram. Do not copy historical release claims
 forward or treat a source correction as a deployed release.
 
-## Current release frontier — 2026-10-03, 10:46 MSK
+## Current release frontier — 2026-10-03, 11:30 MSK
 
 Astra active Lead Architect epoch4; Kimi continuity deputy. This is the only
-mutable backlog/status register. Three existing TUIs/models/ultra/tier/provider/
-guards/writer locks unchanged. No leadership takeover, new service or dispatcher.
+mutable backlog/status register. Three existing native TUIs/models/ultra/tier/
+provider/guards/writer locks unchanged; no takeover/new service/dispatcher.
 
 Frozen product `cecd28a92ac4fd4e34c4d3813d0c598debe09436`,
 `0.208.64/schema50`, index SHA256
 `29ddfd4a8810d4396673e153fd5da301f7cf86ea00c1bf478ea2ec76fe844e4f`.
-Preceding archival main `9defb96cc647f6fb3f044338c1e3664d52e38500` is
-not the product candidate and never a frozen-checkout pull/reset target.
-Harness package, image/compiler ABI, built wheel and installed runtime identities
-remain separate. Final wheel absent; recorded production0.208.58 unchanged.
-Private evidence remains private; no product/production effects.
+Archival main is a backlog-only published checkpoint, never the frozen product
+candidate or pull/reset target. Package/image/ABI/wheel/runtime identities remain
+separate. Final wheel absent; recorded installed production0.208.58 unchanged.
 
 Five grouped implementation roots remain class=harness:
 
@@ -37,56 +35,78 @@ Five grouped implementation roots remain class=harness:
 | --- | --- | --- |
 | Browser A214 `b48767637bddf842ae1d2cd1e1afe01af0970c17ba590cfc6f4773ca6d18fc66` | E01–E04 connected ordinary corrections, exact Source15/current209/aux3 checked; integrated INERT only. Root/LAB898 scoped E01/E02/E04 and Sol083 E03 FD-generation credits; no whole acceptance, target NOT_RUN | Actual producer→transport→parser→oracle→retirement: native/stock/raw/preencode/error body+aliases/BOTH outside ends C1 CODE, whole fit C2 UNKNOWN. Astra integration/admission; original216/all29/all6/all9/caps retained. |
 | Scanner LAB887 `3527f471a3070180968873c76150db504cba16cc23777e2562d226eb3b4656ee` | Current52, narrow A205 R02/R03. SOL075 G2 hash-only WIP `da7f001b531935f5374cde8092f31d2b428ac8bfef98dc0548746e8c8f3983fd` quarantined, not replacement/full implementation/acceptance/target | A192-C1/C2 actual Source main AND Root endpoint parent/caller/finite-end ownership closure CODE. SOL075 G1 cyberPolicy-denied operation is not retried, rephrased, delegated or routed around. Astra precise compliant existing-role ownership decision; no new service or process-exit/evidence fiction. |
-| Publisher A209 baseline `5891c11470be4e25e540f50820614587bb1798bb48f3478394b6ad8482a60181`; new SOL087 proposal `acfe7c0d4e978e331240f8a1e5f89bd75bc2eff349d464bedbf5638f06fc6a0e` | Source44/current134/six changed vs SOL086 fully authenticated; not product-integrated or whole accepted. Actual LAB907 first non-author review confirms only H2 current ordered owner projection and three carrier snapshots before full_snapshot. Target NOT_RUN | Actual success fork still fork_history_book, bootstrap still span-only, ordinary error/cleanup requesterror/emptydict. PreparedFullBody/token prevents final retirement; completion receipt constructor/confirmed end producer absent. N1–N4 native supplier/receiver/error/BOTH ends CODE, C2 UNKNOWN; C04 not closed. Astra connected ownership/body/end/cost integration; original69/exact6/all15/current134/schema20/caps/controls retained. |
-| Sender LAB896 `3640d1973ef956cadbad7efa11ae91343f132631931beb9e21494eb188b1aac9` | Current original54/96 and scoped Sol082 filename ordering; selector context conditional, no whole acceptance/target. LAB906 reported no implementation, not a permission waiver | Before initializer, selector.create.begin sends raw actual instance through Producer.note→value; fileno or unsupported-kind failure precedes replay's zero-operand defect. A220 confirms existing source authority permits coherent code/schema/receiver changes and pure-Python stock body allocation inside original fence; fixed decode whitelist is CODE, not authority. SOL089 connected actual producer→codec→receiver→unchanged matcher→init-error→finite ends; no class/FD tags, empty/opaque surrogate, expected copy, native constructor replay or matcher weakening. Astra integration/non-author review; original54/current96/all32/all7/132predicates/16pure/12class/72effects/R01R07/caps/clocks retained. |
+| Publisher A209 baseline `5891c11470be4e25e540f50820614587bb1798bb48f3478394b6ad8482a60181`; SOL087 current proposal `acfe7c0d4e978e331240f8a1e5f89bd75bc2eff349d464bedbf5638f06fc6a0e` | Source44/current134/six changed vs SOL086 fully authenticated; not product-integrated or whole accepted. LAB907 scoped H2/carrier-order credits only. LAB909 wrapper `5e973ce0d8807bb530926e31a677834a4eb8247a8a7cdd83e2ab25dcc49f8994` authenticated/rejected whole; no integrated closure. Target NOT_RUN | Actual success fork still fork_history_book, bootstrap still span-only, ordinary error/cleanup requesterror/emptydict. PreparedFullBody/token prevents final retirement; completion receipt constructor/confirmed end producer absent. N1–N4 native supplier/receiver/error/BOTH ends CODE, C2 UNKNOWN; C04 not closed. SOL090 actual connected implementation after one compact, Astra integration/non-author review; original69/exact6/all15/current134/schema20/caps/controls retained. |
+| Sender LAB896 baseline `3640d1973ef956cadbad7efa11ae91343f132631931beb9e21494eb188b1aac9`; SOL089 new proposal `2b47fdda0e73435f3c9d370f1c52e83fb849138b44575932867a6bc0d5029133` | SOL089 actual 25 files / Source9 (3 changed,5 equal,1 new called codec),110 external SHA9 authenticated. Author code submitted; original matcher/predicates preserved by declared literal checks, no product integration or independent acceptance. Target NOT_RUN | Stock-Python birth/body/alias producer→captured begin/post→held stock registry→read-only replay→unchanged strict matcher/error/one-close connected proposal. LAB910 different-author review active; native/raw/error C1/BOTH outside native ends CODE and whole C2 UNKNOWN still open. Original54/current96/all32/all7/132predicates/16pure/12class/72effects/R01R07/caps retained. |
 | Node SOL079 `3981cc05a99abf578767413249db6812c7319346b844a5ac846348c2082558ec` | Source17/current6four changed/two equal full static check; INERT only. LAB895 masked dup2 UNKNOWN_RETURNED/original-primary unlock/end-TB both decoders/single publication scoped credit. No whole/target | Preserve B04 simultaneous256 and confirmed closed-record reclamation, not old lifetime history finding. Actual native/stock/raw/prebirth outside parent→Caller/body allocator/readonly receiver/BOTH ends C1 CODE; C2 UNKNOWN. Astra integration/admission; original35/all6/all3/GPG6/F1F2D1D2/current19/caps/clocks retained. |
 
-A220 material movement:
+A222 current movement (not author-package count as release progress):
 
-- LAB907 completed10:12:43MSK/7m31s. Full9 package,108 exact external
-  SHA9, actual transport/result authenticated; Received then ACK. Credits above
-  are scoped and rejoined to actual SOL087 bytes; no whole root closed.
-- SOL088 completed10:14:58MSK/13m7s. Full17/55external/74gaplessparts/
-  189044bytes/20 actual windows authenticated; Received then exact native RESULT
-  consumed. A proof contract, not a connected implementation.
-- A220 bounded source-only decision selects the existing native_queue.start_exact
-  actual response plus exact queued payload as B09 origin producer in the existing
-  preregistered private B09 store. Actual enqueue/start serialization, lifecycle,
-  dedup, writer lock and pre-task compact must stay intact. No protected helper
-  edits/new dispatcher/ledger/historical TASK replay or retroactive origin proof.
-  Current completed turn is necessary but does not prove TASK-to-turn origin.
-  S1 must authenticate exact never-ACK generation/protocol/effect closure;
-  missing/malformed ACK is not false. After-ACK loss authority schema stays an
-  honest unavailable conditional branch, not a blocker while primary Grok works.
-- No independently closed additional whole root, new grouped/product root or
-  required release execution layer. No full release stage newly executable.
-  Next executable work is the two finite connected source implementations below.
+- SOL089 completed11:21:26MSK,2130.932s. Actual manifest/25 files/110 external
+  SHA9 and official RESULT authenticated, durable Received then exact native
+  RESULT consumed. Its connected stock-Python implementation is under first
+  different-author LAB910 review, not accepted whole/native/executed.
+- LAB909 completed11:11:17MSK,557.76134s. Actual 10 files/65 declarations across
+  54 external full SHA9, transport and 17384-byte source fully read/authenticated;
+  Received then exact ACK. It adds a receipt-wrapper proposal but does not
+  implement N1/N2/N3 suppliers, performing entry integration, full-body close/
+  owner-close/retire cycle or confirmed native outside end. Actual author
+  implementation_complete=false/task_done=false; no whole acceptance. Its
+  live_stamp_equal=false labels are not drift: actual full SHA9 all match.
+  SOL090 now targets those actual connected missing implementations.
+- B09 existing conditional fallback, class=harness/evidence: actual read-only
+  `thread/items/list` with exact CURRENT turn/first user item proves the native
+  TASK-to-turn input without old chat/manual queue start/replay or a dispatcher.
+  Actual auto-started TASK has no CONSUMED-TASK record, so the old receiver was
+  incompatible. New Astra inert connected source manifest
+  `e7f4fc34cab37325e517b93ae08b63abe08219dd099d4be5eb53406f7c065216` implements actual producer→TASK/role/epoch/
+  generation/contract binding→completed current turn→received RESULT→original
+  signed receipt issuer/consumer (native capture v3). Primary v2 first12656bytes,
+  signed task/rubric/case validator, nine-field ReviewResult/six-case order and
+  receipt MAC/case validator byte-equal. Source-only literal checks, no AST/
+  import/compiler/exec/tests; Root author credit is not independent acceptance.
+- B09 S1 class=evidence stays OPEN: actual host identity is string, generation
+  payload.task_generation, effects counters.effects. Explicit ACK/type/identity
+  checks added; expired/no-ACK/zero effects is not finite generation retirement.
+  Missing closure/provider-loss producer fails closed. Native branch is NOT_READY
+  until real S1 supplier + independent source acceptance/admission. Conditional
+  fallback is not current critical path while Grok works; never relabeled PASS.
+  Actual SOL089 current-input observation is protocol evidence only, not B09
+  content/runtime/release evidence; native turn/item/client/queued IDs distinct.
+- Independently closed additional whole roots=0; new grouped/product/environment
+  roots=0; required release execution layers completed=0. No full release stage
+  newly executable. Newly executable source work: LAB910 independent Sender
+  review and SOL090 actual connected Publisher implementation. Canonical runtime
+  diagnostics remain behind whole independent source/environment admission.
+- Two immutable Received records accidentally used a manual future received_msk
+  label11:25; the label is explicitly invalidated by a protected correction.
+  Actual file seals/native consumption/Lab ACK clocks govern. No clock credit
+  from that label and no historical record rewritten.
 
-Safe active assignments (no heavy execution overlap):
+Safe active assignments, actual delivery not inferred from ENQUEUED/RUNNING:
 
-- SOL089 generation1, existing Sol TUI; exactly one completed original compact
-  10:39:47/error=null/contextCompaction, then TASK enqueue10:44:50.
-  Actual turn `01a100b9-0e55-7fb3-9787-409b836a3076` inProgress, queue empty.
-  TASK SHA256 `32c478c0c8589ff0c8d3c220099e39d31de74030d54d1725a4ffc11198586031`;
-  INPUT `d12c2331c1b7b59494c86f42f8195cd1255bc0622e47ee4500ad2bff3d4b23d4`.
-  New inert safePython/text/JSON only; no execution/native/C/private-heap effects.
-  Original body/alias/resource requirements unchanged, non-author review required.
-- LAB908 generation1/job `job_9a4fb82c99e344ccb0aadfef38f869b5`:
-  existing B09 producer/capture/receiver/S1 connected source implementation,
-  submitted10:39:40, actual executor ACK10:39:53, same visible instance15/TUI.
-  INPUT `8aa881c1d4dfc20781090e075206ab3d74de9603eeec8b0f73318f9a706491ea`.
-  No Grok compact, native API/dispatch/generation closure/keys/signing/content/
-  execution. Author cannot self-accept; Astra/Sol non-author review required.
-- Both4200s authoring caps,600s seal/read256MiB/RAM8GiB/out32MiB/local4/
-  children0/net0/retry0/friday0. Caps are not measured durations or release ETA.
-  Goal remains active; Sol has no general goal. Read ready results at substantive
-  checkpoints, no peer waits/model polling. Durable lab cursor:
-  `msg_c782e1585867447aaf20a988c9b98b61`; native Astra queue empty.
-- Grok is currently available by actual ACK, not calendar/PID/socket/RUNNING.
-  If a task becomes overdue/unclaimed, inspect ready result first, then actual
-  visible turn/delivery/deathwatch/guard. Only confirmed unavailable closes the
-  exact unfinished generation/effects and transfers remaining permitted work to
-  existing Sol after its current task and one pre-task compact. No hidden replacement.
+- SOL090 generation1, existing Sol: exactly one original compact completed
+ 11:25:15MSK/error=null/contextCompaction,76.678s, before TASK enqueue11:26:22.
+  TASK `87178307db6d0fa48241f4a9761ff0912e0dfab2739e44bba6f2f6491ef8b209`;
+  INPUT `46b300df240e8d6e33322b6865a2f97b1b789b7cfb44bf0d449148500f5ca988`.
+  Actual turn `01a100df-13bb-78f0-987b-b02938a84ad6` inProgress,
+  queue empty/no Sol goal; ENQUEUED is not reviewer acceptance.
+  Source-only implementation within original Publisher roles/fence, necessary
+  safe native source text allowed; no native execution/private-heap operations,
+  grants/unsafe payloads/denied Scanner retry. Non-author review required.
+- LAB910 generation1/job `job_ac3f73b4245b467c99aebe467c74a40d`, first non-author
+  current SOL089 stock-Python origin/body/alias/replay/matcher qualification.
+  Submitted11:24:33MSK; actual same-instance executor ACK11:24:49MSK,
+  RUNNING/deadline12:34:49MSK/effects0/friday0, no availability from submit alone. INPUT `285033faef07f38de4de6dc594a298bb45e0ad6d87bfa7b12e8ebc7890ce2be0`.
+  Same visible instance15; PRE_TASK_COMPACT=FORBIDDEN_OWNER_POLICY.
+- 4200s caps/600s seal/read256MiB/RAM8GiB/local4/children0/net0/retry0/friday0.
+  Caps are not measured release durations. No heavy execution overlap, no
+  Source effects/gate or production change. Goal active, Sol no general goal.
+- Grok delivered another actual terminal result on3October. Ready result first,
+  then actual visibleturn/delivery/deathwatch/guard on substantive overdue/
+  unclaimed checkpoint. Only confirmed unavailable closes exact generation/
+  effects and transfers safe remaining work to existing Sol after current task
+  and one compact. No hidden replacement or peer waits/model polling.
+  Durable lab cursor `msg_ffb45e1bf7a7402b8cd86896b3046911`; Astra native queue empty.
 
 Execution/deployment frontier remains unchanged: r5 immutable RED/no reuse,
 r6 absent. Whole Source acceptance, Source/Root admission, current image/compiler/
